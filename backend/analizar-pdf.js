@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const ALLOWED_ANALYSIS_STATUSES = new Set(["idle", "uploading", "queued", "processing", "completed", "failed"]);
+const ALLOWED_ANALYSIS_STATUSES = new Set(["idle", "uploading", "queued", "processing", "completed", "failed", "cancelled"]);
 const ALLOWED_STYLE_KINDS = new Set(["paragraph", "character", "swatch"]);
 const ANALIZAR_PDF_MAPPING_TOOL_NAME = "Peppermint Patty Editor";
 
@@ -401,6 +401,60 @@ function sanitizeAnalizarPdfSession(raw = {}, options = {}) {
   };
 }
 
+function reconcileStaleAnalizarPdfSessionJobs(rawSession = {}, jobStore = null) {
+  const session = sanitizeAnalizarPdfSession(rawSession, {
+    id: rawSession?.id || "",
+    ownerId: rawSession?.ownerId || "",
+    createdAt: rawSession?.createdAt || nowIso()
+  });
+  if (!jobStore || typeof jobStore.get !== "function") {
+    return session;
+  }
+
+  const reconcileStatus = (status = "", jobId = "") => {
+    const cleanStatus = normalizeAnalysisStatus(status);
+    const cleanJobId = clampText(jobId || "", 160);
+    if (!["queued", "processing", "uploading"].includes(cleanStatus)) {
+      return { status: cleanStatus, jobId: cleanJobId, changed: false };
+    }
+    if (cleanJobId && jobStore.get(cleanJobId)) {
+      return { status: cleanStatus, jobId: cleanJobId, changed: false };
+    }
+    return { status: "failed", jobId: "", changed: true };
+  };
+
+  let changed = false;
+  const next = JSON.parse(JSON.stringify(session));
+  const sessionReconciled = reconcileStatus(next.analysisStatus, next.analysisJobId);
+  next.analysisStatus = sessionReconciled.status;
+  next.analysisJobId = sessionReconciled.jobId;
+  changed = changed || sessionReconciled.changed;
+
+  next.revisions = Array.isArray(next.revisions) ? next.revisions.map((revision) => {
+    const revisionNext = revision && typeof revision === "object" ? { ...revision } : revision;
+    const revisionReconciled = reconcileStatus(revisionNext?.analysisStatus, revisionNext?.analysisJobId);
+    if (revisionNext && typeof revisionNext === "object") {
+      revisionNext.analysisStatus = revisionReconciled.status;
+      revisionNext.analysisJobId = revisionReconciled.jobId;
+      changed = changed || revisionReconciled.changed;
+      revisionNext.files = Array.isArray(revisionNext.files) ? revisionNext.files.map((file) => {
+        const fileNext = file && typeof file === "object" ? { ...file } : file;
+        const fileReconciled = reconcileStatus(fileNext?.analysisStatus, fileNext?.analysisJobId);
+        if (fileNext && typeof fileNext === "object") {
+          fileNext.analysisStatus = fileReconciled.status;
+          fileNext.analysisJobId = fileReconciled.jobId;
+          changed = changed || fileReconciled.changed;
+        }
+        return fileNext;
+      }) : [];
+    }
+    return revisionNext;
+  }) : [];
+
+  next.__staleJobsReconciled = changed;
+  return next;
+}
+
 function createAnalizarPdfJobStore() {
   const jobs = new Map();
 
@@ -635,6 +689,7 @@ module.exports = {
   ensureDirSync,
   logAnalizarPdf,
   normalizeAnalysisStatus,
+  reconcileStaleAnalizarPdfSessionJobs,
   resolveAnalyzerScript,
   sanitizeResultSummary,
   sanitizeAnalizarPdfSession,

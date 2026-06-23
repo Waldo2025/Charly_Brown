@@ -5,6 +5,7 @@ import {
   queueAnalizarPdfUpload,
   saveAnalizarPdfSession
 } from "./analizar-pdf-api.js";
+import { createAnalizarPdfSaveCoordinator } from "./analizar-pdf-save-coordinator.js";
 
 const EMPTY_RESULT = Object.freeze({
   paginationIssues: [],
@@ -22,7 +23,8 @@ const ALLOWED_ANALYSIS_STATUSES = new Set([
   "queued",
   "processing",
   "completed",
-  "failed"
+  "failed",
+  "cancelled"
 ]);
 
 const EMPTY_BIBLIOGRAPHIC_INFO = Object.freeze({
@@ -33,6 +35,13 @@ const EMPTY_BIBLIOGRAPHIC_INFO = Object.freeze({
   unidad: "",
   edicionNumero: "",
   revisionNumero: ""
+});
+
+const saveCoordinator = createAnalizarPdfSaveCoordinator({
+  saveImpl: async (session) => {
+    const payload = await saveAnalizarPdfSession(normalizeAnalizarPdfSession(session));
+    return normalizeAnalizarPdfSession(payload?.session || session);
+  }
 });
 
 function normalizeBibliographicInfo(raw = {}) {
@@ -259,8 +268,7 @@ export async function loadSessions() {
 }
 
 export async function saveSession(session = null) {
-  const payload = await saveAnalizarPdfSession(normalizeAnalizarPdfSession(session));
-  return normalizeAnalizarPdfSession(payload?.session || session);
+  return saveCoordinator.save(session);
 }
 
 export async function deleteSession(sessionId = "") {

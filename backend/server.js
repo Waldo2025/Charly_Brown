@@ -98,6 +98,7 @@ const {
   ensureDirSync,
   logAnalizarPdf,
   normalizeAnalysisStatus,
+  reconcileStaleAnalizarPdfSessionJobs,
   resolveAnalyzerScript,
   sanitizeResultSummary,
   sanitizeAnalizarPdfSession,
@@ -107,7 +108,7 @@ const {
   createAnalizarPdfProcessingQueue
 } = require("./analizar-pdf-processing-queue.js");
 const {
-  runAnalizarPdfJobInWorker
+  createAnalizarPdfWorkerRun
 } = require("./analizar-pdf-worker-client.js");
 
 let admin = null;
@@ -1229,6 +1230,7 @@ async function processQueuedAnalizarPdfJob(job = {}) {
     session
   } = job;
 
+  let workerRun = null;
   try {
     logAnalizarPdf("job.processing.start", {
       jobId,
@@ -1249,7 +1251,7 @@ async function processQueuedAnalizarPdfJob(job = {}) {
       sourceAssetPath: stableSourcePath
     }));
 
-    const result = await runAnalizarPdfJobInWorker({
+    workerRun = createAnalizarPdfWorkerRun({
       scriptPath,
       pdfPath: tempFilePath,
       session: {
@@ -1257,6 +1259,10 @@ async function processQueuedAnalizarPdfJob(job = {}) {
         analysisMapping: selectedMapping || null
       }
     });
+    analizarPdfJobStore.set(jobId, {
+      cancel: typeof workerRun.cancel === "function" ? workerRun.cancel : null
+    });
+    const result = await workerRun.promise;
     const resultSummary = buildResultSummary(result);
     const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, buildAnalizarPdfFileStatePatch({
       analysisStatus: "completed",
@@ -1283,6 +1289,25 @@ async function processQueuedAnalizarPdfJob(job = {}) {
     });
     return result;
   } catch (error) {
+    if (["analizar_pdf_worker_cancelled", "analizar_pdf_job_cancelled"].includes(String(error?.message || "").trim()) || String(error?.code || "").trim() === "analizar_pdf_job_cancelled") {
+      const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, buildAnalizarPdfFileStatePatch({
+        analysisStatus: "cancelled",
+        jobId: "",
+        rawFileName,
+        sourceType,
+        mappingId: selectedMapping?.id || mappingId || "",
+        mappingTitle: selectedMapping?.title || "",
+        mappingUpdatedAt: selectedMapping?.updatedAt || "",
+        sourceAssetPath: stableSourcePath
+      })).catch(() => null);
+      analizarPdfJobStore.set(jobId, {
+        status: "cancelled",
+        error: null,
+        cancel: null,
+        session: persistedSession
+      });
+      return null;
+    }
     logAnalizarPdf("job.failed", {
       jobId,
       sessionId,
@@ -1302,10 +1327,14 @@ async function processQueuedAnalizarPdfJob(job = {}) {
     analizarPdfJobStore.set(jobId, {
       status: "failed",
       error: String(error?.message || error),
+      cancel: null,
       session: persistedSession
     });
     throw error;
   } finally {
+    analizarPdfJobStore.set(jobId, {
+      cancel: null
+    });
     try {
       fs.unlinkSync(tempFilePath);
       logAnalizarPdf("job.tempfile.deleted", {
@@ -3597,13 +3626,24 @@ async function loadAnalizarPdfSessionForOwner(uid = "", sessionId = "") {
     err.status = 403;
     throw err;
   }
+  const sanitized = sanitizeAnalizarPdfSession(data, {
+    id: cleanSessionId,
+    ownerId: cleanUid,
+    createdAt: data.createdAt || new Date().toISOString()
+  });
+  const reconciled = reconcileStaleAnalizarPdfSessionJobs(sanitized, analizarPdfJobStore);
+  if (reconciled.__staleJobsReconciled) {
+    const { __staleJobsReconciled, ...persistable } = reconciled;
+    await ref.set(persistable, { merge: true });
+    return {
+      ref,
+      data: persistable
+    };
+  }
+  const { __staleJobsReconciled, ...cleanData } = reconciled;
   return {
     ref,
-    data: sanitizeAnalizarPdfSession(data, {
-      id: cleanSessionId,
-      ownerId: cleanUid,
-      createdAt: data.createdAt || new Date().toISOString()
-    })
+    data: cleanData
   };
 }
 
@@ -5775,10 +5815,20 @@ app.get("/api/analizar-pdf/sessions/list", async (req, res) => {
     const uid = String(req.authContext?.uid || "").trim();
     const snap = await db.collection(ANALIZAR_PDF_COLLECTION).where("ownerId", "==", uid).limit(80).get();
     const sessions = snap.docs
-      .map((docSnap) => sanitizeAnalizarPdfSession(docSnap.data() || {}, {
-        id: docSnap.id,
-        ownerId: uid
-      }))
+      .map((docSnap) => {
+        const sanitized = sanitizeAnalizarPdfSession(docSnap.data() || {}, {
+          id: docSnap.id,
+          ownerId: uid
+        });
+        const reconciled = reconcileStaleAnalizarPdfSessionJobs(sanitized, analizarPdfJobStore);
+        if (reconciled.__staleJobsReconciled) {
+          const { __staleJobsReconciled, ...persistable } = reconciled;
+          void docSnap.ref.set(persistable, { merge: true });
+          return persistable;
+        }
+        const { __staleJobsReconciled, ...cleanData } = reconciled;
+        return cleanData;
+      })
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     return res.status(200).json({ ok: true, sessions });
   } catch (error) {
@@ -6122,6 +6172,59 @@ app.get("/api/analizar-pdf/analyze-status", async (req, res) => {
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo consultar el estado.") });
+  }
+});
+
+app.post("/api/analizar-pdf/analyze-cancel", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const jobId = clampText(req.body?.jobId || "", 160);
+    if (!jobId) {
+      return res.status(400).json({ error: "Falta jobId." });
+    }
+    const job = analizarPdfJobStore.get(jobId);
+    if (!job) {
+      return res.status(404).json({ error: "Job no encontrado." });
+    }
+    if (String(job.ownerId || "").trim() !== uid) {
+      return res.status(403).json({ error: "No puedes cancelar este job." });
+    }
+    const currentStatus = String(job.status || "").trim().toLowerCase();
+    if (["completed", "failed", "cancelled"].includes(currentStatus)) {
+      return res.status(200).json({ ok: true, jobId, cancelled: currentStatus === "cancelled", status: currentStatus });
+    }
+    const queueCancelled = analizarPdfProcessingQueue.cancel(jobId);
+    if (typeof job.cancel === "function") {
+      job.cancel();
+    }
+    const persistedSession = job.sessionId
+      ? await updateAnalizarPdfFileState(uid, job.sessionId, job.revisionId, job.fileId, buildAnalizarPdfFileStatePatch({
+        analysisStatus: "cancelled",
+        jobId: "",
+        rawFileName: String(job.fileName || "").trim(),
+        sourceType: String(job.sourceType || "pdf").trim(),
+        mappingId: "",
+        mappingTitle: "",
+        mappingUpdatedAt: "",
+        sourceAssetPath: ""
+      })).catch(() => null)
+      : null;
+    analizarPdfJobStore.set(jobId, {
+      status: "cancelled",
+      cancel: null,
+      error: null,
+      session: persistedSession
+    });
+    return res.status(200).json({
+      ok: true,
+      jobId,
+      cancelled: true,
+      queueCancelled,
+      status: "cancelled",
+      session: persistedSession
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo cancelar el análisis.") });
   }
 });
 

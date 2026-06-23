@@ -37,6 +37,17 @@ function createAnalizarPdfProcessingQueue({ runJob } = {}) {
         queueMicrotask(drain);
       });
     },
+    cancel(jobId = "") {
+      const cleanJobId = String(jobId || "").trim();
+      if (!cleanJobId) return false;
+      const index = pending.findIndex((entry) => String(entry?.job?.jobId || "").trim() === cleanJobId);
+      if (index === -1) return false;
+      const [entry] = pending.splice(index, 1);
+      const error = new Error("analizar_pdf_job_cancelled");
+      error.code = "analizar_pdf_job_cancelled";
+      entry.reject(error);
+      return true;
+    },
     getSnapshot() {
       return {
         active,

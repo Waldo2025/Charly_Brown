@@ -81,6 +81,15 @@ export async function getAnalizarPdfAnalysisStatus(jobId = "") {
   });
 }
 
+export async function cancelAnalizarPdfAnalysis(jobId = "") {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) throw new Error("Falta jobId.");
+  return authFetchJson("/api/analizar-pdf/analyze-cancel", {
+    method: "POST",
+    body: { jobId: cleanJobId }
+  });
+}
+
 export async function exportAnalizarPdfCorrectedIdml(sessionId = "", revisionId = "", fileId = "", correctionSelection = null, cleanupOptions = null) {
   const cleanSessionId = String(sessionId || "").trim();
   const cleanRevisionId = String(revisionId || "").trim();

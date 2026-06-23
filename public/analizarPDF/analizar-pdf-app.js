@@ -11,6 +11,7 @@ import { createAnalizarPdfSidepanelApi } from "./analizar-pdf-sidepanel.js";
 import { createAnalizarPdfResultsRenderer } from "./analizar-pdf-results.js";
 import {
   activateAnalizarPdfStyleMapping,
+  cancelAnalizarPdfAnalysis,
   deleteAnalizarPdfStyleMapping,
   exportAnalizarPdfCorrectedIdml,
   listAnalizarPdfStyleMappings,
@@ -50,6 +51,7 @@ const state = {
 };
 
 let exportConfigRestoreFocusEl = null;
+const ANALYZE_BTN_DEFAULT_LABEL = String(document.getElementById("analizarPdfAnalyzeBtn")?.textContent || "Analizar ficha editorial").trim() || "Analizar ficha editorial";
 
 function logAnalizarPdfFlow(step = "", payload = null) {
   const label = `[analizar-pdf][flow] ${String(step || "").trim()}`;
@@ -244,8 +246,10 @@ function renderActionButtonState() {
   const session = store.getActiveSession();
   const revision = getActiveRevision(session);
   const file = getActiveFile(session, revision);
+  const fileBusy = isBusyAnalysisStatus(file?.analysisStatus || "");
   if (els.analyzeBtn) {
-    els.analyzeBtn.disabled = blockAll;
+    els.analyzeBtn.disabled = blockAll && !fileBusy;
+    els.analyzeBtn.textContent = fileBusy ? "Detener análisis" : ANALYZE_BTN_DEFAULT_LABEL;
   }
   if (els.analyzeAllBtn) {
     els.analyzeAllBtn.disabled = blockAll;
@@ -1274,6 +1278,52 @@ async function buildAnalysisTargetsForAll(session = null, selectedFiles = state.
   return targets;
 }
 
+async function clearBusyStatusesWithoutLocalFiles(session = null, options = {}) {
+  const scope = String(options?.scope || "active").trim().toLowerCase() || "active";
+  const targetFileIds = new Set(
+    Array.isArray(options?.targetFileIds)
+      ? options.targetFileIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : []
+  );
+  const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
+  let changed = false;
+
+  for (const revision of revisions) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      const fileId = String(file?.id || "").trim();
+      if (scope === "targets" && targetFileIds.size && !targetFileIds.has(fileId)) {
+        continue;
+      }
+      if (!isBusyAnalysisStatus(file?.analysisStatus || "")) {
+        continue;
+      }
+      const cachedFile = await resolveCachedFileForEntry(file);
+      if (cachedFile) {
+        continue;
+      }
+      file.analysisStatus = "failed";
+      file.analysisJobId = "";
+      file.hasLocalSource = false;
+      file.localBlobKey = "";
+      file.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return false;
+  }
+
+  mutateActiveSession((draft) => {
+    draft.analysisStatus = "failed";
+    draft.analysisJobId = "";
+    return draft;
+  }, { render: false });
+  await persistActiveSession([]);
+  renderAll();
+  return true;
+}
+
 async function runAnalysisForTargets(session = null, targets = [], emptyMessage = "") {
   const savedSessionId = String(session?.id || "").trim();
   logAnalizarPdfFlow("runAnalysisForTargets:start", {
@@ -1284,6 +1334,9 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
     throw new Error("No hay sesión activa.");
   }
   if (!targets.length) {
+    await clearBusyStatusesWithoutLocalFiles(session, {
+      scope: "targets"
+    });
     logAnalizarPdfFlow("runAnalysisForTargets:no-targets", { emptyMessage });
     setJobMetaText(emptyMessage || "No hay archivos disponibles para analizar.");
     return;
@@ -1791,6 +1844,7 @@ async function refreshSessions(preferredSessionId = "") {
   const fallbackId = preferredSessionId || state.activeSessionId || restoreActiveSessionId() || sessions[0]?.id || "";
   store.setActiveSession(fallbackId);
   ensureActiveRevisionAndFile(store.getActiveSession());
+  await clearBusyStatusesWithoutLocalFiles(store.getActiveSession(), { scope: "all" });
   renderAll();
 }
 
@@ -2886,10 +2940,44 @@ function bindEditorEvents() {
   });
 
   els.analyzeBtn.addEventListener("click", async () => {
+    const session = store.getActiveSession();
+    const revision = getActiveRevision(session);
+    const activeFile = getActiveFile(session, revision);
+    const activeJobId = String(activeFile?.analysisJobId || session?.analysisJobId || "").trim();
+    if (isBusyAnalysisStatus(activeFile?.analysisStatus || "") && activeJobId) {
+      try {
+        const payload = await cancelAnalizarPdfAnalysis(activeJobId);
+        if (payload?.session) {
+          store.upsertSession(payload.session);
+        } else {
+          mutateActiveSession((draft) => {
+            draft.analysisStatus = "cancelled";
+            draft.analysisJobId = "";
+            const draftRevision = (draft.revisions || []).find((entry) => entry.id === String(state.activeRevisionId || "").trim());
+            const draftFile = draftRevision?.files?.find((entry) => entry.id === String(state.activeFileId || "").trim());
+            if (draftFile) {
+              draftFile.analysisStatus = "cancelled";
+              draftFile.analysisJobId = "";
+            }
+            return draft;
+          });
+        }
+        window.clearTimeout(state.analysisPollTimer);
+        state.analysisPollTimer = 0;
+        state.isAnalyzingCurrent = false;
+        state.isAnalyzingAll = false;
+        setBusyOverlay("");
+        setJobMetaText("Análisis cancelado.");
+        renderActionButtonState();
+        renderAll();
+      } catch (error) {
+        setJobMetaText(String(error?.message || error));
+      }
+      return;
+    }
     if (state.isAnalyzingCurrent || state.isAnalyzingAll || state.isSavingSession) {
       return;
     }
-    const session = store.getActiveSession();
     const uploadState = getUploadUiState(session);
     if (!session) {
       setJobMetaText("Crea una sesión antes de analizar.");
