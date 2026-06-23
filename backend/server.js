@@ -12180,7 +12180,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       || overlayCardSegments.length
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
-      || finalShouldAttemptBrowserRenderer
     );
     const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;

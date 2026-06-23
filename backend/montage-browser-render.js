@@ -202,6 +202,12 @@ async function renderMontageBrowserOverlayVideo({
       }
     });
     page = await context.newPage();
+    page.on("console", (msg) => {
+      console.info(`[backend][montage-browser-render][console] [${msg.type()}]`, msg.text());
+    });
+    page.on("pageerror", (err) => {
+      console.error("[backend][montage-browser-render][pageerror]", err.message, err.stack);
+    });
     const html = buildMontageBrowserRenderBootstrap({ publicRoot, payload, baseVideoPath, viewport });
     await fs.promises.writeFile(bootstrapHtmlPath, html, "utf8");
     const abortBrowserRender = async () => {
