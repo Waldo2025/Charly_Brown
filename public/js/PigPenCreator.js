@@ -95,11 +95,15 @@ const elements = {
   btnGenerar: document.getElementById("btnGenerar"),
   btnLimpiar: document.getElementById("btnLimpiar"),
   btnExportar: document.getElementById("btnExportar"),
+  btnRepairEscapeRoom: document.getElementById("btnRepairEscapeRoom"),
   btnPreviewAutofill: document.getElementById("btnPreviewAutofill"),
   publishToggle: document.getElementById("publishToggle"),
   publishSwitchLabel: document.getElementById("publishSwitchLabel"),
   btnCopiarJson: document.getElementById("btnCopiarJson"),
   btnSugerirObjetivo: document.getElementById("btnSugerirObjetivo"),
+  objectiveIdeaModal: document.getElementById("objectiveIdeaModal"),
+  objectiveIdeaTextarea: document.getElementById("objectiveIdeaTextarea"),
+  btnObjectiveIdeaGenerate: document.getElementById("btnObjectiveIdeaGenerate"),
   btnAddMission: document.getElementById("btnAddMission"),
   loading: document.getElementById("loadingIndicator"),
   emptyState: document.getElementById("erEmptyState"),
@@ -144,6 +148,8 @@ const elements = {
   previewThemeSummary: document.getElementById("previewThemeSummary"),
   btnPreviewThemeReset: document.getElementById("btnPreviewThemeReset")
 };
+
+let objectiveIdeaModalInstance = null;
 
 const state = {
   project: null,
@@ -1036,6 +1042,14 @@ function saveFormState() {
   scheduleSessionSave();
 }
 
+function getObjectiveIdeaModal() {
+  if (!elements.objectiveIdeaModal || !window.bootstrap?.Modal) return null;
+  if (!objectiveIdeaModalInstance) {
+    objectiveIdeaModalInstance = window.bootstrap.Modal.getOrCreateInstance(elements.objectiveIdeaModal);
+  }
+  return objectiveIdeaModalInstance;
+}
+
 function restoreFormState() {
   if (!elements.form || !isLocalStorageAvailable()) return;
   const rawState = window.localStorage.getItem(FORM_STORAGE_KEY);
@@ -1221,6 +1235,9 @@ function syncActionButtons() {
   elements.btnAddMission.disabled = state.isLoading;
   elements.btnExportar.disabled = state.isLoading || !hasData || state.isGenerating;
   elements.btnCopiarJson.disabled = state.isLoading || !hasData || state.isGenerating;
+  if (elements.btnRepairEscapeRoom) {
+    elements.btnRepairEscapeRoom.disabled = state.isLoading || !hasData || state.isGenerating;
+  }
   if (elements.btnPreviewAutofill) {
     elements.btnPreviewAutofill.disabled = state.isLoading || !hasData || state.isGenerating;
   }
@@ -1308,6 +1325,7 @@ function buildPrompt(data) {
   const narrativaEtiqueta = data.narrativaBase === "otro"
     ? `Otra narrativa: ${data.narrativaPersonalizada || "personalizada"}`
     : data.narrativa;
+  const estiloImagen = normalizeString(data.estiloImagen, "Ilustración editorial educativa coherente con la narrativa");
 
   return `
 Eres un experto en gamificación, narrativa educativa y diseño de escape rooms profesionales.
@@ -1326,6 +1344,9 @@ ${objetivosTematicos}
 - No agregues, omitas ni combines salas.
 - Preguntas internas por sala: ${data.preguntasPorSala}
 - Estilo narrativo: ${narrativaEtiqueta}
+- Estilo visual obligatorio para todas las imágenes del escape room: ${estiloImagen}
+- Mantén ese estilo visual en portada, salas y preguntas.
+- No mezcles estilos incompatibles. Si el estilo visual no menciona ciencia ficción, futurismo, neón, hologramas, pantallas digitales, interfaces tecnológicas o estética cyberpunk, NO los agregues.
 - Ritmo: ${data.ritmo}
 - Dificultad: ${data.dificultad}
 - Pistas: ${data.pistas}
@@ -1413,13 +1434,17 @@ function extractGeminiImageData(imageData = {}) {
 function buildVisualDirection(data = {}) {
   const temas = Array.isArray(data.temas) ? data.temas.filter(Boolean) : [];
   const temaResumen = temas.length ? temas.join(", ") : normalizeString(data.tema, "la temática principal");
-  // Prioridad: 1) estilo elegido por el usuario en el brief, 2) linea_visual_base generada por la IA, 3) fallback genérico
   const estiloUsuario = normalizeString(data.estiloImagen, "");
   const estiloIA = normalizeString(data.linea_visual_base, "");
   const narrativaCtx = normalizeString(data.narrativa, "la narrativa del escape room");
+  const estiloLower = estiloUsuario.toLowerCase();
+  const allowsFuturistic = /(futur|ciencia ficcion|ciencia ficción|cyberpunk|neon|neón|tecnolog|hologram|digital|sci[- ]?fi)/i.test(estiloLower);
+  const restrictions = allowsFuturistic
+    ? ""
+    : " Evita por completo hologramas, neón, interfaces digitales, armaduras sci-fi, pantallas flotantes y estética futurista.";
   const line = estiloUsuario
-    ? `${estiloUsuario} La dirección visual debe ser coherente con: ${narrativaCtx}.`
-    : (estiloIA || `Ilustración editorial coherente con ${narrativaCtx}.`);
+    ? `Estilo visual obligatorio: ${estiloUsuario}. Debe ser coherente con ${narrativaCtx}.${restrictions}`
+    : `${estiloIA || `Ilustración editorial coherente con ${narrativaCtx}.`}${restrictions}`;
   return {
     temaResumen,
     line,
@@ -1896,26 +1921,34 @@ function sanitizeMissionMedia(media = null) {
   return media;
 }
 
+function applySequentialMissionRoutes(missions = []) {
+  return missions.map((mission, index) => {
+    const nextMission = missions[index + 1] || null;
+    return {
+      ...mission,
+      bloqueada_inicial: index !== 0,
+      desbloquea: nextMission ? [nextMission.id] : []
+    };
+  });
+}
+
 function withDefaultRoutes(project) {
   const hydrated = normalizeEscapeRoomProject(project);
   hydrated.themeConfig = normalizePreviewThemeConfig(project?.themeConfig || state.previewTheme);
-  hydrated.misiones = hydrated.misiones.map((mission, index) => {
-    const nextMission = hydrated.misiones[index + 1];
-    const hasRoute = Array.isArray(mission.desbloquea) && mission.desbloquea.length > 0;
+  const sequentialMissions = applySequentialMissionRoutes(hydrated.misiones);
+  hydrated.misiones = sequentialMissions.map((mission, index) => {
+    const nextMission = sequentialMissions[index + 1];
     const questionCount = Array.isArray(mission.preguntas) && mission.preguntas.length ? mission.preguntas.length : 1;
     const draft = createMissionDraft(index, {
       ...mission,
-      desbloquea: hasRoute ? mission.desbloquea : (nextMission ? [nextMission.id] : [])
+      desbloquea: nextMission ? [nextMission.id] : [],
+      bloqueada_inicial: index !== 0
     }, questionCount);
     if (mission.tipo_interaccion === "opcion_multiple") {
       draft._correctOptionIndex = findCorrectOptionIndex(draft);
     }
     return draft;
   });
-
-  if (hydrated.misiones.length && hydrated.misiones.every((mission) => mission.bloqueada_inicial)) {
-    hydrated.misiones[0].bloqueada_inicial = false;
-  }
 
   hydrated.misiones.forEach((mission) => {
     if (mission.imagen && !mission.media?.url) {
@@ -1958,20 +1991,13 @@ function fitProjectToConfiguredCounts(project, formData = {}) {
       id: sourceMission.id || `m${missionIndex + 1}`,
       release: `SALA ${String(missionIndex + 1).padStart(2, "0")}`,
       preguntas: alignedQuestions,
-      desbloquea: Array.isArray(sourceMission.desbloquea) ? sourceMission.desbloquea : []
+      desbloquea: [],
+      bloqueada_inicial: missionIndex !== 0
     }, targetQuestionCount);
   });
 
-  const missionIds = new Set(missions.map((mission) => mission.id));
-  missions.forEach((mission, index) => {
-    const nextMission = missions[index + 1];
-    const validRoutes = Array.isArray(mission.desbloquea)
-      ? [...new Set(mission.desbloquea.filter((id) => missionIds.has(id) && id !== mission.id))]
-      : [];
-    mission.desbloquea = validRoutes.length ? validRoutes : (nextMission ? [nextMission.id] : []);
-    if (index === 0) {
-      mission.bloqueada_inicial = false;
-    }
+  const sequentialMissions = applySequentialMissionRoutes(missions);
+  sequentialMissions.forEach((mission, index) => {
     const missionQuestions = Array.isArray(mission.preguntas) ? mission.preguntas.slice(0, targetQuestionCount) : [];
     if (Array.isArray(mission.preguntas) && missionQuestions.length !== mission.preguntas.length) {
       adjustedQuestionCount = true;
@@ -1983,14 +2009,10 @@ function fitProjectToConfiguredCounts(project, formData = {}) {
     }
   });
 
-  if (missions.length && missions.every((mission) => mission.bloqueada_inicial)) {
-    missions[0].bloqueada_inicial = false;
-  }
-
   return {
     project: withDefaultRoutes({
       ...normalized,
-      misiones: missions
+      misiones: sequentialMissions
     }),
     adjusted: adjustedMissionCount || adjustedQuestionCount,
     adjustedMissionCount,
@@ -2061,6 +2083,18 @@ function renderPreview() {
     return;
   }
   elements.previewFrame.srcdoc = buildPreviewDocument(project, { editorialReview: true });
+}
+
+function repairEscapeRoomRuntime() {
+  if (!state.project) {
+    setStatus("Genera un escape room antes de repararlo.", "warning");
+    return;
+  }
+  state.project = withDefaultRoutes(materializeProjectForExport() || state.project);
+  renderMissionEditor();
+  renderOutputsNow();
+  setActiveTab("preview");
+  setStatus("Preview y export recompuestos con la lógica más actual del escape room.", "success");
 }
 
 function triggerPreviewEditorialAutofill() {
@@ -2390,15 +2424,10 @@ function renderMissionEditor() {
   });
 
   elements.missionEditorList.innerHTML = state.project.misiones.map((mission, index) => {
-    const unlockChoices = state.project.misiones
-      .filter((candidate) => candidate.id !== mission.id)
-      .map((candidate) => `
-        <label class="er-check-card">
-          <input type="checkbox" data-action="toggle-unlock" data-index="${index}" data-target-id="${escapeHtmlAttr(candidate.id)}" ${mission.desbloquea.includes(candidate.id) ? "checked" : ""}>
-          <span>${escapeHtml(candidate.titulo)} <small class="er-muted">(${escapeHtml(candidate.id)})</small></span>
-        </label>
-      `)
-      .join("");
+    const nextMission = state.project.misiones[index + 1] || null;
+    const unlockSummary = nextMission
+      ? `<div class="er-muted">Esta sala desbloquea automáticamente: <strong>${escapeHtml(nextMission.titulo)}</strong> <small>(${escapeHtml(nextMission.id)})</small></div>`
+      : `<div class="er-muted">Esta es la última sala y no desbloquea otra más.</div>`;
 
     const optionRows = mission.opciones.map((option, optionIndex) => `
       <div class="er-option-row">
@@ -2488,9 +2517,9 @@ function renderMissionEditor() {
 
           <section class="er-routing-panel">
             <div class="er-label">Rutas y desbloqueos</div>
-            <p class="er-inline-note">Marca qué salas se desbloquean al resolver esta sala.</p>
+            <p class="er-inline-note">El escape room usa desbloqueo secuencial: cada sala abre solo la siguiente.</p>
             <div class="er-unlock-grid">
-              ${unlockChoices || `<div class="er-muted">No hay otras salas para desbloquear.</div>`}
+              ${unlockSummary}
             </div>
           </section>
 
@@ -3390,6 +3419,7 @@ elements.form.addEventListener("submit", async (event) => {
       tema: formData.temaSecundaria,
       tema_curricular: formData.tema,
       estacion: formData.estacion,
+      estiloImagen: formData.estiloImagen,
       themeConfig: normalizePreviewThemeConfig(state.previewTheme),
       duracion_minutos: formData.duracion
     };
@@ -3464,6 +3494,7 @@ elements.form.addEventListener("submit", async (event) => {
 
 elements.btnAddMission.addEventListener("click", addMission);
 elements.btnExportar.addEventListener("click", exportPackage);
+elements.btnRepairEscapeRoom?.addEventListener("click", repairEscapeRoomRuntime);
 elements.btnPreviewAutofill?.addEventListener("click", triggerPreviewEditorialAutofill);
 elements.publishToggle?.addEventListener("change", handlePublishToggleChange);
 
@@ -3483,73 +3514,158 @@ elements.btnCopiarJson.addEventListener("click", async () => {
   }
 });
 
-async function sugerirObjetivoFinal() {
+function setButtonLoading(button, isLoading, loadingLabel, idleHtml) {
+  if (!button) return;
+  if (isLoading) {
+    button.disabled = true;
+    button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <span>${loadingLabel}</span>`;
+    return;
+  }
+  button.disabled = false;
+  button.innerHTML = idleHtml;
+}
+
+function buildObjectiveSeedPrompt({ tema, narrativa, numMisiones, preguntasPorSala, duracion }) {
+  return [
+    `Tema curricular: "${tema}"`,
+    `Narrativa: "${narrativa}"`,
+    `Cantidad de salas/misiones: ${numMisiones}`,
+    `Preguntas por sala: ${preguntasPorSala}`,
+    `Duración total: ${duracion} minutos`,
+    "",
+    "Redacta un borrador inicial de ideas para el objetivo del escape room.",
+    "Debe servir como punto de partida para que el usuario lo edite antes de generar el objetivo final.",
+    "Entrega entre 3 y 6 líneas breves en texto plano.",
+    "Incluye aprendizajes clave, habilidades y una meta final coherente con el tema curricular.",
+    "No uses encabezados, markdown ni HTML."
+  ].join("\n");
+}
+
+function buildObjectiveFinalPrompt({ tema, narrativa, numMisiones, preguntasPorSala, duracion, userIdeas }) {
+  return [
+    `Tema curricular: "${tema}"`,
+    `Narrativa: "${narrativa}"`,
+    `Cantidad de salas/misiones: ${numMisiones}`,
+    `Preguntas por sala: ${preguntasPorSala}`,
+    `Duración total: ${duracion} minutos`,
+    "",
+    "Ideas y prioridades propuestas por el usuario para el objetivo:",
+    userIdeas,
+    "",
+    "Redacta un objetivo final integral para el escape room con base en el tema curricular y en las ideas del usuario.",
+    "Debe describir con claridad qué debe lograr el grupo al terminar, qué conocimientos o habilidades desarrollará y cómo se relaciona con la experiencia.",
+    "Escribe un texto claro, útil y listo para pegarse en el campo 'Objetivo final'.",
+    "Entrega un bloque breve de 1 a 2 párrafos, sin encabezados, sin markdown y sin HTML."
+  ].join("\n");
+}
+
+async function generateObjectiveText(prompt, temperature = 0.85) {
+  const model = elements.modeloSelect?.value || TEXT_MODEL_DEFAULT;
+  const response = await authFetchJson("/api/gemini/generate", {
+    method: "POST",
+    body: {
+      model,
+      payload: {
+        systemInstruction: {
+          parts: [{
+            text: "Eres un experto diseñador instruccional y de escape rooms educativos. Escribe única y exclusivamente en español latinoamericano neutro (es-419). Queda estrictamente prohibido utilizar modismos o conjugaciones verbales típicas de España. Devuelve solo texto plano, sin markdown, sin encabezados y sin HTML."
+          }]
+        },
+        contents: [{
+          role: "user",
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature
+        }
+      }
+    }
+  });
+  return String(response?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+}
+
+function getObjectiveSuggestionContext() {
   const tema = String(document.getElementById("temaInput")?.value || "").trim();
   if (!tema) {
     setStatus("Por favor, ingresa primero un tema curricular para poder sugerir un objetivo.", "warning");
     document.getElementById("temaInput")?.focus();
-    return;
+    return null;
   }
+  return {
+    tema,
+    numMisiones: document.getElementById("numMisionesInput")?.value || 4,
+    preguntasPorSala: document.getElementById("preguntasPorSalaInput")?.value || 1,
+    duracion: document.getElementById("duracionInput")?.value || 35,
+    narrativa: elements.narrativaSelect?.value || ""
+  };
+}
 
-  const numMisiones = document.getElementById("numMisionesInput")?.value || 4;
-  const preguntasPorSala = document.getElementById("preguntasPorSalaInput")?.value || 1;
-  const duracion = document.getElementById("duracionInput")?.value || 35;
-  const narrativa = elements.narrativaSelect?.value || "";
+async function sugerirObjetivoFinal() {
+  const context = getObjectiveSuggestionContext();
+  if (!context) return;
 
   const btn = elements.btnSugerirObjetivo;
   const originalText = btn ? btn.innerHTML : "";
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <span>Pensando...</span>`;
-  }
+  setButtonLoading(btn, true, "Preparando ideas...", originalText);
   try {
-    const model = elements.modeloSelect?.value || TEXT_MODEL_DEFAULT;
-    const response = await authFetchJson("/api/gemini/generate", {
-      method: "POST",
-      body: {
-        model,
-        payload: {
-          systemInstruction: {
-            parts: [{
-              text: "Eres un experto diseñador instruccional y de escape rooms educativos. Tu tarea es generar un Brief detallado y estructurado de objetivos pedagógicos, narrativa y diseño para la creación del escape room. Escribe única y exclusivamente en español latinoamericano neutro (es-419). Queda estrictamente prohibido utilizar modismos o conjugaciones verbales típicas de España (como vosotros, tenéis, deberéis, etc.). Debes estructurar el texto obligatoriamente en 5 secciones separadas por saltos de línea:\n1) PROPÓSITO PEDAGÓGICO GENERAL (aprendizajes, habilidades y competencias que se desarrollarán en relación al tema curricular).\n2) NARRATIVA INICIAL Y REGLAS DE ESCAPE (el gancho de la historia, las reglas de juego implícitas y cómo se enlazan las pistas y el progreso visual).\n3) ENFOQUE DIDÁCTICO POR SALA (para cada una de las salas indicadas define con precisión qué subtema o concepto se abordará y el tipo de desafío cognitivo o lógico a resolver. Asimismo, describe detalladamente qué elementos y referencias visuales explícitas -como mapas, leyendas, coordenadas o símbolos específicos- DEBEN contener las imágenes de apoyo para que los alumnos puedan resolver la pregunta).\n4) CANDADOS, LLAVES Y MECANISMOS DE BLOQUEO (diseñar qué tipo de candado físico o digital, código de dirección, combinación de colores, contraseña numérica o llaves físicas se asocian a cada reto para bloquear y desbloquear el progreso).\n5) CLÍMAX Y CONCLUSIÓN (la resolución del gran enigma final en el panel de control o cierre del escape room).\n\nSé sumamente descriptivo y propón metas claras y coherentes para que el motor de generación de salas lo entienda perfectamente."
-            }]
-          },
-          contents: [{
-            role: "user",
-            parts: [{
-              text: `Tema curricular: "${tema}"\nNarrativa: "${narrativa}"\nCantidad de salas/misiones: ${numMisiones}\nPreguntas por sala: ${preguntasPorSala}\nDuración total: ${duracion} minutos\n\nGenera el Brief estructurado de 5 secciones detallando el Propósito Pedagógico General, la Narrativa Inicial/Reglas de progreso, el Enfoque Didáctico por sala (con detalles explícitos para las imágenes correspondientes), los Candados/Llaves/Mecanismos de bloqueo de cada desafío y el Clímax/Conclusión. Usa guiones sencillos (-) para listar salas e ítems. Escribe todo en texto plano con saltos de línea. No utilices negritas de markdown (**), símbolos complejos ni etiquetas HTML.`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.9
-          }
-        }
-      }
-    });
-
-    const generatedText = String(response?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-    if (generatedText) {
-      const objetivoInput = document.getElementById("objetivoInput");
-      if (objetivoInput) {
-        objetivoInput.value = generatedText;
-        saveFormState();
-        setStatus("Objetivo final sugerido exitosamente por la IA.", "success");
-      }
-    } else {
-      setStatus("No se recibió una sugerencia clara de la IA. Intenta de nuevo.", "warning");
+    const seedText = await generateObjectiveText(buildObjectiveSeedPrompt(context), 0.82);
+    if (!seedText) {
+      setStatus("No se recibió un borrador inicial claro. Intenta de nuevo.", "warning");
+      return;
     }
+    if (elements.objectiveIdeaTextarea) {
+      elements.objectiveIdeaTextarea.value = seedText;
+    }
+    const modal = getObjectiveIdeaModal();
+    if (modal) {
+      modal.show();
+      window.setTimeout(() => elements.objectiveIdeaTextarea?.focus(), 180);
+    }
+    setStatus("Edita las ideas propuestas y luego genera el objetivo final.", "info");
   } catch (err) {
     console.error("Error al sugerir objetivo final:", err);
-    setStatus("Error al generar el objetivo. Intenta de nuevo.", "bad");
+    setStatus("Error al preparar las ideas del objetivo. Intenta de nuevo.", "bad");
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalText;
+    setButtonLoading(btn, false, "Preparando ideas...", originalText);
+  }
+}
+
+async function generateFinalObjectiveFromIdeas() {
+  const context = getObjectiveSuggestionContext();
+  if (!context) return;
+  const userIdeas = String(elements.objectiveIdeaTextarea?.value || "").trim();
+  if (!userIdeas) {
+    setStatus("Escribe o ajusta al menos una idea antes de generar el objetivo final.", "warning");
+    elements.objectiveIdeaTextarea?.focus();
+    return;
+  }
+
+  const button = elements.btnObjectiveIdeaGenerate;
+  const originalText = button ? button.innerHTML : "";
+  setButtonLoading(button, true, "Generando objetivo...", originalText);
+  try {
+    const generatedText = await generateObjectiveText(buildObjectiveFinalPrompt({ ...context, userIdeas }), 0.88);
+    if (!generatedText) {
+      setStatus("No se recibió un objetivo final claro. Intenta de nuevo.", "warning");
+      return;
     }
+    const objetivoInput = document.getElementById("objetivoInput");
+    if (objetivoInput) {
+      objetivoInput.value = generatedText;
+      saveFormState();
+    }
+    getObjectiveIdeaModal()?.hide();
+    setStatus("Objetivo final sugerido exitosamente por la IA.", "success");
+  } catch (err) {
+    console.error("Error al generar el objetivo final:", err);
+    setStatus("Error al generar el objetivo final. Intenta de nuevo.", "bad");
+  } finally {
+    setButtonLoading(button, false, "Generando objetivo...", originalText);
   }
 }
 
 elements.btnSugerirObjetivo?.addEventListener("click", sugerirObjetivoFinal);
+elements.btnObjectiveIdeaGenerate?.addEventListener("click", generateFinalObjectiveFromIdeas);
 
 elements.btnLimpiar.addEventListener("click", () => {
   state.formPersistenceSuspended = true;

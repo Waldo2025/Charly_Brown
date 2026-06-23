@@ -369,6 +369,10 @@
                                     <h2>Juego exportable y JSON normalizado</h2>
                                 </div>
                                 <div class="er-output-header-actions">
+                                    <button type="button" id="btnRepairEscapeRoom" class="er-button er-button-secondary">
+                                        <i class="fas fa-screwdriver-wrench"></i>
+                                        <span>Reparar escape room</span>
+                                    </button>
                                     <button type="button" id="btnPreviewAutofill" class="er-button er-button-secondary">
                                         <i class="fas fa-wand-magic-sparkles"></i>
                                         <span>Resolver preview</span>
@@ -515,6 +519,31 @@
                 <div class="modal-footer">
                     <button type="button" id="btnPreviewThemeReset" class="er-button er-button-ghost">Restablecer</button>
                     <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="objectiveIdeaModal" tabindex="-1" aria-labelledby="objectiveIdeaModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+            <div class="modal-content er-modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="objectiveIdeaModalLabel">Ideas para el objetivo</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="er-field">
+                        <span>Escribe o ajusta las ideas del objetivo</span>
+                        <textarea id="objectiveIdeaTextarea" class="er-multiline" rows="10" placeholder="Ejemplo: el objetivo es que aprendan las sumas algebraicas y a refactorizar fórmulas..."></textarea>
+                    </label>
+                    <p class="er-field-help">Este texto se combinará con el tema curricular para redactar el objetivo final del escape room.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" id="btnObjectiveIdeaGenerate" class="er-button er-button-primary">
+                        <i class="fas fa-wand-magic-sparkles"></i>
+                        <span>Generar objetivo final</span>
+                    </button>
                 </div>
             </div>
         </div>

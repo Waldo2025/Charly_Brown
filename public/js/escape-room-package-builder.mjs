@@ -1484,6 +1484,9 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     if (nextScreen === "ending" && !areAllMissionsCompleted()) return;
     state.galleryScreen = nextScreen;
     renderGallery();
+    if (nextScreen === "mission") {
+      scrollMissionStageToTop();
+    }
   }
 
   function goToPreviousGalleryScreen() {
@@ -1530,7 +1533,20 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
         state.currentMissionId = missionId;
         persistProgressState();
         render();
+        scrollMissionStageToTop();
       });
+    });
+  }
+
+  function scrollMissionStageToTop() {
+    window.requestAnimationFrame(() => {
+      const missionPanel = document.querySelector("#missionStage .mission-panel");
+      const scrollTarget = missionPanel || els.missionStage || document.querySelector('[data-gallery-screen="mission"]');
+      if (scrollTarget && typeof scrollTarget.scrollIntoView === "function") {
+        scrollTarget.scrollIntoView({ block: "start", behavior: "auto" });
+        return;
+      }
+      window.scrollTo({ top: 0, behavior: "auto" });
     });
   }
 
@@ -1964,6 +1980,7 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     ensureTimerInterval();
     persistProgressState();
     render();
+    scrollMissionStageToTop();
   }
 
   function resetEscapeRoom() {
