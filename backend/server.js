@@ -12041,8 +12041,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         } else if (!useNativeVideoAudio && inputAudioPath) {
           audioFilterGraph = `[2:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         } else if (useNativeVideoAudio && videoHasAudio) {
-          // Normalizamos a -16 LUFS antes de aplicar el volumen del usuario para consistencia
-          audioFilterGraph = `[0:a:0]loudnorm=I=-16:TP=-1.5:LRA=11,volume=${veoVolume},aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[v];[v][1:a]amix=inputs=2:duration=first:dropout_transition=0.05:normalize=0[aout]`;
+          // Preserve the scene-native VEO audio as-is here. When the export also
+          // carries Gemini timeline segments, they are mixed later in
+          // finalizeMontageExportAudioTrack so both sources remain audible without
+          // duplicating Gemini inside the scene segment itself.
+          audioFilterGraph = `[0:a:0]volume=${veoVolume},aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         } else {
           audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         }

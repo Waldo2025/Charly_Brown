@@ -30,4 +30,10 @@ assert.match(
   "La mezcla final debe combinar el segmento del timeline con el clip de dialogueAudioMap para reutilizar dataUrl/cache local y los fallbacks por fila."
 );
 
+assert.match(
+  source,
+  /\[0:a\]volume='[\s\S]*\[v_ducked\];\[v_ducked\]\[mix\]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1\.5dB\[outa\]/,
+  "La mezcla final debe conservar el audio de escena y sumar encima el timeline Gemini/fondo, con ducking sobre la pista de escena."
+);
+
 console.log("Podcaster montage export final audio stage OK.");

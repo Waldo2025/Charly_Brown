@@ -32,8 +32,9 @@ if (!/const trackUrl = String\(panelMusic\?\.downloadUrl \|\| panelMusic\?\.stor
 }
 
 if (!/const sceneMix = window\.resolveTimelineClipMix\?\.\(activeSession, rowId\) \|\| null;/.test(exportSource)
-  || !/veoVolumeOverridePct: resolvedVeoVolumePct/.test(exportSource)) {
-  throw new Error("El export debe usar el mix efectivo de escena para el volumen VEO, no solo el runtime clip cacheado.");
+  || !/veoVolumeOverridePct: resolvedVeoVolumePct/.test(exportSource)
+  || !/geminiVolumeOverridePct: resolvedGeminiVolumePct/.test(exportSource)) {
+  throw new Error("El export debe usar el mix efectivo de escena para los volúmenes VEO y Gemini.");
 }
 
 if (!/const preserveManualVeo = Number\.isFinite\(currentVeoOverride\) && Math\.round\(currentVeoOverride\) !== previousVeoPct;/.test(podcasterSource)

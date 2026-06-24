@@ -3131,6 +3131,9 @@ export function buildMontageExportPayload(session = null) {
       const resolvedVeoVolumePct = Number.isFinite(Number(sceneMix?.veoPct))
         ? Math.max(0, Math.min(100, Math.round(Number(sceneMix.veoPct))))
         : normalizeLegacyPct(entry?.clip?.veoVolumeOverridePct, normalizeLegacyPct(videoCfg?.montageDefaultVeoVolumePct, 100));
+      const resolvedGeminiVolumePct = Number.isFinite(Number(sceneMix?.geminiPct))
+        ? Math.max(0, Math.min(100, Math.round(Number(sceneMix.geminiPct))))
+        : normalizeLegacyPct(entry?.clip?.geminiVolumeOverridePct, normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100));
       const useNativeVideoAudio = window.shouldKeepNativeVideoAudioForRow?.(activeSession, rowId) || resolvedVeoVolumePct > 0.0001;
       const transitionOut = entry?.transitionOut
         || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
@@ -3185,6 +3188,9 @@ export function buildMontageExportPayload(session = null) {
             mediaKind: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
             localMediaCacheKey: videoCacheKey
           },
+          // When the montage timeline audio is active, Gemini voice is mixed in the
+          // final audio pass together with background tracks. Keeping the per-scene
+          // clip here would duplicate Gemini over the same scene.
           audio: useTimelineAudio
             ? null
             : (audioStoragePath || audioDownloadUrl || audioDataUrl) ? {
@@ -3197,7 +3203,8 @@ export function buildMontageExportPayload(session = null) {
               localMediaCacheKey: audioCacheKey
             } : null,
           useNativeVideoAudio: useNativeVideoAudio === true,
-          veoVolumeOverridePct: resolvedVeoVolumePct
+          veoVolumeOverridePct: resolvedVeoVolumePct,
+          geminiVolumeOverridePct: resolvedGeminiVolumePct
         }
       };
     });
