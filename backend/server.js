@@ -4579,8 +4579,16 @@ async function retimeDialogueAudioBufferToTargetDuration(buffer = Buffer.alloc(0
   mimeType = "audio/wav"
 } = {}) {
   const source = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
-  const target = Math.max(0, Number(targetDurationSec || 0) || 0);
   const measured = Math.max(0, Number(measuredDurationSec || 0) || 0);
+  // Override: always return the original source buffer to avoid stretching the audio
+  return {
+    buffer: source,
+    mimeType: String(mimeType || "audio/wav").trim() || "audio/wav",
+    durationSec: measured,
+    applied: false,
+    appliedSpeedRatio: 1
+  };
+  const target = Math.max(0, Number(targetDurationSec || 0) || 0);
   if (!source.length || target <= 0.05 || measured <= 0.05) {
     return {
       buffer: source,
@@ -8904,8 +8912,8 @@ function buildGeminiTtsPrompt({
   const styleLine = [buildGeminiTtsBaseStyle(expression), direction.stylePrompt].filter(Boolean).join(" ");
   const pacingLine = direction.pacingPrompt || "Conversacional, fluido y con pausas naturales.";
   const accentLine = direction.accentPrompt || "Español latino neutro, dicción clara.";
-  const cleanTargetDurationSec = Math.max(0, Number(targetDurationSec || 0) || 0);
-  const cleanSpeechRateHint = Math.max(0.5, Math.min(1.85, Number(speechRateHint || 1) || 1));
+  const cleanTargetDurationSec = 0; // Math.max(0, Number(targetDurationSec || 0) || 0);
+  const cleanSpeechRateHint = 1; // Math.max(0.5, Math.min(1.85, Number(speechRateHint || 1) || 1));
   const sceneLine = direction.scenePrompt || (String(contentMode || "").trim().toLowerCase() === "educational"
     ? "Explicación cercana de estudio, clara y humana."
     : "Conversación de podcast en estudio, cercana y natural.");

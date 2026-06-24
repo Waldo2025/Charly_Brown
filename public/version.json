@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.233",
-  "build": "2026-1.0.10.233",
+  "version": "1.0.10.234",
+  "build": "2026-1.0.10.234",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Se eliminó el estiramiento y la lentitud del audio Gemini al generar voz para escenas con duración personalizada, ignorando la velocidad lenta sugerida y evitando el retimado FFmpeg en Firestore.",
     "Corregido: Las escenas de la librería con voz en off de Gemini ahora exportan correctamente su audio al incluir sus segmentos de fallback en el dialogueAudioMap y en la línea de tiempo del payload de exportación persistido en Firestore.",
     "Corregido: Se incrementa el timeout de la composición de montage overlap (montage_overlap_compose) de forma dinámica hasta un máximo proporcional al total de segundos del timeline para evitar fallos por timeout en Render/Firestore.",
     "Corregido: El export de montaje ahora compone de forma recursiva en grupos pequeños de máximo 4 inputs, lo que evita que FFmpeg exceda el límite de memoria RAM y cause reinicios (OOM) en Render/Firestore.",
@@ -29,6 +30,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: Se eliminó el estiramiento y la lentitud del audio Gemini al generar voz para escenas con duración personalizada, ignorando la velocidad lenta sugerida y evitando el retimado FFmpeg en Firestore.",
     "Corregido: Las escenas de la librería con voz en off de Gemini ahora exportan correctamente su audio al incluir sus segmentos de fallback en el dialogueAudioMap y en la línea de tiempo del payload de exportación persistido en Firestore.",
     "Corregido: Se incrementa el timeout de la composición de montage overlap (montage_overlap_compose) de forma dinámica hasta un máximo proporcional al total de segundos del timeline para evitar fallos por timeout en Render/Firestore.",
     "Corregido: El export de montaje ahora compone de forma recursiva en grupos pequeños de máximo 4 inputs, lo que evita que FFmpeg exceda el límite de memoria RAM y cause reinicios (OOM) en Render/Firestore.",
@@ -181,5 +183,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.233"
+  "cache_version": "2026-1.0.10.234"
 }
