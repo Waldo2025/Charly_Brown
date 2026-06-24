@@ -56,6 +56,38 @@ function shouldUseBrowserMontageRenderer(input = {}) {
     && input?.onlyAudio !== true;
 }
 
+function resolveRuntimeMontageRenderMode(requestedValue = "", availabilityOverride = null) {
+  const requestedMode = normalizeMontageRenderMode(requestedValue || "browser");
+  if (requestedMode !== "browser") {
+    return {
+      requestedMode,
+      renderMode: requestedMode,
+      downgraded: false,
+      reasonCode: "",
+      reasonMessage: ""
+    };
+  }
+  const availability = availabilityOverride && typeof availabilityOverride === "object"
+    ? availabilityOverride
+    : getMontageBrowserRendererAvailability();
+  if (availability?.available === true) {
+    return {
+      requestedMode,
+      renderMode: "browser",
+      downgraded: false,
+      reasonCode: "",
+      reasonMessage: ""
+    };
+  }
+  return {
+    requestedMode,
+    renderMode: "ffmpeg-legacy",
+    downgraded: true,
+    reasonCode: String(availability?.code || "playwright_unavailable").trim() || "playwright_unavailable",
+    reasonMessage: String(availability?.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
+  };
+}
+
 function pathToFileUrl(targetPath = "") {
   const resolved = path.resolve(String(targetPath || "").trim());
   return `file://${resolved.startsWith("/") ? "" : "/"}${resolved.replace(/\\/g, "/")}`;
@@ -273,6 +305,7 @@ async function renderMontageBrowserOverlayVideo({
 
 module.exports = {
   normalizeMontageRenderMode,
+  resolveRuntimeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
   isMontageBrowserRendererAvailable,

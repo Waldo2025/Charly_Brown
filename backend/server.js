@@ -84,6 +84,7 @@ const {
 } = require("./montage-export-video-params.js");
 const {
   normalizeMontageRenderMode,
+  resolveRuntimeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
   renderMontageBrowserOverlayVideo
@@ -12872,9 +12873,25 @@ async function renderMontagePreviewMedia(rawInput = {}, context = {}) {
 app.post("/api/podcaster/montage/export", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
-    const input = normalizeMontageExportRequestBody(req.body || {});
+    const normalizedInput = normalizeMontageExportRequestBody(req.body || {});
+    const renderModeDecision = resolveRuntimeMontageRenderMode(normalizedInput.renderMode || "browser");
+    const input = renderModeDecision.downgraded
+      ? {
+        ...normalizedInput,
+        renderMode: renderModeDecision.renderMode
+      }
+      : normalizedInput;
+    if (renderModeDecision.downgraded) {
+      console.warn("[backend][montage-export][render-mode-fallback]", {
+        requestedMode: renderModeDecision.requestedMode,
+        effectiveMode: renderModeDecision.renderMode,
+        code: renderModeDecision.reasonCode,
+        message: renderModeDecision.reasonMessage
+      });
+    }
     console.info("[backend][montage-export][request-body]", {
       sessionId: String(input.sessionId || "").trim(),
+      requestedRenderMode: normalizeMontageRenderMode(normalizedInput.renderMode || "browser"),
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
       onScreenTextSegments: Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments.length : 0,

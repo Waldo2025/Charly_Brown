@@ -10,12 +10,40 @@ const {
   resolveMontageActiveOverlayCards,
   buildMontageRenderAssContent
 } = renderSurfaceApi;
+const {
+  resolveRuntimeMontageRenderMode
+} = await import("../backend/montage-browser-render.js");
 
 test("normalizeMontageRenderMode defaults unknown values to browser", () => {
   assert.equal(normalizeMontageRenderMode("browser"), "browser");
   assert.equal(normalizeMontageRenderMode("ffmpeg-legacy"), "ffmpeg-legacy");
   assert.equal(normalizeMontageRenderMode(""), "browser");
   assert.equal(normalizeMontageRenderMode("weird"), "browser");
+});
+
+test("resolveRuntimeMontageRenderMode downgrades browser exports when Chromium is unavailable", () => {
+  const result = resolveRuntimeMontageRenderMode("browser", {
+    available: false,
+    code: "playwright_chromium_missing",
+    message: "Chromium no instalado."
+  });
+  assert.equal(result.requestedMode, "browser");
+  assert.equal(result.renderMode, "ffmpeg-legacy");
+  assert.equal(result.downgraded, true);
+  assert.equal(result.reasonCode, "playwright_chromium_missing");
+});
+
+test("resolveRuntimeMontageRenderMode preserves browser when Chromium is available", () => {
+  const result = resolveRuntimeMontageRenderMode("browser", { available: true });
+  assert.equal(result.renderMode, "browser");
+  assert.equal(result.downgraded, false);
+});
+
+test("resolveRuntimeMontageRenderMode preserves explicit ffmpeg fallback", () => {
+  const result = resolveRuntimeMontageRenderMode("ffmpeg-legacy", { available: false });
+  assert.equal(result.requestedMode, "ffmpeg-legacy");
+  assert.equal(result.renderMode, "ffmpeg-legacy");
+  assert.equal(result.downgraded, false);
 });
 
 test("resolveMontageRenderEntryAtTime picks the active timeline entry", () => {
