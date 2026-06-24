@@ -2016,6 +2016,11 @@ function logMontageMemory(stage = "", extra = {}) {
   });
 }
 
+async function removeMontageTempPaths(paths = []) {
+  const uniquePaths = Array.from(new Set((Array.isArray(paths) ? paths : []).map((item) => String(item || "").trim()).filter(Boolean)));
+  await Promise.all(uniquePaths.map((targetPath) => fs.promises.rm(targetPath, { force: true }).catch(() => {})));
+}
+
 function logHeavyWorkMemory(kind = "", stage = "", extra = {}) {
   console.info("[backend][heavy-work][memory]", {
     kind: String(kind || "").trim() || "unknown",
@@ -11738,6 +11743,7 @@ async function finalizeMontageExportAudioTrack({
         shouldAbort: () => shouldAbort(),
         registerAbortHandler
       });
+      await removeMontageTempPaths(segmentInputs.map((item) => item?.path));
       nextOutPath = timelineMixedOutPath;
     }
     logMontageMemory("mix_timeline_audio_after", {
@@ -11779,6 +11785,7 @@ async function finalizeMontageExportAudioTrack({
       shouldAbort: () => shouldAbort(),
       registerAbortHandler
     });
+    await removeMontageTempPaths([musicPath]);
     nextOutPath = mixedOutPath;
   }
 
@@ -11923,6 +11930,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       });
       logMontageMemory("render_scene_before", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
       let currentSceneSubstage = isImageAsset ? "scene_download_image" : "scene_download_video";
+      let inputVisualPath = "";
+      let inputAudioPath = "";
       try {
         throwIfCancelled(`scene_${sceneIndex}_before_download`);
         const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
@@ -11947,7 +11956,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           downloadUrl: videoDownloadUrl,
           substage: currentSceneSubstage
         }));
-        const inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+        inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
         throwIfCancelled(`scene_${sceneIndex}_after_download`);
         const downloadedVisualStat = await fs.promises.stat(inputVisualPath).catch(() => null);
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
@@ -11965,7 +11974,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           }
         }));
         const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
-        const inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
+        inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
         const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
         const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
           ? "blur-backdrop"
@@ -12283,6 +12292,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           index: Number(detail?.index || i) || i,
           lastError: String(detail?.lastError || detail?.message || error?.message || "").trim()
         }));
+      } finally {
+        await removeMontageTempPaths([inputVisualPath, inputAudioPath]);
       }
     }
 
@@ -12367,6 +12378,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       });
     }
     logMontageMemory("concat_timeline_after", { jobId, exportedSceneCount: exportedEntries.length });
+    await removeMontageTempPaths(intermediatePaths.filter((targetPath) => String(targetPath || "").trim() && String(targetPath || "").trim() !== String(concatOutPath || "").trim()));
 
     const exportOffsetsByRowId = new Map();
     const overlapAwareEntries = overlapPlan.entries.length ? overlapPlan.entries : exportedEntries;

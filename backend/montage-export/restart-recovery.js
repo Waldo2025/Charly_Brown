@@ -10,7 +10,25 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   if (!input) return false;
   if (input.persistedInlineRastersRedacted === true) return false;
   const restartResumeCount = Math.max(0, Math.round(Number(source.restartResumeCount || 0) || 0));
-  return restartResumeCount < 1;
+  if (restartResumeCount >= 1) return false;
+  const stage = String(source.stage || "").trim().toLowerCase();
+  const progress = Math.max(0, Math.min(1, Number(source.progress || 0) || 0));
+  const currentSceneIndex = Math.max(0, Math.round(Number(source.currentSceneIndex || 0) || 0));
+  if (progress >= 0.48) return false;
+  if ([
+    "concat_timeline",
+    "encode_visual_pass",
+    "encode_delivery",
+    "mix_timeline_audio",
+    "mix_background_music",
+    "cache_output",
+    "ready",
+    "completed"
+  ].includes(stage)) {
+    return false;
+  }
+  if (stage === "render_scene_segments" && currentSceneIndex > 1) return false;
+  return true;
 }
 
 function buildAutoResumeInterruptedMontageExportJobPatch(job = null, nowIso = new Date().toISOString()) {
