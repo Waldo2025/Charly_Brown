@@ -2297,7 +2297,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
         kind
       }).catch(() => { });
     }
-    if (directDataUrlBytes > 0 && directDataUrlBytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) {
+    if (directDataUrlBytes > 0 && directDataUrlBytes <= getMontageInlineMediaMaxBytes(kind)) {
       return {
         ...asset,
         dataUrl: directDataUrl,
@@ -2316,7 +2316,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
   if (cacheKey) {
     const cachedDataUrl = await readMontageCachedMediaDataUrl(cacheKey);
     const cachedDataUrlBytes = estimateMontageDataUrlBytes(cachedDataUrl);
-    if (cachedDataUrl.startsWith("data:") && cachedDataUrlBytes > 0 && cachedDataUrlBytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) {
+    if (cachedDataUrl.startsWith("data:") && cachedDataUrlBytes > 0 && cachedDataUrlBytes <= getMontageInlineMediaMaxBytes(kind)) {
       return {
         ...asset,
         dataUrl: cachedDataUrl,
@@ -2362,7 +2362,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
       });
     }
     const sizeBytes = Math.max(0, Number(blob?.size || 0) || 0);
-    if (sizeBytes > 0 && sizeBytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) {
+    if (sizeBytes > 0 && sizeBytes <= getMontageInlineMediaMaxBytes(kind)) {
       const dataUrl = await blobToDataUrl(blob, String(blob.type || mimeType || "").trim() || mimeType);
       if (dataUrl.startsWith("data:")) {
         if (cacheKey) {
@@ -2950,6 +2950,7 @@ export function buildMontageExportPayload(session = null) {
           || storedAudio?.storagePath
           || storedAudio?.localDataUrl
           || storedAudio?.dataUrl
+          || storedAudio?.localMediaCacheKey
           || segment?.audioSrc
           || runtime?.audioSrc
           || ""
