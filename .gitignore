@@ -97,3 +97,6 @@ backups/
 # Local analizar-pdf sample files
 public/analizarPDF/*.pdf
 public/analizarPDF/*.idml
+
+# Local nested app workspace not deployed from this repo
+charly-app/
