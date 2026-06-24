@@ -1,3 +1,7 @@
+const IS_RENDER_RUNTIME = Boolean(
+  String(process.env.RENDER_EXTERNAL_HOSTNAME || process.env.RENDER_SERVICE_ID || "").trim()
+);
+
 function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "balanced", bitrateSettings = null) {
   const cleanFormat = String(format || "").trim().toLowerCase();
   const preset = ["high", "balanced", "small"].includes(String(qualityPreset || "").trim().toLowerCase())
@@ -17,6 +21,9 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
 
   let crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
   let x264Preset = preset === "high" ? "medium" : preset === "small" ? "veryfast" : "faster";
+  if (IS_RENDER_RUNTIME) {
+    x264Preset = preset === "high" ? "veryfast" : preset === "small" ? "ultrafast" : "superfast";
+  }
   let maxRate = preset === "high" ? "8M" : (preset === "small" ? "2M" : "5M");
   let bufSize = preset === "high" ? "16M" : (preset === "small" ? "4M" : "10M");
   let isCbr = false;

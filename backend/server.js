@@ -12830,6 +12830,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           deliveryOutPath
         ], {
           stage: "montage_encode_delivery",
+          timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+          timeoutCode: "encode_delivery_timeout",
           shouldAbort: () => shouldAbort(),
           registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
@@ -12893,6 +12895,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         deliveryOutPath
       ], {
         stage: "montage_encode_delivery",
+        timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+        timeoutCode: "encode_delivery_timeout",
         shouldAbort: () => shouldAbort(),
         registerAbortHandler: context?.registerAbortHandler,
         heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,

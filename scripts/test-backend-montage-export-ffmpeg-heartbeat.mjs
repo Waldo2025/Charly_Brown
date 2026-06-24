@@ -23,7 +23,7 @@ assert.match(
 
 assert.match(
   source,
-  /stage: `montage_scene_\$\{sceneIndex\}`,[\s\S]*heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,[\s\S]*onHeartbeat: \(\{ elapsedMs = 0 \} = \{\}\) => \{/,
+  /stage: `montage_scene_\$\{sceneIndex\}`,[\s\S]*heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,[\s\S]*onHeartbeat: (?:\(\{ elapsedMs = 0 \} = \{\}\)|\(heartbeat = \{\}\)) => \{/,
   "el render de escenas debe conectar el heartbeat de FFmpeg al reporter de montaje"
 );
 
@@ -35,13 +35,13 @@ assert.match(
 
 assert.match(
   source,
-  /stage: "montage_final_visuals",[\s\S]*onHeartbeat: \(\{ elapsedMs = 0 \} = \{\}\) => \{/,
+  /stage: "montage_final_visuals",[\s\S]*onHeartbeat: (?:\(\{ elapsedMs = 0 \} = \{\}\)|\(heartbeat = \{\}\)) => \{/,
   "la fase de capas finales debe mantener heartbeat durante FFmpeg"
 );
 
 assert.match(
   source,
-  /stage: "montage_encode_delivery",[\s\S]*onHeartbeat: \(\{ elapsedMs = 0 \} = \{\}\) => \{/,
+  /stage: "montage_encode_delivery",[\s\S]*onHeartbeat: (?:\(\{ elapsedMs = 0 \} = \{\}\)|\(heartbeat = \{\}\)) => \{/,
   "la fase de codificacion final debe mantener heartbeat durante FFmpeg"
 );
 
