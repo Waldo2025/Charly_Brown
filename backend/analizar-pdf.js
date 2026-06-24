@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
@@ -417,8 +418,13 @@ function reconcileStaleAnalizarPdfSessionJobs(rawSession = {}, jobStore = null) 
     if (!["queued", "processing", "uploading"].includes(cleanStatus)) {
       return { status: cleanStatus, jobId: cleanJobId, changed: false };
     }
-    if (cleanJobId && jobStore.get(cleanJobId)) {
+    const job = cleanJobId ? jobStore.get(cleanJobId) : null;
+    const jobStatus = normalizeAnalysisStatus(job?.status || "");
+    if (job && ["queued", "processing", "uploading"].includes(jobStatus)) {
       return { status: cleanStatus, jobId: cleanJobId, changed: false };
+    }
+    if (job && ["completed", "failed", "cancelled"].includes(jobStatus)) {
+      return { status: jobStatus, jobId: "", changed: jobStatus !== cleanStatus || cleanJobId !== "" };
     }
     return { status: "failed", jobId: "", changed: true };
   };
@@ -598,12 +604,16 @@ function resolveAnalyzerScript(session = {}) {
 function spawnAnalizarPdfPythonJob(options = {}) {
   const pythonBin = String(options.pythonBin || process.env.PDF_ANALYZER_PYTHON_BIN || "python3").trim() || "python3";
   const scriptPath = path.resolve(String(options.scriptPath || ""));
+  const sessionPayload = JSON.stringify(options.session || {});
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "analizar-pdf-session-"));
+  const sessionJsonPath = path.join(sessionDir, "session.json");
+  fs.writeFileSync(sessionJsonPath, sessionPayload, "utf8");
   const args = [
     scriptPath,
     "--input",
     path.resolve(String(options.pdfPath || "")),
-    "--session-json",
-    JSON.stringify(options.session || {})
+    "--session-json-file",
+    sessionJsonPath
   ];
   const env = {
     ...process.env,
@@ -663,12 +673,28 @@ function spawnAnalizarPdfPythonJob(options = {}) {
       if (code !== 0) {
         const error = new Error(stderr.trim() || stdout.trim() || `Python exit ${code}`);
         error.code = code;
+        try {
+          fs.rmSync(sessionDir, { recursive: true, force: true });
+        } catch (_) {
+          // noop
+        }
         reject(error);
         return;
       }
       try {
-        resolve(JSON.parse(stdout));
+        const parsed = JSON.parse(stdout);
+        try {
+          fs.rmSync(sessionDir, { recursive: true, force: true });
+        } catch (_) {
+          // noop
+        }
+        resolve(parsed);
       } catch (error) {
+        try {
+          fs.rmSync(sessionDir, { recursive: true, force: true });
+        } catch (_) {
+          // noop
+        }
         reject(new Error(`Invalid Python JSON output: ${error.message}`));
       }
     });

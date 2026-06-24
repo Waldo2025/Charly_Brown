@@ -14,13 +14,17 @@ from analizar_idml.pipeline import analyze_idml_document  # noqa: E402
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
-    parser.add_argument("--session-json", required=True)
+    parser.add_argument("--session-json", default="")
+    parser.add_argument("--session-json-file", default="")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    session = json.loads(args.session_json)
+    session_payload = args.session_json
+    if args.session_json_file:
+        session_payload = Path(args.session_json_file).read_text(encoding="utf-8")
+    session = json.loads(session_payload)
     result = analyze_idml_document(args.input, session)
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
 

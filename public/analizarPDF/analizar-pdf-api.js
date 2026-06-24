@@ -1,45 +1,50 @@
-import { authFetchJson, buildApiUrl, getAuthHeaders, hasAvailableApiBase } from "../js/api-client.js";
+import { authFetch, authFetchJson, buildApiUrl, hasAvailableApiBase } from "../js/api-client.js";
 
 export async function listAnalizarPdfSessions() {
-  return authFetchJson("/api/analizar-pdf/sessions/list", { method: "GET" });
+  return authFetchJson("/api/analizar-pdf/sessions/list", { method: "GET", preferRemote: false });
 }
 
 export async function saveAnalizarPdfSession(session) {
   return authFetchJson("/api/analizar-pdf/sessions/save", {
     method: "POST",
-    body: { session }
+    body: { session },
+    preferRemote: false
   });
 }
 
 export async function listAnalizarPdfStyleMappings() {
-  return authFetchJson("/api/analizar-pdf/style-mappings/list", { method: "GET" });
+  return authFetchJson("/api/analizar-pdf/style-mappings/list", { method: "GET", preferRemote: false });
 }
 
 export async function saveAnalizarPdfStyleMapping(mapping) {
   return authFetchJson("/api/analizar-pdf/style-mappings/save", {
     method: "POST",
-    body: { mapping }
+    body: { mapping },
+    preferRemote: false
   });
 }
 
 export async function deleteAnalizarPdfStyleMapping(mappingId = "") {
   return authFetchJson("/api/analizar-pdf/style-mappings/delete", {
     method: "POST",
-    body: { mappingId }
+    body: { mappingId },
+    preferRemote: false
   });
 }
 
 export async function activateAnalizarPdfStyleMapping(mappingId = "") {
   return authFetchJson("/api/analizar-pdf/style-mappings/activate", {
     method: "POST",
-    body: { mappingId }
+    body: { mappingId },
+    preferRemote: false
   });
 }
 
 export async function deleteAnalizarPdfSession(sessionId = "") {
   return authFetchJson("/api/analizar-pdf/sessions/delete", {
     method: "POST",
-    body: { sessionId }
+    body: { sessionId },
+    preferRemote: false
   });
 }
 
@@ -53,17 +58,17 @@ export async function queueAnalizarPdfUpload(sessionId = "", file = null, source
     throw new Error(`El archivo debe ser ${expectedExt}.`);
   }
   if (!hasAvailableApiBase()) throw new Error("API_UNAVAILABLE");
-  const headers = await getAuthHeaders({
-    "Content-Type": file.type || "application/octet-stream",
-    "X-Session-Id": cleanSessionId,
-    "X-File-Name": file.name || `documento${expectedExt}`,
-    ...(String(fileContext?.revisionId || "").trim() ? { "X-Revision-Id": String(fileContext.revisionId).trim() } : {}),
-    ...(String(fileContext?.fileId || "").trim() ? { "X-File-Id": String(fileContext.fileId).trim() } : {}),
-    ...(String(fileContext?.mappingId || "").trim() ? { "X-Mapping-Id": String(fileContext.mappingId).trim() } : {}),
-  });
-  const response = await fetch(buildApiUrl("/api/analizar-pdf/analyze"), {
+  const response = await authFetch("/api/analizar-pdf/analyze", {
     method: "POST",
-    headers,
+    preferRemote: false,
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-Session-Id": cleanSessionId,
+      "X-File-Name": file.name || `documento${expectedExt}`,
+      ...(String(fileContext?.revisionId || "").trim() ? { "X-Revision-Id": String(fileContext.revisionId).trim() } : {}),
+      ...(String(fileContext?.fileId || "").trim() ? { "X-File-Id": String(fileContext.fileId).trim() } : {}),
+      ...(String(fileContext?.mappingId || "").trim() ? { "X-Mapping-Id": String(fileContext.mappingId).trim() } : {}),
+    },
     body: file
   });
   const data = await response.json().catch(() => ({}));
@@ -77,7 +82,8 @@ export async function getAnalizarPdfAnalysisStatus(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) throw new Error("Falta jobId.");
   return authFetchJson(`/api/analizar-pdf/analyze-status?jobId=${encodeURIComponent(cleanJobId)}`, {
-    method: "GET"
+    method: "GET",
+    preferRemote: false
   });
 }
 
@@ -86,7 +92,8 @@ export async function cancelAnalizarPdfAnalysis(jobId = "") {
   if (!cleanJobId) throw new Error("Falta jobId.");
   return authFetchJson("/api/analizar-pdf/analyze-cancel", {
     method: "POST",
-    body: { jobId: cleanJobId }
+    body: { jobId: cleanJobId },
+    preferRemote: false
   });
 }
 
@@ -97,12 +104,12 @@ export async function exportAnalizarPdfCorrectedIdml(sessionId = "", revisionId 
   if (!cleanSessionId || !cleanRevisionId || !cleanFileId) {
     throw new Error("Faltan sessionId, revisionId o fileId.");
   }
-  const headers = await getAuthHeaders({
-    "Content-Type": "application/json"
-  });
-  const response = await fetch(buildApiUrl("/api/analizar-pdf/export-corrected-idml"), {
+  const response = await authFetch("/api/analizar-pdf/export-corrected-idml", {
     method: "POST",
-    headers,
+    preferRemote: false,
+    headers: {
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({
       sessionId: cleanSessionId,
       revisionId: cleanRevisionId,
@@ -123,10 +130,9 @@ export async function exportAnalizarPdfCorrectedIdml(sessionId = "", revisionId 
   if (!downloadPath) {
     return data;
   }
-  const downloadHeaders = await getAuthHeaders({});
-  const downloadResponse = await fetch(buildApiUrl(downloadPath), {
+  const downloadResponse = await authFetch(buildApiUrl(downloadPath), {
     method: "GET",
-    headers: downloadHeaders
+    preferRemote: false
   });
   if (!downloadResponse.ok) {
     throw new Error(`No se pudo descargar el IDML corregido (HTTP ${downloadResponse.status}).`);

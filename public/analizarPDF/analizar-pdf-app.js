@@ -39,6 +39,7 @@ const state = {
   currentUser: null,
   selectedFiles: [],
   analysisPollTimer: 0,
+  analysisPollController: null,
   persistedTitlesBySessionId: {},
   styleMappings: [],
   activeMappingId: "",
@@ -239,6 +240,81 @@ function updateEditorialSpinner(status = "idle") {
 function setBusyOverlay(label = "") {
   state.busyOverlayLabel = String(label || "").trim();
   updateEditorialSpinner(getActiveFile(store.getActiveSession())?.analysisStatus || store.getActiveSession()?.analysisStatus || "idle");
+}
+
+function settleAnalysisPoll(result = null) {
+  const controller = state.analysisPollController;
+  if (!controller) {
+    return false;
+  }
+  const resultJobId = String(result?.jobId || "").trim();
+  if (resultJobId && resultJobId !== controller.jobId) {
+    return false;
+  }
+  window.clearTimeout(state.analysisPollTimer);
+  state.analysisPollTimer = 0;
+  state.analysisPollController = null;
+  controller.resolve(result);
+  return true;
+}
+
+function rejectAnalysisPoll(error) {
+  const controller = state.analysisPollController;
+  if (!controller) {
+    return false;
+  }
+  window.clearTimeout(state.analysisPollTimer);
+  state.analysisPollTimer = 0;
+  state.analysisPollController = null;
+  controller.reject(error);
+  return true;
+}
+
+function isAuthAnalysisError(error = null) {
+  const status = Number(error?.status || 0);
+  const message = String(error?.message || "").trim().toUpperCase();
+  return status === 401 || status === 403 || message.includes("AUTH_REQUIRED") || message.includes("AUTH_INVALID") || message.includes("AUTH_FORBIDDEN");
+}
+
+function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed") {
+  const cleanJobId = String(jobId || "").trim();
+  const normalizedStatus = String(nextStatus || "failed").trim().toLowerCase() || "failed";
+  let changed = false;
+  mutateActiveSession((draft) => {
+    if (!draft || typeof draft !== "object") {
+      return draft;
+    }
+    if (!cleanJobId || String(draft.analysisJobId || "").trim() === cleanJobId) {
+      if (isBusyAnalysisStatus(draft.analysisStatus || "") || String(draft.analysisJobId || "").trim()) {
+        draft.analysisStatus = normalizedStatus;
+        draft.analysisJobId = "";
+        changed = true;
+      }
+    }
+    for (const revision of Array.isArray(draft.revisions) ? draft.revisions : []) {
+      for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+        if (cleanJobId && String(file?.analysisJobId || "").trim() !== cleanJobId) {
+          continue;
+        }
+        if (!cleanJobId && !isBusyAnalysisStatus(file?.analysisStatus || "")) {
+          continue;
+        }
+        file.analysisStatus = normalizedStatus;
+        file.analysisJobId = "";
+        file.updatedAt = new Date().toISOString();
+        changed = true;
+      }
+    }
+    return draft;
+  }, { render: false });
+  window.clearTimeout(state.analysisPollTimer);
+  state.analysisPollTimer = 0;
+  state.isAnalyzingCurrent = false;
+  state.isAnalyzingAll = false;
+  setBusyOverlay("");
+  renderActionButtonState();
+  renderAll();
+  return changed;
 }
 
 function renderActionButtonState() {
@@ -920,7 +996,7 @@ function buildRenderableSession(session = null) {
         mappingEntries,
       }));
   });
-  const fileResults = activeFileResult.length ? activeFileResult : fallbackFileResults;
+  const fileResults = fallbackFileResults.length ? fallbackFileResults : activeFileResult;
   logAnalizarPdfFlow("buildRenderableSession", {
     sessionId: session?.id || "",
     activeRevisionId: revision?.id || "",
@@ -2964,6 +3040,7 @@ function bindEditorEvents() {
         }
         window.clearTimeout(state.analysisPollTimer);
         state.analysisPollTimer = 0;
+        settleAnalysisPoll({ jobId: activeJobId, status: "cancelled", cancelled: true });
         state.isAnalyzingCurrent = false;
         state.isAnalyzingAll = false;
         setBusyOverlay("");
@@ -3100,35 +3177,65 @@ async function startPolling(jobId = "") {
   window.clearTimeout(state.analysisPollTimer);
   const cleanJobId = String(jobId || "").trim();
   logAnalizarPdfFlow("startPolling:start", { jobId: cleanJobId });
-  if (!cleanJobId) return;
-  const tick = async () => {
-    try {
-      const payload = await pollAnalysisStatus(cleanJobId);
-      logAnalizarPdfFlow("startPolling:tick", {
-        jobId: cleanJobId,
-        status: payload?.status || "",
-        hasSession: Boolean(payload?.session),
-        error: payload?.error || "",
-      });
-      const session = payload?.session || null;
-      if (session) {
-        store.upsertSession(session);
+  if (!cleanJobId) return null;
+  if (state.analysisPollController && state.analysisPollController.jobId !== cleanJobId) {
+    rejectAnalysisPoll(new Error("ANALYSIS_POLL_REPLACED"));
+  }
+  return new Promise((resolve, reject) => {
+    state.analysisPollController = {
+      jobId: cleanJobId,
+      resolve,
+      reject,
+    };
+    const tick = async () => {
+      try {
+        const payload = await pollAnalysisStatus(cleanJobId);
+        logAnalizarPdfFlow("startPolling:tick", {
+          jobId: cleanJobId,
+          status: payload?.status || "",
+          hasSession: Boolean(payload?.session),
+          error: payload?.error || "",
+        });
+        const session = payload?.session || null;
+        if (session) {
+          store.upsertSession(session);
+        }
+        setJobMetaText(formatJobMeta(payload, buildRenderableSession(session)));
+        renderAll();
+        if (payload?.status === "queued" || payload?.status === "processing") {
+          state.analysisPollTimer = window.setTimeout(tick, 2500);
+          logAnalizarPdfFlow("startPolling:scheduled-next", { jobId: cleanJobId });
+          return;
+        }
+        clearBusyAnalysisStateForJob(cleanJobId, payload?.status || "completed");
+        settleAnalysisPoll(payload);
+      } catch (error) {
+        const clearStatus = isAuthAnalysisError(error)
+          ? "failed"
+          : /job no encontrado/i.test(String(error?.message || ""))
+            ? "failed"
+            : "";
+        logAnalizarPdfFlow("startPolling:error", {
+          jobId: cleanJobId,
+          status: Number(error?.status || 0) || "",
+          message: String(error?.message || error),
+        });
+        if (clearStatus) {
+          clearBusyAnalysisStateForJob(cleanJobId, clearStatus);
+          setJobMetaText(
+            isAuthAnalysisError(error)
+              ? "La sesión expiró o perdió autorización para consultar el análisis. Vuelve a cargar la página."
+              : String(error?.message || error)
+          );
+          settleAnalysisPoll({ jobId: cleanJobId, status: clearStatus, error: String(error?.message || error) });
+          return;
+        }
+        setJobMetaText(String(error?.message || error));
+        rejectAnalysisPoll(error);
       }
-      setJobMetaText(formatJobMeta(payload, buildRenderableSession(session)));
-      renderAll();
-      if (payload?.status === "queued" || payload?.status === "processing") {
-        state.analysisPollTimer = window.setTimeout(tick, 2500);
-        logAnalizarPdfFlow("startPolling:scheduled-next", { jobId: cleanJobId });
-      }
-    } catch (error) {
-      logAnalizarPdfFlow("startPolling:error", {
-        jobId: cleanJobId,
-        message: String(error?.message || error),
-      });
-      setJobMetaText(String(error?.message || error));
-    }
-  };
-  await tick();
+    };
+    void tick();
+  });
 }
 
 async function bootstrap() {

@@ -159,14 +159,79 @@ async function getAuthHeadersWithRefresh(extra = {}, forceRefresh = false) {
   };
 }
 
+function extractErrorText(value, fallback = "", seen = new Set()) {
+  if (value == null) return String(fallback || "").trim();
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+  }
+  if (typeof value !== "object") {
+    const text = String(value || "").trim();
+    return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+  }
+  if (seen.has(value)) return String(fallback || "").trim();
+  seen.add(value);
+  for (const candidate of [value?.error, value?.message, value?.detail, value?.reason, value?.code]) {
+    const text = extractErrorText(candidate, "", seen);
+    if (text) return text;
+  }
+  try {
+    const text = JSON.stringify(value);
+    return text && text !== "{}" ? text : String(fallback || "").trim();
+  } catch (_) {
+    return String(fallback || "").trim();
+  }
+}
+
+function isBackendAuthError(response, data) {
+  return response.status === 401 || (response.status === 403 && /^AUTH_/i.test(String(data?.error || data?.code || "").trim()));
+}
+
+async function parseResponseDetailSafe(response) {
+  const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+  if (contentType.includes("application/json")) {
+    return response.clone().json().catch(() => ({}));
+  }
+  const text = await response.clone().text().catch(() => "");
+  return text ? { error: text } : {};
+}
+
+export async function authFetch(url, options = {}) {
+  if (!hasAvailableApiBase()) {
+    const error = new Error("Backend de producción no configurado.");
+    error.code = "API_UNAVAILABLE";
+    throw error;
+  }
+  const { auth = true, preferRemote = auth, ...requestOptions } = options || {};
+  const finalUrl = auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url);
+  const baseHeaders = { ...(requestOptions.headers || {}) };
+  const buildRequestInit = async (forceRefresh = false) => {
+    const headers = auth ? await getAuthHeadersWithRefresh(baseHeaders, forceRefresh) : baseHeaders;
+    return {
+      ...requestOptions,
+      headers
+    };
+  };
+  let requestInit = await buildRequestInit(false);
+  let response = await fetch(finalUrl, requestInit);
+  if (auth) {
+    const detail = await parseResponseDetailSafe(response);
+    if (isBackendAuthError(response, detail)) {
+      requestInit = await buildRequestInit(true);
+      response = await fetch(finalUrl, requestInit);
+    }
+  }
+  return response;
+}
+
 export async function authFetchJson(url, options = {}) {
   if (!hasAvailableApiBase()) {
     const error = new Error("Backend de producción no configurado.");
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, ...requestOptions } = options || {};
-  const finalUrl = auth ? buildApiUrlPreferRemote(url) : buildApiUrl(url);
+  const { auth = true, preferRemote = auth, ...requestOptions } = options || {};
+  const finalUrl = auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url);
   const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};
   const buildRequestInit = async (forceRefresh = false) => {
@@ -196,29 +261,6 @@ export async function authFetchJson(url, options = {}) {
   }
 
   const parseJsonSafe = async (response) => response.json().catch(() => ({}));
-  const extractErrorText = (value, fallback = "", seen = new Set()) => {
-    if (value == null) return String(fallback || "").trim();
-    if (typeof value === "string") {
-      const text = value.trim();
-      return text && text !== "[object Object]" ? text : String(fallback || "").trim();
-    }
-    if (typeof value !== "object") {
-      const text = String(value || "").trim();
-      return text && text !== "[object Object]" ? text : String(fallback || "").trim();
-    }
-    if (seen.has(value)) return String(fallback || "").trim();
-    seen.add(value);
-    for (const candidate of [value?.error, value?.message, value?.detail, value?.reason, value?.code]) {
-      const text = extractErrorText(candidate, "", seen);
-      if (text) return text;
-    }
-    try {
-      const text = JSON.stringify(value);
-      return text && text !== "{}" ? text : String(fallback || "").trim();
-    } catch (_) {
-      return String(fallback || "").trim();
-    }
-  };
   const buildHttpError = (response, data) => {
     const detail = extractErrorText(data, `HTTP ${response.status}`);
     const error = new Error(detail);
@@ -271,7 +313,7 @@ export async function authFetchJson(url, options = {}) {
     }
   }
   const data = await parseJsonSafe(response);
-  const backendAuthError = response.status === 401 || (response.status === 403 && /^AUTH_/i.test(String(data?.error || data?.code || "").trim()));
+  const backendAuthError = isBackendAuthError(response, data);
   if (backendAuthError && auth) {
     try {
       requestInit = await buildRequestInit(true);
