@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.229",
-  "build": "2026-1.0.10.229",
+  "version": "1.0.10.231",
+  "build": "2026-1.0.10.231",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export de montaje ahora compone de forma recursiva en grupos pequeños de máximo 4 inputs, lo que evita que FFmpeg exceda el límite de memoria RAM y cause reinicios (OOM) en Render/Firestore.",
+    "Actualizado: Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js a la v2026-06-24.5 y version.json a la build 1.0.10.230 para forzar la recarga del frontend con la limitación de resolución a 720p en Render/Firestore.",
     "Actualizado: Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js a la v2026-06-24.4 y version.json a la build 1.0.10.229 para forzar la recarga del frontend con la optimización de presets y timeouts de codificación en Render/Firestore.",
     "Actualizado: Se incrementan los cache-busters de podcaster-montage-export.js a la v2026-06-24.3 y version.json a la build 1.0.10.228 para forzar la recarga del frontend junto con la optimización del export de una sola escena.",
     "Actualizado: Se incrementan los cache-busters de podcaster-montage-export.js a la v2026-06-24.2 y version.json a la build 1.0.10.227 para forzar la recarga del frontend mientras se valida el fix de snoopy-export en producción.",
@@ -13,18 +15,20 @@
     "Actualizado: Se incrementan nuevamente los cache-busters de Podcaster a la v2026-06-22.6 y version.json a la build 1.0.10.220 para forzar la recarga del frontend con el split correcto de backends (Gemini separado de snoopy-export).",
     "Actualizado: Se incrementa el cache-buster del cargador de configuración runtime y de api-client-podcaster a la v2026-06-22.5, obligando al navegador a recargar y respetar el flujo de backends correcto (exportaciones a snoopy-export y Gemini a su backend correspondiente) en podcaster.html.",
     "Actualizado: Se incrementa la resiliencia ante fallas de red de Google OAuth2 en backend e implementa reintentos automáticos elegantes para VEO ante backend_busy en el frontend. Se corrigen bugs del logo de marca en la exportación de montaje y la sincronización automática de Party Karaoke cuando los subtítulos están ocultos.",
-    "Corregido: El audio de fondo MP3 subido localmente ahora se escucha en el export de montage: buildUploadedPanelMusicSegments ahora incluye localMediaCacheKey derivado de resolvePanelMusicSessionCacheKey para que hydrateMontageSceneMediaAsset recupere el audio del IndexedDB correctamente. El audio Gemini duplicado con desfase también fue corregido.",
+    "Corregido: El audio de fondo MP3 subido localmente ahora se escucha en el export de montage: buildUploadedPanelMusicSegments ahora includes localMediaCacheKey derivado de resolvePanelMusicSessionCacheKey para que hydrateMontageSceneMediaAsset recupere el audio del IndexedDB correctamente. El audio Gemini duplicado con desfase también fue corregido.",
     "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
     "Corregido: El export de Podcaster usa un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke, cards y logo fieles al preview.",
     "Corregido: El export final de Podcaster ahora guarda el MP4 en Storage mediante upload no resumable, evitando el fetch OAuth a googleapis.com/oauth2/v4/token que estaba cerrándose prematuramente en Render.",
     "Corregido: Podcaster ahora sanea dialogueVideoMap para no guardar type undefined en Firestore y proxy-media deja de cerrar streams válidos de forma prematura durante exportaciones con mezcla de audio timeline.",
-    "Corregido: Se solucionó de raíz el error 403 Forbidden y Premature close en proxy-image y proxy-media mediante la firma offline y local de las URLs de Firebase Storage y su descarga/transmisión directa via HTTPS, lo que evita por completo la necesidad de contactar al endpoint de tokens de Google que se interrumpía en Render.",
+    "Corregido: Se solucionó de raíz el error 403 Forbidden y Premature close en proxy-image and proxy-media mediante la firma offline y local de las URLs de Firebase Storage y su descarga/transmisión directa via HTTPS, lo que evita por completo la necesidad de contactar al endpoint de tokens de Google que se interrumpía en Render.",
     "Corregido: Se solucionó el error 403 Forbidden y Premature close al consultar imágenes privadas a través de proxy-image y proxy-media implementando reintentos con backoff exponencial para operaciones de almacenamiento y corrigiendo la detección errónea de cancelación de solicitudes en el backend.",
     "Corregido: Se solucionó un error 403 Forbidden al consultar imágenes privadas a través de /api/assets/proxy-image agregando el código 403 al detector de fallos de GCS, permitiendo la conmutación exitosa al bucket activo.",
     "Corregido: Se actualizó el formato de las etiquetas de anulación de color en ASS a formato estándar (\\1c y \\1a) para corregir el resaltado amarillo del karaoke en exportación. Se movió la superposición del logo/marca al final del pipeline de composición para que quede encima de las tarjetas (overlay cards) en Reels. Se corrigió resolveMontageCanvasSize para respetar el toggle de reelModeEnabled al exportar videos verticales en modo normal.",
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El export de montaje ahora compone de forma recursiva en grupos pequeños de máximo 4 inputs, lo que evita que FFmpeg exceda el límite de memoria RAM y cause reinicios (OOM) en Render/Firestore.",
+    "Actualizado: Se incrementan version.json y los cache-busters de Podcaster a la v2026-06-24.5 para forzar la carga del frontend con la limitación de resolución a 720p en Render/Firestore.",
     "Actualizado: Se incrementan version.json y los cache-busters de Podcaster a la v2026-06-24.4 para forzar la carga del frontend con el fix de timeouts y optimización de presets en Render/Firestore.",
     "Actualizado: Se incrementan version.json y el cache-buster de podcaster-montage-export.js a la v2026-06-24.3 para forzar la carga del frontend alineado con la optimización del export de una sola escena.",
     "Actualizado: Se incrementan version.json y el cache-buster de podcaster-montage-export.js a la v2026-06-24.2 para descartar frontend cacheado durante la validación del fix de snoopy-export.",
@@ -173,5 +177,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.229"
+  "cache_version": "2026-1.0.10.231"
 }

@@ -788,14 +788,32 @@ async function buildMontageFileSnapshot(filePath = "") {
 
 function resolveMontageReviewCanvasSize(resolution = "source", sourceWidth = 0, sourceHeight = 0) {
   const preset = String(resolution || "source").trim();
-  if (preset === "1080p") return { width: 1920, height: 1080 };
-  if (preset === "720p") return { width: 1280, height: 720 };
-  if (preset === "480p") return { width: 854, height: 480 };
-  const largestSide = Math.max(Number(sourceWidth || 0), Number(sourceHeight || 0));
-  if (largestSide >= 1800) return { width: 1920, height: 1080 };
-  if (largestSide >= 1100) return { width: 1280, height: 720 };
-  if (largestSide >= 760) return { width: 854, height: 480 };
-  return { width: 640, height: 360 };
+  let result;
+  if (preset === "1080p") {
+    result = { width: 1920, height: 1080 };
+  } else if (preset === "720p") {
+    result = { width: 1280, height: 720 };
+  } else if (preset === "480p") {
+    result = { width: 854, height: 480 };
+  } else {
+    const largestSide = Math.max(Number(sourceWidth || 0), Number(sourceHeight || 0));
+    if (largestSide >= 1800) {
+      result = { width: 1920, height: 1080 };
+    } else if (largestSide >= 1100) {
+      result = { width: 1280, height: 720 };
+    } else if (largestSide >= 760) {
+      result = { width: 854, height: 480 };
+    } else {
+      result = { width: 640, height: 360 };
+    }
+  }
+
+  if (IS_RENDER_RUNTIME) {
+    if (result.width > 1280 || result.height > 720) {
+      result = { width: 1280, height: 720 };
+    }
+  }
+  return result;
 }
 
 function buildMontageReviewVideoFilter(entries = [], options = {}) {
@@ -10608,35 +10626,47 @@ function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolu
   const safeHeight = Math.max(2, Math.round(Number(sourceHeight || 720) || 720));
   const even = (value = 0) => Math.max(2, Math.round(value / 2) * 2);
   const key = String(resolution || "source").trim().toLowerCase();
+  
+  let result;
   if (key === "source") {
-    return { width: even(safeWidth), height: even(safeHeight) };
-  }
-  if (key === "1080x1920") {
-    return { width: 1080, height: 1920 };
-  }
-  if (key === "720x1280") {
-    return { width: 720, height: 1280 };
-  }
-  if (key === "480x854") {
-    return { width: 480, height: 854 };
-  }
-  if (key === "1080p") {
-    return { width: 1920, height: 1080 };
-  }
-  if (key === "720p") {
-    return { width: 1280, height: 720 };
-  }
-  if (key === "480p") {
-    return { width: 854, height: 480 };
-  }
-  if (reelModeEnabled === true) {
-    return safeWidth <= safeHeight
+    result = { width: even(safeWidth), height: even(safeHeight) };
+  } else if (key === "1080x1920") {
+    result = { width: 1080, height: 1920 };
+  } else if (key === "720x1280") {
+    result = { width: 720, height: 1280 };
+  } else if (key === "480x854") {
+    result = { width: 480, height: 854 };
+  } else if (key === "1080p") {
+    result = { width: 1920, height: 1080 };
+  } else if (key === "720p") {
+    result = { width: 1280, height: 720 };
+  } else if (key === "480p") {
+    result = { width: 854, height: 480 };
+  } else if (reelModeEnabled === true) {
+    result = safeWidth <= safeHeight
+      ? { width: even(safeWidth), height: even(safeHeight) }
+      : { width: even(safeHeight), height: even(safeWidth) };
+  } else {
+    result = safeWidth >= safeHeight
       ? { width: even(safeWidth), height: even(safeHeight) }
       : { width: even(safeHeight), height: even(safeWidth) };
   }
-  return safeWidth >= safeHeight
-    ? { width: even(safeWidth), height: even(safeHeight) }
-    : { width: even(safeHeight), height: even(safeWidth) };
+
+  if (IS_RENDER_RUNTIME) {
+    const maxDim = 1280;
+    const maxShortDim = 720;
+    const isPortrait = result.width < result.height;
+    const maxWidth = isPortrait ? maxShortDim : maxDim;
+    const maxHeight = isPortrait ? maxDim : maxShortDim;
+    if (result.width > maxWidth || result.height > maxHeight) {
+      const scale = Math.min(maxWidth / result.width, maxHeight / result.height);
+      result = {
+        width: even(result.width * scale),
+        height: even(result.height * scale)
+      };
+    }
+  }
+  return result;
 }
 
 function isMontageReelResolution(resolution = "") {
@@ -11066,131 +11096,194 @@ async function renderMontageOverlapComposition({
   emitStage = () => {}
 } = {}) {
   const plan = buildMontageOverlapCompositionPlan(exportedEntries);
-  if ((!plan.hasOverlap && !plan.hasGaps) || !intermediatePaths.length || intermediatePaths.length !== plan.entries.length) {
+  if ((!plan.hasOverlap && !plan.hasGaps) || !plan.entries.length) {
     return "";
   }
-  const firstDims = await probeMediaVideoDimensionsWithFfmpeg(intermediatePaths[0], "montage_overlap_probe").catch(() => ({ width: 1280, height: 720 }));
+
+  const firstPath = plan.entries[0]?.intermediatePath || (intermediatePaths && intermediatePaths[0]);
+  const firstDims = firstPath
+    ? await probeMediaVideoDimensionsWithFfmpeg(firstPath, "montage_overlap_probe").catch(() => ({ width: 1280, height: 720 }))
+    : { width: 1280, height: 720 };
   const canvas = resolveMontageCanvasSize(
     firstDims?.width || 1280,
     firstDims?.height || 720,
     input?.resolution || "source",
     input?.reelModeEnabled === true
   );
-  const totalSec = Math.max(0.25, plan.totalDurationMs / 1000);
-  const colorInputIndex = intermediatePaths.length;
-  const silentAudioInputIndex = intermediatePaths.length + 1;
-  const filters = [`[${colorInputIndex}:v]format=rgba[base0]`];
-  const audioLabels = [];
-  let baseLabel = "base0";
 
-  plan.entries.forEach((entry, index) => {
-    const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
-    const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
-    const previousEntry = index > 0 ? plan.entries[index - 1] : null;
-    const transition = resolveMontageOverlayTransition(entry, previousEntry);
-    const transitionType = String(transition?.type || "cut").trim().toLowerCase();
-    const transitionSec = Math.max(0.02, Number(transition?.durationMs || 0) / 1000);
-    const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
-    const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
-    const videoLabel = `v${index}`;
-    let videoChain = `[${index}:v]scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
-    if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
-      videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
-    }
-    if (transitionType === "zoom-in" || transitionType === "zoom-out" || transitionType === "blur") {
-      const scaleExpr = transitionType === "zoom-in"
-        ? `0.72+0.28*${localProgressExpr}`
-        : transitionType === "zoom-out"
-          ? `1.22-0.22*${localProgressExpr}`
-          : `1.06-0.06*${localProgressExpr}`;
-      videoChain += `,scale=w='${canvas.width}*(${scaleExpr})':h='${canvas.height}*(${scaleExpr})':eval=frame`;
-    }
-    videoChain += `,setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB[${videoLabel}]`;
-    filters.push(videoChain);
-    let overlayX = "0";
-    let overlayY = "0";
-    if (transitionType === "slide-left") {
-      overlayX = `${canvas.width}*(1-${overlayProgressExpr})`;
-    } else if (transitionType === "slide-right") {
-      overlayX = `-${canvas.width}*(1-${overlayProgressExpr})`;
-    } else if (transitionType === "slide-up") {
-      overlayY = `${canvas.height}*(1-${overlayProgressExpr})`;
-    } else if (transitionType === "slide-down") {
-      overlayY = `-${canvas.height}*(1-${overlayProgressExpr})`;
-    } else if (transitionType === "zoom-in" || transitionType === "zoom-out" || transitionType === "blur") {
-      overlayX = `(${canvas.width}-w)/2`;
-      overlayY = `(${canvas.height}-h)/2`;
-    }
-    const overlayOutLabel = `base${index + 1}`;
-    filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
-    baseLabel = overlayOutLabel;
-    if (transitionType === "dip-black" || transitionType === "flash-white") {
-      const pulseLabel = `transition_pulse_${index}`;
-      const pulseOutLabel = `base${index + 1}_pulse`;
-      const color = transitionType === "flash-white" ? "white" : "black";
-      const halfTransitionSec = Math.max(0.01, transitionSec / 2);
-      filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24,format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
-      filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[${pulseOutLabel}]`);
-      baseLabel = pulseOutLabel;
+  const maxInputs = IS_RENDER_RUNTIME ? 4 : 6;
+
+  async function runSingleOverlapComposition(chunkEntries, sortedPaths, isFinal = false) {
+    const chunkPlan = buildMontageOverlapCompositionPlan(chunkEntries);
+    const totalSec = Math.max(0.25, chunkPlan.totalDurationMs / 1000);
+    const colorInputIndex = sortedPaths.length;
+    const silentAudioInputIndex = sortedPaths.length + 1;
+    const filters = [`[${colorInputIndex}:v]format=rgba[base0]`];
+    const audioLabels = [];
+    let baseLabel = "base0";
+
+    chunkPlan.entries.forEach((entry, index) => {
+      const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
+      const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
+      const previousEntry = index > 0 ? chunkPlan.entries[index - 1] : null;
+      const transition = resolveMontageOverlayTransition(entry, previousEntry);
+      const transitionType = String(transition?.type || "cut").trim().toLowerCase();
+      const transitionSec = Math.max(0.02, Number(transition?.durationMs || 0) / 1000);
+      const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
+      const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
+      const videoLabel = `v${index}`;
+      let videoChain = `[${index}:v]scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+      if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
+        videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
+      }
+      if (transitionType === "zoom-in" || transitionType === "zoom-out" || transitionType === "blur") {
+        const scaleExpr = transitionType === "zoom-in"
+          ? `0.72+0.28*${localProgressExpr}`
+          : transitionType === "zoom-out"
+            ? `1.22-0.22*${localProgressExpr}`
+            : `1.06-0.06*${localProgressExpr}`;
+        videoChain += `,scale=w='${canvas.width}*(${scaleExpr})':h='${canvas.height}*(${scaleExpr})':eval=frame`;
+      }
+      videoChain += `,setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB[${videoLabel}]`;
+      filters.push(videoChain);
+      let overlayX = "0";
+      let overlayY = "0";
+      if (transitionType === "slide-left") {
+        overlayX = `${canvas.width}*(1-${overlayProgressExpr})`;
+      } else if (transitionType === "slide-right") {
+        overlayX = `-${canvas.width}*(1-${overlayProgressExpr})`;
+      } else if (transitionType === "slide-up") {
+        overlayY = `${canvas.height}*(1-${overlayProgressExpr})`;
+      } else if (transitionType === "slide-down") {
+        overlayY = `-${canvas.height}*(1-${overlayProgressExpr})`;
+      } else if (transitionType === "zoom-in" || transitionType === "zoom-out" || transitionType === "blur") {
+        overlayX = `(${canvas.width}-w)/2`;
+        overlayY = `(${canvas.height}-h)/2`;
+      }
+      const overlayOutLabel = `base${index + 1}`;
+      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
+      baseLabel = overlayOutLabel;
+      if (transitionType === "dip-black" || transitionType === "flash-white") {
+        const pulseLabel = `transition_pulse_${index}`;
+        const pulseOutLabel = `base${index + 1}_pulse`;
+        const color = transitionType === "flash-white" ? "white" : "black";
+        const halfTransitionSec = Math.max(0.01, transitionSec / 2);
+        filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24,format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
+        filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[${pulseOutLabel}]`);
+        baseLabel = pulseOutLabel;
+      }
+
+      const sceneVeoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 0)));
+      const includeSceneAudio = input?.useTimelineAudio !== true || (entry?.useNativeVideoAudio === true && sceneVeoVolumePct > 0.0001);
+      if (includeSceneAudio) {
+        const audioLabel = `a${index}`;
+        let audioChain = `[${index}:a]atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS`;
+        const delayMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+        audioChain += `,adelay=${delayMs}ms|${delayMs}ms[${audioLabel}]`;
+        filters.push(audioChain);
+        audioLabels.push(audioLabel);
+      }
+    });
+
+    if (audioLabels.length) {
+      filters.push(`${audioLabels.map((label) => `[${label}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[aout_mix]`);
+      filters.push(`[aout_mix][${silentAudioInputIndex}:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]`);
+    } else {
+      filters.push(`[${silentAudioInputIndex}:a]atrim=start=0:duration=${totalSec.toFixed(3)},asetpts=PTS-STARTPTS[aout]`);
     }
 
-    const sceneVeoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 0)));
-    const includeSceneAudio = input?.useTimelineAudio !== true || (entry?.useNativeVideoAudio === true && sceneVeoVolumePct > 0.0001);
-    if (includeSceneAudio) {
-      const audioLabel = `a${index}`;
-      let audioChain = `[${index}:a]atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS`;
-      const delayMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-      audioChain += `,adelay=${delayMs}ms|${delayMs}ms[${audioLabel}]`;
-      filters.push(audioChain);
-      audioLabels.push(audioLabel);
-    }
-  });
+    const outPath = isFinal
+      ? path.join(tmpDir, `montage-overlap.${outExt}`)
+      : path.join(tmpDir, `overlap-chunk-${randomUUID()}.${outExt}`);
 
-  if (audioLabels.length) {
-    filters.push(`${audioLabels.map((label) => `[${label}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[aout_mix]`);
-    filters.push(`[aout_mix][${silentAudioInputIndex}:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]`);
-  } else {
-    filters.push(`[${silentAudioInputIndex}:a]atrim=start=0:duration=${totalSec.toFixed(3)},asetpts=PTS-STARTPTS[aout]`);
+    await runFfmpegCommand([
+      "-y", "-hide_banner", "-loglevel", "warning",
+      ...sortedPaths.flatMap((p) => ["-i", p]),
+      "-f", "lavfi", "-i", `color=c=black:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
+      "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalSec.toFixed(3)}`,
+      "-filter_complex", filters.join(";"),
+      "-map", `[${baseLabel}]`,
+      "-map", "[aout]",
+      "-r", "24",
+      "-c:v", params.vCodec,
+      ...params.vArgs,
+      "-pix_fmt", "yuv420p",
+      "-c:a", params.aCodec,
+      "-ar", "48000",
+      ...params.aArgs,
+      ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+      outPath
+    ], {
+      stage: "montage_overlap_compose",
+      timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+      timeoutCode: "montage_overlap_compose_timeout",
+      heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+      onHeartbeat: () => {
+        emitStage(
+          "concat_timeline",
+          0.48,
+          "Componiendo escenas con transiciones o huecos en el timeline.",
+          {
+            currentSceneIndex: Math.max(0, plan.entries.length),
+            totalScenes: Math.max(0, Number(input?.entries?.length || plan.entries.length) || 0),
+            sceneSubstage: "",
+            lastHeartbeatAt: new Date().toISOString()
+          }
+        );
+      }
+    });
+
+    return outPath;
   }
 
-  const outPath = path.join(tmpDir, `montage-overlap.${outExt}`);
-  await runFfmpegCommand([
-    "-y", "-hide_banner", "-loglevel", "warning",
-    ...intermediatePaths.flatMap((p) => ["-i", p]),
-    "-f", "lavfi", "-i", `color=c=black:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
-    "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalSec.toFixed(3)}`,
-    "-filter_complex", filters.join(";"),
-    "-map", `[${baseLabel}]`,
-    "-map", "[aout]",
-    "-r", "24",
-    "-c:v", params.vCodec,
-    ...params.vArgs,
-    "-pix_fmt", "yuv420p",
-    "-c:a", params.aCodec,
-    "-ar", "48000",
-    ...params.aArgs,
-    ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
-    outPath
-  ], {
-    stage: "montage_overlap_compose",
-    timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
-    timeoutCode: "montage_overlap_compose_timeout",
-    heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-    onHeartbeat: () => {
-      emitStage(
-        "concat_timeline",
-        0.48,
-        "Componiendo escenas con transiciones o huecos en el timeline.",
-        {
-          currentSceneIndex: Math.max(0, plan.entries.length),
-          totalScenes: Math.max(0, Number(input?.entries?.length || plan.entries.length) || 0),
-          sceneSubstage: "",
-          lastHeartbeatAt: new Date().toISOString()
-        }
-      );
+  async function renderOverlapCompositionRecursive(entries, isFinal = false) {
+    if (entries.length <= maxInputs) {
+      const sortedPaths = entries.map((e) => e.intermediatePath);
+      return await runSingleOverlapComposition(entries, sortedPaths, isFinal);
     }
-  });
-  return outPath;
+
+    const chunkedEntries = [];
+    for (let i = 0; i < entries.length; i += maxInputs) {
+      const chunkEntries = entries.slice(i, i + maxInputs);
+      const chunkOffsetMs = chunkEntries[0].timelineStartMs;
+      const shiftedEntries = chunkEntries.map((entry) => ({
+        ...entry,
+        timelineStartMs: Math.max(0, entry.timelineStartMs - chunkOffsetMs),
+        timelineEndMs: Math.max(0, entry.timelineEndMs - chunkOffsetMs)
+      }));
+
+      const chunkOutPath = await renderOverlapCompositionRecursive(shiftedEntries, false);
+      const chunkDurationMs = shiftedEntries.reduce((max, entry) => Math.max(max, entry.timelineEndMs), 0);
+
+      chunkedEntries.push({
+        sceneIndex: chunkedEntries.length + 1,
+        rowId: `chunk_${i}_to_${i + chunkEntries.length - 1}`,
+        intermediatePath: chunkOutPath,
+        zIndex: 1,
+        durationSec: chunkDurationMs / 1000,
+        durationMs: chunkDurationMs,
+        timelineStartMs: chunkOffsetMs,
+        timelineEndMs: chunkOffsetMs + chunkDurationMs,
+        useNativeVideoAudio: true,
+        veoVolumeOverridePct: 100,
+        transitionIn: chunkEntries[0].transitionIn || null,
+        transitionOut: chunkEntries[chunkEntries.length - 1].transitionOut || null
+      });
+    }
+
+    const resultPath = await renderOverlapCompositionRecursive(chunkedEntries, isFinal);
+
+    // Clean up intermediate chunk files
+    for (const entry of chunkedEntries) {
+      if (entry.intermediatePath !== resultPath) {
+        await fs.promises.unlink(entry.intermediatePath).catch(() => {});
+      }
+    }
+
+    return resultPath;
+  }
+
+  return await renderOverlapCompositionRecursive(plan.entries, true);
 }
 
 async function renderMontageGapFillerClip({
