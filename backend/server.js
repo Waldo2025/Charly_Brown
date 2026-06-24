@@ -9986,7 +9986,16 @@ function buildMontageSkippedEntry(entry = {}, index = 0, reason = "scene_asset_u
 
 function shouldSkipMontageEntryError(error) {
   const code = String(error?.code || error?.message || "").trim();
-  return code === "storage_not_found" || code === "missing_download_source";
+  return [
+    "storage_not_found",
+    "missing_download_source",
+    "scene_download_timeout",
+    "storage_download_idle_timeout",
+    "downloaded_asset_invalid",
+    "scene_probe_timeout",
+    "scene_render_timeout",
+    "ffmpeg_exit_code"
+  ].includes(code);
 }
 
 function createMontageAssetDownloader({ tmpDir = "", uid = "", sessionId = "", shouldAbort = null } = {}) {
