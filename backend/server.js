@@ -767,6 +767,25 @@ async function probeImageDimensionsWithFfmpeg(inputPath = "", label = "probe_ima
   return probeMediaVideoDimensionsWithFfmpeg(inputPath, label);
 }
 
+async function buildMontageFileSnapshot(filePath = "") {
+  const resolvedPath = String(filePath || "").trim();
+  if (!resolvedPath) {
+    return {
+      path: "",
+      exists: false,
+      sizeBytes: 0,
+      modifiedAt: null
+    };
+  }
+  const stat = await fs.promises.stat(resolvedPath).catch(() => null);
+  return {
+    path: resolvedPath,
+    exists: Boolean(stat),
+    sizeBytes: Math.max(0, Number(stat?.size || 0) || 0),
+    modifiedAt: stat?.mtime instanceof Date ? stat.mtime.toISOString() : null
+  };
+}
+
 function resolveMontageReviewCanvasSize(resolution = "source", sourceWidth = 0, sourceHeight = 0) {
   const preset = String(resolution || "source").trim();
   if (preset === "1080p") return { width: 1920, height: 1080 };
@@ -10469,6 +10488,17 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
   ].join("/");
   const stat = await fs.promises.stat(finalOutPath).catch(() => null);
   const candidateBuckets = getStorageBucketCandidates();
+  const uploadStartMs = Date.now();
+  console.info("[backend][montage-export][store-result-start]", {
+    exportId,
+    jobId: clampExportId(context?.jobId || ""),
+    finalOutPath: String(finalOutPath || "").trim() || null,
+    fileSizeBytes: Math.max(0, Number(stat?.size || 0) || 0),
+    filename,
+    mimeType,
+    storagePath,
+    candidateBuckets: candidateBuckets.map((bucket) => String(bucket?.name || "").trim()).filter(Boolean)
+  });
   let targetBucket = await resolveWritableStorageBucket();
   let lastUploadError = null;
   for (const candidateBucket of candidateBuckets) {
@@ -10480,6 +10510,12 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
         destination: storagePath,
         filePath: finalOutPath,
         contentType: mimeType
+      });
+      console.info("[backend][montage-export][store-result-upload-success]", {
+        exportId,
+        bucket: String(candidateBucket?.name || "").trim() || null,
+        storagePath,
+        elapsedMs: Date.now() - uploadStartMs
       });
       targetBucket = candidateBucket;
       resolvedWritableStorageBucket = candidateBucket;
@@ -10513,13 +10549,17 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
       expiresAt: expiresAtIso,
       outExt
     });
+    console.info("[backend][montage-export][store-result-cache-artifact]", {
+      exportId,
+      cacheFilePath: String(cacheArtifact?.filePath || "").trim() || null
+    });
   } catch (cacheError) {
     console.warn("[backend][storage] export cache artifact write failed", {
       exportId,
       message: String(cacheError?.message || cacheError)
     });
   }
-  return {
+  const result = {
     exportId,
     downloadUrl,
     downloadToken: token,
@@ -10531,6 +10571,14 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     sizeBytes: Math.max(0, Number(stat?.size || 0) || 0),
     cacheFilePath: cacheArtifact?.filePath || ""
   };
+  console.info("[backend][montage-export][store-result-finish]", {
+    exportId,
+    storagePath,
+    downloadUrl: redactUrlForLogs(downloadUrl),
+    sizeBytes: result.sizeBytes,
+    elapsedMs: Date.now() - uploadStartMs
+  });
+  return result;
 }
 
 function buildMontagePreviewPipelineInput(rawInput = {}) {
@@ -11638,12 +11686,22 @@ async function finalizeMontageExportAudioTrack({
   };
 
   let nextOutPath = finalOutPath;
+  console.info("[backend][montage-export][final-audio-start]", {
+    jobId,
+    useTimelineAudio: input.useTimelineAudio === true,
+    includeBackgroundMusic: input.includeBackgroundMusic === true,
+    timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0,
+    normalizedGeminiSegmentCount: Array.isArray(input.normalizedGeminiTimelineSegments) ? input.normalizedGeminiTimelineSegments.length : 0,
+    exportedDurationSec: Math.max(0, Number(exportedDurationSec || 0) || 0),
+    inputSnapshot: await buildMontageFileSnapshot(nextOutPath)
+  });
   if (input.useTimelineAudio) {
     const segmentInputs = [];
     const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
       input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
       0.60
     );
+    const mixTimelineStartMs = Date.now();
     emitStage("mix_timeline_audio", 0.88, "Preparando mezcla del audio del timeline.");
     logMontageMemory("mix_timeline_audio_start", {
       jobId,
@@ -11665,6 +11723,19 @@ async function finalizeMontageExportAudioTrack({
       throw new Error("montage_timeline_audio_sources_missing");
     }
     if (segmentInputs.length) {
+      console.info("[backend][montage-export][timeline-audio-inputs-ready]", {
+        jobId,
+        segmentInputCount: segmentInputs.length,
+        inputSnapshot: await buildMontageFileSnapshot(nextOutPath),
+        segmentInputs: segmentInputs.map((item, idx) => ({
+          index: idx,
+          rowId: String(item?.segment?.rowId || "").trim() || null,
+          startMs: Math.max(0, Math.round(Number(item?.segment?.startMs || 0) || 0)),
+          durationMs: Math.max(0, Math.round(Number(item?.segment?.durationMs || 0) || 0)),
+          volumePct: Math.max(0, Number(item?.segment?.volumePct ?? 100) || 0),
+          path: String(item?.path || "").trim() || null
+        }))
+      });
       const timelineMixedOutPath = path.join(tmpDir, `montage-timeline-audio-final.${outExt}`);
       const audioCodec = outExt === "webm" ? "libopus" : "aac";
       const audioBitrate = outExt === "webm" ? "128k" : "160k";
@@ -11734,6 +11805,12 @@ async function finalizeMontageExportAudioTrack({
       });
       const videoDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.40));
       const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[mix];[0:a]volume='${videoDuckExprEscaped}':eval=frame[v_ducked];[v_ducked][mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`;
+      console.info("[backend][montage-export][timeline-audio-mix-start]", {
+        jobId,
+        timelineMixedOutPath,
+        inputSnapshot: await buildMontageFileSnapshot(nextOutPath),
+        segmentInputCount: segmentInputs.length
+      });
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning", "-i", nextOutPath,
         ...segmentInputs.flatMap((item) => ["-i", item.path]),
@@ -11748,6 +11825,11 @@ async function finalizeMontageExportAudioTrack({
       });
       await removeMontageTempPaths(segmentInputs.map((item) => item?.path));
       nextOutPath = timelineMixedOutPath;
+      console.info("[backend][montage-export][timeline-audio-mix-finish]", {
+        jobId,
+        elapsedMs: Date.now() - mixTimelineStartMs,
+        outputSnapshot: await buildMontageFileSnapshot(nextOutPath)
+      });
     }
     logMontageMemory("mix_timeline_audio_after", {
       jobId,
@@ -11756,6 +11838,7 @@ async function finalizeMontageExportAudioTrack({
   }
 
   if (input.includeBackgroundMusic) {
+    const mixMusicStartMs = Date.now();
     emitStage("mix_background_music", 0.92, "Mezclando música de fondo.");
     if (!input.backgroundMusic || typeof input.backgroundMusic !== "object") {
       const err = new Error("includeBackgroundMusic requiere backgroundMusic.");
@@ -11772,6 +11855,14 @@ async function finalizeMontageExportAudioTrack({
     const mixedOutPath = path.join(tmpDir, `montage-mixed-final.${outExt}`);
     const audioCodec = outExt === "webm" ? "libopus" : "aac";
     const audioBitrate = outExt === "webm" ? "128k" : "160k";
+    console.info("[backend][montage-export][background-music-mix-start]", {
+      jobId,
+      musicPath,
+      inputSnapshot: await buildMontageFileSnapshot(nextOutPath),
+      exportedDurationSec: Math.max(0, Number(exportedDurationSec || 0) || 0),
+      configuredVolume: volume,
+      configuredBackgroundDuckVolume
+    });
     shouldAbort() && (() => { throw new Error("montage_export_cancelled"); })();
     await runFfmpegCommand([
       "-y", "-hide_banner", "-loglevel", "warning",
@@ -11790,8 +11881,17 @@ async function finalizeMontageExportAudioTrack({
     });
     await removeMontageTempPaths([musicPath]);
     nextOutPath = mixedOutPath;
+    console.info("[backend][montage-export][background-music-mix-finish]", {
+      jobId,
+      elapsedMs: Date.now() - mixMusicStartMs,
+      outputSnapshot: await buildMontageFileSnapshot(nextOutPath)
+    });
   }
 
+  console.info("[backend][montage-export][final-audio-finish]", {
+    jobId,
+    outputSnapshot: await buildMontageFileSnapshot(nextOutPath)
+  });
   return nextOutPath;
 }
 
@@ -12706,6 +12806,15 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           lastHeartbeatAt: new Date().toISOString()
         });
         const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
+        const encodeDeliveryStartMs = Date.now();
+        console.info("[backend][montage-export][encode-delivery-start]", {
+          jobId,
+          stage: "montage_encode_delivery",
+          reason: "final_visual_fallback_no_filtergraph",
+          inputSnapshot: await buildMontageFileSnapshot(finalOutPath),
+          outputPath: deliveryOutPath,
+          deliveryParams
+        });
         throwIfCancelled("montage_encode_delivery");
         await runFfmpegCommand([
           "-y", "-hide_banner", "-loglevel", "warning",
@@ -12730,16 +12839,29 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               sceneSubstage: "",
               lastHeartbeatAt: new Date().toISOString()
             });
-            console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
+            console.info("[backend][montage-export][encode-delivery-heartbeat]", {
               jobId,
               stage: "montage_encode_delivery",
               elapsedMs,
+              outputSnapshot: fs.existsSync(deliveryOutPath)
+                ? {
+                  path: deliveryOutPath,
+                  sizeBytes: Math.max(0, Number(fs.statSync(deliveryOutPath)?.size || 0) || 0),
+                  modifiedAt: fs.statSync(deliveryOutPath)?.mtime instanceof Date ? fs.statSync(deliveryOutPath).mtime.toISOString() : null
+                }
+                : { path: deliveryOutPath, exists: false, sizeBytes: 0, modifiedAt: null },
               stderrPreview: buildMontageStderrPreview(stderr),
               stdoutPreview: buildMontageStderrPreview(stdout, 4, 300)
             });
           }
         });
         finalOutPath = deliveryOutPath;
+        console.info("[backend][montage-export][encode-delivery-finish]", {
+          jobId,
+          stage: "montage_encode_delivery",
+          elapsedMs: Date.now() - encodeDeliveryStartMs,
+          outputSnapshot: await buildMontageFileSnapshot(finalOutPath)
+        });
       }
     } else {
       emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
@@ -12747,6 +12869,15 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         lastHeartbeatAt: new Date().toISOString()
       });
       const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
+      const encodeDeliveryStartMs = Date.now();
+      console.info("[backend][montage-export][encode-delivery-start]", {
+        jobId,
+        stage: "montage_encode_delivery",
+        reason: "no_final_visual_pass",
+        inputSnapshot: await buildMontageFileSnapshot(finalOutPath),
+        outputPath: deliveryOutPath,
+        deliveryParams
+      });
       throwIfCancelled("montage_encode_delivery");
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning",
@@ -12771,18 +12902,38 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             sceneSubstage: "",
             lastHeartbeatAt: new Date().toISOString()
           });
-          console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
+          console.info("[backend][montage-export][encode-delivery-heartbeat]", {
             jobId,
             stage: "montage_encode_delivery",
             elapsedMs,
+            outputSnapshot: fs.existsSync(deliveryOutPath)
+              ? {
+                path: deliveryOutPath,
+                sizeBytes: Math.max(0, Number(fs.statSync(deliveryOutPath)?.size || 0) || 0),
+                modifiedAt: fs.statSync(deliveryOutPath)?.mtime instanceof Date ? fs.statSync(deliveryOutPath).mtime.toISOString() : null
+              }
+              : { path: deliveryOutPath, exists: false, sizeBytes: 0, modifiedAt: null },
             stderrPreview: buildMontageStderrPreview(stderr),
             stdoutPreview: buildMontageStderrPreview(stdout, 4, 300)
           });
         }
       });
       finalOutPath = deliveryOutPath;
+      console.info("[backend][montage-export][encode-delivery-finish]", {
+        jobId,
+        stage: "montage_encode_delivery",
+        elapsedMs: Date.now() - encodeDeliveryStartMs,
+        outputSnapshot: await buildMontageFileSnapshot(finalOutPath)
+      });
     }
 
+    const finalizeAudioStartMs = Date.now();
+    console.info("[backend][montage-export][final-audio-dispatch]", {
+      jobId,
+      inputSnapshot: await buildMontageFileSnapshot(finalOutPath),
+      useTimelineAudio: input.useTimelineAudio === true,
+      includeBackgroundMusic: input.includeBackgroundMusic === true
+    });
     finalOutPath = await finalizeMontageExportAudioTrack({
       input,
       finalOutPath,
@@ -12795,6 +12946,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       downloadInput,
       jobId,
       registerAbortHandler: context?.registerAbortHandler
+    });
+    console.info("[backend][montage-export][final-audio-dispatch-finish]", {
+      jobId,
+      elapsedMs: Date.now() - finalizeAudioStartMs,
+      outputSnapshot: await buildMontageFileSnapshot(finalOutPath)
     });
 
     emitStage("cache_output", 0.96, "Preparando descarga final.");
@@ -12810,6 +12966,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
 
     emitStage("upload_result", 0.98, "Subiendo archivo final.");
     logMontageMemory("cache_output_start", { jobId, exportedSceneCount: exportedEntries.length });
+    console.info("[backend][montage-export][upload-result-dispatch]", {
+      jobId,
+      inputSnapshot: await buildMontageFileSnapshot(finalOutPath)
+    });
     const stored = await storeMontageExportResult(finalOutPath, input, context);
     logMontageMemory("cache_output_after", { jobId, exportId: String(stored?.exportId || "").trim() });
     emitStage("finalize_result", 0.99, "Finalizando entrega del archivo.");
