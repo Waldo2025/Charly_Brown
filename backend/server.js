@@ -11196,6 +11196,7 @@ async function renderMontageOverlapComposition({
       ? path.join(tmpDir, `montage-overlap.${outExt}`)
       : path.join(tmpDir, `overlap-chunk-${randomUUID()}.${outExt}`);
 
+    const composeTimeoutMs = Math.max(20 * 60 * 1000, Math.ceil(totalSec * 20 * 1000));
     await runFfmpegCommand([
       "-y", "-hide_banner", "-loglevel", "warning",
       ...sortedPaths.flatMap((p) => ["-i", p]),
@@ -11215,7 +11216,7 @@ async function renderMontageOverlapComposition({
       outPath
     ], {
       stage: "montage_overlap_compose",
-      timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+      timeoutMs: composeTimeoutMs,
       timeoutCode: "montage_overlap_compose_timeout",
       heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
       onHeartbeat: () => {
