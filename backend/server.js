@@ -29,6 +29,9 @@ const {
   buildAutoResumeInterruptedMontageExportJobPatch
 } = require("./montage-export/restart-recovery.js");
 const {
+  reconcileMontageExportAudioIntent
+} = require("./montage-export-audio-intent-reconcile.js");
+const {
   createProcessMontageExportJob
 } = require("./montage-export/worker-runner.js");
 const {
@@ -12927,13 +12930,51 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const normalizedInput = normalizeMontageExportRequestBody(req.body || {});
+    const sessionIdForAudioIntent = String(normalizedInput?.sessionId || "").trim();
+    let normalizedSessionForAudioIntent = null;
+    if (sessionIdForAudioIntent) {
+      try {
+        const sessionSnap = await db.collection("podcaster_sessions").doc(sessionIdForAudioIntent).get();
+        const sessionData = sessionSnap.exists ? (sessionSnap.data() || {}) : null;
+        const sessionOwnerId = String(sessionData?.ownerId || "").trim();
+        if (sessionData?.session && typeof sessionData.session === "object" && (!sessionOwnerId || sessionOwnerId === uid)) {
+          normalizedSessionForAudioIntent = sessionData.session;
+        }
+      } catch (sessionError) {
+        console.warn("[backend][montage-export][audio-intent-session-read-failed]", {
+          sessionId: sessionIdForAudioIntent || null,
+          message: String(sessionError?.message || sessionError)
+        });
+      }
+    }
+    const audioIntentInput = normalizedSessionForAudioIntent
+      ? reconcileMontageExportAudioIntent(normalizedInput, normalizedSessionForAudioIntent)
+      : normalizedInput;
+    if (audioIntentInput !== normalizedInput) {
+      const changedAudioIntentEntries = (Array.isArray(audioIntentInput.entries) ? audioIntentInput.entries : []).reduce((count, entry, index) => {
+        const before = normalizedInput.entries?.[index] || null;
+        if (!before) return count;
+        const useNativeChanged = Boolean(before?.useNativeVideoAudio) !== Boolean(entry?.useNativeVideoAudio);
+        const veoChanged = Number(before?.veoVolumeOverridePct || 0) !== Number(entry?.veoVolumeOverridePct || 0);
+        const geminiChanged = Number(before?.geminiVolumeOverridePct || 0) !== Number(entry?.geminiVolumeOverridePct || 0);
+        return count + (useNativeChanged || veoChanged || geminiChanged ? 1 : 0);
+      }, 0);
+      if (changedAudioIntentEntries > 0 || Boolean(normalizedInput.useTimelineAudio) !== Boolean(audioIntentInput.useTimelineAudio)) {
+        console.info("[backend][montage-export][audio-intent-reconciled]", {
+          sessionId: sessionIdForAudioIntent || null,
+          changedEntryCount: changedAudioIntentEntries,
+          previousUseTimelineAudio: normalizedInput.useTimelineAudio === true,
+          nextUseTimelineAudio: audioIntentInput.useTimelineAudio === true
+        });
+      }
+    }
     const renderModeDecision = resolveRuntimeMontageRenderMode(normalizedInput.renderMode || "browser");
     const input = renderModeDecision.downgraded
       ? {
-        ...normalizedInput,
+        ...audioIntentInput,
         renderMode: renderModeDecision.renderMode
       }
-      : normalizedInput;
+      : audioIntentInput;
     if (renderModeDecision.downgraded) {
       console.warn("[backend][montage-export][render-mode-fallback]", {
         requestedMode: renderModeDecision.requestedMode,
@@ -12947,6 +12988,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       requestedRenderMode: normalizeMontageRenderMode(normalizedInput.renderMode || "browser"),
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
+      nativeVideoAudioEntries: Array.isArray(input.entries) ? input.entries.filter((entry) => entry?.useNativeVideoAudio === true).length : 0,
       onScreenTextSegments: Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
       overlayCardCount: Array.isArray(input.overlayCards?.segments) ? input.overlayCards.segments.length : (Array.isArray(input.overlayCards) ? input.overlayCards.length : 0),
