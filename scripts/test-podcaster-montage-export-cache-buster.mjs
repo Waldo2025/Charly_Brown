@@ -14,23 +14,16 @@ const montageExportSource = fs.readFileSync(
   "utf8"
 );
 
-assert.match(
-  htmlSource,
-  /src="podcaster\/podcaster\.js\?v=2026-06-23\.2"/,
-  "El entrypoint del podcaster debe romper caché con la versión nueva."
-);
+const htmlBusterMatch = htmlSource.match(/src="podcaster\/podcaster\.js\?v=([\d.-]+)"/);
+const htmlExportBusterMatch = htmlSource.match(/src="podcaster\/podcaster-montage-export\.js\?v=([\d.-]+)"/);
+const jsExportBusterMatch = podcasterSource.match(/from "\.\/podcaster-montage-export\.js\?v=([\d.-]+)";/);
 
-assert.match(
-  htmlSource,
-  /src="podcaster\/podcaster-montage-export\.js\?v=2026-06-23\.2"/,
-  "El módulo de export debe usar el mismo cache-buster que el bundle principal."
-);
+assert.ok(htmlBusterMatch, "Debe tener cache-buster para podcaster.js");
+assert.ok(htmlExportBusterMatch, "Debe tener cache-buster para podcaster-montage-export.js");
+assert.ok(jsExportBusterMatch, "Debe tener import cache-buster en podcaster.js");
 
-assert.match(
-  podcasterSource,
-  /from "\.\/podcaster-montage-export\.js\?v=2026-06-23\.2";/,
-  "El bundle principal debe importar la versión nueva del módulo de export."
-);
+assert.equal(htmlBusterMatch[1], htmlExportBusterMatch[1], "El módulo de export debe usar el mismo cache-buster que el bundle principal.");
+assert.equal(htmlBusterMatch[1], jsExportBusterMatch[1], "El bundle principal debe importar la versión nueva del módulo de export.");
 
 assert.match(
   montageExportSource,

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.228",
-  "build": "2026-1.0.10.228",
+  "version": "1.0.10.229",
+  "build": "2026-1.0.10.229",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Actualizado: Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js a la v2026-06-24.4 y version.json a la build 1.0.10.229 para forzar la recarga del frontend con la optimización de presets y timeouts de codificación en Render/Firestore.",
     "Actualizado: Se incrementan los cache-busters de podcaster-montage-export.js a la v2026-06-24.3 y version.json a la build 1.0.10.228 para forzar la recarga del frontend junto con la optimización del export de una sola escena.",
     "Actualizado: Se incrementan los cache-busters de podcaster-montage-export.js a la v2026-06-24.2 y version.json a la build 1.0.10.227 para forzar la recarga del frontend mientras se valida el fix de snoopy-export en producción.",
     "Actualizado: Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js a la v2026-06-23.5 y version.json a la build 1.0.10.226 para forzar la carga del fix que deja el polling pegado a Firestore cuando export-status cae por 502/CORS.",
@@ -24,6 +25,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Actualizado: Se incrementan version.json y los cache-busters de Podcaster a la v2026-06-24.4 para forzar la carga del frontend con el fix de timeouts y optimización de presets en Render/Firestore.",
     "Actualizado: Se incrementan version.json y el cache-buster de podcaster-montage-export.js a la v2026-06-24.3 para forzar la carga del frontend alineado con la optimización del export de una sola escena.",
     "Actualizado: Se incrementan version.json y el cache-buster de podcaster-montage-export.js a la v2026-06-24.2 para descartar frontend cacheado durante la validación del fix de snoopy-export.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del fix que mueve el seguimiento del export a Firestore cuando export-status falla por 502/CORS.",
@@ -171,5 +173,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.238"
+  "cache_version": "2026-1.0.10.229"
 }
