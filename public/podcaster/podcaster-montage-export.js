@@ -953,7 +953,7 @@ function getMontageExportPreviewMediaTargets(mediaType = "", preferAlt = false) 
   return { isImage, primary, alt, target, fallback };
 }
 
-function syncMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl = null) {
+function applyMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl = null) {
   const preview = frontendPreview && typeof frontendPreview === "object" ? frontendPreview : null;
   const container = document.getElementById("montageExportPreviewContainer");
   const resolver = window.resolveSceneMediaRenderSpec;
@@ -999,6 +999,15 @@ function syncMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl =
     targetMediaEl.addEventListener("loadedmetadata", () => applyLayout(targetMediaEl), { once: true });
     applyLayout(targetMediaEl);
   }
+}
+
+function syncMontageFrontendPreviewMediaLayout(frontendPreview = null) {
+  const preview = frontendPreview && typeof frontendPreview === "object" ? frontendPreview : null;
+  if (!preview) return;
+  const targetMediaEl = String(preview.mediaType || "").startsWith("image/")
+    ? window.els.montageExportPreviewImage
+    : window.els.montageExportPreviewVideo;
+  applyMontageFrontendPreviewMediaLayout(preview, targetMediaEl);
 }
 
 export function setMontageExportOpen(isOpen = false) {
@@ -1144,7 +1153,7 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
       const playPromise = targetMediaEl.play?.();
       if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => { });
     }
-    syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview, targetMediaEl);
+    applyMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview, targetMediaEl);
   };
   if (isVideoPreview && targetMediaEl) {
     const currentSrc = String(targetMediaEl.getAttribute("src") || "").trim();
@@ -1170,7 +1179,7 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
         targetMediaEl.src = window.montageExportPreviewState.dataUrl;
       }
       targetMediaEl.hidden = !hasReadyPreview;
-      syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview, targetMediaEl);
+      applyMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview, targetMediaEl);
     }
     if (fallbackMediaEl && fallbackMediaEl !== targetMediaEl) {
       fallbackMediaEl.hidden = true;
@@ -3291,13 +3300,13 @@ export function buildMontageExportPayload(session = null) {
 export async function runMontageExport() {
   if (window.montageExportBusy || montageExportSubmitLocked) return;
   montageExportSubmitLocked = true;
-  setConfirmMontageExportButtonState({
-    disabled: true,
-    loading: true,
-    label: "Preparando exportación…"
-  });
   const previousJobId = String(window.montageExportJobState.jobId || "").trim();
   try {
+    setConfirmMontageExportButtonState({
+      disabled: true,
+      loading: true,
+      label: "Preparando exportación…"
+    });
     const session = window.getActiveSession?.() || null;
     const prepared = await buildMontageExportPayloadForSubmission(session);
     logMontageExportDevtools("submit_clicked", {

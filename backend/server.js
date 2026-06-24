@@ -10551,45 +10551,35 @@ function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolu
   const safeHeight = Math.max(2, Math.round(Number(sourceHeight || 720) || 720));
   const even = (value = 0) => Math.max(2, Math.round(value / 2) * 2);
   const key = String(resolution || "source").trim().toLowerCase();
-
-  let w = even(safeWidth);
-  let h = even(safeHeight);
-
+  if (key === "source") {
+    return { width: even(safeWidth), height: even(safeHeight) };
+  }
   if (key === "1080x1920") {
-    w = 1080;
-    h = 1920;
-  } else if (key === "720x1280") {
-    w = 720;
-    h = 1280;
-  } else if (key === "480x854") {
-    w = 480;
-    h = 854;
-  } else if (key === "1080p") {
-    w = 1920;
-    h = 1080;
-  } else if (key === "720p") {
-    w = 1280;
-    h = 720;
-  } else if (key === "480p") {
-    w = 854;
-    h = 480;
+    return { width: 1080, height: 1920 };
   }
-
-  if (reelModeEnabled) {
-    if (w > h) {
-      const temp = w;
-      w = h;
-      h = temp;
-    }
-  } else {
-    if (w < h) {
-      const temp = w;
-      w = h;
-      h = temp;
-    }
+  if (key === "720x1280") {
+    return { width: 720, height: 1280 };
   }
-
-  return { width: even(w), height: even(h) };
+  if (key === "480x854") {
+    return { width: 480, height: 854 };
+  }
+  if (key === "1080p") {
+    return { width: 1920, height: 1080 };
+  }
+  if (key === "720p") {
+    return { width: 1280, height: 720 };
+  }
+  if (key === "480p") {
+    return { width: 854, height: 480 };
+  }
+  if (reelModeEnabled === true) {
+    return safeWidth <= safeHeight
+      ? { width: even(safeWidth), height: even(safeHeight) }
+      : { width: even(safeHeight), height: even(safeWidth) };
+  }
+  return safeWidth >= safeHeight
+    ? { width: even(safeWidth), height: even(safeHeight) }
+    : { width: even(safeHeight), height: even(safeWidth) };
 }
 
 function isMontageReelResolution(resolution = "") {
@@ -12169,7 +12159,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           shouldAbort: () => shouldAbort(),
           registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-          onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
+          onHeartbeat: (heartbeat = {}) => {
+            const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
             emitSceneSubstage({
               sceneIndex,
               rowId,
@@ -12642,7 +12633,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           shouldAbort: () => shouldAbort(),
           registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-          onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
+          onHeartbeat: (heartbeat = {}) => {
+            const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
             emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
               lastHeartbeatAt: new Date().toISOString()
             });
@@ -12677,7 +12669,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           shouldAbort: () => shouldAbort(),
           registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-          onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
+          onHeartbeat: (heartbeat = {}) => {
+            const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
             emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
               lastHeartbeatAt: new Date().toISOString()
             });
@@ -12713,7 +12706,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         shouldAbort: () => shouldAbort(),
         registerAbortHandler: context?.registerAbortHandler,
         heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-        onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
+        onHeartbeat: (heartbeat = {}) => {
+          const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
           emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
             lastHeartbeatAt: new Date().toISOString()
           });
