@@ -40,7 +40,7 @@ import {
   setMontageExportProgress,
   setMontageExportStatus,
   configureMontageExportRuntime
-} from "./podcaster-montage-export.js?v=2026-06-24.6";
+} from "./podcaster-montage-export.js?v=2026-06-24.7";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -3752,6 +3752,10 @@ function getDialogueAudioMap(session = null) {
 function hasExplicitDialogueAudioForRow(session = null, rowId = "") {
   const key = String(rowId ?? "").trim();
   if (!key) return false;
+  const fallbackClip = resolveFallbackDialogueAudioForRow(session, key);
+  if (fallbackClip && (fallbackClip.downloadUrl || fallbackClip.storagePath || fallbackClip.dataUrl || fallbackClip.localMediaCacheKey)) {
+    return true;
+  }
   return Boolean(getDialogueAudioMap(session)[key]);
 }
 
