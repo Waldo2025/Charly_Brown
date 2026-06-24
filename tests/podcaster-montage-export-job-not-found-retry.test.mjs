@@ -39,6 +39,19 @@ const persistCalls = [];
 
 const context = {
   console,
+  loadMontageExportJobStatusFallback: async () => null,
+  applyMontageExportPolledStatus: async (data) => {
+    if (data?.status === "ready") {
+      context.window.montageExportJobState.jobNotFoundCount = 0;
+      context.window.montageExportBusy = false;
+      context.persistMontageExportActiveJob("");
+      return true;
+    }
+    return false;
+  },
+  loadMontageExportJobStatusFromFirestore: async () => null,
+  buildMontageExportEndpoint: (path) => `https://remote.test${path}`,
+  schedulePreferredFirestorePollRetry() {},
   authFetchJson: async (url) => {
     context.__lastAuthFetchUrl = String(url || "");
     context.__fetchCount = (context.__fetchCount || 0) + 1;

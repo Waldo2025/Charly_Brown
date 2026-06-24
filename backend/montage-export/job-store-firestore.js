@@ -321,8 +321,12 @@ function createMontageExportJobStore({
       type: "montage_export",
       status: String(merged.status || source.status || "queued").trim() || "queued",
       stage: String(merged.stage || source.stage || "queued").trim() || "queued",
-      sceneSubstage: String(merged.sceneSubstage || source.sceneSubstage || "").trim(),
-      hint: String(merged.hint || source.hint || "").trim(),
+      sceneSubstage: Object.prototype.hasOwnProperty.call(patch, "sceneSubstage")
+        ? String(patch.sceneSubstage || "").trim()
+        : String(source.sceneSubstage || "").trim(),
+      hint: Object.prototype.hasOwnProperty.call(patch, "hint")
+        ? String(patch.hint || "").trim()
+        : String(source.hint || "").trim(),
       progress: clamp01(merged.progress, source.progress || 0),
       currentSceneIndex: Number.isFinite(Number(merged.currentSceneIndex)) ? Math.max(0, Math.round(Number(merged.currentSceneIndex) || 0)) : Math.max(0, Math.round(Number(source.currentSceneIndex) || 0)),
       totalScenes: Number.isFinite(Number(merged.totalScenes)) ? Math.max(0, Math.round(Number(merged.totalScenes) || 0)) : Math.max(0, Math.round(Number(source.totalScenes) || 0)),

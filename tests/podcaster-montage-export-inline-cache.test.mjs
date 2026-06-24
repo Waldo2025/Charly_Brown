@@ -58,7 +58,7 @@ const context = {
         return {
           headers: { get: () => "audio/mpeg" },
           blob: async () => ({
-            size: 2_500_001,
+            size: 12_500_001,
             arrayBuffer: async () => new Uint8Array([1]).buffer
           })
         };
@@ -89,7 +89,9 @@ const context = {
 vm.createContext(context);
 [
   "const MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES = 2500000;",
+  "const MONTAGE_EXPORT_INLINE_AUDIO_MAX_BYTES = 12000000;",
   "const MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES = 6000000;",
+  extractFunction("getMontageInlineMediaMaxBytes"),
   extractFunction("estimateMontageDataUrlBytes"),
   extractFunction("buildMontageMediaCacheCandidates"),
   extractMaybeAsyncFunction("blobToDataUrl"),
