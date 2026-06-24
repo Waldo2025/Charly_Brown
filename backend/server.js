@@ -11826,6 +11826,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const skippedEntries = [];
     const exportedEntries = [];
     let globalCanvas = null;
+    const resolvedInlineBrandOverlayPath = input.brandOverlay?.enabled === true
+      ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath)
+      : "";
+    const shouldInlineSingleSceneBrandOverlay = Boolean(
+      input.exportMode === "normal"
+      && Array.isArray(input.entries)
+      && input.entries.length === 1
+      && resolvedInlineBrandOverlayPath
+      && fs.existsSync(resolvedInlineBrandOverlayPath)
+    );
     const emitSceneSubstage = ({
       sceneIndex = 0,
       rowId = "",
@@ -12129,6 +12139,23 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoFilterGraph = textOverlayResult.videoFilterGraph;
           finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
         }
+        if (shouldInlineSingleSceneBrandOverlay) {
+          args.push("-loop", "1", "-i", resolvedInlineBrandOverlayPath);
+          const brandInputIndex = (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2;
+          const brandOutLabel = `scene_brand_${sceneIndex}`;
+          const brandFilterComplex = buildMontageBrandOverlayFilter(input.brandOverlay, {
+            width: canvas.width,
+            height: canvas.height,
+            reelModeEnabled: sceneReelModeEnabled,
+            baseInputLabel: finalVideoMapLabel,
+            brandInputLabel: `[${brandInputIndex}:v]`,
+            outputLabel: brandOutLabel
+          });
+          if (brandFilterComplex) {
+            videoFilterGraph = videoFilterGraph ? `${videoFilterGraph};${brandFilterComplex}` : brandFilterComplex;
+            finalVideoMapLabel = `[${brandOutLabel}]`;
+          }
+        }
 
 
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
@@ -12282,7 +12309,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
     throwIfCancelled("concat_timeline");
-    if (overlapPlan.hasOverlap) {
+    if (!overlapPlan.hasOverlap && !overlapPlan.hasGaps && intermediatePaths.length === 1) {
+      concatOutPath = intermediatePaths[0];
+    } else if (overlapPlan.hasOverlap) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
         tmpDir,
@@ -12369,8 +12398,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
-    const resolvedBrandPath = input.brandOverlay?.enabled === true ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath) : "";
-    const hasBrandOverlay = Boolean(resolvedBrandPath && fs.existsSync(resolvedBrandPath));
+    const resolvedBrandPath = resolvedInlineBrandOverlayPath;
+    const hasBrandOverlay = Boolean(!shouldInlineSingleSceneBrandOverlay && resolvedBrandPath && fs.existsSync(resolvedBrandPath));
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const browserRendererAvailability = shouldAttemptBrowserRenderer ? getMontageBrowserRendererAvailability() : { available: false };
     let finalShouldAttemptBrowserRenderer = shouldAttemptBrowserRenderer;
@@ -12594,7 +12623,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       }
 
       if (reviewFilter || visualFilters.length) {
-        emitStage(visualEncodeStage, 0.84, visualEncodeMessage);
+        emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
+          sceneSubstage: "",
+          lastHeartbeatAt: new Date().toISOString()
+        });
         const finalVisualOutPath = path.join(tmpDir, `montage-final-visuals.${outExt}`);
         const finalVisualArgs = [
           "-y", "-hide_banner", "-loglevel", "warning",
@@ -12640,6 +12672,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           onHeartbeat: (heartbeat = {}) => {
             const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
             emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
+              sceneSubstage: "",
               lastHeartbeatAt: new Date().toISOString()
             });
             console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
@@ -12653,7 +12686,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         });
         finalOutPath = finalVisualOutPath;
       } else {
-        emitStage(visualEncodeStage, 0.84, visualEncodeMessage);
+        emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
+          sceneSubstage: "",
+          lastHeartbeatAt: new Date().toISOString()
+        });
         const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
         throwIfCancelled("montage_encode_delivery");
         await runFfmpegCommand([
@@ -12676,6 +12712,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           onHeartbeat: (heartbeat = {}) => {
             const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
             emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
+              sceneSubstage: "",
               lastHeartbeatAt: new Date().toISOString()
             });
             console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
@@ -12690,7 +12727,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         finalOutPath = deliveryOutPath;
       }
     } else {
-      emitStage(visualEncodeStage, 0.84, visualEncodeMessage);
+      emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
+        sceneSubstage: "",
+        lastHeartbeatAt: new Date().toISOString()
+      });
       const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
       throwIfCancelled("montage_encode_delivery");
       await runFfmpegCommand([
@@ -12713,6 +12753,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         onHeartbeat: (heartbeat = {}) => {
           const { elapsedMs = 0, stderr = "", stdout = "" } = heartbeat || {};
           emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
+            sceneSubstage: "",
             lastHeartbeatAt: new Date().toISOString()
           });
           console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
