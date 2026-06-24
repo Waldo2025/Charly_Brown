@@ -2937,7 +2937,14 @@ export function buildMontageExportPayload(session = null) {
           return null;
         }
         const runtime = runtimeByRowId.get(rowId) || null;
-        const storedAudio = window.resolveDialogueAudioForRow(activeSession, rowId);
+        // Para escenas de biblioteca con audio explícito, resolveDialogueAudioForRow
+        // tiene su propio guard que las bloquea. Aquí ya sabemos que el audio existe,
+        // así que lo resolvemos directamente desde el map o el fallback del track.
+        const storedAudio = (
+          (typeof window.getDialogueAudioMap === "function" ? window.getDialogueAudioMap(activeSession)[rowId] : null)
+          || (typeof window.resolveFallbackDialogueAudioForRow === "function" ? window.resolveFallbackDialogueAudioForRow(activeSession, rowId) : null)
+          || window.resolveDialogueAudioForRow(activeSession, rowId)
+        );
         const src = String(
           storedAudio?.downloadUrl
           || storedAudio?.storagePath
