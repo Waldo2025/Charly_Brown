@@ -71,19 +71,24 @@ function createProcessMontageExportJob({
         shouldAbort: () => cancelRequested,
         onStage: async ({ stage, progress, hint, ...extra }) => {
           if (cancelRequested) return;
+          const normalizedStage = String(stage || "validate_payload").trim() || "validate_payload";
+          const normalizedExtra = { ...extra };
+          if (normalizedStage !== "render_scene_segments" && !Object.prototype.hasOwnProperty.call(normalizedExtra, "sceneSubstage")) {
+            normalizedExtra.sceneSubstage = "";
+          }
           console.info("[backend][montage-export][job-stage]", {
             jobId,
-            stage: String(stage || "validate_payload").trim() || "validate_payload",
+            stage: normalizedStage,
             progress: Math.max(0, Math.min(1, Number(progress || 0) || 0)),
             hint: String(hint || "").trim(),
-            ...extra
+            ...normalizedExtra
           });
           await jobStore.updateJob(jobId, {
             status: "running",
-            stage,
+            stage: normalizedStage,
             progress,
             hint,
-            ...extra
+            ...normalizedExtra
           });
         }
         });

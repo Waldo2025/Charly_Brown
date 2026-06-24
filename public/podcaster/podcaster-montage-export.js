@@ -333,6 +333,7 @@ let montageExportJobState = {
   pollFailureCount: 0,
   jobNotFoundCount: 0,
   preferFirestorePolling: false,
+  firestorePreferredMissCount: 0,
   recoverySource: "",
   busyHandoffRecoveryCount: 0,
   reviewExcelEnabled: false,
@@ -667,6 +668,21 @@ function scheduleMontageExportJobNotFoundRetry(jobId = "", failureCount = 0) {
   const retries = Math.max(0, Number(failureCount || 0) || 0);
   if (retries >= MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES) return;
   const delayMs = Math.min(2500, 350 + (retries * 350));
+  if (window.montageExportJobState.pollTimer) {
+    window.clearTimeout(window.montageExportJobState.pollTimer);
+    window.montageExportJobState.pollTimer = null;
+  }
+  window.montageExportJobState.pollTimer = window.setTimeout(() => {
+    if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    pollMontageExportJob(cleanJobId).catch(() => { });
+  }, delayMs);
+}
+
+function schedulePreferredFirestorePollRetry(jobId = "", missCount = 0) {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) return;
+  const misses = Math.max(0, Number(missCount || 0) || 0);
+  const delayMs = Math.min(6000, 1800 + (misses * 700));
   if (window.montageExportJobState.pollTimer) {
     window.clearTimeout(window.montageExportJobState.pollTimer);
     window.montageExportJobState.pollTimer = null;
@@ -1056,6 +1072,7 @@ export function resetMontageExportJobState() {
     pollFailureCount: 0,
     jobNotFoundCount: 0,
     preferFirestorePolling: false,
+    firestorePreferredMissCount: 0,
     recoverySource: "",
     busyHandoffRecoveryCount: 0,
     reviewExcelEnabled: false,
@@ -1407,6 +1424,7 @@ export async function pollMontageExportJob(jobId = "") {
     if (window.montageExportJobState.preferFirestorePolling === true) {
       const firestoreOnly = await loadMontageExportJobStatusFromFirestore(cleanJobId);
       if (firestoreOnly) {
+        window.montageExportJobState.firestorePreferredMissCount = 0;
         logMontageExportDevtools("poll_firestore_preferred", {
           jobId: cleanJobId,
           status: String(firestoreOnly?.status || "").trim() || undefined,
@@ -1420,7 +1438,21 @@ export async function pollMontageExportJob(jobId = "") {
         }, 2000);
         return;
       }
-      window.montageExportJobState.preferFirestorePolling = false;
+      window.montageExportJobState.firestorePreferredMissCount = Math.max(0, Number(window.montageExportJobState.firestorePreferredMissCount || 0) || 0) + 1;
+      const missCount = window.montageExportJobState.firestorePreferredMissCount;
+      logMontageExportDevtools("poll_firestore_preferred_miss", {
+        jobId: cleanJobId,
+        missCount
+      }, "warn");
+      setMontageExportStatus(
+        describeMontageExportStage(String(window.montageExportJobState.lastStage || "").trim(), window.montageExportState.exportMode),
+        missCount > 1
+          ? `Seguimos consultando el export por Firestore. No llegó estado en el intento ${missCount}; reintentando…`
+          : "Seguimos consultando el export por Firestore. No llegó estado en este intento; reintentando…",
+        { tone: "warning" }
+      );
+      schedulePreferredFirestorePollRetry(cleanJobId, missCount);
+      return;
     }
     // IMPORTANTE: aquí usamos /api para respetar la configuración activa del runtime.
     // En Hosting esto hoy termina en un redirect 302 hacia Render, no en un reverse proxy real.
@@ -1450,6 +1482,7 @@ export async function pollMontageExportJob(jobId = "") {
     if (firestoreFallback) {
       if (isMontageExportStatusRedirectFailure(error)) {
         window.montageExportJobState.preferFirestorePolling = true;
+        window.montageExportJobState.firestorePreferredMissCount = 0;
       }
       if (await applyMontageExportPolledStatus(firestoreFallback, cleanJobId)) return;
       window.montageExportJobState.pollTimer = window.setTimeout(() => {
@@ -1617,6 +1650,7 @@ export async function continueMontageExportPolling() {
   setMontageExportContinueButton({ visible: false });
   window.montageExportJobState.pollFailureCount = 0;
   window.montageExportJobState.preferFirestorePolling = false;
+  window.montageExportJobState.firestorePreferredMissCount = 0;
   window.montageExportJobState.startedAtMs = Date.now();
   setMontageExportStatus(
     "Reanudando seguimiento del export…",
@@ -3323,6 +3357,7 @@ export async function runMontageExport() {
     window.montageExportJobState.lastPollSuccessAtMs = Date.now();
     window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
     window.montageExportJobState.preferFirestorePolling = false;
+    window.montageExportJobState.firestorePreferredMissCount = 0;
     window.montageExportJobState.recoverySource = "";
     window.montageExportJobState.busyHandoffRecoveryCount = 0;
     window.montageExportJobState.reviewExcelEnabled = window.montageExportState.exportMode === "review" && window.montageExportState.includeReviewExcel !== false;

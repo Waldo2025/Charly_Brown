@@ -136,3 +136,46 @@ test("worker runner writes durable error details after pipeline failure", async 
   assert.equal(updates.at(-1).patch.failedSceneIndex, 3);
   assert.equal(updates.at(-1).patch.failedSubstage, "scene_download_video");
 });
+
+test("worker runner clears stale sceneSubstage outside render_scene_segments", async () => {
+  const updates = [];
+  const processor = createProcessMontageExportJob({
+    jobStore: {
+      async getJob() {
+        return { status: "running", progress: 0.5, sceneSubstage: "scene_ffmpeg_render" };
+      },
+      async updateJob(jobId, patch) {
+        updates.push({ jobId, patch });
+        return patch;
+      }
+    },
+    executeMontageExportPipeline: async (_input, { onStage }) => {
+      await onStage({
+        stage: "concat_timeline",
+        progress: 0.48,
+        hint: "Uniendo escenas."
+      });
+      return {
+        export: {
+          storagePath: "podcaster/exports/u/s/job-concat.mp4",
+          downloadUrl: "https://example.com/video.mp4"
+        },
+        downloadUrl: "https://example.com/video.mp4"
+      };
+    },
+    buildMontageSceneFailure: (error) => ({ error: error.message })
+  });
+
+  await processor({
+    data: {
+      jobId: "job-concat",
+      ownerId: "user-1",
+      baseUrl: "https://example.com",
+      input: { sessionId: "session-1" }
+    }
+  });
+
+  const concatUpdate = updates.find(({ patch }) => patch.stage === "concat_timeline");
+  assert.ok(concatUpdate);
+  assert.equal(concatUpdate.patch.sceneSubstage, "");
+});

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.225",
-  "build": "2026-1.0.10.225",
+  "version": "1.0.10.226",
+  "build": "2026-1.0.10.226",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Actualizado: Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js a la v2026-06-23.5 y version.json a la build 1.0.10.226 para forzar la carga del fix que deja el polling pegado a Firestore cuando export-status cae por 502/CORS.",
     "Actualizado: Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js a la v2026-06-23.4 y version.json a la build 1.0.10.225 para forzar la carga del fix de polling por Firestore cuando export-status cae por 502/CORS.",
     "Corregido: El export de Podcaster vuelve a reconstruir el texto en pantalla desde las escenas solo cuando el track está visible pero el timeline llega vacío; si está oculto, no revive. Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js.",
     "Corregido: Se soluciona la omisión del texto en pantalla (subtítulos) en las exportaciones normales de video con Playwright habilitado al forzar el quemado de subtítulos ASS por escena sin importar la disponibilidad del browser renderer.",
@@ -166,5 +167,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.235"
+  "cache_version": "2026-1.0.10.236"
 }

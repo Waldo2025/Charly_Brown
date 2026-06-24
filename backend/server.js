@@ -11006,7 +11006,8 @@ async function renderMontageOverlapComposition({
   params = {},
   outExt = "mp4",
   intermediatePaths = [],
-  exportedEntries = []
+  exportedEntries = [],
+  emitStage = () => {}
 } = {}) {
   const plan = buildMontageOverlapCompositionPlan(exportedEntries);
   if ((!plan.hasOverlap && !plan.hasGaps) || !intermediatePaths.length || intermediatePaths.length !== plan.entries.length) {
@@ -11114,7 +11115,25 @@ async function renderMontageOverlapComposition({
     ...params.aArgs,
     ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
     outPath
-  ], { stage: "montage_overlap_compose" });
+  ], {
+    stage: "montage_overlap_compose",
+    timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+    timeoutCode: "montage_overlap_compose_timeout",
+    heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+    onHeartbeat: () => {
+      emitStage(
+        "concat_timeline",
+        0.48,
+        "Componiendo escenas con transiciones o huecos en el timeline.",
+        {
+          currentSceneIndex: Math.max(0, plan.entries.length),
+          totalScenes: Math.max(0, Number(input?.entries?.length || plan.entries.length) || 0),
+          sceneSubstage: "",
+          lastHeartbeatAt: new Date().toISOString()
+        }
+      );
+    }
+  });
   return outPath;
 }
 
@@ -12266,7 +12285,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         params: intermediateParams,
         outExt,
         intermediatePaths,
-        exportedEntries
+        exportedEntries,
+        emitStage
       });
     }
     if (!concatOutPath) {
@@ -12291,8 +12311,26 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         concatOutPath
       ], {
         stage: "montage_concat",
+        timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+        timeoutCode: "montage_concat_timeout",
         shouldAbort: () => shouldAbort(),
-        registerAbortHandler: context?.registerAbortHandler
+        registerAbortHandler: context?.registerAbortHandler,
+        heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+        onHeartbeat: () => {
+          emitStage(
+            "concat_timeline",
+            0.48,
+            (overlapPlan.hasOverlap || overlapPlan.hasGaps)
+              ? "Componiendo escenas con transiciones o huecos en el timeline."
+              : "Uniendo escenas en un solo timeline.",
+            {
+              currentSceneIndex: Math.max(0, exportedEntries.length),
+              totalScenes: input.entries.length,
+              sceneSubstage: "",
+              lastHeartbeatAt: new Date().toISOString()
+            }
+          );
+        }
       });
     }
     logMontageMemory("concat_timeline_after", { jobId, exportedSceneCount: exportedEntries.length });
