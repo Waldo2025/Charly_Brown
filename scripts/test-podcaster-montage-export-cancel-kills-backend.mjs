@@ -18,7 +18,7 @@ assert.match(
 
 assert.match(
   exportSource,
-  /authFetchJson\("\/api\/podcaster\/montage\/export-cancel",\s*\{[\s\S]*?method:\s*"POST"[\s\S]*?body:\s*\{ jobId: cleanJobId \}[\s\S]*?keepalive:\s*true/,
+  /authFetchJson\((?:buildMontageExportEndpoint\()?"\/api\/podcaster\/montage\/export-cancel"\)?,\s*\{[\s\S]*?method:\s*"POST"[\s\S]*?body:\s*\{ jobId: cleanJobId \}[\s\S]*?keepalive:\s*true/,
   "La cancelacion debe usar el endpoint backend de export-cancel con keepalive."
 );
 

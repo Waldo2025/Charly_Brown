@@ -1287,6 +1287,7 @@ export async function cancelMontageExportFromModal() {
         cancelError,
         { tone: "error" }
       );
+      setMontageExportBusy(false);
       throw error;
     }
   }
@@ -2032,12 +2033,12 @@ export function openMontageExportModal() {
   if (isLegacyAutoMontageFilename(state.filename)) state.filename = "";
   if (!state.filename) state.filename = defaultMontageExportFilename(window.getActiveSession());
   setMontageExportOpen(true);
-  syncMontageExportUi();
   resetMontageExportJobState();
   resetMontageExportPreviewState();
   setMontageExportPreviewPaused(false);
   setMontageExportBusy(false);
   setMontageExportProgress(null);
+  syncMontageExportUi();
   setConfirmMontageExportButtonState({
     disabled: false,
     loading: false,
