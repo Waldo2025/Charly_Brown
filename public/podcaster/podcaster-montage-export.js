@@ -1068,6 +1068,7 @@ export function downloadReadyMontageExport() {
 
 export function resetMontageExportJobState() {
   clearMontageExportPolling();
+  montageExportSubmitLocked = false;
   window.montageExportJobState = {
     jobId: "",
     pollTimer: null,
@@ -3334,6 +3335,7 @@ export async function runMontageExport() {
     });
     const session = window.getActiveSession?.() || null;
     const prepared = await buildMontageExportPayloadForSubmission(session);
+    if (!window.montageExportBusy) return;
     logMontageExportDevtools("submit_clicked", {
       hasSession: Boolean(session),
       preparedOk: Boolean(prepared?.ok),
@@ -3381,6 +3383,14 @@ export async function runMontageExport() {
       method: "POST",
       body: submissionPayload
     });
+    if (!window.montageExportBusy) {
+      console.warn("[podcaster][montage-export] submit returned but export is no longer busy (cancelled)");
+      const newJobId = String(data?.jobId || "").trim();
+      if (newJobId) {
+        void requestMontageExportCancel(newJobId).catch(() => {});
+      }
+      return;
+    }
     const jobId = String(data?.jobId || "").trim();
     if (!jobId) throw new Error("montage_export_job_missing");
     window.montageExportJobState.jobId = jobId;
@@ -3413,6 +3423,7 @@ export async function runMontageExport() {
     window.montageExportJobState.startedAtMs = Date.now();
     pollMontageExportJob(jobId).catch(() => { });
   } catch (error) {
+    if (!window.montageExportBusy) return;
     const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
     const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];

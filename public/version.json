@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.239",
-  "build": "2026-1.0.10.239",
+  "version": "1.0.10.240",
+  "build": "2026-1.0.10.240",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Se resolvieron condiciones de carrera y bloqueos del botón Exportar al cancelar exportaciones en progreso mientras la petición de envío (POST) o la preparación del payload seguían activas en segundo plano.",
     "Corregido: Al cancelar el export desde el botón Cancelar, se desbloquea el estado de ocupado (isBusy) y se limpia la interfaz del modal para poder iniciar un nuevo export sin recargar la página.",
     "Corregido: Se exponen hasExplicitDialogueAudioForRow y isPublicLibrarySceneRow en window para que las escenas de biblioteca con voz Gemini/voz en off no pierdan su audio en el export y se procesen correctamente en el timeline de montaje.",
     "Corregido: hasDialogueAudioSource en el reconciler de audio ahora reconoce localMediaCacheKey como fuente válida, evitando que el reconciler deshabilite el timeline audio de escenas con audio solo en IndexedDB.",
@@ -190,5 +191,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.239"
+  "cache_version": "2026-1.0.10.240"
 }
