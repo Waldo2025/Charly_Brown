@@ -2950,12 +2950,12 @@ export function buildMontageExportPayload(session = null) {
           || storedAudio?.storagePath
           || storedAudio?.localDataUrl
           || storedAudio?.dataUrl
-          || storedAudio?.localMediaCacheKey
           || segment?.audioSrc
           || runtime?.audioSrc
           || ""
         ).trim();
-        if (!src) return null;
+        const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
+        if (!effectiveSrc) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const durationMs = Math.max(
           STUDIO_TIMELINE_MIN_CLIP_MS,
@@ -2979,7 +2979,7 @@ export function buildMontageExportPayload(session = null) {
           id: String(segment?.id || `${rowId}-seg-${idx + 1}`).trim() || `${rowId}-seg-${idx + 1}`,
           rowId,
           sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 0) || 0)),
-          url: src,
+          url: effectiveSrc,
           storagePath: String(storedAudio?.storagePath || "").trim(),
           downloadUrl: String(storedAudio?.downloadUrl || "").trim(),
           dataUrl: String(storedAudio?.dataUrl || storedAudio?.localDataUrl || "").trim(),

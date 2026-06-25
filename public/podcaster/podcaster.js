@@ -40,7 +40,7 @@ import {
   setMontageExportProgress,
   setMontageExportStatus,
   configureMontageExportRuntime
-} from "./podcaster-montage-export.js?v=2026-06-24.10";
+} from "./podcaster-montage-export.js?v=2026-06-24.11";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -19575,6 +19575,8 @@ Object.assign(window, {
   getPanelMontageMusicConfig,
   getSceneBackgroundMusicVolumeOverridePct,
   shouldKeepNativeVideoAudioForRow,
+  hasExplicitDialogueAudioForRow,
+  isPublicLibrarySceneRow,
   trimWords,
   normalizeVoiceNameSource,
   resolveActiveVideoPreset,
