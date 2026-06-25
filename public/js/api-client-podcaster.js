@@ -4,11 +4,14 @@ export {
   buildApiUrlFromBase,
   buildExportApiUrl,
   buildApiUrlPreferRemote,
+  buildVeoApiUrl,
+  buildVeoApiUrlPreferRemote,
   canUseSameOriginApi,
   getExportApiBase,
+  getVeoApiBase,
   getAuthHeaders,
   getRemoteApiBase,
   hasAvailableApiBase,
   isLoopbackApiBase,
   resolveApiBase
-} from "./api-client.js?v=2026-06-22.6";
+} from "./api-client.js?v=2026-06-25.1";

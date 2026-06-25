@@ -26,6 +26,7 @@ const auth = getAuth(app);
     'contenidounidad.html': { title: 'Contenido', header: 'filters' },
     'contenidounidad-.html': { title: 'Contenido', header: 'filters' },
     'generarlectura.html': { title: 'Charly Studio', header: 'simple' },
+    'charly-brown.html': { title: 'Charly Brown', header: 'simple' },
     'pigpencreator.html': { title: 'PigPen Escape Room Creator', header: 'simple' },
     'podcaster.html': { title: 'Podcaster Studio', header: 'simple' },
     'imagecreator.html': { title: 'Image Creator', header: 'simple' },
@@ -280,6 +281,7 @@ const auth = getAuth(app);
     const links = [
       { href: 'home.html', icon: 'fas fa-home', label: 'Inicio' },
       { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
+      { href: 'charly-brown.html', icon: 'fas fa-wand-magic-sparkles', label: 'Charly Brown', id: 'charlyBrownLink', roleVisibility: 'admin,author,editor,developer' },
       { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
       { href: 'PeppermintPattyAnalizer.html', icon: 'fas fa-file-pdf', label: 'Peppermint Patty Analizer' },
       { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Charly Brown</title>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.1.36">
+  <link rel="stylesheet" href="header.css?v=2026-1.0.1.36">
+  <link rel="stylesheet" href="charly-brown/charly-brown.css?v=2026-06-25-1">
+</head>
+<body data-page="charly-brown.html" class="cb-unit-body">
+  <div class="main-header">
+    <div class="header-content"><!-- header-content loaded from chromeLayout.js --></div>
+  </div>
+
+  <div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+    <div class="sidebar-menu"><!-- sidebar-menu loaded from chromeLayout.js --></div>
+  </div>
+
+  <main class="cb-unit-shell" aria-label="Editor de unidades Charly Brown">
+    <header class="cb-chat-header">
+      <div>
+        <p class="cb-panel-kicker">Editor guiado</p>
+        <h2 id="cbActiveSessionTitle">Nueva unidad</h2>
+      </div>
+      <div class="cb-chat-actions" aria-label="Acciones rápidas">
+        <label class="cb-model-select-label" for="cbModelSelect">
+          <span>Modelo</span>
+          <select id="cbModelSelect">
+            <option value="gemini-2.5-flash-lite" selected>Gemini 2.5 Flash Lite</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+            <option value="gemini-3-flash-preview">Gemini 3 Flash (Preview)</option>
+            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview)</option>
+            <option value="gemini-3-pro-preview">Gemini 3 Pro (Preview)</option>
+            <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash (Preview)</option>
+            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite (Preview)</option>
+            <option value="gemini-flash-latest">Gemini Flash Latest</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+          </select>
+        </label>
+        <button type="button" class="cb-chip-action" data-chat-action="activities">Generar actividades</button>
+        <button type="button" class="cb-chip-action" data-chat-action="teacher-notes">Crear notas</button>
+        <button type="button" id="cbToggleAcceptedBtn" class="cb-chip-action" aria-pressed="false">Ocultar panel</button>
+      </div>
+    </header>
+
+    <aside class="cb-unit-sessions" aria-label="Sesiones">
+      <div class="cb-panel-head">
+        <div>
+          <p class="cb-panel-kicker">Unidades</p>
+          <h1>Charly Brown</h1>
+        </div>
+        <button type="button" id="cbNewSessionBtn" class="cb-icon-button cb-icon-button--primary" aria-label="Nueva unidad" title="Nueva unidad">
+          <i class="fas fa-plus"></i>
+        </button>
+      </div>
+      <div id="cbSessionStatus" class="cb-small-status">Cargando sesiones...</div>
+      <div id="cbSessionList" class="cb-session-list"></div>
+    </aside>
+
+    <section class="cb-unit-chat" aria-label="Conversación de generación">
+      <div id="cbMessages" class="cb-messages" aria-live="polite"></div>
+    </section>
+
+    <aside class="cb-accepted-panel" aria-label="Listo para usar">
+      <div id="cbAcceptedResizeHandle" class="cb-accepted-resize-handle" aria-hidden="true"></div>
+      <div class="cb-panel-head">
+        <div>
+          <p class="cb-panel-kicker">Aprobado</p>
+          <h2>Listo para usar</h2>
+        </div>
+        <button type="button" id="cbGenerateGlobalNotesBtn" class="cb-text-button">Notas con aprobadas</button>
+      </div>
+      <section class="cb-setup-panel-shell" aria-label="Datos de la unidad">
+        <button type="button" id="cbToggleSetupPanelBtn" class="cb-setup-panel-toggle" aria-expanded="true" aria-controls="cbSetupPanelBody">
+          <span>Datos de la unidad</span>
+          <i class="fas fa-chevron-up" aria-hidden="true"></i>
+        </button>
+        <div id="cbSetupPanelBody" class="cb-setup-panel cb-setup-panel--side">
+          <div class="cb-field-group">
+            <label for="cbLevelSelect">Nivel</label>
+            <select id="cbLevelSelect">
+              <option value="Preescolar">Preescolar</option>
+              <option value="Primaria" selected>Primaria</option>
+              <option value="Secundaria">Secundaria</option>
+            </select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbModeSelect">Voy a crear</label>
+            <select id="cbModeSelect">
+              <option value="Alumno">Alumno</option>
+              <option value="Maestro">Maestro</option>
+            </select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbGradeSelect">Grado</label>
+            <select id="cbGradeSelect"></select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbTrimesterSelect">Trimestre</label>
+            <select id="cbTrimesterSelect">
+              <option>1</option>
+              <option selected>2</option>
+              <option>3</option>
+            </select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbUnitSelect">Unidad</label>
+            <select id="cbUnitSelect">
+              <option>1</option>
+              <option>2</option>
+              <option selected>3</option>
+              <option>4</option>
+            </select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbCategorySelect">Categoría</label>
+            <select id="cbCategorySelect"></select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbSubtopicSelect">Subtema</label>
+            <select id="cbSubtopicSelect"></select>
+          </div>
+          <div class="cb-field-group cb-field-group--wide">
+            <label for="cbEditionInput">Edición</label>
+            <select id="cbEditionInput"></select>
+          </div>
+        </div>
+      </section>
+      <div id="cbAcceptedPanel" class="cb-accepted-list"></div>
+    </aside>
+  </main>
+
+  <footer class="cb-composer-footer" aria-label="Escritura del chat">
+    <form id="cbComposer" class="cb-composer" autocomplete="off">
+      <textarea id="cbComposerInput" rows="2" placeholder="Escribe lo que necesitas cambiar, generar o corregir..."></textarea>
+      <button type="submit" class="cb-send-button" aria-label="Enviar">
+        <i class="fas fa-paper-plane"></i>
+      </button>
+    </form>
+  </footer>
+
+  <script type="module" src="js/chromeLayout.js?v=2026-1.0.0.72"></script>
+  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="charly-brown/main.js?v=2026-06-25-1"></script>
+</body>
+</html>

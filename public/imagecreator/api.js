@@ -1,4 +1,4 @@
-import { authFetchJson } from "../js/api-client.js";
+import { authFetchJson, buildVeoApiUrl } from "../js/api-client.js?v=2026-06-25.1";
 import { prepareAttachmentsForGemini } from "./attachments.js";
 import { buildGeminiImagePayload, estimateGeminiPayloadBytes } from "./payloads.js";
 import { MAX_GEMINI_PAYLOAD_BYTES, MAX_RESULTS_PER_TURN } from "./constants.js";
@@ -45,7 +45,7 @@ export async function generateImagesViaGemini({ mode, prompt, options, attachmen
         throw new Error("Las referencias adjuntas siguen siendo demasiado pesadas para Gemini. Usa menos imágenes o referencias más ligeras.");
       }
       // eslint-disable-next-line no-await-in-loop
-      const response = await authFetchJson("/api/gemini/generate", {
+      const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
         method: "POST",
         body: {
           model: options.model,

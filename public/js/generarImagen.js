@@ -1,6 +1,6 @@
 import { getStorage, ref, uploadString, listAll, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
-import { buildApiUrl, getAuthHeaders } from './api-client.js';
+import { buildVeoApiUrl, getAuthHeaders } from './api-client.js?v=2026-06-25.1';
 import { getDefaultFirebaseApp } from './firebase-default-app.js';
 
 const app = getDefaultFirebaseApp();
@@ -30,7 +30,7 @@ async function generarMapaMentalGemini(textoLectura) {
       `;
 
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
-  const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+  const response = await fetch(buildVeoApiUrl("/api/gemini/generate"), {
     method: "POST",
     headers,
     body: JSON.stringify({

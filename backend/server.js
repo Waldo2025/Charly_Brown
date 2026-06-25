@@ -253,6 +253,10 @@ const BACKEND_SERVICE_ROLE = String(
   process.env.BACKEND_SERVICE_ROLE || process.env.CHARLY_BACKEND_ROLE || "all"
 ).trim().toLowerCase();
 const GEMINI_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini";
+const GEMINI_VEO_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini-veo";
+const EXPORT_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "export";
+const HAS_BACKEND_ROLE = ["gemini", "gemini-veo", "export"].includes(BACKEND_SERVICE_ROLE);
+const EXPOSURE_IS_ROLE_BASED = HAS_BACKEND_ROLE || BACKEND_SERVICE_ROLE === "all";
 const BACKEND_BOOT_ISO = new Date().toISOString();
 const BACKEND_BOOT_SIGNATURE = `backend/server.js@${BACKEND_BOOT_ISO}`;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
@@ -1089,7 +1093,7 @@ function buildBackendHealthPayload() {
   const browserRenderer = getMontageBrowserRendererAvailability();
   return {
     ok: true,
-    service: "gemini-backend",
+    service: BACKEND_SERVICE_ROLE || "all",
     port: PORT,
     geminiConfigured: hasGeminiKey(),
     moodleShareUsersRoute: true,
@@ -1204,16 +1208,36 @@ try {
 }
 
 function isDirectMontageExportFallbackMode() {
-  if (GEMINI_SERVICE_ONLY) return false;
+  if (!EXPORT_SERVICE_ONLY && EXPOSURE_IS_ROLE_BASED) return false;
   return !montageExportQueueConfigured || !montageExportQueue;
 }
 
 function ensureMontageExportServiceEnabled(res) {
-  if (!GEMINI_SERVICE_ONLY) return true;
+  if (EXPORT_SERVICE_ONLY || BACKEND_SERVICE_ROLE === "all") return true;
   res.status(503).json({
     error: "montage_export_service_disabled",
     code: "montage_export_service_disabled",
-    message: "Este backend Gemini/VEO no procesa exportaciones de montaje. Usa el backend de export."
+    message: "Este backend no procesa exportaciones de montaje. Usa el backend de export."
+  });
+  return false;
+}
+
+function ensureVeoGenerationServiceEnabled(res) {
+  if (GEMINI_VEO_SERVICE_ONLY || BACKEND_SERVICE_ROLE === "all") return true;
+  res.status(503).json({
+    error: "veo_service_disabled",
+    code: "veo_service_disabled",
+    message: "Este backend no procesa generación de videos e imágenes. Usa el backend gemini-veo."
+  });
+  return false;
+}
+
+function ensureGeminiGenerativeServiceEnabled(res) {
+  if (GEMINI_SERVICE_ONLY || BACKEND_SERVICE_ROLE === "all") return true;
+  res.status(503).json({
+    error: "gemini_service_disabled",
+    code: "gemini_service_disabled",
+    message: "Este backend no procesa generación generativa. Usa el backend gemini generativo."
   });
   return false;
 }
@@ -7028,6 +7052,7 @@ app.post("/api/podcaster/sessions/delete", async (req, res) => {
 });
 
 app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
+  if (!ensureVeoGenerationServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -7255,6 +7280,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
 });
 
 app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
+  if (!ensureVeoGenerationServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -7399,6 +7425,7 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
 });
 
 app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
+  if (!ensureVeoGenerationServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   cleanupDialogueVideoJobs();
   try {
@@ -7495,6 +7522,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
 });
 
 app.get("/api/podcaster/dialogue-videos/generate-status", async (req, res) => {
+  if (!ensureVeoGenerationServiceEnabled(res)) return;
   cleanupDialogueVideoJobs();
   const jobId = clampExportId(req.query?.jobId || "");
   if (!jobId) return res.status(400).json({ error: "Falta jobId." });
@@ -7504,6 +7532,7 @@ app.get("/api/podcaster/dialogue-videos/generate-status", async (req, res) => {
 });
 
 app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
+  if (!ensureVeoGenerationServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   const jobMeta = req.body?.__job && typeof req.body.__job === "object" ? req.body.__job : null;
   const jobId = clampExportId(jobMeta?.jobId || "") || clampExportId(randomUUID());
@@ -14438,6 +14467,7 @@ app.post("/api/podcaster/music/library/delete", async (req, res) => {
 });
 
 app.post("/api/podcaster/music/generate", async (req, res) => {
+  if (!ensureGeminiGenerativeServiceEnabled(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const sessionId = clampText(req.body?.sessionId || "", 140);
@@ -14837,6 +14867,7 @@ app.post("/api/gemini/generate", async (req, res) => {
 });
 
 app.get("/api/gemini/models", async (_req, res) => {
+  if (!ensureGeminiGenerativeServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   try {
     const upstream = await fetchCompat(`${GEMINI_BASE}/models?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
@@ -14851,6 +14882,7 @@ app.get("/api/gemini/models", async (_req, res) => {
 });
 
 app.post("/api/gemini/live-token", async (req, res) => {
+  if (!ensureGeminiGenerativeServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   try {
     const modelInput = normalizeModel(req.body?.model || "gemini-2.5-flash-native-audio-preview-12-2025");

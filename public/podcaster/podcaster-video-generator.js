@@ -1,5 +1,5 @@
 
-import { authFetchJson, buildApiUrl } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js?v=2026-06-25.1";
 import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
 import { isReelModeEnabled } from "./podcaster-reels.js";
@@ -324,7 +324,7 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
   let lastStateKey = "";
   let lastData = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const data = await authFetchJson(`/api/podcaster/dialogue-videos/generate-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    const data = await authFetchJson(buildVeoApiUrl(`/api/podcaster/dialogue-videos/generate-status?jobId=${encodeURIComponent(cleanJobId)}`));
     lastData = data;
     const status = String(data?.status || "").trim().toLowerCase();
     const hint = String(data?.hint || "").trim();
@@ -647,7 +647,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
 
       for (let attempt = 0; attempt <= maxBusyRetries; attempt++) {
         try {
-          resp = await authFetchJson("/api/podcaster/dialogue-videos/generate", {
+          resp = await authFetchJson(buildVeoApiUrl("/api/podcaster/dialogue-videos/generate"), {
             method: "POST",
             body: JSON.stringify(body)
           });

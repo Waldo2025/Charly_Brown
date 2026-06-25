@@ -20,7 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-import { authFetchJson, buildApiUrl, hasAvailableApiBase } from "./api-client.js";
+import { authFetchJson, buildVeoApiUrl, hasAvailableApiBase } from "./api-client.js?v=2026-06-25.1";
 import {
   normalizeEscapeRoomProject,
   normalizeMission,
@@ -1491,7 +1491,7 @@ function buildQuestionVisualPrompt({ data, mission, question, roomIndex, questio
 }
 
 async function generateGeminiImage(prompt, { aspectRatio = "16:9", imageSize = "1K", temperature = 0.58 } = {}) {
-  const imageData = await authFetchJson("/api/gemini/generate", {
+  const imageData = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
     method: "POST",
     body: {
       model: IMAGE_MODEL,
@@ -3349,7 +3349,7 @@ elements.form.addEventListener("submit", async (event) => {
   refreshPanels();
 
   try {
-    const generated = await authFetchJson("/api/gemini/generate", {
+    const generated = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
       method: "POST",
       body: {
         model: formData.modelo || TEXT_MODEL_DEFAULT,
@@ -3561,7 +3561,7 @@ function buildObjectiveFinalPrompt({ tema, narrativa, numMisiones, preguntasPorS
 
 async function generateObjectiveText(prompt, temperature = 0.85) {
   const model = elements.modeloSelect?.value || TEXT_MODEL_DEFAULT;
-  const response = await authFetchJson("/api/gemini/generate", {
+  const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
     method: "POST",
     body: {
       model,

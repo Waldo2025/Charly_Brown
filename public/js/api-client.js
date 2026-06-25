@@ -2,7 +2,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth
 
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
-const DEFAULT_RENDER_API_BASE = "https://charly-brown-gemini-backend.onrender.com/api";
+const DEFAULT_GEMINI_API_BASE = "https://charly-brown-gemini-backend.onrender.com/api";
+const DEFAULT_VEO_API_BASE = "https://gemini-veo.onrender.com/api";
 const DEFAULT_EXPORT_API_BASE = "https://snoopy-export.onrender.com/api";
 
 function getAlternateLocalApiUrl(url = "") {
@@ -48,7 +49,15 @@ function getConfiguredApiBase() {
 }
 
 export function getRemoteApiBase() {
-  return String(window.__CHARLY_CONFIG__?.remoteApiBaseUrl || DEFAULT_RENDER_API_BASE).trim().replace(/\/+$/, "");
+  return String(
+    window.__CHARLY_CONFIG__?.geminiApiBaseUrl
+    || window.__CHARLY_CONFIG__?.remoteApiBaseUrl
+    || DEFAULT_GEMINI_API_BASE
+  ).trim().replace(/\/+$/, "");
+}
+
+export function getVeoApiBase() {
+  return String(window.__CHARLY_CONFIG__?.veoApiBaseUrl || DEFAULT_VEO_API_BASE).trim().replace(/\/+$/, "");
 }
 
 export function getExportApiBase() {
@@ -122,6 +131,17 @@ export function buildApiUrlPreferRemote(path = "") {
     return buildApiUrlFromBase(remoteBase, input);
   }
   return buildApiUrl(input);
+}
+
+export function buildVeoApiUrl(path = "") {
+  const input = String(path || "").trim();
+  if (!input) return getVeoApiBase();
+  if (/^https?:\/\//i.test(input)) return input;
+  return buildApiUrlFromBase(getVeoApiBase(), input);
+}
+
+export function buildVeoApiUrlPreferRemote(path = "") {
+  return buildVeoApiUrl(path);
 }
 
 export function buildExportApiUrl(path = "") {

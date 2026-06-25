@@ -3,7 +3,7 @@ import { getStorage, ref, uploadString, listAll, getDownloadURL } from 'https://
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { deleteObject } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js'; // Asegúrate de tener esta importación
 import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, deleteDoc, doc, setDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
-import { buildApiUrl } from './api-client.js';
+import { buildVeoApiUrl } from './api-client.js?v=2026-06-25.1';
 import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
 import { bootstrapFirebaseAppCheck } from './firebase-app-check.js';
 import { escapeHtml } from './security-utils.js';
@@ -507,7 +507,7 @@ async function generarMapaMentalGemini(texto) {
   const token = user ? await user.getIdToken() : "";
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(buildApiUrl("/api/gemini/generate"), {
+  const res = await fetch(buildVeoApiUrl("/api/gemini/generate"), {
     method: "POST",
     headers,
     body: JSON.stringify({

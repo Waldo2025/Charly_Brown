@@ -67,6 +67,34 @@ service cloud.firestore {
         ]);
     }
 
+    function isApprovedUser() {
+      return isSignedIn() && (
+        isEditor() ||
+        request.auth.token.approvalStatus == "approved" ||
+        request.auth.token.approvalStatus == "aprobado" ||
+        request.auth.token.status == "approved" ||
+        request.auth.token.status == "aprobado" ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approvalStatus == "approved" ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approvalStatus == "aprobado" ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "approved" ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "aprobado" ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.estadoAprobacion == "approved" ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.estadoAprobacion == "aprobado" ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.aprobado == true ||
+            (
+              roleFromUserDoc() != "" &&
+              roleFromUserDoc() != "pending" &&
+              roleFromUserDoc() != "pendiente"
+            )
+          )
+        )
+      );
+    }
+
     function isGameDeveloper() {
       return isAdmin() || hasAnyRole([
         "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev"
@@ -80,6 +108,7 @@ service cloud.firestore {
     function isDocOwner(data) {
       return isSignedIn() && (
         data.userId == request.auth.uid ||
+        data.ownerId == request.auth.uid ||
         data.uid == request.auth.uid ||
         data.ownerUid == request.auth.uid ||
         data.createdBy == request.auth.uid
@@ -369,6 +398,18 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
+    match /charlyBrownUnitSessions/{sessionId} {
+      allow read: if isApprovedUser() &&
+        resource.data.ownerUid == request.auth.uid;
+      allow create: if isApprovedUser() &&
+        request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isApprovedUser() &&
+        resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if isApprovedUser() &&
+        resource.data.ownerUid == request.auth.uid;
+    }
+
     // Fuentes de lecturas para juego/editor.
     match /lecturasASC/{docId} {
       allow read: if isSignedIn() || isPublished(resource.data) || isEditor() || isDocOwner(resource.data) || isLecturaSharedWithUser(resource.data);
@@ -377,7 +418,8 @@ service cloud.firestore {
 
     match /lecturasNuevas/{docId} {
       allow read: if isSignedIn() || isPublished(resource.data) || isEditor() || isDocOwner(resource.data) || isLecturaSharedWithUser(resource.data);
-      allow write: if isEditor();
+      allow create: if isEditor() || (isApprovedUser() && isDocOwner(request.resource.data));
+      allow update, delete: if isEditor() || (isApprovedUser() && isDocOwner(resource.data));
     }
 
     // Lecturas game: lectura pública para ranking; escritura sólo owner autenticado o admin.

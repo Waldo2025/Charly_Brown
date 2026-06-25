@@ -45,7 +45,9 @@ const context = {
     },
     __CHARLY_CONFIG__: {
       apiBaseUrl: "/api",
+      geminiApiBaseUrl: "https://charly-brown-gemini-backend.onrender.com/api",
       remoteApiBaseUrl: "https://charly-brown-gemini-backend.onrender.com/api",
+      veoApiBaseUrl: "https://gemini-veo.onrender.com/api",
       allowSameOriginApi: true
     }
   },
@@ -62,7 +64,10 @@ vm.runInContext([
   extractFunction("resolveApiBase"),
   extractFunction("buildApiUrl"),
   extractFunction("buildApiUrlFromBase"),
-  extractFunction("buildApiUrlPreferRemote")
+  extractFunction("buildApiUrlPreferRemote"),
+  extractFunction("getVeoApiBase"),
+  extractFunction("buildVeoApiUrl"),
+  extractFunction("buildVeoApiUrlPreferRemote")
 ].join("\n\n"), context);
 
 test("authenticated podcaster requests prefer the remote backend instead of the /api redirect", () => {
@@ -70,5 +75,17 @@ test("authenticated podcaster requests prefer the remote backend instead of the 
   assert.equal(
     resolved,
     "https://charly-brown-gemini-backend.onrender.com/api/podcaster/montage/export"
+  );
+});
+
+test("veo requests resolve to the dedicated gemini-veo backend", () => {
+  assert.equal(context.getVeoApiBase(), "https://gemini-veo.onrender.com/api");
+  assert.equal(
+    context.buildVeoApiUrl("/api/podcaster/dialogue-videos/generate"),
+    "https://gemini-veo.onrender.com/api/podcaster/dialogue-videos/generate"
+  );
+  assert.equal(
+    context.buildVeoApiUrlPreferRemote("/api/gemini/generate"),
+    "https://gemini-veo.onrender.com/api/gemini/generate"
   );
 });

@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-06-25.1";
 import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-24.15";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17.1";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
@@ -10568,7 +10568,7 @@ async function generateGlobalScenarioImage(scenarioId = "", options = {}) {
       };
     }, { render: false });
     renderPodcastPortraitStrip(getActiveSession());
-    const response = await authFetchJson("/api/podcaster/scenario-images/generate", {
+    const response = await authFetchJson(buildVeoApiUrl("/api/podcaster/scenario-images/generate"), {
       method: "POST",
       body: JSON.stringify({
         sessionId: session.id,
@@ -13981,7 +13981,7 @@ async function generateSpeakerPortrait(speaker = "", options = {}) {
   }
   setPodcastVideoStatus(`Generando retrato: ${speakerName}...`);
 
-  const response = await authFetchJson("/api/podcaster/speaker-portraits/generate", {
+  const response = await authFetchJson(buildVeoApiUrl("/api/podcaster/speaker-portraits/generate"), {
     method: "POST",
     body: JSON.stringify({
       sessionId: session.id,

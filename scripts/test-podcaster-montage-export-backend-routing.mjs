@@ -37,8 +37,14 @@ assert.match(
 );
 
 assert.match(
+  runtimeConfigSource,
+  /veoApiBaseUrl:\s*"https:\/\/gemini-veo\.onrender\.com\/api"/,
+  "El runtime config debe publicar una base separada para el backend de Veo e imagen."
+);
+
+assert.match(
   podcasterHtmlSource,
-  /<script src="js\/runtime-config-loader\.js\?v=2026-06-22\.6" defer><\/script>/,
+  /<script src="js\/runtime-config-loader\.js\?v=2026-06-25\.1" defer><\/script>/,
   "podcaster.html debe forzar la recarga del runtime-config-loader alineado con el split de backends."
 );
 
@@ -46,6 +52,12 @@ assert.match(
   apiClientSource,
   /const DEFAULT_EXPORT_API_BASE = "https:\/\/snoopy-export\.onrender\.com\/api";/,
   "El cliente API debe tener un backend por defecto para export."
+);
+
+assert.match(
+  apiClientSource,
+  /const DEFAULT_VEO_API_BASE = "https:\/\/gemini-veo\.onrender\.com\/api";/,
+  "El cliente API debe tener un backend por defecto para Veo e imagen."
 );
 
 assert.match(
@@ -58,6 +70,12 @@ assert.match(
   apiClientSource,
   /export function buildExportApiUrl\(path = ""\)/,
   "El cliente API debe exponer un builder dedicado para URLs de export."
+);
+
+assert.match(
+  apiClientSource,
+  /export function buildVeoApiUrl\(path = ""\)/,
+  "El cliente API debe exponer un builder dedicado para URLs de Veo."
 );
 
 assert.match(
@@ -86,8 +104,14 @@ assert.match(
 
 assert.match(
   videoGeneratorSource,
-  /authFetchJson\("\/api\/podcaster\/dialogue-videos\/generate",/,
-  "La generación VEO debe seguir apuntando al backend Gemini/VEO."
+  /authFetchJson\(buildVeoApiUrl\("\/api\/podcaster\/dialogue-videos\/generate"\),/,
+  "La generación VEO debe apuntar al backend gemini-veo."
+);
+
+assert.match(
+  videoGeneratorSource,
+  /authFetchJson\(buildVeoApiUrl\(`\/api\/podcaster\/dialogue-videos\/generate-status\?jobId=\$\{encodeURIComponent\(cleanJobId\)\}`\)\)/,
+  "El polling de VEO debe consultar el backend gemini-veo."
 );
 
 assert.match(
@@ -104,26 +128,26 @@ assert.match(
 
 assert.match(
   backendServerSource,
-  /const GEMINI_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini";/,
-  "El backend debe reconocer el modo dedicado Gemini/VEO."
+  /const GEMINI_VEO_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini-veo";/,
+  "El backend debe reconocer el modo dedicado gemini-veo."
 );
 
 assert.match(
   backendServerSource,
-  /function isDirectMontageExportFallbackMode\(\) \{\s*if \(GEMINI_SERVICE_ONLY\) return false;/,
-  "El backend Gemini/VEO no debe bloquear VEO por exportaciones directas."
+  /function ensureVeoGenerationServiceEnabled\(res\) \{\s*if \(GEMINI_VEO_SERVICE_ONLY \|\| BACKEND_SERVICE_ROLE === "all"\) return true;/,
+  "El backend debe aceptar generación de imágenes y videos solo en el servicio gemini-veo."
 );
 
 assert.match(
   backendServerSource,
-  /function ensureMontageExportServiceEnabled\(res\) \{\s*if \(!GEMINI_SERVICE_ONLY\) return true;/,
-  "El backend debe rechazar endpoints de export cuando corre en modo Gemini/VEO."
+  /function ensureMontageExportServiceEnabled\(res\) \{\s*if \(EXPORT_SERVICE_ONLY \|\| BACKEND_SERVICE_ROLE === "all"\) return true;/,
+  "El backend debe rechazar endpoints de export cuando no corre en el servicio de export."
 );
 
 assert.match(
   renderYamlSource,
-  /name:\s+charly-brown-gemini-backend[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+gemini/,
-  "Render debe declarar el rol gemini para activar la separación de servicios en producción."
+  /name:\s+gemini-veo[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+gemini-veo/,
+  "Render debe declarar el rol gemini-veo para activar la separación de servicios en producción."
 );
 
 console.log("Podcaster montage export backend routing OK.");
