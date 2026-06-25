@@ -11190,6 +11190,7 @@ async function renderMontageOverlapComposition({
     chunkPlan.entries.forEach((entry, index) => {
       const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
       const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
+      const padTailSec = Math.max(0.2, totalSec - startSec + 0.25);
       const previousEntry = index > 0 ? chunkPlan.entries[index - 1] : null;
       const transition = resolveMontageOverlayTransition(entry, previousEntry);
       const transitionType = String(transition?.type || "cut").trim().toLowerCase();
@@ -11197,7 +11198,7 @@ async function renderMontageOverlapComposition({
       const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
       const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
       const videoLabel = `v${index}`;
-      let videoChain = `[${index}:v]scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+      let videoChain = `[${index}:v]tpad=stop_mode=clone:stop_duration=${padTailSec.toFixed(3)},scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
       if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
         videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
       }

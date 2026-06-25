@@ -32,7 +32,8 @@ if (!/function buildMontageOverlapCompositionPlan\(exportedEntries = \[\]\) \{/.
   || !/visualLayoutMode = String\(entry\?\.visualLayoutMode \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "blur-backdrop"/.test(backendSource)
   || !/boxblur=24:8/.test(backendSource)
   || !/Number\(a\?\.zIndex \|\| 0\) - Number\(b\?\.zIndex \|\| 0\)/.test(backendSource)
-  || !/if \(overlapPlan\.hasOverlap\) \{[\s\S]*renderMontageOverlapComposition\(/m.test(backendSource)) {
+  || !/if \(overlapPlan\.hasOverlap\) \{[\s\S]*renderMontageOverlapComposition\(/m.test(backendSource)
+  || !/tpad=stop_mode=clone:stop_duration=\$\{padTailSec\.toFixed\(3\)\}/.test(backendSource)) {
   throw new Error("El export backend debe priorizar la capa superior en overlaps y soportar blur backdrop por escena.");
 }
 
