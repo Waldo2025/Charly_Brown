@@ -249,6 +249,10 @@ loadLocalEnvFile();
 const app = express();
 const PORT = Number(process.env.API_PORT || process.env.PORT || 8787);
 const HOST = String(process.env.API_HOST || "0.0.0.0").trim() || "0.0.0.0";
+const BACKEND_SERVICE_ROLE = String(
+  process.env.BACKEND_SERVICE_ROLE || process.env.CHARLY_BACKEND_ROLE || "all"
+).trim().toLowerCase();
+const GEMINI_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini";
 const BACKEND_BOOT_ISO = new Date().toISOString();
 const BACKEND_BOOT_SIGNATURE = `backend/server.js@${BACKEND_BOOT_ISO}`;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
@@ -1200,7 +1204,18 @@ try {
 }
 
 function isDirectMontageExportFallbackMode() {
+  if (GEMINI_SERVICE_ONLY) return false;
   return !montageExportQueueConfigured || !montageExportQueue;
+}
+
+function ensureMontageExportServiceEnabled(res) {
+  if (!GEMINI_SERVICE_ONLY) return true;
+  res.status(503).json({
+    error: "montage_export_service_disabled",
+    code: "montage_export_service_disabled",
+    message: "Este backend Gemini/VEO no procesa exportaciones de montaje. Usa el backend de export."
+  });
+  return false;
 }
 
 function buildDirectFallbackBusyDetail(kind = "", activeJobIds = []) {
@@ -2951,6 +2966,34 @@ function normalizeRole(value = "") {
   return "assistant";
 }
 
+function sanitizeReferenceImageRecord(value = null, fallbackName = "Referencia") {
+  if (!value || typeof value !== "object") return null;
+  const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
+  const mediaRef = normalizePersistedMediaReference(
+    clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
+    clampText(String(value?.storagePath || value?.path || "").trim(), 700)
+  );
+  const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
+  const storagePath = clampText(mediaRef.storagePath || "", 700);
+  const mimeType = clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png";
+  const explicitType = String(value?.type || value?.mediaKind || "").trim().toLowerCase();
+  const combinedSource = `${downloadUrl} ${storagePath}`.toLowerCase();
+  const looksLikeImage = mimeType.startsWith("image/")
+    || explicitType === "image"
+    || /\.(png|jpe?g|webp|gif)(\?|$|\s)/i.test(combinedSource);
+  if (!dataUrl.startsWith("data:image/") && !downloadUrl && !storagePath) return null;
+  if (!looksLikeImage) return null;
+  return {
+    name: clampText(value?.name || fallbackName, 180) || fallbackName,
+    dataUrl: dataUrl.startsWith("data:image/") ? dataUrl : "",
+    downloadUrl,
+    storagePath,
+    mimeType,
+    type: "image",
+    updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
+  };
+}
+
 function sanitizePodcasterSession(raw = {}) {
   const disfluencyDefaults = {
     enabled: false,
@@ -3039,34 +3082,6 @@ function sanitizePodcasterSession(raw = {}) {
       promptVersion: clampText(portrait?.promptVersion || "podcaster_v1", 80) || "podcaster_v1"
     };
   });
-
-  const sanitizeReferenceImageRecord = (value = null, fallbackName = "Referencia") => {
-    if (!value || typeof value !== "object") return null;
-    const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
-    const mediaRef = normalizePersistedMediaReference(
-      clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
-      clampText(String(value?.storagePath || value?.path || "").trim(), 700)
-    );
-    const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
-    const storagePath = clampText(mediaRef.storagePath || "", 700);
-    const mimeType = clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png";
-    const explicitType = String(value?.type || value?.mediaKind || "").trim().toLowerCase();
-    const combinedSource = `${downloadUrl} ${storagePath}`.toLowerCase();
-    const looksLikeImage = mimeType.startsWith("image/")
-      || explicitType === "image"
-      || /\.(png|jpe?g|webp|gif)(\?|$|\s)/i.test(combinedSource);
-    if (!dataUrl.startsWith("data:image/") && !downloadUrl && !storagePath) return null;
-    if (!looksLikeImage) return null;
-    return {
-      name: clampText(value?.name || fallbackName, 180) || fallbackName,
-      dataUrl: dataUrl.startsWith("data:image/") ? dataUrl : "",
-      downloadUrl,
-      storagePath,
-      mimeType,
-      type: "image",
-      updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
-    };
-  };
 
   const sanitizeReferenceImageMap = (rawMap = {}, maxEntries = 120) => {
     const source = rawMap && typeof rawMap === "object" ? rawMap : {};
@@ -13311,6 +13326,7 @@ async function renderMontagePreviewMedia(rawInput = {}, context = {}) {
 }
 
 app.post("/api/podcaster/montage/export", async (req, res) => {
+  if (!ensureMontageExportServiceEnabled(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const normalizedInput = normalizeMontageExportRequestBody(req.body || {});
@@ -13509,6 +13525,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 });
 
 app.get("/api/podcaster/montage/export-status", async (req, res) => {
+  if (!ensureMontageExportServiceEnabled(res)) return;
   try {
     const jobId = clampExportId(req.query?.jobId || "");
     if (!jobId) return res.status(400).json({ error: "Falta jobId." });
@@ -13688,6 +13705,7 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
 });
 
 app.post("/api/podcaster/montage/export-cancel", async (req, res) => {
+  if (!ensureMontageExportServiceEnabled(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const jobId = clampExportId(req.body?.jobId || "");
@@ -13734,6 +13752,7 @@ app.post("/api/podcaster/montage/export-cancel", async (req, res) => {
 });
 
 app.post("/api/podcaster/montage/preview", async (req, res) => {
+  if (!ensureMontageExportServiceEnabled(res)) return;
   try {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");

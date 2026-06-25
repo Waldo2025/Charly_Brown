@@ -17,6 +17,8 @@ services:
         value: /opt/render/project/src/backend/.playwright-browsers
       - key: API_HOST
         value: 0.0.0.0
+      - key: BACKEND_SERVICE_ROLE
+        value: gemini
       - key: FIREBASE_PROJECT_ID
         value: charly-brown
       - key: FIREBASE_STORAGE_BUCKET

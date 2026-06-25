@@ -17,6 +17,18 @@ const montageExportSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-montage-export.js",
   "utf8"
 );
+const videoGeneratorSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-video-generator.js",
+  "utf8"
+);
+const backendServerSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/backend/server.js",
+  "utf8"
+);
+const renderYamlSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/render.yaml",
+  "utf8"
+);
 
 assert.match(
   runtimeConfigSource,
@@ -70,6 +82,48 @@ assert.match(
   montageExportSource,
   /authFetchJson\(buildMontageExportEndpoint\("\/api\/podcaster\/montage\/export-cancel"\),/,
   "La cancelación de export debe ir al backend snoopy-export."
+);
+
+assert.match(
+  videoGeneratorSource,
+  /authFetchJson\("\/api\/podcaster\/dialogue-videos\/generate",/,
+  "La generación VEO debe seguir apuntando al backend Gemini/VEO."
+);
+
+assert.match(
+  backendServerSource,
+  /function sanitizeReferenceImageRecord\(value = null, fallbackName = "Referencia"\)/,
+  "El normalizador de imágenes de referencia debe existir a nivel de módulo."
+);
+
+assert.match(
+  backendServerSource,
+  /const BACKEND_SERVICE_ROLE = String\(\s*process\.env\.BACKEND_SERVICE_ROLE \|\| process\.env\.CHARLY_BACKEND_ROLE \|\| "all"\s*\)\.trim\(\)\.toLowerCase\(\);/,
+  "El backend debe soportar un rol explícito para separar Gemini/VEO de export."
+);
+
+assert.match(
+  backendServerSource,
+  /const GEMINI_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini";/,
+  "El backend debe reconocer el modo dedicado Gemini/VEO."
+);
+
+assert.match(
+  backendServerSource,
+  /function isDirectMontageExportFallbackMode\(\) \{\s*if \(GEMINI_SERVICE_ONLY\) return false;/,
+  "El backend Gemini/VEO no debe bloquear VEO por exportaciones directas."
+);
+
+assert.match(
+  backendServerSource,
+  /function ensureMontageExportServiceEnabled\(res\) \{\s*if \(!GEMINI_SERVICE_ONLY\) return true;/,
+  "El backend debe rechazar endpoints de export cuando corre en modo Gemini/VEO."
+);
+
+assert.match(
+  renderYamlSource,
+  /name:\s+charly-brown-gemini-backend[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+gemini/,
+  "Render debe declarar el rol gemini para activar la separación de servicios en producción."
 );
 
 console.log("Podcaster montage export backend routing OK.");
