@@ -7568,6 +7568,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const referenceImageDataUrls = referenceMode === "image"
       ? inlineReferenceBudget.referenceImageDataUrls
       : [];
+    const referenceImages = referenceMode === "image" && Array.isArray(req.body?.referenceImages)
+      ? req.body.referenceImages
+        .map((item) => sanitizeReferenceImageRecord(item, "Referencia"))
+        .filter(Boolean)
+        .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT)
+      : [];
     const referenceImageNames = referenceMode === "image" && Array.isArray(req.body?.referenceImageNames)
       ? req.body.referenceImageNames.map((item) => clampText(item || "", 180)).filter(Boolean).slice(0, 4)
       : [];
@@ -7756,13 +7762,39 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       jobId,
       sessionId,
       rowId,
-      imageReferenceCount: referenceImageDataUrls.length,
+      imageReferenceCount: Math.max(referenceImageDataUrls.length, referenceImages.length),
       videoReferenceCount: referenceVideoDataUrl ? 1 : 0
     });
-    const sceneReferenceSources = referenceImageDataUrls.length ? referenceImageDataUrls : (referenceImageDataUrl ? [referenceImageDataUrl] : []);
+    const sceneReferenceSources = [];
+    const seenSceneReferenceSources = new Set();
+    const pushSceneReferenceSource = (item = null) => {
+      const normalized = sanitizeReferenceImageRecord(item, "Referencia");
+      if (!normalized) return;
+      const dedupeKey = [
+        String(normalized.dataUrl || "").trim(),
+        String(normalized.downloadUrl || "").trim(),
+        String(normalized.storagePath || "").trim()
+      ].join("|");
+      if (!dedupeKey || seenSceneReferenceSources.has(dedupeKey)) return;
+      seenSceneReferenceSources.add(dedupeKey);
+      sceneReferenceSources.push(normalized);
+    };
+    referenceImages.forEach((item) => pushSceneReferenceSource(item));
+    referenceImageDataUrls.forEach((dataUrl) => pushSceneReferenceSource({ dataUrl, type: "image" }));
+    if (referenceImageDataUrl) {
+      pushSceneReferenceSource({
+        dataUrl: referenceImageDataUrl,
+        name: referenceImageName,
+        type: "image"
+      });
+    }
     const sceneReferences = [];
-    for (const imageDataUrl of sceneReferenceSources) {
-      const sceneReference = await loadOptionalImageReference({ dataUrl: imageDataUrl });
+    for (const imageSource of sceneReferenceSources) {
+      const sceneReference = await loadOptionalImageReference({
+        dataUrl: imageSource?.dataUrl,
+        url: imageSource?.downloadUrl,
+        storagePath: imageSource?.storagePath
+      });
       if (!sceneReference) continue;
       sceneReferences.push({
         buffer: sceneReference.buffer,

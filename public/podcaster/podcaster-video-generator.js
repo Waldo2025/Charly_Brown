@@ -567,6 +567,17 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         audioUrl: audioClip?.downloadUrl || "",
         audioStoragePath: audioClip?.storagePath || "",
         referenceMode,
+        referenceImages: effectiveReferenceImages
+          .map((item) => ({
+            name: String(item?.name || "").trim(),
+            dataUrl: String(item?.dataUrl || "").trim(),
+            downloadUrl: String(item?.downloadUrl || item?.url || "").trim(),
+            storagePath: String(item?.storagePath || item?.path || "").trim(),
+            mimeType: String(item?.mimeType || "image/png").trim().toLowerCase() || "image/png",
+            type: "image"
+          }))
+          .filter((item) => item.dataUrl || item.downloadUrl || item.storagePath)
+          .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
         referenceImageDataUrls: inlineReferenceBudget.referenceImageDataUrls,
         referenceImageDataUrl: String(rowReferenceImage?.dataUrl || "").trim(),
         referenceImageNames: effectiveReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
