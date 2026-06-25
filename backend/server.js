@@ -50,7 +50,8 @@ const {
 } = require("./gemini-upstream-retry.js");
 const {
   createHeavyWorkCoordinator,
-  validateDialogueVideoInlineReferenceBudget
+  validateDialogueVideoInlineReferenceBudget,
+  DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT
 } = require("./podcaster-stability.js");
 const {
   normalizeDialogueAudioWordTimings,

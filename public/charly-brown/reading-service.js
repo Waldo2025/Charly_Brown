@@ -257,21 +257,10 @@ function normalizeKey(value = "") {
 }
 
 function normalizeQuestions(row = {}) {
-  const directSources = [
-    row.preguntas,
-    row.preguntasComprension,
-    row.preguntas_comprension,
-    row.questions,
-    row.questionsComprension,
-    row.questions_comprension,
-    row.preguntasVistaGuardadas,
-    row.preguntasGuardadas,
-    row.preguntasLista,
-    row.preguntasData
-  ];
+  const directSources = collectQuestionSources(row);
   const normalized = directSources
     .flatMap((value) => normalizeQuestionSource(value))
-    .filter((item) => item.prompt || item.answer || item.criteria || item.level);
+    .filter((item) => item.texto || item.respuesta || item.criterio || item.nivel);
   if (normalized.length) return dedupeQuestions(normalized);
 
   const htmlFallbacks = [
@@ -291,9 +280,32 @@ function normalizeQuestions(row = {}) {
   return [];
 }
 
+function collectQuestionSources(row = {}) {
+  const sources = [
+    row.preguntas,
+    row.preguntasComprension,
+    row.preguntas_comprension,
+    row.questions,
+    row.questionsComprension,
+    row.questions_comprension,
+    row.campos?.preguntas,
+    row.campos?.preguntasComprension,
+    row.campos?.preguntas_comprension,
+    row.campos?.questions,
+    row.rawData?.preguntas,
+    row.rawData?.preguntasComprension,
+    row.rawData?.preguntas_comprension,
+    row.rawData?.questions,
+    row.rawData?.campos?.preguntas,
+    row.rawData?.campos?.preguntasComprension,
+    row.rawData?.campos?.preguntas_comprension
+  ];
+  return sources.filter((value) => value != null && value !== "");
+}
+
 function normalizeQuestionItem(item = {}) {
   if (typeof item === "string") return parseQuestionText(item);
-  const texto = String(item.texto || item.prompt || item.pregunta || item.text || "").trim();
+  const texto = String(item.texto || item.pregunta || item.prompt || item.text || "").trim();
   const respuesta = String(item.respuesta || item.answer || item.solution || "").trim();
   const criterio = String(item.criterio || item.criteria || "").trim();
   const nivel = String(item.nivel || item.level || "").trim();
@@ -311,18 +323,14 @@ function parseQuestionText(text = "") {
   if (!raw) return { prompt: "", answer: "", criteria: "", level: "" };
 
   const answerMatch = raw.match(/(?:respuesta esperada|respuesta)\s*:\s*([\s\S]+)$/i);
-  const levelMatch = raw.match(/(?:nivel taxonomico|nivel)\s*:\s*([^—-]+?)(?=\s*(?:criterio|respuesta esperada|respuesta)\s*:|$)/i);
-  const criteriaMatch = raw.match(/criterio\s*:\s*([\s\S]+?)(?=\s*(?:nivel taxonomico|nivel|respuesta esperada|respuesta)\s*:|$)/i);
+  const levelMatch = raw.match(/(?:nivel taxonomico|nivel)\s*:\s*([^\n\r—-]+?)(?=\s*(?:criterio|respuesta esperada|respuesta)\s*:|$)/i);
+  const criteriaMatch = raw.match(/criterio\s*:\s*([^\n\r]+?)(?=\s*(?:nivel taxonomico|nivel|respuesta esperada|respuesta)\s*:|$)/i);
 
-  let prompt = raw
-    .replace(/(?:respuesta esperada|respuesta)\s*:\s*[\s\S]+$/i, "")
-    .replace(/(?:nivel taxonomico|nivel)\s*:\s*[^—-]+?(\s*(?:criterio|respuesta esperada|respuesta)\s*:|$)/i, "$1")
-    .replace(/criterio\s*:\s*[\s\S]+?(\s*(?:nivel taxonomico|nivel|respuesta esperada|respuesta)\s*:|$)/i, "$1")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  prompt = prompt.replace(/^[0-9]+\.\s*/, "").trim();
-  prompt = prompt.replace(/\s+(?:nivel taxonomico|nivel|criterio)\s*:.+$/i, "").trim();
+  let prompt = raw;
+  [answerMatch?.[0], levelMatch?.[0], criteriaMatch?.[0]].filter(Boolean).forEach((snippet) => {
+    prompt = prompt.replace(snippet, " ");
+  });
+  prompt = prompt.replace(/^[0-9]+\.\s*/, "").replace(/\s+/g, " ").trim();
 
   return {
     prompt,
@@ -336,6 +344,8 @@ function normalizeQuestionSource(value = "") {
   if (!value) return [];
   if (Array.isArray(value)) return value.map((item) => normalizeQuestionItem(item));
   if (typeof value === "object") {
+    if (Array.isArray(value.preguntasComprension)) return value.preguntasComprension.map((item) => normalizeQuestionItem(item));
+    if (Array.isArray(value.questions)) return value.questions.map((item) => normalizeQuestionItem(item));
     if (Array.isArray(value.items)) return value.items.map((item) => normalizeQuestionItem(item));
     if (Array.isArray(value.preguntas)) return value.preguntas.map((item) => normalizeQuestionItem(item));
     const single = normalizeQuestionItem(value);
@@ -477,7 +487,15 @@ function extractQuestionsFromHtml(html = "") {
     const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
     const root = doc.body.firstElementChild;
     if (!root) return [];
-    const candidates = Array.from(root.querySelectorAll("li, p, tr"));
+    const questionContainers = Array.from(root.querySelectorAll("ol, ul, table, .cb-reading-questions, .preguntas, .preguntas-lectura"));
+    const candidates = [];
+    if (questionContainers.length) {
+      questionContainers.forEach((container) => {
+        candidates.push(...Array.from(container.querySelectorAll("li, tr, p")));
+      });
+    } else {
+      candidates.push(...Array.from(root.querySelectorAll("li, p, tr")));
+    }
     const structured = candidates
       .map((node) => extractQuestionFromNode(node))
       .filter(Boolean);
@@ -515,10 +533,13 @@ function extractQuestionFromNode(node = null) {
   const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
   if (!text) return null;
   if (/^preguntas de comprension|^preguntas de comprensión$/i.test(text)) return null;
-
   const labelTexts = extractQuestionLabelsFromNode(node);
   const bodyText = stripQuestionLabels(text, labelTexts);
   const parsed = parseQuestionText(bodyText);
+  if (!parsed.prompt) {
+    const firstSentence = bodyText.split(/(?<=[.!?])\s+/)[0] || bodyText;
+    parsed.prompt = firstSentence.replace(/^[0-9]+\.\s*/, "").trim();
+  }
   const data = {
     texto: parsed.prompt || bodyText,
     nivel: labelTexts.nivel || parsed.level,

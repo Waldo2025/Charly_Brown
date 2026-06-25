@@ -1,4 +1,4 @@
-import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getDefaultFirebaseApp } from "../js/firebase-default-app.js";
 import { ALL_OPTION, getCategoriesForGrade } from "./unit-contracts.js";
 
@@ -6,16 +6,14 @@ const app = getDefaultFirebaseApp();
 const db = getFirestore(app);
 
 export async function loadSyaForMeta(meta = {}) {
-  const q = query(
-    collection(db, "secuenciaAlcance"),
-    where("nivel", "==", meta.level || "Primaria"),
-    where("grado", "==", meta.grade || ""),
-    where("trimestre", "==", meta.trimester || ""),
-    where("unidad", "==", meta.unit || "")
-  );
-  const snap = await getDocs(q);
-  if (!snap.empty) return normalizeSyaDoc(snap.docs[0].data() || {});
-  return buildFallbackSya(meta);
+  const docs = await loadSyaDocs();
+  if (!docs.length) return buildFallbackSya(meta);
+  const matches = docs
+    .map((doc) => ({ ...doc, score: scoreSyaDoc(doc, meta) }))
+    .filter((doc) => doc.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const best = matches[0] || docs[0];
+  return normalizeSyaDoc(best.data || {});
 }
 
 export function normalizeSyaDoc(data = {}) {
@@ -23,6 +21,13 @@ export function normalizeSyaDoc(data = {}) {
   Object.entries(data || {}).forEach(([key, value]) => {
     if (value == null) return;
     if (["nivel", "grado", "trimestre", "unidad", "fechaCreacion"].includes(key)) return;
+    if (typeof value === "object" && !Array.isArray(value)) {
+      Object.entries(value).forEach(([nestedKey, nestedValue]) => {
+        if (nestedValue == null) return;
+        out[nestedKey] = String(nestedValue || "").trim();
+      });
+      return;
+    }
     out[key] = String(value || "").trim();
   });
   return out;
@@ -49,7 +54,7 @@ export function getSyaGroupedByCategory(meta = {}, sya = {}) {
       .filter((entry) => entry && Object.values(entry.fields).some(Boolean));
     if (items.length) grouped.push({ category, items });
   });
-  return grouped;
+  return grouped.length ? grouped : buildFallbackGroupedSya(meta, sya);
 }
 
 export function getFocusedSya(meta = {}, sya = {}) {
@@ -92,7 +97,7 @@ function filterCategoriesBySelection(meta = {}, categories = {}) {
 
   return Object.fromEntries(categoryEntries.map(([category, subtopics]) => {
     if (hasAllSelection(selectedSubtopic) || !selectedSubtopic) return [category, subtopics];
-    const filtered = subtopics.filter((subtopic) => subtopic === selectedSubtopic);
+    const filtered = subtopics.filter((subtopic) => sameSubtopic(subtopic, selectedSubtopic));
     return [category, filtered];
   }).filter(([, subtopics]) => Array.isArray(subtopics) && subtopics.length));
 }
@@ -117,10 +122,10 @@ function buildSubtopicSyaFields(sya = {}, subtopic = "") {
   const keys = resolveSyaKeyBases(subtopic);
   const normalizedMap = buildNormalizedSyaFieldMap(sya);
   return {
-    T: pickFirstSyaValue(sya, normalizedMap, keys, "T"),
-    AE: pickFirstSyaValue(sya, normalizedMap, keys, "AE"),
-    C: pickFirstSyaValue(sya, normalizedMap, keys, "C"),
-    P: pickFirstSyaValue(sya, normalizedMap, keys, "P")
+    T: pickFirstSyaValue(sya, normalizedMap, keys, "T") || pickByPrefix(normalizedMap, keys, "T"),
+    AE: pickFirstSyaValue(sya, normalizedMap, keys, "AE") || pickByPrefix(normalizedMap, keys, "AE"),
+    C: pickFirstSyaValue(sya, normalizedMap, keys, "C") || pickByPrefix(normalizedMap, keys, "C"),
+    P: pickFirstSyaValue(sya, normalizedMap, keys, "P") || pickByPrefix(normalizedMap, keys, "P")
   };
 }
 
@@ -164,6 +169,53 @@ function buildNormalizedSyaFieldMap(sya = {}) {
     out[normalizeSyaLookupKey(key)] = safeValue;
   });
   return out;
+}
+
+function pickByPrefix(normalizedMap = {}, keyBases = [], suffix = "") {
+  const prefixes = keyBases.map((base) => normalizeSyaLookupKey(`${base}_${suffix}`)).filter(Boolean);
+  for (const [key, value] of Object.entries(normalizedMap || {})) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) return String(value || "").trim();
+  }
+  return "";
+}
+
+function buildFallbackGroupedSya(meta = {}, sya = {}) {
+  const categories = getCategoriesForGrade(meta.grade);
+  return Object.entries(categories)
+    .map(([category, subtopics]) => ({
+      category,
+      items: subtopics.map((subtopic) => ({ subtopic, fields: buildSubtopicSyaFields(sya, subtopic) }))
+    }))
+    .filter((group) => group.items.some((item) => Object.values(item.fields).some(Boolean)));
+}
+
+async function loadSyaDocs() {
+  const snap = await getDocs(collection(db, "secuenciaAlcance"));
+  return snap.docs.map((docSnap) => ({ id: docSnap.id, data: docSnap.data() || {} }));
+}
+
+function scoreSyaDoc(doc = {}, meta = {}) {
+  const data = doc.data || {};
+  let score = 0;
+  const level = normalizeSyaLookupKey(meta.level || "");
+  const grade = normalizeSyaLookupKey(meta.grade || "");
+  const trimester = normalizeSyaLookupKey(meta.trimester || "");
+  const unit = normalizeSyaLookupKey(meta.unit || "");
+
+  if (level && normalizeSyaLookupKey(data.nivel || "") === level) score += 4;
+  if (grade && normalizeSyaLookupKey(data.grado || "") === grade) score += 4;
+  if (trimester && normalizeSyaLookupKey(data.trimestre || "") === trimester) score += 4;
+  if (unit && normalizeSyaLookupKey(data.unidad || "") === unit) score += 4;
+
+  // Prefer docs that already contain curricular keys.
+  const keys = Object.keys(data);
+  if (keys.some((key) => /_(T|AE|C|P)$/i.test(key))) score += 2;
+  if (keys.some((key) => /_/i.test(key))) score += 1;
+  return score;
+}
+
+function sameSubtopic(a = "", b = "") {
+  return normalizeSyaLookupKey(a) === normalizeSyaLookupKey(b);
 }
 
 function normalizeSyaLookupKey(value = "") {
