@@ -3157,10 +3157,11 @@ export function buildMontageExportPayload(session = null) {
       const transitionOut = entry?.transitionOut
         || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
         || null;
-      if (!rowId || !(videoStoragePath || videoDownloadUrl || videoDataUrl)) {
+      const hasCustomBg = entry?.clip?.backgroundColor && String(entry.clip.backgroundColor).trim() !== "";
+      if (!rowId || (!(videoStoragePath || videoDownloadUrl || videoDataUrl) && !hasCustomBg)) {
         return {
           ok: false,
-          error: `La escena ${index + 1} no tiene video generado.`,
+          error: `La escena ${index + 1} no tiene video ni color de fondo seleccionado.`,
           entry: null,
           skippedEntry: {
             sceneIndex: index + 1,
@@ -3179,6 +3180,7 @@ export function buildMontageExportPayload(session = null) {
           sceneIndex: index + 1,
           speaker: String(row?.speaker || "").trim(),
           sceneLabel: `Escena ${index + 1}`,
+          backgroundColor: entry?.clip?.backgroundColor || "",
           zIndex: Math.max(1, Number(entry?.zIndex || entry?.clip?.zIndex || index + 1) || (index + 1)),
           timelineStartMs: Math.max(0, Number(entry?.startMs || 0) || 0),
           timelineEndMs: Math.max(0, Number(entry?.endMs || 0) || 0),

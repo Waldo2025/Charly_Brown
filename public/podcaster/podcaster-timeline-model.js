@@ -630,7 +630,8 @@ function normalizeTimelineClipItem(raw = {}, rowId = "") {
     mediaOffsetYPct: normalizeTimelineClipMediaOffset(raw?.mediaOffsetYPct),
     mediaMotionPreset: normalizeTimelineClipMediaMotionPreset(raw?.mediaMotionPreset),
     visualLayoutMode: normalizeTimelineClipVisualLayoutMode(raw?.visualLayoutMode),
-    zIndex: Math.max(1, Math.round(toFiniteNumber(raw?.zIndex, 1)))
+    zIndex: Math.max(1, Math.round(toFiniteNumber(raw?.zIndex, 1))),
+    backgroundColor: raw?.backgroundColor ? String(raw.backgroundColor).trim() : ""
   };
 }
 

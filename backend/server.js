@@ -2589,6 +2589,61 @@ function redactUrlForLogs(url = "") {
   }
 }
 
+function hexToRgb(hex) {
+  const cleanHex = String(hex || "").trim().replace("#", "");
+  if (cleanHex.length === 3) {
+    const r = parseInt(cleanHex[0] + cleanHex[0], 16) || 0;
+    const g = parseInt(cleanHex[1] + cleanHex[1], 16) || 0;
+    const b = parseInt(cleanHex[2] + cleanHex[2], 16) || 0;
+    return { r, g, b };
+  }
+  const r = parseInt(cleanHex.slice(0, 2), 16) || 0;
+  const g = parseInt(cleanHex.slice(2, 4), 16) || 0;
+  const b = parseInt(cleanHex.slice(4, 6), 16) || 0;
+  return { r, g, b };
+}
+
+function generateGradientPpm(color1, color2, width = 256, height = 144) {
+  const rgb1 = hexToRgb(color1);
+  const rgb2 = hexToRgb(color2);
+  let body = `P3\n${width} ${height}\n255\n`;
+  const pixels = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const t = (x / (width - 1) + y / (height - 1)) / 2;
+      const r = Math.max(0, Math.min(255, Math.round(rgb1.r + t * (rgb2.r - rgb1.r))));
+      const g = Math.max(0, Math.min(255, Math.round(rgb1.g + t * (rgb2.g - rgb1.g))));
+      const b = Math.max(0, Math.min(255, Math.round(rgb1.b + t * (rgb2.b - rgb1.b))));
+      pixels.push(`${r} ${g} ${b}`);
+    }
+  }
+  body += pixels.join(" ") + "\n";
+  return body;
+}
+
+function generateSolidPpm(color, width = 1, height = 1) {
+  const rgb = hexToRgb(color);
+  let body = `P3\n${width} ${height}\n255\n`;
+  const pixels = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      pixels.push(`${rgb.r} ${rgb.g} ${rgb.b}`);
+    }
+  }
+  body += pixels.join(" ") + "\n";
+  return body;
+}
+
+function parseBackgroundGradient(bgString) {
+  const str = String(bgString || "").trim();
+  if (!str.startsWith("linear-gradient")) return null;
+  const match = str.match(/linear-gradient\(\s*(?:\d+deg\s*,\s*)?([#a-fA-F0-9]+)\s*,\s*([#a-fA-F0-9]+)\s*\)/i);
+  if (match) {
+    return { color1: match[1], color2: match[2] };
+  }
+  return null;
+}
+
 function hasGeminiKey() {
   return !!GEMINI_API_KEY;
 }
@@ -3317,7 +3372,8 @@ function sanitizePodcasterSession(raw = {}) {
         visualLayoutMode: String(clip?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
           ? "blur-backdrop"
           : "default",
-        zIndex
+        zIndex,
+        backgroundColor: clip?.backgroundColor ? clampText(clip.backgroundColor, 150) : ""
       };
     });
     return next;
@@ -11101,10 +11157,11 @@ async function renderMontageOverlapComposition({
   outExt = "mp4",
   intermediatePaths = [],
   exportedEntries = [],
-  emitStage = () => {}
+  emitStage = () => {},
+  force = false
 } = {}) {
   const plan = buildMontageOverlapCompositionPlan(exportedEntries);
-  if ((!plan.hasOverlap && !plan.hasGaps) || !plan.entries.length) {
+  if ((!force && !plan.hasOverlap && !plan.hasGaps) || !plan.entries.length) {
     return "";
   }
 
@@ -12096,9 +12153,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           || String(videoAsset?.mimeType || "").trim().toLowerCase().startsWith("image/");
         return isImageAsset;
       })();
-      const isImageAsset = isImageAssetOriginal
+      const hasCustomBg = entry?.backgroundColor && String(entry.backgroundColor).trim() !== "";
+      let isImageAsset = isImageAssetOriginal
         || /\.(jpg|jpeg|png|webp|gif|avif)(?:[?#&]|$)/i.test(videoAsset?.storagePath || videoAsset?.url || "")
         || /\/api\/assets\/proxy-image\?/i.test(videoAsset?.storagePath || videoAsset?.url || "");
+      if (hasCustomBg && !videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl) {
+        isImageAsset = true;
+      }
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
 
       if (!rowId) {
@@ -12106,7 +12167,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         err.status = 400;
         throw err;
       }
-      if (!videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl) {
+      if (!videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl && !hasCustomBg) {
         skippedEntries.push(buildMontageSkippedEntry(entry, i, "missing_video_source", {
           kind: isImageAsset ? "image" : "video",
           code: "missing_download_source",
@@ -12166,7 +12227,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           downloadUrl: videoDownloadUrl,
           substage: currentSceneSubstage
         }));
-        inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+        if (hasCustomBg && !videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl) {
+          const grad = parseBackgroundGradient(entry.backgroundColor);
+          let ppmContent = "";
+          if (grad) {
+            ppmContent = generateGradientPpm(grad.color1, grad.color2, 256, 144);
+          } else {
+            ppmContent = generateSolidPpm(entry.backgroundColor, 1, 1);
+          }
+          inputVisualPath = path.join(tmpDir, `scene-bg-${sceneIndex}-${Date.now()}.ppm`);
+          fs.writeFileSync(inputVisualPath, ppmContent, "utf8");
+        } else {
+          inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+        }
         throwIfCancelled(`scene_${sceneIndex}_after_download`);
         const downloadedVisualStat = await fs.promises.stat(inputVisualPath).catch(() => null);
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
@@ -12456,6 +12529,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           sceneIndex,
           rowId,
           intermediatePath,
+          syntheticVisualOnly: hasCustomBg && !videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl,
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
           durationSec: durSec,
           durationMs,
@@ -12526,13 +12600,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const montageTotalDurationMs = reviewCursorMs;
 
     const overlapPlan = buildMontageOverlapCompositionPlan(exportedEntries);
+    const requiresSafeTimelineComposition = exportedEntries.some((entry) => entry?.syntheticVisualOnly === true);
     let concatOutPath = "";
     emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
     throwIfCancelled("concat_timeline");
     if (!overlapPlan.hasOverlap && !overlapPlan.hasGaps && intermediatePaths.length === 1) {
       concatOutPath = intermediatePaths[0];
-    } else if (overlapPlan.hasOverlap) {
+    } else if (overlapPlan.hasOverlap || requiresSafeTimelineComposition) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
         tmpDir,
@@ -12540,7 +12615,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         outExt,
         intermediatePaths,
         exportedEntries,
-        emitStage
+        emitStage,
+        force: requiresSafeTimelineComposition
       });
     }
     if (!concatOutPath) {

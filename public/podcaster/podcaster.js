@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-17.10";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-24.15";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17.1";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-12.2";
@@ -53,7 +53,7 @@ import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=202
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-12.2";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-12.2";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-24.15";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -729,6 +729,17 @@ const els = {
   deleteTimelineSpeedRangeBtn: document.getElementById("deleteTimelineSpeedRangeBtn"),
   cancelTimelineSpeedRangeBtn: document.getElementById("cancelTimelineSpeedRangeBtn"),
   applyTimelineSpeedRangeBtn: document.getElementById("applyTimelineSpeedRangeBtn"),
+  timelineSceneBgColorModal: document.getElementById("timelineSceneBgColorModal"),
+  closeTimelineSceneBgColorModalBtn: document.getElementById("closeTimelineSceneBgColorModalBtn"),
+  timelineSceneBgColorModalTitle: document.getElementById("timelineSceneBgColorModalTitle"),
+  timelineSceneBgUseGradient: document.getElementById("timelineSceneBgUseGradient"),
+  timelineSceneBgColorLabel: document.getElementById("timelineSceneBgColorLabel"),
+  timelineSceneBgColorInput: document.getElementById("timelineSceneBgColorInput"),
+  timelineSceneBgColorInput2: document.getElementById("timelineSceneBgColorInput2"),
+  timelineSceneBgColorText: document.getElementById("timelineSceneBgColorText"),
+  deleteTimelineSceneBgColorBtn: document.getElementById("deleteTimelineSceneBgColorBtn"),
+  cancelTimelineSceneBgColorBtn: document.getElementById("cancelTimelineSceneBgColorBtn"),
+  applyTimelineSceneBgColorBtn: document.getElementById("applyTimelineSceneBgColorBtn"),
   podcastActiveSpeakerBackdropVideoAlt: document.getElementById("podcastActiveSpeakerBackdropVideoAlt"),
   onScreenTextTrackModal: document.getElementById("onScreenTextTrackModal"),
   onScreenTextTrackPanel: document.getElementById("onScreenTextTrackPanel"),
@@ -1017,6 +1028,9 @@ let timelineSpeedRangeModalState = {
   startSourceMs: 0,
   endSourceMs: 1000,
   playbackRate: 1
+};
+let timelineSceneBgColorModalState = {
+  rowId: ""
 };
 let montageAudioSubtracksOpen = (() => {
   try {
@@ -11163,6 +11177,163 @@ function deleteTimelineFrameHoldFromModal() {
   return changed;
 }
 
+function setTimelineSceneBgColorModalOpen(rowId = "") {
+  const key = String(rowId || "").trim();
+  timelineSceneBgColorModalState.rowId = key;
+  if (els.timelineSceneBgColorModal) {
+    els.timelineSceneBgColorModal.hidden = !key;
+  }
+  if (key) {
+    syncTimelineSceneBgColorModal(getActiveSession());
+  }
+}
+
+function parseBackgroundGradient(bgString) {
+  const str = String(bgString || "").trim();
+  if (!str.startsWith("linear-gradient")) return null;
+  const match = str.match(/linear-gradient\(\s*(?:\d+deg\s*,\s*)?([#a-fA-F0-9]+)\s*,\s*([#a-fA-F0-9]+)\s*\)/i);
+  if (match) {
+    return { color1: match[1], color2: match[2] };
+  }
+  return null;
+}
+
+function syncTimelineSceneBgColorModal(session = null) {
+  if (!timelineSceneBgColorModalState.rowId) return;
+  const activeSession = session || getActiveSession();
+  const rowId = String(timelineSceneBgColorModalState.rowId || "").trim();
+  const rows = getSessionRows(activeSession);
+  const rowIndex = rows.findIndex((row) => String(row?.id || "").trim() === rowId);
+  const clip = ensureTimelineClipsByRowId(activeSession, { persist: false })[rowId];
+  if (rowIndex < 0 || !clip) {
+    setTimelineSceneBgColorModalOpen("");
+    return;
+  }
+
+  if (els.timelineSceneBgColorModalTitle) {
+    els.timelineSceneBgColorModalTitle.textContent = `Color de fondo · Escena ${rowIndex + 1}`;
+  }
+
+  const bgVal = String(clip.backgroundColor || "").trim();
+  const grad = parseBackgroundGradient(bgVal);
+
+  if (grad) {
+    if (els.timelineSceneBgUseGradient) els.timelineSceneBgUseGradient.checked = true;
+    if (els.timelineSceneBgColorInput) els.timelineSceneBgColorInput.value = grad.color1;
+    if (els.timelineSceneBgColorInput2) {
+      els.timelineSceneBgColorInput2.value = grad.color2;
+      els.timelineSceneBgColorInput2.hidden = false;
+    }
+    if (els.timelineSceneBgColorLabel) els.timelineSceneBgColorLabel.textContent = "Colores";
+  } else {
+    if (els.timelineSceneBgUseGradient) els.timelineSceneBgUseGradient.checked = false;
+    const solidColor = bgVal || "#000000";
+    if (els.timelineSceneBgColorInput) els.timelineSceneBgColorInput.value = solidColor;
+    if (els.timelineSceneBgColorInput2) {
+      els.timelineSceneBgColorInput2.value = "#000000";
+      els.timelineSceneBgColorInput2.hidden = true;
+    }
+    if (els.timelineSceneBgColorLabel) els.timelineSceneBgColorLabel.textContent = "Color";
+  }
+
+  if (els.timelineSceneBgColorText) {
+    els.timelineSceneBgColorText.value = bgVal;
+  }
+
+  updateColorPresetActiveState(bgVal);
+}
+
+function updateColorPresetActiveState(bgValue) {
+  const cleanVal = String(bgValue || "").trim().toLowerCase();
+  const presetRow = els.timelineSceneBgColorModal?.querySelector(".color-preset-row");
+  if (presetRow) {
+    presetRow.querySelectorAll(".color-preset-btn").forEach((btn) => {
+      const btnColor = String(btn.dataset.color || "").trim().toLowerCase();
+      if (btnColor === cleanVal) {
+        btn.classList.add("is-active");
+      } else {
+        btn.classList.remove("is-active");
+      }
+    });
+  }
+}
+
+function applyTimelineSceneBgColorModal() {
+  const rowId = String(timelineSceneBgColorModalState.rowId || "").trim();
+  if (!rowId) return;
+
+  const session = getActiveSession();
+  if (!session) return;
+
+  let bgValue = "";
+  const useGrad = els.timelineSceneBgUseGradient?.checked === true;
+  if (useGrad) {
+    const c1 = String(els.timelineSceneBgColorInput?.value || "#000000").trim();
+    const c2 = String(els.timelineSceneBgColorInput2?.value || "#000000").trim();
+    bgValue = `linear-gradient(135deg, ${c1}, ${c2})`;
+  } else {
+    bgValue = String(els.timelineSceneBgColorInput?.value || "#000000").trim();
+  }
+
+  const nextClips = { ...ensureTimelineClipsByRowId(session, { persist: false }) };
+  if (nextClips[rowId]) {
+    nextClips[rowId] = {
+      ...nextClips[rowId],
+      backgroundColor: bgValue
+    };
+  }
+
+  upsertPodcastVideoConfig((cfg) => ({
+    ...cfg,
+    timelineClipsByRowId: nextClips,
+    timelineVersion: STUDIO_TIMELINE_VERSION
+  }));
+
+  renderPodcastVideoTimeline(getActiveSession());
+  syncPodcastStudioInspector(getActiveSession());
+
+  try {
+    playbackController.syncStageMedia(rowId, { force: true });
+  } catch (_) {}
+
+  setTimelineSceneBgColorModalOpen("");
+  setGenerationStatus(`Color de fondo aplicado a escena ${resolveSceneNumberByRowId(rowId, session)}`, "is-live");
+  scheduleSessionLocalPersist("scene-bg-color-edit");
+}
+
+function deleteTimelineSceneBgColorModal() {
+  const rowId = String(timelineSceneBgColorModalState.rowId || "").trim();
+  if (!rowId) return;
+
+  const session = getActiveSession();
+  if (!session) return;
+
+  const nextClips = { ...ensureTimelineClipsByRowId(session, { persist: false }) };
+  if (nextClips[rowId]) {
+    nextClips[rowId] = {
+      ...nextClips[rowId],
+      backgroundColor: ""
+    };
+  }
+
+  upsertPodcastVideoConfig((cfg) => ({
+    ...cfg,
+    timelineClipsByRowId: nextClips,
+    timelineVersion: STUDIO_TIMELINE_VERSION
+  }));
+
+  renderPodcastVideoTimeline(getActiveSession());
+  syncPodcastStudioInspector(getActiveSession());
+
+  try {
+    playbackController.syncStageMedia(rowId, { force: true });
+  } catch (_) {}
+
+  setTimelineSceneBgColorModalOpen("");
+  setGenerationStatus(`Color de fondo eliminado de escena ${resolveSceneNumberByRowId(rowId, session)}`, "is-live");
+  scheduleSessionLocalPersist("scene-bg-color-delete");
+}
+
 function setTimelineSpeedRangeModalOpen(rowId = "") {
   const key = String(rowId || "").trim();
   timelineSpeedRangeModalState.rowId = key;
@@ -17590,6 +17761,13 @@ function attachEvents() {
         openTimelineClipDurationConfig(rowId);
         return;
       }
+      const configureBgColorBtn = event.target.closest("[data-action='timeline-configure-scene-bg-color']");
+      if (configureBgColorBtn) {
+        const rowId = String(configureBgColorBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        setTimelineSceneBgColorModalOpen(rowId);
+        return;
+      }
       const openFrameHoldBtn = event.target.closest("[data-action='timeline-open-frame-hold-modal']");
       if (openFrameHoldBtn) {
         const rowId = String(openFrameHoldBtn.dataset.rowId || "").trim();
@@ -17872,6 +18050,14 @@ function attachEvents() {
       }
     });
   }
+  if (els.timelineSceneBgColorModal) {
+    els.timelineSceneBgColorModal.addEventListener("click", (event) => {
+      const closeBtn = event.target.closest("[data-action='close-timeline-scene-bg-color-modal']");
+      if (closeBtn) {
+        setTimelineSceneBgColorModalOpen("");
+      }
+    });
+  }
   if (els.onScreenTextTrackPanel) {
     const onScreenTextTrackHead = els.onScreenTextTrackPanel.querySelector(".music-config-head");
     onScreenTextTrackHead?.addEventListener("pointerdown", (event) => {
@@ -18102,6 +18288,115 @@ function attachEvents() {
     els.timelineFrameHoldDurationNumber.addEventListener("input", () => syncTimelineFrameHoldModalInputs("number"));
     els.timelineFrameHoldDurationNumber.addEventListener("change", () => syncTimelineFrameHoldModalInputs("number"));
   }
+  if (els.closeTimelineSceneBgColorModalBtn) {
+    els.closeTimelineSceneBgColorModalBtn.addEventListener("click", () => setTimelineSceneBgColorModalOpen(""));
+  }
+  if (els.cancelTimelineSceneBgColorBtn) {
+    els.cancelTimelineSceneBgColorBtn.addEventListener("click", () => setTimelineSceneBgColorModalOpen(""));
+  }
+  if (els.deleteTimelineSceneBgColorBtn) {
+    els.deleteTimelineSceneBgColorBtn.addEventListener("click", () => {
+      deleteTimelineSceneBgColorModal();
+    });
+  }
+  if (els.applyTimelineSceneBgColorBtn) {
+    els.applyTimelineSceneBgColorBtn.addEventListener("click", () => {
+      applyTimelineSceneBgColorModal();
+    });
+  }
+  if (els.timelineSceneBgUseGradient) {
+    els.timelineSceneBgUseGradient.addEventListener("change", (e) => {
+      const isGrad = e.target.checked;
+      if (els.timelineSceneBgColorInput2) {
+        els.timelineSceneBgColorInput2.hidden = !isGrad;
+      }
+      if (els.timelineSceneBgColorLabel) {
+        els.timelineSceneBgColorLabel.textContent = isGrad ? "Colores" : "Color";
+      }
+      if (els.timelineSceneBgColorText) {
+        if (isGrad) {
+          const c1 = els.timelineSceneBgColorInput?.value || "#000000";
+          const c2 = els.timelineSceneBgColorInput2?.value || "#000000";
+          els.timelineSceneBgColorText.value = `linear-gradient(135deg, ${c1}, ${c2})`;
+        } else {
+          els.timelineSceneBgColorText.value = els.timelineSceneBgColorInput?.value || "#000000";
+        }
+        updateColorPresetActiveState(els.timelineSceneBgColorText.value);
+      }
+    });
+  }
+  if (els.timelineSceneBgColorInput) {
+    els.timelineSceneBgColorInput.addEventListener("input", (e) => {
+      const val = e.target.value;
+      if (els.timelineSceneBgUseGradient?.checked) {
+        const c2 = els.timelineSceneBgColorInput2?.value || "#000000";
+        if (els.timelineSceneBgColorText) els.timelineSceneBgColorText.value = `linear-gradient(135deg, ${val}, ${c2})`;
+      } else {
+        if (els.timelineSceneBgColorText) els.timelineSceneBgColorText.value = val;
+      }
+      if (els.timelineSceneBgColorText) updateColorPresetActiveState(els.timelineSceneBgColorText.value);
+    });
+  }
+  if (els.timelineSceneBgColorInput2) {
+    els.timelineSceneBgColorInput2.addEventListener("input", (e) => {
+      const val = e.target.value;
+      if (els.timelineSceneBgUseGradient?.checked) {
+        const c1 = els.timelineSceneBgColorInput?.value || "#000000";
+        if (els.timelineSceneBgColorText) els.timelineSceneBgColorText.value = `linear-gradient(135deg, ${c1}, ${val})`;
+      }
+      if (els.timelineSceneBgColorText) updateColorPresetActiveState(els.timelineSceneBgColorText.value);
+    });
+  }
+  if (els.timelineSceneBgColorText) {
+    els.timelineSceneBgColorText.addEventListener("input", (e) => {
+      const val = String(e.target.value).trim();
+      const grad = parseBackgroundGradient(val);
+      if (grad) {
+        if (els.timelineSceneBgUseGradient) els.timelineSceneBgUseGradient.checked = true;
+        if (els.timelineSceneBgColorInput) els.timelineSceneBgColorInput.value = grad.color1;
+        if (els.timelineSceneBgColorInput2) {
+          els.timelineSceneBgColorInput2.value = grad.color2;
+          els.timelineSceneBgColorInput2.hidden = false;
+        }
+        if (els.timelineSceneBgColorLabel) els.timelineSceneBgColorLabel.textContent = "Colores";
+        updateColorPresetActiveState(val);
+      } else if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+        if (els.timelineSceneBgUseGradient) els.timelineSceneBgUseGradient.checked = false;
+        if (els.timelineSceneBgColorInput) els.timelineSceneBgColorInput.value = val;
+        if (els.timelineSceneBgColorInput2) els.timelineSceneBgColorInput2.hidden = true;
+        if (els.timelineSceneBgColorLabel) els.timelineSceneBgColorLabel.textContent = "Color";
+        updateColorPresetActiveState(val);
+      }
+    });
+  }
+
+  els.timelineSceneBgColorModal?.querySelectorAll(".color-preset-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const color = btn.dataset.color;
+      if (color) {
+        if (els.timelineSceneBgColorText) els.timelineSceneBgColorText.value = color;
+        const grad = parseBackgroundGradient(color);
+        if (grad) {
+          if (els.timelineSceneBgUseGradient) els.timelineSceneBgUseGradient.checked = true;
+          if (els.timelineSceneBgColorInput) els.timelineSceneBgColorInput.value = grad.color1;
+          if (els.timelineSceneBgColorInput2) {
+            els.timelineSceneBgColorInput2.value = grad.color2;
+            els.timelineSceneBgColorInput2.hidden = false;
+          }
+          if (els.timelineSceneBgColorLabel) els.timelineSceneBgColorLabel.textContent = "Colores";
+        } else {
+          if (els.timelineSceneBgUseGradient) els.timelineSceneBgUseGradient.checked = false;
+          if (els.timelineSceneBgColorInput) els.timelineSceneBgColorInput.value = color;
+          if (els.timelineSceneBgColorInput2) {
+            els.timelineSceneBgColorInput2.value = "#000000";
+            els.timelineSceneBgColorInput2.hidden = true;
+          }
+          if (els.timelineSceneBgColorLabel) els.timelineSceneBgColorLabel.textContent = "Color";
+        }
+        updateColorPresetActiveState(color);
+      }
+    });
+  });
   if (els.closeTimelineSpeedRangeModalBtn) {
     els.closeTimelineSpeedRangeModalBtn.addEventListener("click", () => setTimelineSpeedRangeModalOpen(""));
   }

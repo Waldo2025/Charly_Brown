@@ -1109,6 +1109,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                         <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-regenerate-scene-video-hq" data-row-id="${escapeHtml(rowId)}" title="Regenerar mejorando calidad desde el clip actual" aria-label="Regenerar mejorando calidad"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
                           <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : "fa-wand-magic-sparkles"}" aria-hidden="true"></i>
                         </button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-configure-scene-bg-color" data-row-id="${escapeHtml(rowId)}" title="Color de fondo de escena" aria-label="Color de fondo de escena">
+                          <i class="fas fa-palette" aria-hidden="true"></i>
+                        </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-edit-stylized-text" data-row-id="${escapeHtml(rowId)}" title="Editar Texto Estilizado" aria-label="Editar Texto Estilizado">
                           <i class="fas fa-font" aria-hidden="true"></i>
                         </button>
@@ -1126,9 +1129,11 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                         ? (isLikelyImageMediaRecord(primarySegment || generatedClip)
                           ? `<img src="${escapeHtml(videoSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`
                           : `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous" poster="${escapeHtml(previewPosterSrc)}"></video>`)
-                        : portraitSrc
-                          ? `<img src="${escapeHtml(portraitSrc)}" alt="${escapeHtml(`Retrato de ${speakerName}`)}" loading="lazy">`
-                          : `<div class="podcast-video-scene-empty">Sin video</div>`}
+                        : timelineClip?.backgroundColor
+                          ? `<div style="width: 100%; height: 100%; background: ${escapeHtml(timelineClip.backgroundColor)}; border-radius: 4px; border: 1px dashed rgba(255,255,255,0.25);"></div>`
+                          : portraitSrc
+                            ? `<img src="${escapeHtml(portraitSrc)}" alt="${escapeHtml(`Retrato de ${speakerName}`)}" loading="lazy">`
+                            : `<div class="podcast-video-scene-empty">Sin video</div>`}
                       ${isGenerating
                         ? `<div class="podcast-video-scene-loading" aria-hidden="true">
                             <span class="podcast-video-scene-loading-ring"></span>

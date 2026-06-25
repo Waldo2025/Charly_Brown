@@ -2999,10 +2999,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         video.style.filter = "";
         video.style.transition = "";
       });
-      const preview = this.els?.podcastVideoStage?.querySelector(".podcast-video-preview");
-      preview?.style?.removeProperty?.("--pod-stage-aspect");
-      preview?.style?.removeProperty?.("--pod-stage-aspect-w");
-      preview?.style?.removeProperty?.("--pod-stage-aspect-h");
+      const preview = this.els?.podcastVideoStage?.querySelector(".podcast-video-preview") || this.els?.podcastVideoStage;
+      if (preview) {
+        preview.style?.removeProperty?.("--pod-stage-aspect");
+        preview.style?.removeProperty?.("--pod-stage-aspect-w");
+        preview.style?.removeProperty?.("--pod-stage-aspect-h");
+        preview.style.background = "";
+        preview.style.backgroundColor = "";
+      }
       const applyScale = this.deps?.applySceneMediaScaleToStage || window.applySceneMediaScaleToStage;
       applyScale?.({ rowId: "", mediaScale: 1, visualLayoutMode: "default", container: preview || null });
       if (typeof window.hideStageImagePreview === "function") {
@@ -3031,13 +3035,19 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     );
 
+    const ensureClips = this.deps?.ensureTimelineClipsByRowId || window.ensureTimelineClipsByRowId;
+    const clipMap = ensureClips?.(activeSession, { persist: false }) || {};
+    const clipCfg = clipMap[key] || null;
+    const hasCustomBg = clipCfg && clipCfg.backgroundColor && clipCfg.backgroundColor !== "";
+
     const playbackActive = this.state.isPlaying === true || (this.deps?.podcastPlaybackState || window.podcastPlaybackState)?.active === true;
     const isSpeaking = (this.deps?.podcastVideoState || window.podcastVideoState)?.speaking === true;
     const mediaSignature = [
       String(src || "").trim(),
       String(firstSegment?.storagePath || clip?.storagePath || "").trim(),
       String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
-      String(firstSegment?.type || clip?.type || "").trim().toLowerCase()
+      String(firstSegment?.type || clip?.type || "").trim().toLowerCase(),
+      String(clipCfg?.backgroundColor || "").trim()
     ].join("|");
     const stateKey = `${sessionId}_${key}_${isSpeaking}_${playbackActive}_${(this.deps?.podcastVideoState || window.podcastVideoState)?.montageActive}_${mediaSignature}`;
     
@@ -3052,11 +3062,17 @@ export class PodcasterPlaybackController extends EventEmitter {
     const stageBackdrop = activeBundle.backdrop;
     const inactiveBackdrop = inactiveBundle.backdrop;
     if (!stageVideo) return;
-    
-    const ensureClips = this.deps?.ensureTimelineClipsByRowId || window.ensureTimelineClipsByRowId;
-    const clipMap = ensureClips?.(activeSession, { persist: false }) || {};
-    const clipCfg = clipMap[key] || null;
-    
+
+    const container = this.els?.podcastVideoStage?.querySelector(".podcast-video-preview") || this.els?.podcastVideoStage;
+    if (container) {
+      if (hasCustomBg) {
+        container.style.background = clipCfg.backgroundColor;
+      } else {
+        container.style.background = "";
+        container.style.backgroundColor = "";
+      }
+    }
+
     const normalizeLayout = this.deps?.normalizeTimelineClipVisualLayoutMode || window.normalizeTimelineClipVisualLayoutMode;
     const normalizeScale = this.deps?.normalizeTimelineClipMediaScale || window.normalizeTimelineClipMediaScale;
     const applyScale = this.deps?.applySceneMediaScaleToStage || window.applySceneMediaScaleToStage;
@@ -3255,10 +3271,14 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (typeof window.hideStageImagePreview === "function") {
       window.hideStageImagePreview();
     }
-    if (typeof window.restoreStageSpeakerPortrait === "function") {
-      window.restoreStageSpeakerPortrait(activeSession);
+    if (hasCustomBg) {
+      setPortrait?.(false);
+    } else {
+      if (typeof window.restoreStageSpeakerPortrait === "function") {
+        window.restoreStageSpeakerPortrait(activeSession);
+      }
+      setPortrait?.(educationalMode ? false : true);
     }
-    setPortrait?.(educationalMode ? false : true);
     updateUi?.();
     this.syncOverlay(Number(vState?.montageCursorMs || 0), {
       rowId: key,
