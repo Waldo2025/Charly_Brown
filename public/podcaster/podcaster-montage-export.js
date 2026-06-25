@@ -3326,6 +3326,7 @@ export function buildMontageExportPayload(session = null) {
 export async function runMontageExport() {
   if (window.montageExportBusy || montageExportSubmitLocked) return;
   montageExportSubmitLocked = true;
+  setMontageExportBusy(true);
   const previousJobId = String(window.montageExportJobState.jobId || "").trim();
   try {
     setConfirmMontageExportButtonState({
