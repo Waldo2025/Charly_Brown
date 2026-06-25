@@ -10315,6 +10315,32 @@ function persistGlobalTtsDirectionDraft() {
   }), { render: false });
 }
 
+function readGlobalVideoConfigControls() {
+  const selectedVideoModel = buildPodcasterVideoModelChain(String(els.globalCheapVideoMode?.value || "").trim())[0] || "veo-3.1-lite-generate-preview";
+  const selectedMediaLoadMode = String(els.globalMediaLoadMode?.value || "streaming").trim().toLowerCase();
+  return {
+    videoModel: selectedVideoModel,
+    cheapVideoMode: selectedVideoModel === "veo-3.1-lite-generate-preview",
+    mediaLoadMode: ["streaming", "blob", "auto"].includes(selectedMediaLoadMode)
+      ? selectedMediaLoadMode
+      : "streaming"
+  };
+}
+
+function persistGlobalVideoConfigDraft() {
+  const session = getActiveSession();
+  if (!session) return;
+  const nextVideoConfig = readGlobalVideoConfigControls();
+  upsertPodcastVideoConfig((cfg) => ({
+    ...cfg,
+    ...nextVideoConfig
+  }), {
+    persist: false,
+    autosave: false
+  });
+  scheduleSessionLocalPersist("global-config-video");
+}
+
 function syncSpeakerFieldAcrossPanels(host = "", field = "", value = "", sourceContainer = null) {
   [els.globalSpeakerSettings, els.podcastStudioInspectorRowEditor].filter(Boolean).forEach((container) => {
     if (!container || container === sourceContainer) return;
@@ -14781,17 +14807,14 @@ async function applyGlobalConfig() {
 
   // Guardamos la configuración de video por separado para no interferir con el script
   try {
-    const selectedVideoModel = buildPodcasterVideoModelChain(String(els.globalCheapVideoMode?.value || "").trim())[0] || "veo-3.1-lite-generate-preview";
-    const selectedMediaLoadMode = String(els.globalMediaLoadMode?.value || "streaming").trim().toLowerCase();
-    upsertActiveSession((current) => ({
-      ...current,
-      podcastVideoConfig: {
-        ...getPodcastVideoConfig(current),
-        videoModel: selectedVideoModel,
-        cheapVideoMode: selectedVideoModel === "veo-3.1-lite-generate-preview",
-        mediaLoadMode: selectedMediaLoadMode
-      }
-    }), { render: false });
+    const nextVideoConfig = readGlobalVideoConfigControls();
+    upsertPodcastVideoConfig((cfg) => ({
+      ...cfg,
+      ...nextVideoConfig
+    }), {
+      persist: false,
+      autosave: false
+    });
   } catch (e) {
     console.error("[podcaster] Error persisting video quality setting:", e);
   }
@@ -16668,6 +16691,13 @@ function attachEvents() {
           persistGlobalTtsDirectionDraft();
         });
       }
+    });
+  [els.globalCheapVideoMode, els.globalMediaLoadMode]
+    .filter(Boolean)
+    .forEach((input) => {
+      input.addEventListener("change", () => {
+        persistGlobalVideoConfigDraft();
+      });
     });
   if (els.applyGlobalConfigBtn) {
     els.applyGlobalConfigBtn.addEventListener("click", async () => {
