@@ -11190,11 +11190,14 @@ async function renderMontageOverlapComposition({
     chunkPlan.entries.forEach((entry, index) => {
       const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
       const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
-      const padTailSec = Math.max(0.2, totalSec - startSec + 0.25);
       const previousEntry = index > 0 ? chunkPlan.entries[index - 1] : null;
+      const nextEntry = index < chunkPlan.entries.length - 1 ? chunkPlan.entries[index + 1] : null;
       const transition = resolveMontageOverlayTransition(entry, previousEntry);
+      const outgoingTransition = resolveMontageOverlayTransition(nextEntry, entry);
       const transitionType = String(transition?.type || "cut").trim().toLowerCase();
       const transitionSec = Math.max(0.02, Number(transition?.durationMs || 0) / 1000);
+      const outgoingTransitionSec = Math.max(0, Number(outgoingTransition?.durationMs || 0) / 1000);
+      const padTailSec = Math.max(0.12, Math.min(1.0, Math.max(transitionSec, outgoingTransitionSec) + 0.12));
       const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
       const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
       const videoLabel = `v${index}`;
