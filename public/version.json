@@ -1,9 +1,10 @@
 {
-  "version": "1.0.10.236",
-  "build": "2026-1.0.10.236",
+  "version": "1.0.10.237",
+  "build": "2026-1.0.10.237",
   "branch": "codex-bootstrap",
   "changelog": [
-    "Corregido: hydrateMontageSceneMediaAsset ahora usa el límite de 12MB para audio (getMontageInlineMediaMaxBytes) en lugar del límite de 2.5MB de video, permitiendo que audios Gemini de tamaño normal se incluyan como dataUrl en el payload sin ser descartados y causando montage_timeline_audio_sources_missing.",
+    "Corregido: hasDialogueAudioSource en el reconciler de audio ahora reconoce localMediaCacheKey como fuente válida, evitando que el reconciler deshabilite el timeline audio de escenas con audio solo en IndexedDB.",
+    "Corregido: montage_timeline_audio_sources_missing ya no falla el export completo — si los segmentos no pudieron descargarse, el backend entrega el video sin mezcla de audio en lugar de abortar.",
     "Corregido: buildGeminiTimelineSegments ahora incluye localMediaCacheKey como fuente de src para que segmentos con audio solo en IndexedDB no sean eliminados antes de la hidratación.",
     "Corregido: Las escenas de biblioteca con audio Gemini explícito ahora siempre incluyen su audio en el export.",
     "Corregido: Se eliminó el estiramiento y la lentitud del audio Gemini al generar voz para escenas con duración personalizada, ignorando la velocidad lenta sugerida y evitando el retimado FFmpeg en Firestore.",
@@ -187,5 +188,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.236"
+  "cache_version": "2026-1.0.10.237"
 }

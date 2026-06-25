@@ -11822,7 +11822,12 @@ async function finalizeMontageExportAudioTrack({
       }
     }
     if (input.useTimelineAudio && !segmentInputs.length) {
-      throw new Error("montage_timeline_audio_sources_missing");
+      console.warn("[backend][montage-export][timeline-audio-sources-missing]", {
+        jobId,
+        timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0,
+        hint: "useTimelineAudio=true pero ningún segmento pudo descargarse. El video se entregará sin mezcla de timeline audio."
+      });
+      return nextOutPath;
     }
     if (segmentInputs.length) {
       console.info("[backend][montage-export][timeline-audio-inputs-ready]", {

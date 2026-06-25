@@ -12,6 +12,7 @@ function hasDialogueAudioSource(audio = null) {
       String(audio.storagePath || "").trim()
       || String(audio.downloadUrl || audio.url || "").trim()
       || String(audio.dataUrl || audio.localDataUrl || "").trim()
+      || String(audio.localMediaCacheKey || "").trim()
     )
   );
 }
