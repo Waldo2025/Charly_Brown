@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js?v=2026-06-26.2";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import JASSUB from "../vendor/jassub/jassub.js";
 import {

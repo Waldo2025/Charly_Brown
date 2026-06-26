@@ -54,12 +54,23 @@ export function getSyaGroupedByCategory(meta = {}, sya = {}) {
       .filter((entry) => entry && Object.values(entry.fields).some(Boolean));
     if (items.length) grouped.push({ category, items });
   });
-  return grouped.length ? grouped : buildFallbackGroupedSya(meta, sya);
+  if (grouped.length) return grouped;
+  const selectedCategory = String(meta.category || "").trim();
+  const selectedSubtopic = String(meta.subtopic || "").trim();
+  const hasSpecificSelection = !hasAllSelection(selectedCategory) || !hasAllSelection(selectedSubtopic);
+  return hasSpecificSelection ? [] : buildFallbackGroupedSya(meta, sya);
 }
 
 export function getFocusedSya(meta = {}, sya = {}) {
   const subtopic = String(meta.subtopic || "").trim();
-  if (!subtopic || subtopic === ALL_OPTION) return { category: meta.category || "", subtopic: "", fields: {}, summary: "" };
+  if (!subtopic || subtopic === ALL_OPTION) {
+    return {
+      category: String(meta.category || "").trim(),
+      subtopic: "",
+      fields: { T: "", AE: "", C: "", P: "" },
+      summary: ""
+    };
+  }
   const category = inferCategoryForSubtopic(meta, getCategoriesForGrade(meta.grade), subtopic);
   const fields = buildSubtopicSyaFields(sya, subtopic);
   const summary = [
@@ -145,19 +156,22 @@ function resolveSyaKeyBases(subtopic = "") {
   const safe = String(subtopic || "").trim();
   if (!safe) return [];
   const compact = safe.replace(/\s+/g, "");
-  const lowerFirst = compact ? compact.charAt(0).toLowerCase() + compact.slice(1) : "";
   const normalized = normalizeSyaLookupKey(compact);
-  const aliases = new Set([safe, compact, lowerFirst]);
-  if (compact === "ConocimientoDelMedio" || normalized === "conocimientodelmedio") aliases.add("conocimientoDelMedio");
-  if (compact === "Ortografía" || normalized === "ortografia") aliases.add("Ortografia");
-  if (compact === "ComprensionLectora" || normalized === "comprensionlectora") {
+  const aliases = new Set([safe, compact]);
+  if (normalized === "artes") aliases.add("Artes");
+  if (normalized === "habilidades") aliases.add("Habilidades");
+  if (normalized === "conocimientodelmedio") aliases.add("conocimientoDelMedio");
+  if (normalized === "ortografia") aliases.add("Ortografia");
+  if (normalized === "comprensionlectora" || normalized === "lectura") {
     aliases.add("Lectura");
+    aliases.add("ComprensionLectora");
+    aliases.add("Comprensión lectora");
     aliases.add("ComprensiónLectora");
     aliases.add("Comprension Lectora");
   }
-  if (compact === "ExpresionEscrita" || normalized === "expresionescrita") aliases.add("ExpresiónEscrita");
-  if (compact === "ExpresionOral" || normalized === "expresionoral") aliases.add("ExpresiónOral");
-  if (compact === "Matematicas" || normalized === "matematicas") aliases.add("Matemáticas");
+  if (normalized === "expresionescrita") aliases.add("ExpresiónEscrita");
+  if (normalized === "expresionoral") aliases.add("ExpresiónOral");
+  if (normalized === "matematicas") aliases.add("Matemáticas");
   return Array.from(aliases).filter(Boolean);
 }
 

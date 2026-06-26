@@ -1,5 +1,5 @@
 
-import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js?v=2026-06-25.1";
+import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js?v=2026-06-26.2";
 import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
 import { isReelModeEnabled } from "./podcaster-reels.js";
@@ -223,13 +223,48 @@ function normalizeInlineDataUrl(value = "") {
   return clean.startsWith("data:") ? clean : "";
 }
 
+function isMostlyDarkCanvas(canvas = null) {
+  if (!canvas || typeof canvas.getContext !== "function") return true;
+  const width = Math.max(8, Math.min(32, Math.floor(Number(canvas.width || 0) || 0)));
+  const height = Math.max(8, Math.min(18, Math.floor(Number(canvas.height || 0) || 0)));
+  if (!width || !height) return true;
+  try {
+    const sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = width;
+    sampleCanvas.height = height;
+    const sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+    if (!sampleCtx) return true;
+    sampleCtx.drawImage(canvas, 0, 0, width, height);
+    const { data } = sampleCtx.getImageData(0, 0, width, height);
+    let sum = 0;
+    let active = 0;
+    let bright = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      const alpha = data[i + 3] || 0;
+      if (alpha < 16) continue;
+      const brightness = ((data[i] || 0) + (data[i + 1] || 0) + (data[i + 2] || 0)) / 3;
+      sum += brightness;
+      active += 1;
+      if (brightness >= 42) bright += 1;
+    }
+    if (!active) return true;
+    const avgBrightness = sum / active;
+    const brightRatio = bright / active;
+    return avgBrightness < 26 && brightRatio < 0.08;
+  } catch (_) {
+    return true;
+  }
+}
+
 
 const captureContinuityFrameDataUrl = async (videoSrc = "") => {
   const src = String(videoSrc || "").trim();
   if (!src) return "";
+  const seekFractions = [0.95, 0.86, 0.74, 0.62, 0.5, 0.38, 0.24];
   return new Promise((resolve) => {
     const video = document.createElement("video");
     let done = false;
+    let seekIndex = 0;
     const finish = (value = "") => {
       if (done) return;
       done = true;
@@ -256,7 +291,8 @@ const captureContinuityFrameDataUrl = async (videoSrc = "") => {
           finish("");
           return;
         }
-        const seekTo = Math.max(0, dur - 0.08);
+        seekIndex = 0;
+        const seekTo = Math.max(0, dur * seekFractions[seekIndex]);
         video.currentTime = seekTo;
       } catch (_) {
         clear();
@@ -282,6 +318,18 @@ const captureContinuityFrameDataUrl = async (videoSrc = "") => {
           return;
         }
         ctx.drawImage(video, 0, 0, w, h);
+        if (isMostlyDarkCanvas(canvas)) {
+          seekIndex += 1;
+          if (seekIndex < seekFractions.length) {
+            try {
+              video.currentTime = Math.max(0, Number(video.duration || 0) * seekFractions[seekIndex]);
+              return;
+            } catch (_) { }
+          }
+          clear();
+          finish("");
+          return;
+        }
         const dataUrl = canvas.toDataURL("image/png");
         clear();
         finish(dataUrl);
@@ -289,7 +337,7 @@ const captureContinuityFrameDataUrl = async (videoSrc = "") => {
         clear();
         finish("");
       }
-    }, { once: true });
+    });
     try {
       video.src = src;
       video.load();
@@ -1181,7 +1229,8 @@ async function handlePodcasterGenerationClick(event) {
           selectRow: true,
           syncStage: false,
           silent: false,
-          syncStageAfterGenerate: true
+          syncStageAfterGenerate: true,
+          regenerate: false
         });
       } catch (error) {
         traceVisualReferenceScene("ui-generate-failed", {
@@ -1243,6 +1292,7 @@ async function handlePodcasterGenerationClick(event) {
           syncStage: false,
           silent: false,
           syncStageAfterGenerate: true,
+          regenerate: true,
           enhanceFromExistingVideo: hasStoredMediaSource(existingClip)
         });
       } catch (error) {

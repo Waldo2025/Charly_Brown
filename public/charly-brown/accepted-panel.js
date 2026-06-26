@@ -9,12 +9,16 @@ export function renderAcceptedPanel({
   session,
   readingOptions = [],
   readingFilter = "",
-  onRefreshReadings,
+  onNewSession,
   onFilterReadings,
   onUseReading,
+  onOpenReadingsPanel,
   onEditActivity,
   onRegenerateActivity,
+  onRegenerateResource,
   onRemoveActivity,
+  onOpenUnit,
+  onEditUnitData,
   onGenerateNotesForActivity,
   onGenerateGlobalNotes
 } = {}) {
@@ -25,52 +29,42 @@ export function renderAcceptedPanel({
   const accepted = session?.accepted || {};
   const activities = accepted.activities || [];
   const teacherNotes = accepted.teacherNotes || [];
-  const visibleReadings = filterReadings(readingOptions, readingFilter);
-  const hasEditedSya = hasEditedSyaVersion(session);
   const projectMode = isProjectSelection(session?.meta || {});
+  const hasSessionContent = Boolean(
+    accepted.reading ||
+    accepted.sya ||
+    accepted.resources?.length ||
+    accepted.activities?.length ||
+    teacherNotes.length ||
+    (Array.isArray(session?.messages) && session.messages.length) ||
+    (Array.isArray(session?.proposals) && session.proposals.length) ||
+    (Array.isArray(session?.units) && session.units.length) ||
+    hasVisibleUnit(session)
+  );
 
   if (globalBtn) globalBtn.onclick = () => onGenerateGlobalNotes?.();
 
+  if (!hasSessionContent) {
+    panel.innerHTML = "";
+    return;
+  }
+
+  const hasActiveUnit = hasVisibleUnit(session);
   panel.innerHTML = [
-    renderCollapsibleSection({
-      key: "readings-dock",
-      title: "Lecturas",
-      actions: `<button type="button" data-reading-panel-action="refresh">Cargar</button>`,
-      body: `
-        <input class="cb-reading-search" type="search" value="${escapeHtml(readingFilter)}" placeholder="Filtrar por título, grado, unidad o texto..." aria-label="Filtrar lecturas">
-        <div class="cb-reading-panel-list">
-          ${visibleReadings.length ? visibleReadings.map(renderReadingOption).join("") : `<div class="cb-empty">Carga lecturas para elegir una.</div>`}
-        </div>
-      `,
-      extraClass: "cb-reading-dock",
+    hasActiveUnit ? renderCollapsibleSection({
+      key: "unit-active",
+      title: session.title || "Unidad activa",
+      kicker: "Unidad",
+      actions: `<button type="button" class="cb-text-button" data-unit-action="edit">Datos de la unidad</button>`,
+      body: renderUnitHistory(session),
+      extraClass: "cb-unit-summary-card cb-unit-summary-card--lavender cb-approved-card",
       openByDefault: true
-    }),
+    }) : "",
     accepted.reading
       ? renderSelectedReadingSection(accepted.reading)
       : renderCollapsibleSection({
           key: "reading-selected",
           title: "Lectura",
-          body: `<div class="cb-empty">Pendiente</div>`,
-          extraClass: "cb-approved-card cb-approved-card--empty",
-          openByDefault: true
-        }),
-    accepted.sya
-      ? renderCollapsibleSection({
-          key: "sya",
-          title: "Secuencia y alcance",
-          kicker: "Secuencia",
-          actions: `
-            <button type="button" data-sya-action="edit">Editar</button>
-            ${hasEditedSya ? `<button type="button" data-sya-action="restore">Restaurar original</button>` : ""}
-          `,
-          body: renderSyaSummary(session?.meta || {}, accepted.sya),
-          extraClass: "cb-approved-card",
-          openByDefault: true
-        })
-      : renderCollapsibleSection({
-          key: "sya",
-          title: "Secuencia y alcance",
-          kicker: "Secuencia",
           body: `<div class="cb-empty">Pendiente</div>`,
           extraClass: "cb-approved-card cb-approved-card--empty",
           openByDefault: true
@@ -83,6 +77,13 @@ export function renderAcceptedPanel({
       openByDefault: true
     }),
     renderCollapsibleSection({
+      key: "resources",
+      title: "Recursos aprobados",
+      body: accepted.resources?.length ? accepted.resources.map((resource) => renderResource(resource, onRegenerateResource)).join("") : `<div class="cb-empty">Acepta una ficha, anexo, recortable o guión de video para verlo aquí.</div>`,
+      extraClass: "cb-accepted-section",
+      openByDefault: true
+    }),
+    renderCollapsibleSection({
       key: "teacher-notes",
       title: projectMode ? "Notas del proyecto" : "Notas globales del maestro",
       body: teacherNotes.length ? teacherNotes.map((notes) => renderTeacherNotesBlock(notes)).join("") : `<div class="cb-empty">Genera notas con activities aprobadas.</div>`,
@@ -91,23 +92,21 @@ export function renderAcceptedPanel({
     })
   ].join("");
 
-  panel.querySelector("[data-reading-panel-action='refresh']")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    onRefreshReadings?.();
+  panel.querySelector("[data-reading-panel-action='open']")?.addEventListener("click", () => onOpenReadingsPanel?.());
+  panel.querySelector("[data-sya-panel-action='open']")?.addEventListener("click", () => {
+    root?.dispatchEvent(new CustomEvent("cb:sya-edit"));
   });
-  panel.querySelector(".cb-reading-search")?.addEventListener("input", (event) => onFilterReadings?.(event.target.value));
-  panel.querySelectorAll("[data-reading-action='use']").forEach((button) => {
-    button.addEventListener("click", () => onUseReading?.(button.closest("[data-reading-id]")?.dataset.readingId || ""));
+  panel.querySelectorAll("[data-unit-action='new']").forEach((button) => {
+    button.addEventListener("click", () => onNewSession?.());
   });
-  panel.querySelectorAll("[data-sya-action]").forEach((button) => {
+  panel.querySelectorAll("[data-unit-action='edit']").forEach((button) => {
+    button.addEventListener("click", () => onEditUnitData?.());
+  });
+  panel.querySelectorAll("[data-unit-action='open']").forEach((button) => {
     button.addEventListener("click", () => {
-      const action = button.dataset.syaAction || "";
-      if (action === "edit") {
-        root?.dispatchEvent(new CustomEvent("cb:sya-edit"));
-      }
-      if (action === "restore") {
-        root?.dispatchEvent(new CustomEvent("cb:sya-restore"));
-      }
+      const id = button.closest("[data-unit-id]")?.dataset.unitId || "";
+      if (!id) return;
+      onOpenUnit?.(id);
     });
   });
   panel.querySelectorAll("[data-activity-action]").forEach((button) => {
@@ -117,6 +116,12 @@ export function renderAcceptedPanel({
       if (button.dataset.activityAction === "regenerate") onRegenerateActivity?.(id);
       if (button.dataset.activityAction === "remove") onRemoveActivity?.(id);
       if (button.dataset.activityAction === "notes") onGenerateNotesForActivity?.(id);
+    });
+  });
+  panel.querySelectorAll("[data-resource-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.closest("[data-resource-id]")?.dataset.resourceId || "";
+      if (button.dataset.resourceAction === "regenerate") onRegenerateResource?.(id);
     });
   });
   panel.querySelectorAll("[data-collapse-toggle]").forEach((button) => {
@@ -130,6 +135,29 @@ export function renderAcceptedPanel({
       setCollapsedState(key, next);
     });
   });
+}
+
+function renderUnitHistory(session = {}) {
+  const units = Array.isArray(session?.units) ? session.units : [];
+  if (!units.length) return `<div class="cb-empty cb-unit-history-empty">Aún no hay unidades archivadas en esta sesión.</div>`;
+  return `
+    <section class="cb-unit-history">
+      <p class="cb-panel-kicker">Unidades archivadas</p>
+      <div class="cb-unit-history-list">
+        ${units.slice().reverse().map((unit, index) => `
+          <article class="cb-unit-history-item" data-unit-id="${escapeHtml(unit.id || "")}">
+            <strong>${escapeHtml(unit.title || `Unidad ${index + 1}`)}</strong>
+            <span>${escapeHtml([unit.meta?.grade, unit.meta?.category, unit.meta?.subtopic].filter(Boolean).join(" · "))}</span>
+            <button type="button" data-unit-action="open">Abrir</button>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function hasVisibleUnit(session = {}) {
+  return String(session?.title || "").trim() !== "Nueva unidad" || (Array.isArray(session?.units) && session.units.length > 0);
 }
 
 function renderCollapsibleSection({ key = "", title = "", kicker = "", body = "", actions = "", extraClass = "", openByDefault = true } = {}) {
@@ -230,8 +258,23 @@ function renderSyaSummary(meta = {}, sya = {}) {
   const focus = getFocusedSya(meta, sya);
   const grouped = getSyaGroupedByCategory(meta, sya);
   if (!grouped.length) return `<div class="cb-empty">Secuencia sin campos visibles para esta selección.</div>`;
-  return `
-    ${focus?.subtopic && !hasAllSelection(meta.subtopic) ? `
+  const focusCategory = normalize(focus?.category || "");
+  const focusSubtopic = normalize(focus?.subtopic || "");
+  const hasSpecificFocus = Boolean(focusSubtopic);
+  const filteredGroups = hasSpecificFocus
+    ? grouped
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => {
+            const sameCategory = !focusCategory || normalize(group.category || "") === focusCategory;
+            const sameSubtopic = normalize(item.subtopic || "") === focusSubtopic;
+            return !(sameCategory && sameSubtopic);
+          })
+        }))
+        .filter((group) => group.items.length)
+    : grouped;
+  if (hasSpecificFocus) {
+    return `
       <section class="cb-sya-focus">
         <p class="cb-panel-kicker">S&A activa</p>
         <h4>${escapeHtml(focus.category ? `${focus.category} · ${formatSyaKey(focus.subtopic)}` : formatSyaKey(focus.subtopic))}</h4>
@@ -239,9 +282,28 @@ function renderSyaSummary(meta = {}, sya = {}) {
           ${renderSyaFieldEntries(focus.fields)}
         </dl>
       </section>
-    ` : ""}
+      ${filteredGroups.length ? `
+        <div class="cb-sya-groups">
+          ${filteredGroups.map((group) => `
+            <section class="cb-sya-group">
+              <h4>${escapeHtml(group.category)}</h4>
+              ${group.items.map((item) => `
+                <div class="cb-sya-subtopic">
+                  <strong>${escapeHtml(formatSyaKey(item.subtopic))}</strong>
+                  <dl class="cb-sya-summary">
+                    ${renderSyaFieldEntries(item.fields)}
+                  </dl>
+                </div>
+              `).join("")}
+            </section>
+          `).join("")}
+        </div>
+      ` : ""}
+    `;
+  }
+  return `
     <div class="cb-sya-groups">
-      ${grouped.map((group) => `
+      ${filteredGroups.map((group) => `
         <section class="cb-sya-group">
           <h4>${escapeHtml(group.category)}</h4>
           ${group.items.map((item) => `
@@ -297,6 +359,23 @@ function renderTeacherNotesBlock(notes = {}) {
       <h3>Notas del maestro</h3>
       <div class="cb-approved-html">${notes.html || ""}</div>
     </section>
+  `;
+}
+
+function renderResource(resource = {}, onRegenerateResource) {
+  return `
+    <article class="cb-approved-card cb-resource-card" data-resource-id="${escapeHtml(resource.id)}">
+      <div class="cb-approved-card-head">
+        <strong>${escapeHtml(resource.code || resource.title || "Recurso")}</strong>
+        <div>
+          <button type="button" data-resource-action="regenerate">Regenerar</button>
+        </div>
+      </div>
+      <div class="cb-resource-meta">
+        <span>${escapeHtml(resource.context || resource.type || "Recurso")}</span>
+      </div>
+      <div class="cb-approved-html">${resource.html || ""}</div>
+    </article>
   `;
 }
 

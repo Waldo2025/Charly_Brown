@@ -24,8 +24,10 @@ export const DEFAULT_SESSION = {
   syaContextKey: "",
   messages: [],
   proposals: [],
+  units: [],
   accepted: {
     activities: [],
+    resources: [],
     teacherNotes: [],
     reading: null,
     sya: null,
@@ -80,6 +82,11 @@ export function createStore(initialSession = createEmptySession()) {
       state.session.updatedAt = new Date().toISOString();
       notify();
     },
+    removeMessage(messageId = "") {
+      state.session.messages = state.session.messages.filter((item) => item.id !== messageId);
+      state.session.updatedAt = new Date().toISOString();
+      notify();
+    },
     addProposal(proposal = {}) {
       state.session.proposals.unshift({ id: createId("proposal"), status: "pending", createdAt: new Date().toISOString(), ...proposal });
       state.session.updatedAt = new Date().toISOString();
@@ -87,6 +94,14 @@ export function createStore(initialSession = createEmptySession()) {
     },
     acceptActivity(activity = {}) {
       state.session.accepted.activities.push({ id: activity.id || createId("activity"), notes: [], ...activity, acceptedAt: new Date().toISOString() });
+      state.session.updatedAt = new Date().toISOString();
+      notify();
+    },
+    acceptResources(resources = []) {
+      const items = Array.isArray(resources) ? resources : [resources];
+      items.filter(Boolean).forEach((resource) => {
+        state.session.accepted.resources.push({ id: resource.id || createId("resource"), notes: [], ...resource, acceptedAt: new Date().toISOString() });
+      });
       state.session.updatedAt = new Date().toISOString();
       notify();
     },
@@ -127,10 +142,12 @@ export function normalizeSession(input = {}) {
       ...base.accepted,
       ...(raw.accepted || {}),
       activities: Array.isArray(raw.accepted?.activities) ? raw.accepted.activities : [],
+      resources: Array.isArray(raw.accepted?.resources) ? raw.accepted.resources : [],
       teacherNotes: Array.isArray(raw.accepted?.teacherNotes) ? raw.accepted.teacherNotes : []
     },
     messages: Array.isArray(raw.messages) ? raw.messages : [],
     proposals: Array.isArray(raw.proposals) ? raw.proposals : [],
+    units: Array.isArray(raw.units) ? raw.units : [],
     preferences: Array.isArray(raw.preferences) ? raw.preferences : []
   };
 }

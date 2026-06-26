@@ -9,20 +9,25 @@ export function renderSessionSidebar({ root, sessions = [], activeId = "", onSel
   list.innerHTML = sessions.length ? sessions.map((session) => `
     <article class="cb-session-item ${session.id === activeId ? "is-active" : ""}" data-session-id="${escapeHtml(session.id)}">
       <button type="button" class="cb-session-main" data-session-action="select">
-        <strong>${escapeHtml(session.title || "Unidad sin título")}</strong>
-        <span>${escapeHtml(session.meta?.grade || "Primaria")} · U${escapeHtml(session.meta?.unit || "")}</span>
+        <span class="cb-session-main-line">${escapeHtml(session.title || "Unidad sin título")}</span>
       </button>
-      <div class="cb-session-row-actions">
-        <button type="button" title="Renombrar" data-session-action="rename"><i class="fas fa-pen"></i></button>
-        <button type="button" title="Duplicar" data-session-action="duplicate"><i class="fas fa-copy"></i></button>
-        <button type="button" title="Eliminar" data-session-action="delete"><i class="fas fa-trash"></i></button>
-      </div>
+      <details class="cb-session-menu">
+        <summary class="cb-session-menu-toggle" aria-label="Abrir menú de sesión" title="Más opciones">
+          <i class="fas fa-ellipsis-v" aria-hidden="true"></i>
+        </summary>
+        <div class="cb-session-menu-panel">
+          <button type="button" data-session-action="rename"><i class="fas fa-pen"></i><span>Renombrar</span></button>
+          <button type="button" data-session-action="duplicate"><i class="fas fa-copy"></i><span>Duplicar</span></button>
+          <button type="button" data-session-action="delete"><i class="fas fa-trash"></i><span>Eliminar</span></button>
+        </div>
+      </details>
     </article>
   `).join("") : `<div class="cb-empty">Crea tu primera unidad.</div>`;
 
   if (newBtn) newBtn.onclick = () => onNew?.();
   list.querySelectorAll("[data-session-action]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.closest(".cb-session-menu")) button.closest("details")?.removeAttribute("open");
       const id = button.closest("[data-session-id]")?.dataset.sessionId || "";
       const action = button.dataset.sessionAction;
       const session = sessions.find((item) => item.id === id);

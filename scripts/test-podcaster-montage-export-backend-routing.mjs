@@ -44,7 +44,7 @@ assert.match(
 
 assert.match(
   podcasterHtmlSource,
-  /<script src="js\/runtime-config-loader\.js\?v=2026-06-25\.1" defer><\/script>/,
+  /<script src="js\/runtime-config-loader\.js\?v=2026-06-26\.2" defer><\/script>/,
   "podcaster.html debe forzar la recarga del runtime-config-loader alineado con el split de backends."
 );
 
@@ -148,6 +148,18 @@ assert.match(
   renderYamlSource,
   /name:\s+gemini-veo[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+gemini-veo/,
   "Render debe declarar el rol gemini-veo para activar la separación de servicios en producción."
+);
+
+assert.match(
+  renderYamlSource,
+  /type:\s+web\s+name:\s+snoopy-export[\s\S]*?startCommand:\s+node backend\/server\.js[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+export[\s\S]*?- key:\s+PUBLIC_BACKEND_BASE_URL\s+value:\s+https:\/\/snoopy-export\.onrender\.com[\s\S]*?- key:\s+RENDER_KEY_VALUE_CONNECTION_STRING\s+fromService:/,
+  "Render debe declarar snoopy-export como backend web de export con rol export y cola Redis."
+);
+
+assert.match(
+  renderYamlSource,
+  /type:\s+worker\s+name:\s+charly-brown-podcaster-export-worker[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+export[\s\S]*?- key:\s+PUBLIC_BACKEND_BASE_URL\s+value:\s+https:\/\/snoopy-export\.onrender\.com/,
+  "El worker de export debe usar el rol export y publicar URLs contra snoopy-export."
 );
 
 console.log("Podcaster montage export backend routing OK.");

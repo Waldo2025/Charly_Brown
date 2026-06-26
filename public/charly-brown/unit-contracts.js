@@ -38,7 +38,7 @@ export const ACTIVITY_HTML_CONTRACT = `
 <div class="activity">
   <p><strong>Lee con atención el texto.</strong> Subraya las ideas principales y comenta una evidencia. [IC T. IND]</p>
   <ol class="steps steps-numbered">
-    <li>Subinstrucción<div class="answer"><span style="color:mediumvioletred;">Respuesta: respuesta esperada.</span></div></li>
+    <li>Subinstrucción<div class="answer"><span style="color:magenta;">Respuesta: respuesta esperada.</span></div></li>
   </ol>
 </div>`;
 
@@ -155,7 +155,7 @@ export function buildActivityContractPrompt({ grade = "", category = "", subtopi
     "La instrucción principal debe empezar con un verbo en imperativo dirigido al alumno, por ejemplo: Lee, Observa, Resuelve, Escribe, Subraya, Dibuja o Compara.",
     "Solo la primera oración de la instrucción principal va dentro de <strong> y debe cerrar con punto. El resto del párrafo va en texto normal dentro del mismo <p>.",
     "El identificador [IC T. IND], [IC T. PAR] o [IC T. EQUI] debe quedar al final del mismo párrafo principal, fuera del <strong>.",
-    "Cada subinstrucción debe incluir su propia respuesta esperada dentro de .answer.",
+    "Cada subinstrucción debe incluir su propia respuesta esperada dentro de .answer y esa respuesta debe ir en color magenta para resaltar visualmente cuál es la respuesta esperada.",
     isProjectSelection({ category, subtopic })
       ? "Si el subtema activo es Proyectos, organiza la secuencia como proyecto trimestral por fases, manteniendo la misma estructura .activity en cada fase."
       : "Si no es proyecto, mantén formato de actividades regulares del subtema seleccionado.",

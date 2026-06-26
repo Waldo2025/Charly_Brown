@@ -258,10 +258,10 @@ function normalizeKey(value = "") {
 
 function normalizeQuestions(row = {}) {
   const directSources = collectQuestionSources(row);
-  const normalized = directSources
-    .flatMap((value) => normalizeQuestionSource(value))
-    .filter((item) => item.texto || item.respuesta || item.criterio || item.nivel);
-  if (normalized.length) return dedupeQuestions(normalized);
+  for (const source of directSources) {
+    const normalized = normalizeQuestionSource(source).filter((item) => item.texto || item.respuesta || item.criterio || item.nivel);
+    if (normalized.length) return dedupeQuestions(normalized);
+  }
 
   const htmlFallbacks = [
     row.preguntasHTML,
@@ -281,7 +281,7 @@ function normalizeQuestions(row = {}) {
 }
 
 function collectQuestionSources(row = {}) {
-  const sources = [
+  return [
     row.preguntas,
     row.preguntasComprension,
     row.preguntas_comprension,
@@ -299,8 +299,7 @@ function collectQuestionSources(row = {}) {
     row.rawData?.campos?.preguntas,
     row.rawData?.campos?.preguntasComprension,
     row.rawData?.campos?.preguntas_comprension
-  ];
-  return sources.filter((value) => value != null && value !== "");
+  ].filter((value) => value != null && value !== "");
 }
 
 function normalizeQuestionItem(item = {}) {
@@ -344,10 +343,17 @@ function normalizeQuestionSource(value = "") {
   if (!value) return [];
   if (Array.isArray(value)) return value.map((item) => normalizeQuestionItem(item));
   if (typeof value === "object") {
+    if (value.texto || value.pregunta || value.respuesta || value.nivel || value.criterio) {
+      return [normalizeQuestionItem(value)];
+    }
     if (Array.isArray(value.preguntasComprension)) return value.preguntasComprension.map((item) => normalizeQuestionItem(item));
     if (Array.isArray(value.questions)) return value.questions.map((item) => normalizeQuestionItem(item));
     if (Array.isArray(value.items)) return value.items.map((item) => normalizeQuestionItem(item));
     if (Array.isArray(value.preguntas)) return value.preguntas.map((item) => normalizeQuestionItem(item));
+    const objectValues = Object.values(value);
+    if (objectValues.length && objectValues.every((item) => typeof item === "object" || typeof item === "string")) {
+      return objectValues.flatMap((item) => normalizeQuestionSource(item));
+    }
     const single = normalizeQuestionItem(value);
     return single.texto || single.respuesta || single.criterio || single.nivel ? [single] : [];
   }
@@ -360,10 +366,10 @@ function dedupeQuestions(items = []) {
   const seen = new Set();
   return items.filter((item) => {
     const key = [
-      normalizeKey(item.prompt),
-      normalizeKey(item.answer),
-      normalizeKey(item.criteria),
-      normalizeKey(item.level)
+      normalizeKey(item.texto || item.prompt || item.pregunta),
+      normalizeKey(item.respuesta || item.answer),
+      normalizeKey(item.criterio || item.criteria),
+      normalizeKey(item.nivel || item.level)
     ].join("|");
     if (seen.has(key)) return false;
     seen.add(key);

@@ -15,13 +15,14 @@ Devuelve HTML simple con un título, párrafos completos y cierre. No cortes la 
 `.trim();
 }
 
-export function buildActivitiesPrompt({ session = {}, userText = "" } = {}) {
+export function buildActivitiesPrompt({ session = {}, userText = "", resourceSelections = {} } = {}) {
   const meta = session.meta || {};
   const reading = session.accepted?.reading || session.reading || null;
   const sya = session.accepted?.sya || session.sya || null;
   const focusedSya = getFocusedSya(meta, sya || {});
   const groupedSya = getSyaGroupedByCategory(meta, sya || {});
   const projectRules = buildProjectRules(meta);
+  const resourceBlock = buildResourceBlock(resourceSelections, session);
   const contract = buildActivityContractPrompt({
     grade: meta.grade,
     category: meta.category,
@@ -47,6 +48,29 @@ ${reading ? `${reading.title || ""}\n${stripHtml(reading.html || reading.text ||
 
 Secuencia y alcance del subtema actual:
 ${buildSyaPromptBlock(meta, focusedSya, groupedSya)}
+
+Recursos seleccionados para integrar en la propuesta:
+${resourceBlock}
+
+Regla de recursos:
+- Si un recurso está activado, debes generarlo como bloque propio y visible dentro del HTML final.
+- Usa rótulos claros tipo "Ficha ${resolveUnitCode(meta)}a", "Anexo ${resolveUnitCode(meta)}a", "Recortable ${resolveUnitCode(meta)}a" y "Video ${resolveUnitCode(meta)}a" según corresponda.
+- Cada recurso debe poder aceptarse o rechazarse como parte de la propuesta.
+- No lo escondas dentro de un párrafo genérico.
+- Los recursos son complementos: nunca sustituyen la creación de activities.
+- Aunque el usuario elija recursos, debes devolver al menos un bloque <div class="activity"> completo y válido.
+- Presenta las activities y los recursos en bloques separados. No mezcles el HTML de un recurso dentro de la activity.
+- Si incluyes recursos, menciona el material dentro de la instrucción de la activity, por ejemplo: "Usa la Ficha 1a..." o "Apóyate en el Recortable 2b...".
+- Los anexos son recursos visuales y complementarios.
+- Las fichas son actividades complementarias; pueden relacionarse con la lectura o con la secuencia y alcance.
+- Si el recurso activado es Recortable, la activity debe invitar a usarlo de forma dinámica dentro del ejercicio, integrándolo como parte del trabajo práctico y no como una simple mención.
+- Si el recurso activado es Recortable, la activity debe dejar un espacio visible debajo para que el alumno pegue o acomode el recortable en su trabajo.
+- Incluye una indicación clara como "Pega aquí tu recortable" o equivalente, sin volver mecánica la actividad.
+- Evita ejercicios mecánicos o aislados; prioriza propuestas divertidas, educativas y aplicadas al contenido.
+- Si el recurso activado es Video, debes devolver una tabla de guión creativo del video con columnas fijas: Escena, Tiempo, Voz en off, Elemento visual, Texto en pantalla y Transición.
+- La voz en off de cada escena debe tener entre 12 y 17 palabras.
+- El elemento visual debe describir con precisión qué se ve en pantalla, de forma concreta y accionable.
+- Cada fila del guión de video debe ser una escena distinta y completa.
 
 Regla pedagógica:
 - Antes de diseñar las activities, analiza primero esa secuencia y alcance y asegúrate de que las actividades cubran explícitamente T, AE, C y P de la selección activa.
@@ -125,6 +149,7 @@ Importante sobre el bloque actual:
 - No devuelvas solo la primera activity.
 - No elimines fases, preguntas ni respuestas esperadas.
 - Si el proyecto tiene varias fases, cada fase debe seguir presente después del refinamiento.
+- Si existen recursos asociados, también deben permanecer como bloques separados y visibles.
 
 Petición adicional:
 ${userText || "Refina la propuesta sin cambiar el contenido base."}
@@ -232,15 +257,71 @@ export async function generateReading({ session = {}, userText = "", model = "ge
   return { title: extractTitle(html) || "Lectura generada", html, prompt };
 }
 
-export async function generateActivities({ session = {}, userText = "", model = "gemini-2.5-flash" } = {}) {
-  const prompt = buildActivitiesPrompt({ session, userText });
+export async function generateActivities({ session = {}, userText = "", model = "gemini-2.5-flash", resourceSelections = {} } = {}) {
+  const prompt = buildActivitiesPrompt({ session, userText, resourceSelections });
   const rawHtml = await generateWithGemini({ model, prompt });
-  const html = normalizeActivityHtml(rawHtml);
+  let html = normalizeActivityHtml(rawHtml);
+  let validation = validateActivityHtml(html);
+  if (!validation.ok) {
+    const retryPrompt = `${prompt}\n\nREINTENTO OBLIGATORIO:\n- Devuelve al menos un bloque <div class="activity"> completo y válido.\n- Conserva la estructura .activity, ol.steps.steps-numbered y .answer.\n- Si además hay recursos seleccionados, inclúyelos como bloques adicionales, pero no elimines las activities.\n- No devuelvas únicamente fichas, anexos, recortables o guiones de video.`;
+    html = normalizeActivityHtml(await generateWithGemini({ model, prompt: retryPrompt }));
+    validation = validateActivityHtml(html);
+  }
   return {
     html,
     prompt,
-    validation: validateActivityHtml(html)
+    validation
   };
+}
+
+function buildResourceBlock(resourceSelections = {}, session = {}) {
+  const labels = [
+    ["fichas", "Fichas"],
+    ["anexos", "Anexos"],
+    ["recortables", "Recortables"],
+    ["videos", "Guión de video"]
+  ];
+  const counts = buildResourceTypeCounts(session);
+  const active = labels
+    .filter(([key]) => Boolean(resourceSelections[key]))
+    .map(([key, label]) => `- ${label} (${buildResourceCode(session.meta || {}, key, counts[key] || 0)})`);
+  if (!active.length) return "- Sin recursos adicionales seleccionados.";
+  return active.join("\n");
+}
+
+function buildResourceTypeCounts(session = {}) {
+  const counts = { fichas: 0, anexos: 0, recortables: 0, videos: 0 };
+  const accepted = Array.isArray(session.accepted?.resources) ? session.accepted.resources : [];
+  accepted.forEach((resource) => {
+    const type = normalizeResourceType(resource.type || resource.context || resource.title || "");
+    if (type === "ficha") counts.fichas += 1;
+    if (type === "anexo") counts.anexos += 1;
+    if (type === "recortable") counts.recortables += 1;
+    if (type === "video") counts.videos += 1;
+  });
+  return counts;
+}
+
+function buildResourceCode(meta = {}, resourceKey = "", count = 0) {
+  const unit = resolveUnitCode(meta);
+  const suffix = String.fromCharCode(97 + Math.max(0, count));
+  const label = resourceKey === "anexos" ? "Anexo" : resourceKey === "recortables" ? "Recortable" : resourceKey === "videos" ? "Video" : "Ficha";
+  return `${label} ${unit}${suffix}`;
+}
+
+function resolveUnitCode(meta = {}) {
+  const raw = String(meta.unit || "").trim();
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : raw || "1";
+}
+
+function normalizeResourceType(value = "") {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("ficha")) return "ficha";
+  if (text.includes("anexo")) return "anexo";
+  if (text.includes("recortable")) return "recortable";
+  if (text.includes("video") || text.includes("guion")) return "video";
+  return "";
 }
 
 export async function refineActivities({ session = {}, currentHtml = "", difficulty = "normal", userText = "", model = "gemini-2.5-flash" } = {}) {

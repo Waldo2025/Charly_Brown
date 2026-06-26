@@ -53,12 +53,13 @@
     </header>
 
     <aside class="cb-unit-sessions" aria-label="Sesiones">
+      <div id="cbSessionsResizeHandle" class="cb-sessions-resize-handle" aria-hidden="true"></div>
       <div class="cb-panel-head">
         <div>
           <p class="cb-panel-kicker">Unidades</p>
           <h1>Charly Brown</h1>
         </div>
-        <button type="button" id="cbNewSessionBtn" class="cb-icon-button cb-icon-button--primary" aria-label="Nueva unidad" title="Nueva unidad">
+        <button type="button" id="cbNewSessionBtn" class="cb-icon-button cb-icon-button--primary" aria-label="Nueva sesión" title="Nueva sesión">
           <i class="fas fa-plus"></i>
         </button>
       </div>
@@ -75,68 +76,22 @@
       <div class="cb-panel-head">
         <div>
           <p class="cb-panel-kicker">Aprobado</p>
-          <h2>Listo para usar</h2>
         </div>
-        <button type="button" id="cbGenerateGlobalNotesBtn" class="cb-text-button">Notas con aprobadas</button>
+        <div class="cb-panel-head-actions">
+          <button type="button" id="cbOpenReadingsBtn" class="cb-icon-button" aria-label="Abrir lecturas" title="Abrir lecturas">
+            <i class="fas fa-book-open" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbOpenSyaBtn" class="cb-icon-button" aria-label="Abrir secuencia y alcance" title="Abrir secuencia y alcance">
+            <i class="fas fa-list-check" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbNewUnitBtn" class="cb-icon-button" aria-label="Añadir nueva unidad" title="Añadir nueva unidad">
+            <i class="fas fa-plus" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbGenerateGlobalNotesBtn" class="cb-text-button">Notas con aprobadas</button>
+        </div>
       </div>
-      <section class="cb-setup-panel-shell" aria-label="Datos de la unidad">
-        <button type="button" id="cbToggleSetupPanelBtn" class="cb-setup-panel-toggle" aria-expanded="true" aria-controls="cbSetupPanelBody">
-          <span>Datos de la unidad</span>
-          <i class="fas fa-chevron-up" aria-hidden="true"></i>
-        </button>
-        <div id="cbSetupPanelBody" class="cb-setup-panel cb-setup-panel--side">
-          <div class="cb-field-group">
-            <label for="cbLevelSelect">Nivel</label>
-            <select id="cbLevelSelect">
-              <option value="Preescolar">Preescolar</option>
-              <option value="Primaria" selected>Primaria</option>
-              <option value="Secundaria">Secundaria</option>
-            </select>
-          </div>
-          <div class="cb-field-group">
-            <label for="cbModeSelect">Voy a crear</label>
-            <select id="cbModeSelect">
-              <option value="Alumno">Alumno</option>
-              <option value="Maestro">Maestro</option>
-            </select>
-          </div>
-          <div class="cb-field-group">
-            <label for="cbGradeSelect">Grado</label>
-            <select id="cbGradeSelect"></select>
-          </div>
-          <div class="cb-field-group">
-            <label for="cbTrimesterSelect">Trimestre</label>
-            <select id="cbTrimesterSelect">
-              <option>1</option>
-              <option selected>2</option>
-              <option>3</option>
-            </select>
-          </div>
-          <div class="cb-field-group">
-            <label for="cbUnitSelect">Unidad</label>
-            <select id="cbUnitSelect">
-              <option>1</option>
-              <option>2</option>
-              <option selected>3</option>
-              <option>4</option>
-            </select>
-          </div>
-          <div class="cb-field-group">
-            <label for="cbCategorySelect">Categoría</label>
-            <select id="cbCategorySelect"></select>
-          </div>
-          <div class="cb-field-group">
-            <label for="cbSubtopicSelect">Subtema</label>
-            <select id="cbSubtopicSelect"></select>
-          </div>
-          <div class="cb-field-group cb-field-group--wide">
-            <label for="cbEditionInput">Edición</label>
-            <select id="cbEditionInput"></select>
-          </div>
-        </div>
-      </section>
       <div id="cbAcceptedPanel" class="cb-accepted-list"></div>
-    </aside>
+  </aside>
   </main>
 
   <footer class="cb-composer-footer" aria-label="Escritura del chat">
@@ -147,6 +102,112 @@
       </button>
     </form>
   </footer>
+
+  <div id="cbSyaModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="sya"></div>
+    <section class="cb-modal-panel" role="dialog" aria-modal="true" aria-labelledby="cbSyaModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Secuencia y alcance</p>
+          <h2 id="cbSyaModalTitle">Editar secuencia y alcance</h2>
+          <p class="cb-modal-subtitle">Edita los campos en texto plano. La versión original se conserva intacta.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="sya" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div id="cbSyaModalEditor" class="cb-sya-editor" aria-label="Editor de secuencia y alcance"></div>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" data-modal-close="sya">Cancelar</button>
+        <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbSyaModalSave">Guardar cambio</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbResourcesModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="resources"></div>
+    <section class="cb-modal-panel cb-modal-panel--compact" role="dialog" aria-modal="true" aria-labelledby="cbResourcesModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Recursos</p>
+          <h2 id="cbResourcesModalTitle">Antes de generar actividades</h2>
+          <p class="cb-modal-subtitle">Elige uno o varios recursos para integrarlos de forma natural en la propuesta.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="resources" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div class="cb-resource-grid" role="group" aria-label="Seleccionar recursos">
+          <button type="button" class="cb-resource-option" data-resource-toggle="fichas" aria-pressed="false">
+            <strong>Fichas</strong>
+            <span>Actividades imprimibles y guiadas.</span>
+          </button>
+          <button type="button" class="cb-resource-option" data-resource-toggle="anexos" aria-pressed="false">
+            <strong>Anexos</strong>
+            <span>Apoyos visuales, tablas o láminas.</span>
+          </button>
+          <button type="button" class="cb-resource-option" data-resource-toggle="recortables" aria-pressed="false">
+            <strong>Recortables</strong>
+            <span>Piezas manipulables para armar o clasificar.</span>
+          </button>
+          <button type="button" class="cb-resource-option" data-resource-toggle="videos" aria-pressed="false">
+            <strong>Guión de video</strong>
+            <span>Escena breve para modelado o explicación.</span>
+          </button>
+        </div>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" data-modal-close="resources">Cancelar</button>
+        <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbResourcesModalContinue">Continuar</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbUnitDataModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="unit-data"></div>
+    <section class="cb-modal-panel" role="dialog" aria-modal="true" aria-labelledby="cbUnitDataModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Unidad</p>
+          <h2 id="cbUnitDataModalTitle">Datos de la unidad</h2>
+          <p class="cb-modal-subtitle">Corrige la configuración de esta unidad sin salir del panel.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="unit-data" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div id="cbUnitDataModalEditor" class="cb-sya-editor"></div>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" data-modal-close="unit-data">Cancelar</button>
+        <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbUnitDataModalSave">Guardar cambio</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbReadingsModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="readings"></div>
+    <section class="cb-modal-panel cb-modal-panel--wide" role="dialog" aria-modal="true" aria-labelledby="cbReadingsModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Lecturas</p>
+          <h2 id="cbReadingsModalTitle">Elegir lectura</h2>
+          <p class="cb-modal-subtitle">Filtra y selecciona una lectura para esta unidad.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="readings" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <input id="cbReadingSearchModal" class="cb-reading-search" type="search" value="" placeholder="Filtrar por título, grado, unidad o texto..." aria-label="Filtrar lecturas">
+        <div id="cbReadingModalList" class="cb-reading-panel-list"></div>
+      </div>
+    </section>
+  </div>
 
   <script type="module" src="js/chromeLayout.js?v=2026-1.0.0.72"></script>
   <script type="module" src="js/sidebar.js"></script>

@@ -6,7 +6,7 @@ import { createChatController, renderProposalMessage } from "./chat-controller.j
 import { generateActivities, generateChatReply, generateReading, refineActivities } from "./unit-generator.js";
 import { getStaticGeminiTextModels, listGeminiModels } from "./gemini-client.js";
 import { generateTeacherNotes } from "./teacher-notes-generator.js";
-import { loadSyaForMeta } from "./sya-service.js";
+import { loadSyaForMeta, getFocusedSya } from "./sya-service.js";
 import { listReadingsForUnit, saveGeneratedReading } from "./reading-service.js";
 import { ALL_OPTION, getCategoriesForGrade, getGradesForLevel, getWorkModeLabel, isProjectSelection } from "./unit-contracts.js";
 import { routeUserIntent } from "./user-intent.js";
@@ -23,9 +23,20 @@ let readingLoadSeq = 0;
 let syaLoadTimer = null;
 let syaLoadSeq = 0;
 let transientNoticeTimer = null;
+let pendingSyaModalResolver = null;
+let pendingResourcesModalResolver = null;
+let pendingResourceSelections = {
+  fichas: false,
+  anexos: false,
+  recortables: false,
+  videos: false
+};
 const DEFAULT_ACCEPTED_WIDTH = 360;
 const MIN_ACCEPTED_WIDTH = 280;
 const MAX_ACCEPTED_WIDTH = 760;
+const DEFAULT_SESSIONS_WIDTH = 280;
+const MIN_SESSIONS_WIDTH = 220;
+const MAX_SESSIONS_WIDTH = 420;
 const SETUP_PANEL_COLLAPSED_KEY = "cbSetupPanelCollapsed";
 let chatController = null;
 
@@ -37,10 +48,15 @@ export async function boot() {
   renderCategoryAndSubtopicControls(defaultMeta);
   renderEditionOptions(defaultMeta.edition);
   bindMetaControls();
+  bindSessionsPanelControls();
   bindAcceptedPanelControls();
   bindSetupPanelToggle();
   bindComposerFooterLayout();
   bindSyaEditingControls();
+  bindResourcesModalControls();
+  bindReadingsModalControls();
+  bindSyaModalOpenButton();
+  bindUnitDataModalControls();
   renderGeminiModelOptions();
   chatController = createChatController({ root, store, onAction: handleAction, onUserMessage: handleUserMessage });
   bindProposalActions();
@@ -76,7 +92,7 @@ function renderAll(state) {
     root,
     sessions: state.sessions,
     activeId: state.session.id,
-    onNew: newSession,
+    onNew: createNewSession,
     onSelect: selectSession,
     onRename: renameSession,
     onDuplicate: duplicateSelectedSession,
@@ -87,14 +103,18 @@ function renderAll(state) {
     session: state.session,
     readingOptions: currentReadingOptions,
     readingFilter,
-    onRefreshReadings: handleSelectReading,
+    onNewSession: newUnit,
     onFilterReadings: (value) => {
       readingFilter = value;
       renderAll(store.getState());
     },
     onUseReading: useReadingById,
+    onOpenReadingsPanel: openReadingsModal,
     onEditActivity: editActivity,
     onRegenerateActivity: regenerateActivity,
+    onRegenerateResource: regenerateResource,
+    onOpenUnit: openArchivedUnit,
+    onEditUnitData: openUnitDataModal,
     onRemoveActivity: (id) => {
       store.removeActivity(id);
       persist();
@@ -102,6 +122,7 @@ function renderAll(state) {
     onGenerateNotesForActivity: (id) => handleGenerateTeacherNotes(id),
     onGenerateGlobalNotes: () => handleGenerateTeacherNotes("")
   });
+  document.getElementById("cbNewUnitBtn")?.addEventListener("click", newUnit);
   syncComposerFooterLayout();
 }
 
@@ -170,14 +191,133 @@ async function refreshSessions() {
   scheduleSyaReload({ silent: true, delay: 0, replaceExisting: true });
 }
 
-async function newSession() {
-  const session = createEmptySession({ title: "Nueva unidad" });
-  store.setSession(session);
-  syncMetaControls(session);
+async function newUnit() {
+  const current = store.getState().session;
+  const archivedUnit = snapshotCurrentUnit(current);
+  const nextTitle = `Unidad ${String((current.units || []).length + 1).padStart(2, "0")}`;
+  const next = createEmptySession({
+    id: current.id,
+    title: nextTitle,
+    meta: { ...(current.meta || {}) },
+    units: [...(current.units || []), archivedUnit]
+  });
+  store.setSession(next);
+  syncMetaControls(next);
+  flashWorkingStatus("Working");
   await persist();
+  scheduleReadingsReload({ silent: true, delay: 0 });
+  scheduleSyaReload({ silent: true, delay: 0, replaceExisting: true });
+}
+
+async function createNewSession() {
+  await persist();
+  const next = createEmptySession({ title: "Nueva sesión" });
+  store.setSession(next);
+  syncMetaControls(next);
+  await saveSession(next);
   await refreshSessions();
   scheduleReadingsReload({ silent: true, delay: 0 });
   scheduleSyaReload({ silent: true, delay: 0, replaceExisting: true });
+}
+
+function openUnitDataModal() {
+  const modal = document.getElementById("cbUnitDataModal");
+  const editor = document.getElementById("cbUnitDataModalEditor");
+  if (!modal || !editor) return;
+  const session = store.getState().session;
+  const meta = session.meta || {};
+  editor.innerHTML = buildUnitDataEditor(meta);
+  modal.hidden = false;
+  modal.setAttribute("aria-hidden", "false");
+  modal.inert = false;
+  editor.querySelector("select, input")?.focus();
+  const saveBtn = document.getElementById("cbUnitDataModalSave");
+  saveBtn.onclick = () => {
+    const data = readUnitDataEditor(editor);
+    store.updateMeta(data);
+    syncMetaControls(store.getState().session);
+    closeUnitDataModal();
+    persist();
+    scheduleReadingsReload({ silent: true, delay: 0 });
+    scheduleSyaReload({ silent: true, delay: 0, replaceExisting: true });
+  };
+}
+
+function openReadingsModal() {
+  const modal = document.getElementById("cbReadingsModal");
+  const search = document.getElementById("cbReadingSearchModal");
+  if (!modal) return;
+  modal.hidden = false;
+  modal.setAttribute("aria-hidden", "false");
+  modal.inert = false;
+  if (search) search.value = readingFilter || "";
+  renderReadingsModal();
+  search?.focus();
+}
+
+function closeReadingsModal() {
+  const modal = document.getElementById("cbReadingsModal");
+  if (!modal || modal.hidden) return;
+  const active = document.activeElement;
+  if (active && modal.contains(active) && typeof active.blur === "function") active.blur();
+  modal.hidden = true;
+  modal.setAttribute("aria-hidden", "true");
+  modal.inert = true;
+}
+
+function openArchivedUnit(unitId = "") {
+  const current = store.getState().session;
+  const archived = (current.units || []).find((unit) => unit.id === unitId);
+  if (!archived) return;
+  const next = createEmptySession({
+    id: current.id,
+    title: archived.title || "Nueva unidad",
+    meta: { ...(archived.meta || current.meta || {}) },
+    reading: archived.reading || null,
+    sya: archived.sya || null,
+    syaOriginal: archived.syaOriginal || null,
+    syaContextKey: archived.syaContextKey || "",
+    messages: Array.isArray(archived.messages) ? [...archived.messages] : [],
+    proposals: Array.isArray(archived.proposals) ? [...archived.proposals] : [],
+    accepted: {
+      activities: Array.isArray(archived.accepted?.activities) ? [...archived.accepted.activities] : [],
+      resources: Array.isArray(archived.accepted?.resources) ? [...archived.accepted.resources] : [],
+      teacherNotes: Array.isArray(archived.accepted?.teacherNotes) ? [...archived.accepted.teacherNotes] : [],
+      reading: archived.accepted?.reading || null,
+      sya: archived.accepted?.sya || null,
+      syaOriginal: archived.accepted?.syaOriginal || null
+    },
+    units: Array.isArray(current.units) ? [...current.units] : current.units || [],
+    preferences: Array.isArray(archived.preferences) ? [...archived.preferences] : []
+  });
+  store.setSession(next);
+  syncMetaControls(next);
+  scheduleReadingsReload({ silent: true, delay: 0 });
+  scheduleSyaReload({ silent: true, delay: 0, replaceExisting: true });
+}
+
+function snapshotCurrentUnit(session = {}) {
+  return {
+    id: createId("unit"),
+    title: session.title || "Nueva unidad",
+    createdAt: session.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    meta: { ...(session.meta || {}) },
+    reading: session.reading || null,
+    sya: session.sya || null,
+    syaOriginal: session.syaOriginal || null,
+    syaContextKey: session.syaContextKey || "",
+    messages: Array.isArray(session.messages) ? [...session.messages] : [],
+    proposals: Array.isArray(session.proposals) ? [...session.proposals] : [],
+    accepted: {
+      activities: Array.isArray(session.accepted?.activities) ? [...session.accepted.activities] : [],
+      resources: Array.isArray(session.accepted?.resources) ? [...session.accepted.resources] : [],
+      teacherNotes: Array.isArray(session.accepted?.teacherNotes) ? [...session.accepted.teacherNotes] : [],
+      reading: session.accepted?.reading || null,
+      sya: session.accepted?.sya || null,
+      syaOriginal: session.accepted?.syaOriginal || null
+    }
+  };
 }
 
 function selectSession(session) {
@@ -207,7 +347,7 @@ async function deleteSelectedSession(session) {
   if (!session || !confirm("¿Eliminar esta sesión?")) return;
   await deleteSession(session.id);
   await refreshSessions();
-  if (!store.getState().sessions.length) await newSession();
+  if (!store.getState().sessions.length) await createNewSession();
 }
 
 async function handleUserMessage(text) {
@@ -336,13 +476,21 @@ async function handleLoadSya({ silent = false, replaceExisting = false } = {}) {
 
 async function handleGenerateActivities(userText = "") {
   await ensureSyaReadyForGeneration();
+  const resourceSelections = await openResourcesModal();
+  if (!resourceSelections) return;
+  pendingResourceSelections = resourceSelections;
   const session = store.getState().session;
-  const workMode = getWorkModeLabel(session.meta || {});
+  const titlePrefix = buildGeneratedActivityTitle(session.meta || {});
   chatController?.showTransientStatus("Working");
   try {
-    const result = await generateActivities({ session, userText, model: session.meta?.model }).catch((error) => ({ error }));
+    const result = await generateActivities({
+      session,
+      userText,
+      model: session.meta?.model,
+      resourceSelections
+    }).catch((error) => ({ error }));
     if (result.error) return store.addMessage({ role: "assistant", text: `No pude generar activities: ${result.error.message}` });
-    const proposal = { id: createId("proposal"), title: workMode === "proyecto" ? "Proyecto generado" : "Activities generadas", html: result.html, validation: result.validation };
+    const proposal = { id: createId("proposal"), title: titlePrefix, html: result.html, validation: result.validation };
     store.addProposal(proposal);
     store.addMessage({ role: "assistant", html: renderProposalMessage(proposal) });
     flashWorkingStatus();
@@ -354,6 +502,34 @@ async function handleGenerateActivities(userText = "") {
 
 function bindProposalActions() {
   document.addEventListener("click", async (event) => {
+    const resourceButton = event.target.closest?.("[data-resource-proposal-action]");
+    if (resourceButton) {
+      const resourceCard = resourceButton.closest("[data-resource-proposal-index]");
+      const proposalId = resourceCard?.closest("[data-proposal-id]")?.dataset.proposalId || "";
+      const proposal = (store.getState().session.proposals || []).find((item) => item.id === proposalId);
+      if (!proposal) return;
+      const resources = extractResourceBlocks(proposal.html);
+      const index = Number(resourceCard?.dataset.resourceProposalIndex || -1);
+      const resource = Number.isInteger(index) && index >= 0 ? resources[index] : null;
+      if (!resource) return;
+      const action = resourceButton.dataset.resourceProposalAction;
+      if (action === "accept") {
+        store.acceptResources([{
+          ...resource,
+          sourceProposalId: proposal.id,
+          context: buildResourceContextLabel(resource.type)
+        }]);
+        flashWorkingStatus();
+        await persist();
+      }
+      if (action === "reject") {
+        store.addPreference(`No repetir el recurso ${buildResourceContextLabel(resource.type)} rechazado; corrige el diseño del material en la siguiente generación.`);
+        flashWorkingStatus();
+        await persist();
+      }
+      return;
+    }
+
     const button = event.target.closest?.("[data-proposal-action]");
     if (!button) return;
     const proposalId = button.closest("[data-proposal-id]")?.dataset.proposalId || "";
@@ -368,7 +544,16 @@ function bindProposalActions() {
         return;
       }
       const workMode = getWorkModeLabel(store.getState().session.meta || {});
-      store.acceptActivity({ title: proposal.title || (workMode === "proyecto" ? "Proyecto aprobado" : "Activity aprobada"), html: proposal.html });
+      const resources = extractResourceBlocks(proposal.html);
+      const activityHtml = stripResourceBlocks(proposal.html);
+      store.acceptActivity({ title: proposal.title || (workMode === "proyecto" ? "Proyecto aprobado" : "Activity aprobada"), html: activityHtml });
+      if (resources.length) {
+        store.acceptResources(resources.map((resource) => ({
+          ...resource,
+          sourceProposalId: proposal.id,
+          context: buildResourceContextLabel(resource.type)
+        })));
+      }
       flashWorkingStatus();
       await persist();
     }
@@ -477,9 +662,41 @@ async function regenerateActivity(activityId = "") {
   await handleGenerateActivities(`Regenera esta activity aprobada mejorando claridad y estructura:\n${stripHtml(activity.html)}`);
 }
 
+async function regenerateResource(resourceId = "") {
+  const session = store.getState().session;
+  const resource = session.accepted.resources.find((item) => item.id === resourceId);
+  if (!resource) return;
+  chatController?.showTransientStatus("Working");
+  try {
+    const result = await generateActivities({
+      session,
+      userText: `Regenera solo el recurso ${buildResourceContextLabel(resource.type)} con el mismo contexto, la misma unidad y la misma secuencia, pero redactado nuevamente.`,
+      model: session.meta?.model,
+      resourceSelections: resourceSelectionsForType(resource.type)
+    }).catch((error) => ({ error }));
+    if (result.error) return store.addMessage({ role: "assistant", text: `No pude regenerar el recurso: ${result.error.message}` });
+    const refreshed = extractResourceBlocks(result.html).find((item) => item.type === resource.type);
+    if (!refreshed) {
+      store.addMessage({ role: "assistant", text: "La regeneración no devolvió el recurso esperado." });
+      return;
+    }
+    store.setSession({
+      ...session,
+      accepted: {
+        ...session.accepted,
+        resources: session.accepted.resources.map((item) => item.id === resourceId ? { ...item, ...refreshed, acceptedAt: new Date().toISOString() } : item)
+      }
+    });
+    await persist();
+  } finally {
+    chatController?.clearTransientStatus();
+  }
+}
+
 async function handleRefineProposal(proposal = {}, { difficulty = "normal", userText = "" } = {}) {
   await ensureSyaReadyForGeneration();
   const session = store.getState().session;
+  const titlePrefix = buildGeneratedActivityTitle(session.meta || {}, difficulty);
   chatController?.showTransientStatus("Working");
   try {
     const result = await refineActivities({
@@ -492,7 +709,7 @@ async function handleRefineProposal(proposal = {}, { difficulty = "normal", user
     if (result.error) return store.addMessage({ role: "assistant", text: `No pude refinar activities: ${result.error.message}` });
     const nextProposal = {
       id: createId("proposal"),
-      title: difficulty === "challenging" || difficulty === "expert" ? "Activities generadas · más difícil" : "Activities generadas · más fácil",
+      title: titlePrefix,
       html: result.html,
       validation: result.validation
     };
@@ -556,6 +773,34 @@ function bindAcceptedPanelControls() {
   });
 }
 
+function bindSessionsPanelControls() {
+  const handle = document.getElementById("cbSessionsResizeHandle");
+  const savedWidth = Number(localStorage.getItem("cbSessionsPanelWidth") || DEFAULT_SESSIONS_WIDTH);
+  setSessionsPanelWidth(savedWidth);
+
+  handle?.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = Number(getComputedStyle(document.documentElement).getPropertyValue("--cb-sessions-width").replace("px", "")) || DEFAULT_SESSIONS_WIDTH;
+    handle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add("cb-is-resizing-panel");
+
+    const move = (moveEvent) => {
+      const nextWidth = startWidth + (moveEvent.clientX - startX);
+      setSessionsPanelWidth(nextWidth);
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.body.classList.remove("cb-is-resizing-panel");
+      localStorage.setItem("cbSessionsPanelWidth", String(getSessionsPanelWidth()));
+      syncComposerFooterLayout();
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+}
+
 function bindSyaEditingControls() {
   root.addEventListener("cb:sya-edit", () => {
     editSyaForCurrentSession();
@@ -563,6 +808,96 @@ function bindSyaEditingControls() {
   root.addEventListener("cb:sya-restore", () => {
     restoreOriginalSyaForCurrentSession();
   });
+  const modal = document.getElementById("cbSyaModal");
+  const editor = document.getElementById("cbSyaModalEditor");
+  const saveBtn = document.getElementById("cbSyaModalSave");
+
+  modal?.addEventListener("click", (event) => {
+    if (event.target?.dataset?.modalClose === "sya") {
+      pendingSyaModalResolver?.({ action: "cancel" });
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (pendingResourcesModalResolver) {
+      pendingResourcesModalResolver?.({ action: "cancel" });
+      return;
+    }
+    pendingSyaModalResolver?.({ action: "cancel" });
+  });
+  saveBtn?.addEventListener("click", () => {
+    pendingSyaModalResolver?.({ action: "save", value: serializeSyaEditor(editor) });
+  });
+}
+
+function bindUnitDataModalControls() {
+  const modal = document.getElementById("cbUnitDataModal");
+  modal?.addEventListener("click", (event) => {
+    if (event.target?.dataset?.modalClose === "unit-data") {
+      closeUnitDataModal();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeUnitDataModal();
+  });
+}
+
+function bindResourcesModalControls() {
+  const modal = document.getElementById("cbResourcesModal");
+  const continueBtn = document.getElementById("cbResourcesModalContinue");
+  modal?.addEventListener("click", (event) => {
+    const close = event.target?.dataset?.modalClose === "resources" || event.target.closest?.("[data-modal-close='resources']");
+    if (close) pendingResourcesModalResolver?.({ action: "cancel" });
+    const toggle = event.target.closest?.("[data-resource-toggle]");
+    if (!toggle) return;
+    const key = String(toggle.dataset.resourceToggle || "").trim();
+    if (!key || !(key in pendingResourceSelections)) return;
+    pendingResourceSelections = {
+      ...pendingResourceSelections,
+      [key]: !pendingResourceSelections[key]
+    };
+    syncResourceModalUi();
+  });
+  continueBtn?.addEventListener("click", () => {
+    pendingResourcesModalResolver?.({ action: "save", value: { ...pendingResourceSelections } });
+  });
+}
+
+function bindReadingsModalControls() {
+  const modal = document.getElementById("cbReadingsModal");
+  const openBtn = document.getElementById("cbOpenReadingsBtn");
+  const search = document.getElementById("cbReadingSearchModal");
+  const list = document.getElementById("cbReadingModalList");
+
+  openBtn?.addEventListener("click", openReadingsModal);
+  modal?.addEventListener("click", (event) => {
+    const close = event.target?.dataset?.modalClose === "readings" || event.target.closest?.("[data-modal-close='readings']");
+    if (close) closeReadingsModal();
+  });
+  search?.addEventListener("input", (event) => {
+    readingFilter = event.target.value;
+    renderReadingsModal();
+  });
+  list?.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-reading-action='use']");
+    if (!button) return;
+    const id = button.closest("[data-reading-id]")?.dataset.readingId || "";
+    if (!id) return;
+    useReadingById(id);
+    closeReadingsModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeReadingsModal();
+  });
+}
+
+function bindSyaModalOpenButton() {
+  const openBtn = document.getElementById("cbOpenSyaBtn");
+  openBtn?.addEventListener("click", openSyaPanel);
+}
+
+function openSyaPanel() {
+  editSyaForCurrentSession();
 }
 
 function updateProjectModeUi(meta = {}) {
@@ -597,8 +932,18 @@ function setAcceptedPanelWidth(width = DEFAULT_ACCEPTED_WIDTH) {
   syncComposerFooterLayout();
 }
 
+function setSessionsPanelWidth(width = DEFAULT_SESSIONS_WIDTH) {
+  const safe = Math.min(MAX_SESSIONS_WIDTH, Math.max(MIN_SESSIONS_WIDTH, Number(width) || DEFAULT_SESSIONS_WIDTH));
+  document.documentElement.style.setProperty("--cb-sessions-width", `${safe}px`);
+  syncComposerFooterLayout();
+}
+
 function getAcceptedPanelWidth() {
   return Number(getComputedStyle(document.documentElement).getPropertyValue("--cb-accepted-width").replace("px", "")) || DEFAULT_ACCEPTED_WIDTH;
+}
+
+function getSessionsPanelWidth() {
+  return Number(getComputedStyle(document.documentElement).getPropertyValue("--cb-sessions-width").replace("px", "")) || DEFAULT_SESSIONS_WIDTH;
 }
 
 function normalizeForLocalIntent(text = "") {
@@ -789,10 +1134,7 @@ async function editSyaForCurrentSession() {
     return;
   }
 
-  const raw = prompt(
-    "Edita la secuencia y alcance en formato JSON. Se conservará la original y Gemini usará esta versión editada para generar actividades.",
-    JSON.stringify(activeSya, null, 2)
-  );
+  const raw = await openSyaEditorModal(activeSya, session.meta || {});
   if (raw == null) return;
 
   let parsed;
@@ -847,6 +1189,375 @@ function flashWorkingStatus(label = "Working", duration = 900) {
   transientNoticeTimer = setTimeout(() => {
     chatController?.clearTransientStatus();
   }, duration);
+}
+
+function openSyaEditorModal(initialValue = "", meta = {}) {
+  const modal = document.getElementById("cbSyaModal");
+  const editor = document.getElementById("cbSyaModalEditor");
+  if (!modal || !editor) return Promise.resolve(null);
+  renderSyaEditor(editor, parseSyaEditorSource(initialValue), meta);
+  modal.hidden = false;
+  modal.setAttribute("aria-hidden", "false");
+  modal.inert = false;
+  const firstInput = editor.querySelector("textarea, input");
+  firstInput?.focus();
+  return new Promise((resolve) => {
+    pendingSyaModalResolver = (result) => {
+      pendingSyaModalResolver = null;
+      closeSyaEditorModal();
+      if (!result || result.action !== "save") return resolve(null);
+      return resolve(result.value);
+    };
+  });
+}
+
+function openResourcesModal(initialValue = pendingResourceSelections) {
+  const modal = document.getElementById("cbResourcesModal");
+  if (!modal) return Promise.resolve(null);
+  pendingResourceSelections = {
+    fichas: Boolean(initialValue?.fichas),
+    anexos: Boolean(initialValue?.anexos),
+    recortables: Boolean(initialValue?.recortables),
+    videos: Boolean(initialValue?.videos)
+  };
+  syncResourceModalUi();
+  modal.hidden = false;
+  modal.setAttribute("aria-hidden", "false");
+  modal.inert = false;
+  return new Promise((resolve) => {
+    pendingResourcesModalResolver = (result) => {
+      pendingResourcesModalResolver = null;
+      closeResourcesModal();
+      if (!result || result.action !== "save") return resolve(null);
+      return resolve(result.value);
+    };
+  });
+}
+
+function syncResourceModalUi() {
+  const modal = document.getElementById("cbResourcesModal");
+  if (!modal) return;
+  modal.querySelectorAll("[data-resource-toggle]").forEach((button) => {
+    const key = String(button.dataset.resourceToggle || "").trim();
+    const selected = Boolean(pendingResourceSelections[key]);
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+}
+
+function closeResourcesModal() {
+  const modal = document.getElementById("cbResourcesModal");
+  if (modal && !modal.hidden) {
+    const active = document.activeElement;
+    if (active && modal.contains(active) && typeof active.blur === "function") active.blur();
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+    modal.inert = true;
+  }
+}
+
+function renderReadingsModal() {
+  const list = document.getElementById("cbReadingModalList");
+  if (!list) return;
+  const readings = filterReadingsForModal(currentReadingOptions, readingFilter);
+  list.innerHTML = readings.length ? readings.map(renderReadingCardForModal).join("") : `<div class="cb-empty">Carga lecturas para elegir una.</div>`;
+}
+
+function filterReadingsForModal(readings = [], filter = "") {
+  const needle = normalizeForLocalIntent(filter);
+  if (!needle) return readings;
+  return readings.filter((reading) => normalizeForLocalIntent([
+    reading.title,
+    reading.text,
+    reading.collection,
+    reading.sourceLabel,
+    reading.meta?.nivel,
+    reading.meta?.grado,
+    reading.meta?.trimestre,
+    reading.meta?.unidad
+  ].join(" ")).includes(needle));
+}
+
+function renderReadingCardForModal(reading = {}) {
+  const questionsCount = Array.isArray(reading.questions) ? reading.questions.length : 0;
+  const synonymsCount = Array.isArray(reading.sections?.synonyms) ? reading.sections.synonyms.length : 0;
+  return `
+    <article class="cb-reading-option cb-reading-option--panel" data-reading-id="${escapeAttr(reading.id || "")}">
+      <div>
+        <p class="cb-panel-kicker">${escapeHtmlText(reading.sourceLabel || reading.collection || "Lectura")}</p>
+        <h3>${escapeHtmlText(reading.title || "Lectura sin título")}</h3>
+        <span>${escapeHtmlText([reading.meta?.nivel, reading.meta?.grado, reading.meta?.trimestre ? `T${reading.meta.trimestre}` : "", reading.meta?.unidad ? `U${reading.meta.unidad}` : ""].filter(Boolean).join(" · "))}</span>
+        <p>${escapeHtmlText(String(reading.text || "").slice(0, 160))}</p>
+        <span>${escapeHtmlText([
+          questionsCount ? `${questionsCount} preguntas` : "Sin preguntas",
+          synonymsCount ? `${synonymsCount} sinónimos` : ""
+        ].filter(Boolean).join(" · "))}</span>
+      </div>
+      <button type="button" data-reading-action="use">Usar</button>
+    </article>
+  `;
+}
+
+function closeSyaEditorModal() {
+  const modal = document.getElementById("cbSyaModal");
+  if (modal && !modal.hidden) {
+    const active = document.activeElement;
+    if (active && modal.contains(active) && typeof active.blur === "function") active.blur();
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+    modal.inert = true;
+  }
+}
+
+function closeUnitDataModal() {
+  const modal = document.getElementById("cbUnitDataModal");
+  if (!modal || modal.hidden) return;
+  const active = document.activeElement;
+  if (active && modal.contains(active) && typeof active.blur === "function") active.blur();
+  modal.hidden = true;
+  modal.setAttribute("aria-hidden", "true");
+  modal.inert = true;
+}
+
+function parseSyaEditorSource(source = "") {
+  if (!source) return {};
+  if (typeof source === "object") return source;
+  try {
+    return JSON.parse(String(source));
+  } catch (_) {
+    return {};
+  }
+}
+
+function renderSyaEditor(container, data = {}, meta = {}) {
+  if (!container) return;
+  const focus = buildEditableSyaFocus(data, meta);
+  if (!focus) {
+    container.innerHTML = `<div class="cb-empty">No hay campos visibles para editar.</div>`;
+    return;
+  }
+  container.innerHTML = `
+    <section class="cb-sya-editor-card">
+      <p class="cb-panel-kicker">${escapeHtmlText(focus.category || "Categoría")}</p>
+      <h3>${escapeHtmlText(formatSubtopicLabel(focus.subtopic || "Subtema"))}</h3>
+      <div class="cb-sya-editor-grid">
+        ${["T", "AE", "C", "P"].map((key) => `
+          <label class="cb-sya-editor-row">
+            <span>${escapeHtmlText(getSyaFieldLabel(key))}</span>
+            <textarea data-sya-key="${escapeAttr(focus.keys[key])}" rows="3" spellcheck="false">${escapeHtmlText(String(focus.fields[key] || ""))}</textarea>
+          </label>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildUnitDataEditor(meta = {}) {
+  const level = String(meta.level || "Primaria");
+  const grades = getGradesForLevel(level);
+  const categories = Object.keys(getCategoriesForGrade(meta.grade || grades[0] || ""));
+  return `
+    <div class="cb-unit-data-grid">
+      ${field("Nivel", `
+        <select data-unit-field="level">
+          ${["Preescolar", "Primaria", "Secundaria"].map((item) => `<option value="${escapeAttr(item)}"${item === level ? " selected" : ""}>${escapeHtmlText(item)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Voy a crear", `
+        <select data-unit-field="mode">
+          ${["Alumno", "Maestro"].map((item) => `<option value="${escapeAttr(item)}"${item === meta.mode ? " selected" : ""}>${escapeHtmlText(item)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Grado", `
+        <select data-unit-field="grade">
+          ${grades.map((item) => `<option value="${escapeAttr(item)}"${item === meta.grade ? " selected" : ""}>${escapeHtmlText(item)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Trimestre", `
+        <select data-unit-field="trimester">
+          ${["1", "2", "3"].map((item) => `<option value="${escapeAttr(item)}"${item === String(meta.trimester || "") ? " selected" : ""}>${escapeHtmlText(item)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Unidad", `
+        <select data-unit-field="unit">
+          ${["proyecto", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"].map((item) => `<option value="${escapeAttr(item)}"${item === String(meta.unit || "") ? " selected" : ""}>${escapeHtmlText(item === "proyecto" ? "Proyecto" : `Unidad ${item}`)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Edición", `
+        <select data-unit-field="edition">
+          ${buildEditionOptions().map((item) => `<option value="${escapeAttr(item)}"${item === meta.edition ? " selected" : ""}>${escapeHtmlText(item)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Categoría", `
+        <select data-unit-field="category">
+          ${[ALL_OPTION, ...categories].map((item) => `<option value="${escapeAttr(item)}"${item === meta.category ? " selected" : ""}>${escapeHtmlText(item)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Subtema", `
+        <select data-unit-field="subtopic">
+          ${buildSubtopicOptions(meta).map((item) => `<option value="${escapeAttr(item.value)}"${item.value === meta.subtopic ? " selected" : ""}>${escapeHtmlText(item.label)}</option>`).join("")}
+        </select>
+      `)}
+      ${field("Modelo", `
+        <select data-unit-field="model">
+          ${geminiModelOptions.map((item) => `<option value="${escapeAttr(item.id)}"${item.id === meta.model ? " selected" : ""}>${escapeHtmlText(item.label || item.id)}</option>`).join("")}
+        </select>
+      `)}
+    </div>
+  `;
+}
+
+function field(label, control) {
+  return `
+    <label class="cb-field-group">
+      <span>${escapeHtmlText(label)}</span>
+      ${control}
+    </label>
+  `;
+}
+
+function buildSubtopicOptions(meta = {}) {
+  const categoryMap = getCategoriesForGrade(meta.grade || "Primaria");
+  const category = String(meta.category || "");
+  const options = category && category !== ALL_OPTION && Array.isArray(categoryMap[category])
+    ? categoryMap[category]
+    : Array.from(new Set(Object.values(categoryMap).flat()));
+  return [ALL_OPTION, ...options].map((value) => ({ value, label: formatSubtopicLabel(value) }));
+}
+
+function readUnitDataEditor(editor = null) {
+  const data = {};
+  editor?.querySelectorAll("[data-unit-field]").forEach((field) => {
+    data[field.dataset.unitField] = field.value;
+  });
+  return data;
+}
+
+function serializeSyaEditor(container) {
+  const out = {};
+  container?.querySelectorAll("[data-sya-key]").forEach((field) => {
+    const key = String(field.dataset.syaKey || "").trim();
+    const value = String(field.value || "").trim();
+    if (!key) return;
+    out[key] = value;
+  });
+  return out;
+}
+
+function formatSyaEditorLabel(key = "") {
+  return String(key || "")
+    .replace(/_/g, " ")
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase())
+    .trim();
+}
+
+function getSyaFieldLabel(key = "") {
+  if (key === "T") return "Tema (T)";
+  if (key === "AE") return "Aprendizaje esperado (AE)";
+  if (key === "C") return "Contenido (C)";
+  if (key === "P") return "Proceso o práctica (P)";
+  return formatSyaEditorLabel(key);
+}
+
+function buildEditableSyaFocus(source = {}, meta = {}) {
+  const category = String(meta.category || "").trim();
+  const subtopic = String(meta.subtopic || "").trim();
+  if (!subtopic || subtopic === ALL_OPTION) return null;
+  const focus = getFocusedSya(meta, source);
+  const baseKey = resolveSyaBaseKeyForSubtopic(subtopic);
+  return {
+    category: focus.category || category,
+    subtopic: focus.subtopic || subtopic,
+    keys: {
+      T: `${baseKey}_T`,
+      AE: `${baseKey}_AE`,
+      C: `${baseKey}_C`,
+      P: `${baseKey}_P`
+    },
+    fields: focus.fields || { T: "", AE: "", C: "", P: "" }
+  };
+}
+
+function resolveSyaBaseKeyForSubtopic(subtopic = "") {
+  const safe = String(subtopic || "").trim();
+  if (!safe) return "";
+  if (safe === "Comprensión lectora") return "Lectura";
+  if (safe === "ComprensionLectora") return "Lectura";
+  if (safe === "Ortografía") return "Ortografia";
+  if (safe === "Expresión escrita") return "ExpresionEscrita";
+  if (safe === "Expresión oral") return "ExpresionOral";
+  if (safe === "Conocimiento del medio") return "ConocimientoDelMedio";
+  return safe.replace(/\s+/g, "");
+}
+
+function buildGeneratedActivityTitle(meta = {}, difficulty = "") {
+  const category = String(meta.category || "").trim();
+  const subtopic = String(meta.subtopic || "").trim();
+  const mode = getWorkModeLabel(meta);
+  const focus = [category, subtopic].filter(Boolean).join(" · ");
+  const difficultyLabel = difficulty === "challenging" || difficulty === "expert" ? "más difícil" : difficulty === "easy" ? "más fácil" : "";
+  const suffix = difficultyLabel ? ` · ${difficultyLabel}` : "";
+  if (mode === "proyecto") return `proyecto generado${focus ? ` · ${focus}` : ""}${suffix}`;
+  return `actividades generadas${focus ? ` · ${focus}` : ""}${suffix}`;
+}
+
+function resourceSelectionsForType(type = "") {
+  const safe = String(type || "").trim();
+  return {
+    fichas: safe === "ficha",
+    anexos: safe === "anexo",
+    recortables: safe === "recortable",
+    videos: safe === "video"
+  };
+}
+
+function buildResourceContextLabel(type = "") {
+  if (type === "ficha") return "Ficha";
+  if (type === "anexo") return "Anexo";
+  if (type === "recortable") return "Recortable";
+  if (type === "video") return "Guion de video";
+  return "Recurso";
+}
+
+function extractResourceCode(title = "", type = "") {
+  const text = String(title || "").trim();
+  const match = text.match(/\b(Ficha|Anexo|Recortable|Video)\s+([0-9]+[a-z]?)/i);
+  if (match) return `${match[1]} ${match[2]}`;
+  return buildResourceContextLabel(type);
+}
+
+function normalizeResourceType(value = "") {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("ficha")) return "ficha";
+  if (text.includes("anexo")) return "anexo";
+  if (text.includes("recortable")) return "recortable";
+  if (text.includes("video") || text.includes("guion")) return "video";
+  return "";
+}
+
+function extractResourceBlocks(html = "") {
+  if (typeof DOMParser === "undefined") return [];
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${String(html || "")}</div>`, "text/html");
+  const nodes = Array.from(doc.querySelectorAll("[data-resource-type], [data-resource-section='true'], .resource-ficha, .resource-anexo, .resource-recortable, .resource-video, .guion-video"));
+  return nodes.map((node) => {
+    const type = normalizeResourceType(node.getAttribute("data-resource-type") || node.className || node.textContent || "");
+    const title = String(node.querySelector("h1,h2,h3,h4,strong")?.textContent || node.textContent || buildResourceContextLabel(type)).trim();
+    return {
+      type,
+      title,
+      html: node.outerHTML,
+      code: extractResourceCode(title, type)
+    };
+  }).filter((item) => item.type);
+}
+
+function stripResourceBlocks(html = "") {
+  if (typeof DOMParser === "undefined") return html;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${String(html || "")}</div>`, "text/html");
+  doc.querySelectorAll("[data-resource-type], [data-resource-section='true'], .resource-ficha, .resource-anexo, .resource-recortable, .resource-video, .guion-video").forEach((node) => node.remove());
+  return doc.body.innerHTML.replace(/^<div>|<\/div>$/g, "");
 }
 
 function escapeHtmlText(value = "") {
