@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-06-26.4";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.4";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.5";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17.1";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-12.2";
@@ -11314,6 +11314,7 @@ function applyTimelineSceneBgColorModal() {
     timelineClipsByRowId: nextClips,
     timelineVersion: STUDIO_TIMELINE_VERSION
   }));
+  invalidateStudioRuntimeCache();
 
   renderPodcastVideoTimeline(getActiveSession());
   syncPodcastStudioInspector(getActiveSession());
@@ -11347,6 +11348,7 @@ function deleteTimelineSceneBgColorModal() {
     timelineClipsByRowId: nextClips,
     timelineVersion: STUDIO_TIMELINE_VERSION
   }));
+  invalidateStudioRuntimeCache();
 
   renderPodcastVideoTimeline(getActiveSession());
   syncPodcastStudioInspector(getActiveSession());

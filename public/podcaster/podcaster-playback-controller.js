@@ -119,6 +119,23 @@ export class PodcasterPlaybackController extends EventEmitter {
       || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
       || null;
   }
+  resolveStageContainer() {
+    return this.els?.podcastVideoStage?.querySelector?.(".podcast-video-preview")
+      || this.els?.podcastVideoStage
+      || this.resolveStageMediaScaleContainer()
+      || null;
+  }
+  applySceneBackground(entry = null) {
+    const container = this.resolveStageContainer();
+    if (!container) return;
+    const backgroundColor = String(entry?.clip?.backgroundColor || "").trim();
+    if (backgroundColor) {
+      container.style.background = backgroundColor;
+    } else {
+      container.style.background = "";
+      container.style.backgroundColor = "";
+    }
+  }
   syncStageMediaMotionPlaybackState(isPlaying = this.state.isPlaying === true) {
     const container = this.resolveStageMediaScaleContainer()
       || this.els?.podcastVideoStage?.querySelector?.(".podcast-video-preview")
@@ -1715,6 +1732,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (entry) {
       await this.syncStageSwitching(entry, currentMs);
     } else {
+      this.applySceneBackground(null);
       this.hideAllVideos();
       this.hideAllImages();
     }
@@ -2119,6 +2137,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!activeEl) return;
 
     const isImage = this.isImageStageEntry(entry);
+    this.applySceneBackground(entry);
     this.applySceneMediaScale(entry);
 
     if (isImage) {
