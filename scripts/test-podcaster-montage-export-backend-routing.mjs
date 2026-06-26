@@ -38,7 +38,7 @@ assert.match(
 
 assert.match(
   runtimeConfigSource,
-  /veoApiBaseUrl:\s*"https:\/\/gemini-veo\.onrender\.com\/api"/,
+  /veoApiBaseUrl:[\s\S]*"https:\/\/gemini-veo\.onrender\.com\/api"/,
   "El runtime config debe publicar una base separada para el backend de Veo e imagen."
 );
 

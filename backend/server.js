@@ -7434,17 +7434,6 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
     }
-    if (isDirectMontageExportFallbackMode()) {
-      const activeDirectExportJobIds = getActiveHeavyWorkJobIds("montage_export");
-      if (activeDirectExportJobIds.length) {
-        return res.status(503).json({
-          error: "backend_busy",
-          code: "backend_busy",
-          message: "El backend está exportando en modo directo y pausó temporalmente VEO para evitar reinicios por memoria.",
-          detail: buildDirectFallbackBusyDetail("dialogue_video", activeDirectExportJobIds)
-        });
-      }
-    }
     const activeDialogueVideoJobId = getActiveHeavyWorkJobId("dialogue_video");
     if (activeDialogueVideoJobId) {
       return res.status(503).json(buildBackendBusyJson("dialogue_video", activeDialogueVideoJobId));
