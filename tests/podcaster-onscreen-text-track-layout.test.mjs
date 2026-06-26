@@ -94,7 +94,7 @@ test("playback controller does not re-hardcode bubble width and position outside
 
 test("preview controller renders karaoke markup when timings exist and falls back to raw text otherwise", () => {
   assert.match(playbackControllerSource, /const karaokeWordTimings = normalizeKaraokeWordTimings\(audioClip, text\);/);
-  assert.match(playbackControllerSource, /const contentHtml = karaokeWordTimings\.length[\s\S]*?buildKaraokeSubtitleMarkup\(text,\s*karaokeWordTimings,\s*activeKaraokeWordIndex\)[\s\S]*?: this\.deps\.escapeHtml\(text\);/m);
+  assert.match(playbackControllerSource, /const contentHtml = karaokeWordTimings\.length[\s\S]*?buildKaraokeSubtitleMarkup\(text,\s*karaokeWordTimings,\s*activeKaraokeWordIndex,\s*settings\)[\s\S]*?: this\.deps\.escapeHtml\(text\);/m);
   assert.doesNotMatch(playbackControllerSource, /wrappedText \|\| previewSpec\?\.metrics\?\.wrappedText/);
 });
 

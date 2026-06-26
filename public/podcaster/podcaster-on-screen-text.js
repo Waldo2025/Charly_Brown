@@ -271,6 +271,15 @@
       : "3d";
     const textColor = String(source.textColor || "").trim() || "#f8fafc";
     const strokeColor = String(source.strokeColor || "").trim() || "#0f172a";
+    const karaokeHighlightColor = String(source.karaokeHighlightColor || "").trim() || "#facc15";
+    const karaokeHighlightStyleRaw = String(source.karaokeHighlightStyle || "").trim().toLowerCase();
+    const karaokeHighlightStyle = ["glow", "text", "pill", "rect", "underline"].includes(karaokeHighlightStyleRaw)
+      ? karaokeHighlightStyleRaw
+      : "glow";
+    const karaokeHighlightOpacity = clamp01(source.karaokeHighlightOpacity, 0.92);
+    const karaokeHighlightPaddingXPx = Math.max(0, Math.min(40, Math.round(toFiniteNumber(source.karaokeHighlightPaddingXPx, 10))));
+    const karaokeHighlightPaddingYPx = Math.max(0, Math.min(28, Math.round(toFiniteNumber(source.karaokeHighlightPaddingYPx, 4))));
+    const karaokeHighlightRadiusPx = Math.max(0, Math.min(40, Math.round(toFiniteNumber(source.karaokeHighlightRadiusPx, 12))));
     const textOpacity = clamp01(source.textOpacity, 1);
     const bgPresetRaw = String(source.bgPreset || "").trim().toLowerCase();
     const bgPreset = (bgPresetRaw === "solid" || bgPresetRaw === "none" || bgPresetRaw === "glass") ? bgPresetRaw : "glass";
@@ -310,6 +319,12 @@
       fontVariant: resolvedVariant.value,
       textAlign,
       textColor,
+      karaokeHighlightColor,
+      karaokeHighlightStyle,
+      karaokeHighlightOpacity,
+      karaokeHighlightPaddingXPx,
+      karaokeHighlightPaddingYPx,
+      karaokeHighlightRadiusPx,
       strokeColor,
       strokeEnabled,
       strokeWidthPx: Math.round(safeStrokeWidthPx * 100) / 100,
@@ -344,6 +359,20 @@
       current.fontFamily = allowed.has(nextValue) ? nextValue : current.fontFamily;
     } else if (key === "textColor") {
       current.textColor = nextValue || current.textColor;
+    } else if (key === "karaokeHighlightColor") {
+      current.karaokeHighlightColor = nextValue || current.karaokeHighlightColor;
+    } else if (key === "karaokeHighlightStyle") {
+      const allowed = new Set(["glow", "text", "pill", "rect", "underline"]);
+      current.karaokeHighlightStyle = allowed.has(nextValue.toLowerCase()) ? nextValue.toLowerCase() : current.karaokeHighlightStyle;
+    } else if (key === "karaokeHighlightOpacity") {
+      const numeric = toFiniteNumber(nextValue, Number.NaN);
+      if (Number.isFinite(numeric)) current.karaokeHighlightOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+    } else if (key === "karaokeHighlightPaddingXPx") {
+      current.karaokeHighlightPaddingXPx = Math.max(0, Math.min(40, Math.round(toFiniteNumber(nextValue, current.karaokeHighlightPaddingXPx))));
+    } else if (key === "karaokeHighlightPaddingYPx") {
+      current.karaokeHighlightPaddingYPx = Math.max(0, Math.min(28, Math.round(toFiniteNumber(nextValue, current.karaokeHighlightPaddingYPx))));
+    } else if (key === "karaokeHighlightRadiusPx") {
+      current.karaokeHighlightRadiusPx = Math.max(0, Math.min(40, Math.round(toFiniteNumber(nextValue, current.karaokeHighlightRadiusPx))));
     } else if (key === "textOpacity") {
       const numeric = toFiniteNumber(nextValue, Number.NaN);
       if (Number.isFinite(numeric)) current.textOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
@@ -1281,6 +1310,10 @@
     const bgOpacityPct = Math.round(Math.max(0, Math.min(1, Number(current.bgOpacity ?? 1))) * 100);
     const bgScalePct = Math.round(Math.max(0.6, Math.min(1.8, Number(current.bgScale ?? 1))) * 100);
     const boxWidthPct = Math.round(Math.max(0.22, Math.min(0.92, Number(current.boxWidthPct ?? STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT))) * 100);
+    const karaokeHighlightOpacityPct = Math.round(Math.max(0, Math.min(1, Number(current.karaokeHighlightOpacity ?? 0.92))) * 100);
+    const karaokeHighlightPaddingXPx = Math.max(0, Math.min(40, Math.round(Number(current.karaokeHighlightPaddingXPx ?? 10))));
+    const karaokeHighlightPaddingYPx = Math.max(0, Math.min(28, Math.round(Number(current.karaokeHighlightPaddingYPx ?? 4))));
+    const karaokeHighlightRadiusPx = Math.max(0, Math.min(40, Math.round(Number(current.karaokeHighlightRadiusPx ?? 12))));
     const alignmentOptions = [
       { value: "left", label: "Izq." },
       { value: "center", label: "Centro" },
@@ -1317,6 +1350,14 @@
             `).join("")}
           </div>
         </section>
+        <div class="onscreen-text-tabs" role="tablist" aria-label="Paneles de texto en pantalla">
+          <button class="onscreen-text-tab is-active" type="button" role="tab" data-action="onscreen-text-track-tab" data-onscreen-tab="layout" aria-selected="true">Layout</button>
+          <button class="onscreen-text-tab" type="button" role="tab" data-action="onscreen-text-track-tab" data-onscreen-tab="appearance" aria-selected="false">Apariencia</button>
+          <button class="onscreen-text-tab" type="button" role="tab" data-action="onscreen-text-track-tab" data-onscreen-tab="effects" aria-selected="false">Efectos</button>
+          <button class="onscreen-text-tab" type="button" role="tab" data-action="onscreen-text-track-tab" data-onscreen-tab="karaoke" aria-selected="false">Karaoke</button>
+        </div>
+        <div class="onscreen-text-tab-panels">
+        <section class="onscreen-text-tab-panel is-active" data-onscreen-tab-panel="layout">
         <section class="onscreen-text-inspector-panel is-character">
           <div class="onscreen-text-inspector-panel-head"><strong>Carácter</strong></div>
           <div class="onscreen-text-inline-fields is-quad">
@@ -1360,6 +1401,8 @@
             </div>
           </label>
         </section>
+        </section>
+        <section class="onscreen-text-tab-panel" data-onscreen-tab-panel="appearance">
         <section class="onscreen-text-inspector-panel is-appearance">
           <div class="onscreen-text-inspector-panel-head"><strong>Apariencia</strong></div>
           <div class="onscreen-text-inline-row">
@@ -1376,6 +1419,31 @@
             </label>
           </div>
         </section>
+        <section class="onscreen-text-inspector-panel is-background">
+          <div class="onscreen-text-inspector-panel-head"><strong>Fondo</strong></div>
+          <label class="row-field">
+            <span>Tipo</span>
+            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="bgPreset" aria-label="Tipo de fondo del texto">
+              ${bgOptions.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.bgPreset ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="row-field wide">
+            <span>Opacidad</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" aria-label="Opacidad de fondo">
+              <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" inputmode="numeric" aria-label="Opacidad de fondo numérica">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Escala</span>
+            <div class="studio-volume-control">
+              <input type="range" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" aria-label="Escala de fondo">
+              <input type="number" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" inputmode="numeric" aria-label="Escala de fondo numérica">
+            </div>
+          </label>
+        </section>
+        </section>
+        <section class="onscreen-text-tab-panel" data-onscreen-tab-panel="effects">
         <section class="onscreen-text-inspector-panel is-stroke">
           <div class="onscreen-text-inspector-panel-head"><strong>Contorno</strong></div>
           <label class="row-field">
@@ -1444,29 +1512,58 @@
             </div>
           </label>
         </section>
-        <section class="onscreen-text-inspector-panel is-background">
-          <div class="onscreen-text-inspector-panel-head"><strong>Fondo</strong></div>
-          <label class="row-field">
-            <span>Tipo</span>
-            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="bgPreset" aria-label="Tipo de fondo del texto">
-              ${bgOptions.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.bgPreset ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
-            </select>
-          </label>
+        </section>
+        <section class="onscreen-text-tab-panel" data-onscreen-tab-panel="karaoke">
+        <section class="onscreen-text-inspector-panel is-karaoke-highlight">
+          <div class="onscreen-text-inspector-panel-head"><strong>Highlight karaoke</strong></div>
+          <div class="onscreen-text-inline-row">
+            <label class="row-field onscreen-text-swatch-field">
+              <span>Color</span>
+              <input type="color" value="${escapeHtml(String(current.karaokeHighlightColor || "#facc15"))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightColor" aria-label="Color del highlight karaoke">
+            </label>
+            <label class="row-field">
+              <span>Forma</span>
+              <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightStyle" aria-label="Forma del highlight karaoke">
+                <option value="glow"${current.karaokeHighlightStyle === "glow" ? " selected" : ""}>Iluminado</option>
+                <option value="text"${current.karaokeHighlightStyle === "text" ? " selected" : ""}>Solo color</option>
+                <option value="pill"${current.karaokeHighlightStyle === "pill" ? " selected" : ""}>Redondo</option>
+                <option value="rect"${current.karaokeHighlightStyle === "rect" ? " selected" : ""}>Rectángulo</option>
+                <option value="underline"${current.karaokeHighlightStyle === "underline" ? " selected" : ""}>Subrayado</option>
+              </select>
+            </label>
+          </div>
           <label class="row-field wide">
             <span>Opacidad</span>
             <div class="studio-volume-control">
-              <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" aria-label="Opacidad de fondo">
-              <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" inputmode="numeric" aria-label="Opacidad de fondo numérica">
+              <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(karaokeHighlightOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightOpacity" aria-label="Opacidad del highlight karaoke">
+              <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(karaokeHighlightOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightOpacity" inputmode="numeric" aria-label="Opacidad del highlight numérica">
             </div>
           </label>
           <label class="row-field wide">
-            <span>Escala</span>
+            <span>Padding X</span>
             <div class="studio-volume-control">
-              <input type="range" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" aria-label="Escala de fondo">
-              <input type="number" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" inputmode="numeric" aria-label="Escala de fondo numérica">
+              <input type="range" min="0" max="40" step="1" value="${escapeHtml(String(karaokeHighlightPaddingXPx))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightPaddingXPx" aria-label="Padding horizontal del highlight">
+              <input type="number" min="0" max="40" step="1" value="${escapeHtml(String(karaokeHighlightPaddingXPx))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightPaddingXPx" inputmode="numeric" aria-label="Padding horizontal numérico">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Padding Y</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="28" step="1" value="${escapeHtml(String(karaokeHighlightPaddingYPx))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightPaddingYPx" aria-label="Padding vertical del highlight">
+              <input type="number" min="0" max="28" step="1" value="${escapeHtml(String(karaokeHighlightPaddingYPx))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightPaddingYPx" inputmode="numeric" aria-label="Padding vertical numérico">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Radio</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="40" step="1" value="${escapeHtml(String(karaokeHighlightRadiusPx))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightRadiusPx" aria-label="Radio del highlight">
+              <input type="number" min="0" max="40" step="1" value="${escapeHtml(String(karaokeHighlightRadiusPx))}" data-action="onscreen-text-track-setting" data-setting="karaokeHighlightRadiusPx" inputmode="numeric" aria-label="Radio del highlight numérico">
             </div>
           </label>
         </section>
+        </section>
+        </div>
+      </section>
       </section>
     `.trim();
   }

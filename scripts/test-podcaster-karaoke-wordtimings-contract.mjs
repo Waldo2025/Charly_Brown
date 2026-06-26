@@ -59,8 +59,8 @@ test("montage export resolves dialogue audio clips through the same row resolver
 test("podcaster css defines karaoke word and active word states", () => {
   assert.match(cssSource, /\.podcast-karaoke-word\s*\{/);
   assert.match(cssSource, /\.podcast-karaoke-word\.is-active\s*\{/);
-  assert.match(cssSource, /\.podcast-karaoke-word\.is-active\s*\{[\s\S]*?color:\s*#facc15;/i);
-  assert.match(textRenderSource, /\.podcast-karaoke-word\.is-active\s*\{[\s\S]*?color:\s*#facc15;/i);
-  assert.match(textRenderSource, /<tspan fill="#FACC15" filter="url\(#pod-karaoke-active\)">/);
-  assert.match(homeSource, /\.podcast-karaoke-word\.is-active\s*\{[\s\S]*?color:\s*#facc15;/i);
+  assert.match(cssSource, /\.podcast-karaoke-word\.is-active\s*\{[\s\S]*?color:\s*var\(--pod-karaoke-highlight-color,\s*#facc15\);/i);
+  assert.match(textRenderSource, /\.podcast-karaoke-word\.is-active\s*\{[\s\S]*?color:\s*var\(--pod-karaoke-highlight-color,\s*#facc15\);/i);
+  assert.match(textRenderSource, /resolveKaraokeHighlightSettings/);
+  assert.match(homeSource, /\.podcast-karaoke-word\.is-active\s*\{[\s\S]*?color:\s*var\(--pod-karaoke-highlight-color,\s*#facc15\);/i);
 });

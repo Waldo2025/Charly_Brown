@@ -7,6 +7,7 @@ import {
   normalizeKaraokeWordTimings,
   resolveActiveKaraokeWordIndex
 } from "./podcaster-karaoke.js?v=2026-06-16.15";
+import { getPodcasterLocalMediaBlob } from "./podcaster-local-media-cache.js";
 
 /**
  * PodcasterPlaybackController.js
@@ -53,6 +54,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.audioCtx = null;
     this.dialoguePlayers = {};
     this.audioCache = {};
+    this.dialogueAudioSourceKeys = {};
     this.blobCache = new Map();
     this.fetchPromises = new Map();
     this.mediaCacheName = 'podcaster-media-cache-v1';
@@ -70,6 +72,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundLimiterSettings = normalizePodcasterFinalLimiterSettings();
     this.backgroundDuckFactor = 1.0;
     this.backgroundSrc = "";
+    this.backgroundSourceKey = "";
 
     this.stageMachine = {
       loadingSrc: '',
@@ -474,6 +477,65 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     } catch (_) { }
     return cleanUrl;
+  }
+
+  async resolveLocalMediaObjectUrl(localMediaCacheKey = "") {
+    const cleanKey = String(localMediaCacheKey || "").trim();
+    if (!cleanKey) return "";
+    const cacheKey = `podcaster-local-media:${cleanKey}`;
+    const cached = this.getBlobUrlSync(cacheKey);
+    if (cached) return cached;
+    const pending = this.fetchPromises.get(cacheKey);
+    if (pending) return pending;
+    const p = (async () => {
+      try {
+        const blob = await getPodcasterLocalMediaBlob(cleanKey);
+        if (!(blob instanceof Blob)) return "";
+        const objectUrl = URL.createObjectURL(blob);
+        this.blobCache.set(cacheKey, objectUrl);
+        return objectUrl;
+      } catch (_) {
+        return "";
+      }
+    })();
+    this.fetchPromises.set(cacheKey, p);
+    try {
+      return await p;
+    } finally {
+      this.fetchPromises.delete(cacheKey);
+    }
+  }
+
+  async resolveAudioSource(clip = null) {
+    const localKey = String(clip?.localMediaCacheKey || "").trim();
+    if (localKey) {
+      const localSrc = await this.resolveLocalMediaObjectUrl(localKey);
+      if (localSrc) return localSrc;
+    }
+    const localDataUrl = String(clip?.localDataUrl || clip?.dataUrl || "").trim();
+    if (localDataUrl) return localDataUrl;
+    const directSource = String(clip?.sourceUrl || "").trim();
+    if (directSource) return directSource;
+    const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+    if (!rawUrl) {
+      const fallbackUrl = String(clip?.downloadUrl || "").trim();
+      if (!fallbackUrl) return "";
+      return this.getBlobUrl(fallbackUrl);
+    }
+    return this.getBlobUrl(rawUrl);
+  }
+
+  resolveAudioSourceKey(clip = null) {
+    const localKey = String(clip?.localMediaCacheKey || "").trim();
+    if (localKey) return `local:${localKey}`;
+    const sourceUrl = String(clip?.sourceUrl || "").trim();
+    if (sourceUrl) return sourceUrl;
+    const localDataUrl = String(clip?.localDataUrl || clip?.dataUrl || "").trim();
+    if (localDataUrl) return localDataUrl.slice(0, 240);
+    const downloadUrl = String(clip?.downloadUrl || "").trim();
+    if (downloadUrl) return downloadUrl;
+    const storagePath = String(clip?.storagePath || "").trim();
+    return storagePath ? `storage:${storagePath}` : "";
   }
 
   async invalidateBlobUrl(url) {
@@ -1246,29 +1308,41 @@ export class PodcasterPlaybackController extends EventEmitter {
   prewarmDialogueAudios(session) {
     if (!session) return;
     const rows = session?.script?.rows || [];
-    rows.forEach((row) => {
+    rows.forEach(async (row) => {
       const rowId = row?.id;
       if (!rowId) return;
       const clip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
-      const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
-      if (rawUrl && !this.blobCache.has(rawUrl)) {
-        this.getBlobUrl(rawUrl).catch(() => {});
-      }
+      const sourceKey = this.resolveAudioSourceKey(clip);
+      if (!sourceKey) return;
+      const existingSourceKey = String(this.dialogueAudioSourceKeys[rowId] || "").trim();
+      if (existingSourceKey === sourceKey) return;
+      const audioSrc = await this.resolveAudioSource(clip);
+      if (!audioSrc) return;
+      this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
     });
   }
 
-  getOrCreateDialoguePlayer(rowId, audioSrc, session) {
+  getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey = "", session) {
     let audio = this.dialoguePlayers[rowId];
-    if (!audio || (audio.dataset.originalSrc !== audioSrc)) {
-      if (audio) try { audio.pause(); } catch (_) { }
+    const nextSourceKey = String(sourceKey || "").trim();
+    if (!audio || String(this.dialogueAudioSourceKeys[rowId] || "") !== nextSourceKey) {
+      if (audio) {
+        try { audio.pause(); } catch (_) { }
+        const previousSrc = String(audio.dataset?.originalSrc || audio.src || "").trim();
+        if (previousSrc && previousSrc.startsWith("blob:")) {
+          try { URL.revokeObjectURL(previousSrc); } catch (_) { }
+        }
+      }
       audio = new Audio();
       audio.crossOrigin = 'anonymous';
       audio.src = audioSrc;
       audio.dataset.originalSrc = audioSrc;
+      audio.dataset.sourceKey = nextSourceKey;
       audio.dataset.initialized = "false";
       audio.preload = "auto";
       this.dialoguePlayers[rowId] = audio;
       this.audioCache[rowId] = audio;
+      this.dialogueAudioSourceKeys[rowId] = nextSourceKey;
       
       audio.addEventListener("loadedmetadata", () => {
         const nextMs = Math.round(audio.duration * 1000);
@@ -1306,6 +1380,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   async syncAudio(currentMs, speed) {
     const session = this.state.session || this.deps?.getActiveSession?.();
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
+    const currentTimelineRowIds = new Set(entries.map((entry) => String(entry?.rowId || "").trim()).filter(Boolean));
 
     const config = this.deps?.getPodcastVideoConfig?.(session) || {};
     const audioTrack = config.geminiDialogueTrack || { segments: [], enabled: true };
@@ -1332,44 +1407,40 @@ export class PodcasterPlaybackController extends EventEmitter {
       const visibleDurationMs = this.resolveSegmentTimelineDurationMs(segment, clipPlaybackRate);
       return currentMs >= segment.startMs && currentMs < (segment.startMs + visibleDurationMs);
     });
-    const activeRowIds = new Set(activeSegments.map(s => s.rowId));
-
     // Upcoming pre-load (look ahead 5 seconds)
     const upcoming = segments.filter((segment) => {
       const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
       return segmentStartMs > currentMs && (segmentStartMs - currentMs) < 5000;
     });
 
-    const upcomingRowIds = new Set(upcoming.map(s => s.rowId));
-    const keepRowIds = new Set([...activeRowIds, ...upcomingRowIds]);
-
-    // Cleanup players that are no longer active or upcoming
+    // Cleanup players for removed rows only. Keep previously loaded rows loaded to avoid
+    // tearing audio buffers during drag/seek jitter.
     Object.keys(this.dialoguePlayers).forEach(rowId => {
-      if (!keepRowIds.has(rowId)) {
-        const audio = this.dialoguePlayers[rowId];
-        if (audio) {
-          if (!audio.paused) try { audio.pause(); } catch (_) { }
-          audio.src = "";
-          try { audio.load(); } catch (_) { }
-          delete this.dialoguePlayers[rowId];
-          delete this.audioCache[rowId];
-        }
+      if (currentTimelineRowIds.has(rowId)) return;
+      const audio = this.dialoguePlayers[rowId];
+      if (audio) {
+        if (!audio.paused) try { audio.pause(); } catch (_) { }
+        audio.src = "";
+        try { audio.load(); } catch (_) { }
+        delete this.dialoguePlayers[rowId];
+        delete this.audioCache[rowId];
+        delete this.dialogueAudioSourceKeys[rowId];
       }
     });
 
     // Run preload loop to pre-create and buffer upcoming audio elements
     upcoming.forEach(async (s) => {
       const rowId = s.rowId;
-      if (this.dialoguePlayers[rowId]) return;
-
+      if (!rowId) return;
       const clip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
-      const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
-      if (!rawUrl) return;
+      const sourceKey = this.resolveAudioSourceKey(clip);
+      if (!sourceKey) return;
+      if (this.dialoguePlayers[rowId] && String(this.dialogueAudioSourceKeys[rowId] || "") === sourceKey) return;
 
-      const audioSrc = await this.getBlobUrl(rawUrl);
+      const audioSrc = await this.resolveAudioSource(clip);
       if (!audioSrc) return;
 
-      this.getOrCreateDialoguePlayer(rowId, audioSrc, session);
+      this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
     });
 
     // Duck the background music whenever we're within any Gemini dialogue segment
@@ -1379,7 +1450,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     for (const segment of activeSegments) {
       const rowId = segment.rowId;
       const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
-      const rawAudioSrc = this.deps?.resolveStorageAudioUrl?.(audioClip?.downloadUrl, audioClip?.storagePath);
+      if (!audioClip) continue;
+      const sourceKey = this.resolveAudioSourceKey(audioClip);
+      const rawAudioSrc = await this.resolveAudioSource(audioClip);
       if (!rawAudioSrc) continue;
 
       let audioSrc = this.getBlobUrlSync(rawAudioSrc);
@@ -1387,7 +1460,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (!audioSrc) continue;
       
       // hasVoice is already true from activeSegments.length > 0
-      let audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, session);
+      let audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
 
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const effectiveRate = this.clampPlaybackRate(speed * clipPlaybackRate);
@@ -1475,9 +1548,11 @@ export class PodcasterPlaybackController extends EventEmitter {
           const trimOutMs = Math.max(trimInMs + 1, Number(panelCfg.trimOutMs || sourceDurationMs || 0));
           const startOffsetMs = Math.max(0, Number(panelCfg.startOffsetMs || 0) || 0);
           const loopSettings = Array.isArray(panelCfg.loopSettings) ? panelCfg.loopSettings : [];
+          const loopEnabled = panelCfg.loopEnabled !== false;
           let cursorMs = startOffsetMs;
           let loopIndex = 0;
-          while (loopIndex < 120) {
+          const maxLoopCount = loopEnabled ? 120 : 1;
+          while (loopIndex < maxLoopCount) {
             const loopSetting = loopSettings.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex) || null;
             const segmentTrimInMs = Math.max(0, Number(loopSetting?.trimInMs ?? trimInMs) || 0);
             const segmentTrimOutMs = Math.max(segmentTrimInMs + 1, Number(loopSetting?.trimOutMs ?? trimOutMs) || trimOutMs);
@@ -1487,7 +1562,7 @@ export class PodcasterPlaybackController extends EventEmitter {
               return {
                 sourceUrl: panelCfg.sourceUrl,
                 volume: panelCfg.volume,
-                loop: true,
+                loop: loopEnabled,
                 startOffsetMs: cursorMs,
                 endOffsetMs,
                 trimInMs: segmentTrimInMs,
@@ -1500,7 +1575,7 @@ export class PodcasterPlaybackController extends EventEmitter {
             cursorMs = endOffsetMs;
             loopIndex += 1;
           }
-          return panelCfg.sourceUrl ? {
+          return panelCfg.sourceUrl && loopEnabled ? {
             sourceUrl: panelCfg.sourceUrl,
             volume: panelCfg.volume,
             loop: true,
@@ -1514,7 +1589,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         })();
     
     if (activeSegment) {
-      if (this.backgroundSrc !== activeSegment.sourceUrl) {
+      const activeSegmentSourceKey = this.resolveAudioSourceKey(activeSegment);
+      if (this.backgroundSourceKey !== activeSegmentSourceKey || this.backgroundSrc !== String(activeSegment.sourceUrl || "").trim()) {
         if (this.backgroundAudio) {
           try { this.backgroundAudio.pause(); } catch (_) { }
           try { this.backgroundAudio.currentTime = 0; } catch (_) { }
@@ -1530,10 +1606,24 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundFinalLimiter = null;
         this.backgroundStabilizeEnabled = null;
         this.backgroundLimiterEnabled = null;
-        this.backgroundSrc = activeSegment.sourceUrl;
-        // console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl}`);
+        // console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl || "local-blob"}`);
+        this.backgroundSourceKey = activeSegmentSourceKey;
+        this.backgroundSrc = String(activeSegment.sourceUrl || "").trim();
         try {
-          const blobSrc = await this.getBlobUrl(activeSegment.sourceUrl);
+          const resolvedSource = await this.resolveAudioSource({
+            ...activeSegment,
+            localDataUrl: String(activeSegment.localDataUrl || "").trim(),
+            localMediaCacheKey: String(activeSegment.localMediaCacheKey || "").trim(),
+            sourceUrl: String(activeSegment.sourceUrl || activeSegment.downloadUrl || activeSegment.storagePath || "").trim(),
+            downloadUrl: String(activeSegment.downloadUrl || "").trim(),
+            storagePath: String(activeSegment.storagePath || "").trim()
+          });
+          const blobSrc = this.getBlobUrlSync(resolvedSource) || await this.getBlobUrl(resolvedSource);
+          if (!blobSrc) {
+            this.backgroundSrc = "";
+            this.backgroundSourceKey = "";
+            return;
+          }
           this.backgroundAudio = new Audio();
           this.backgroundAudio.crossOrigin = 'anonymous';
           this.backgroundAudio.src = blobSrc;
@@ -1541,6 +1631,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
         } catch (e) {
           this.backgroundSrc = "";
+          this.backgroundSourceKey = "";
           return;
         }
       }
@@ -1614,6 +1705,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundAudio.pause();
       }
       this.backgroundSrc = "";
+      this.backgroundSourceKey = "";
     }
   }
 
@@ -2515,7 +2607,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       : selectedStartMs;
     const activeKaraokeWordIndex = resolveActiveKaraokeWordIndex(karaokeWordTimings, currentMs, karaokeClipStartMs, clipPlaybackRate);
     const contentHtml = karaokeWordTimings.length
-      ? buildKaraokeSubtitleMarkup(text, karaokeWordTimings, activeKaraokeWordIndex)
+      ? buildKaraokeSubtitleMarkup(text, karaokeWordTimings, activeKaraokeWordIndex, settings)
       : this.deps.escapeHtml(text);
 
     const unescapeMap = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'" };

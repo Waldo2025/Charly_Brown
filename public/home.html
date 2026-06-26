@@ -773,6 +773,11 @@
 
             .podcast-on-screen-text-content span,
             .podcast-karaoke-word {
+              --pod-karaoke-highlight-color: #facc15;
+              --pod-karaoke-highlight-opacity: 0.92;
+              --pod-karaoke-highlight-radius: 12px;
+              --pod-karaoke-highlight-pad-x: 10px;
+              --pod-karaoke-highlight-pad-y: 4px;
               display: inline;
               color: inherit;
               font-size: inherit !important;
@@ -783,14 +788,41 @@
             }
 
             .podcast-karaoke-word.is-active {
-              color: #facc15;
+              color: var(--pod-karaoke-highlight-color, #facc15);
               filter: brightness(1.08);
               text-shadow:
-                0 0 0.2em rgba(250, 204, 21, 0.96),
-                0 0 0.72em rgba(250, 204, 21, 0.62),
+                0 0 0.2em var(--pod-karaoke-highlight-color, #facc15),
+                0 0 0.72em var(--pod-karaoke-highlight-color, #facc15),
                 var(--pod-onscreen-text-stroke-shadow),
                 var(--pod-onscreen-text-preset-shadow),
                 var(--pod-onscreen-text-user-shadow);
+            }
+
+            .podcast-karaoke-word.is-active.is-highlight-text {
+              filter: none;
+              text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
+            }
+
+            .podcast-karaoke-word.is-active.is-highlight-pill,
+            .podcast-karaoke-word.is-active.is-highlight-rect {
+              padding: var(--pod-karaoke-highlight-pad-y, 4px) var(--pod-karaoke-highlight-pad-x, 10px);
+              border-radius: var(--pod-karaoke-highlight-radius, 12px);
+              background: var(--pod-karaoke-highlight-color, #facc15);
+              color: #020617;
+              text-shadow: none;
+              box-decoration-break: clone;
+              -webkit-box-decoration-break: clone;
+            }
+
+            .podcast-karaoke-word.is-active.is-highlight-rect {
+              border-radius: min(4px, var(--pod-karaoke-highlight-radius, 4px));
+            }
+
+            .podcast-karaoke-word.is-active.is-highlight-underline {
+              text-decoration-line: underline;
+              text-decoration-thickness: max(0.08em, var(--pod-karaoke-highlight-pad-y, 4px));
+              text-decoration-color: var(--pod-karaoke-highlight-color, #facc15);
+              text-underline-offset: 0.14em;
             }
 
             .multimedia-render-btn {
@@ -1106,13 +1138,13 @@
   </div>
 
 
-  <script src="podcaster/podcaster-on-screen-text.js?v=2026-05-16-1"></script>
-  <script src="podcaster/podcaster-text-render.js?v=2026-06-16.21"></script>
-  <script type="module" src="podcaster/podcaster-playback-controller.js?v=2026-06-10-1"></script>
+  <script src="podcaster/podcaster-on-screen-text.js?v=2026-06-26.7"></script>
+  <script src="podcaster/podcaster-text-render.js?v=2026-06-26.7"></script>
+  <script type="module" src="podcaster/podcaster-playback-controller.js?v=2026-06-26.7"></script>
   <script type="module" src="podcaster/podcaster-overlay-cards.js?v=2026-05-27.2"></script>
   <script type="module" src="podcaster/podcaster-reels.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-  <script type="module" src="podcaster/podcaster-media-editor.js?v=1.0.0"></script>
+  <script type="module" src="podcaster/podcaster-media-editor.js?v=2026-06-26.8"></script>
   <script type="module" src="js/home.js?v=2026-1.0.1.51"></script>
   <script type="module" src="js/chromeLayout.js"></script>
   <script type="module" src="js/sidebar.js?v=2026-1.0.0.60"></script>

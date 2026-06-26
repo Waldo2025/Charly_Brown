@@ -17,6 +17,19 @@ if (!/data-setting="strokeColor"/.test(shared) || !/data-setting="strokeWidthPx"
   throw new Error("El modal debe exponer controles de color y grosor de stroke.");
 }
 
+[
+  'data-onscreen-tab="layout"',
+  'data-onscreen-tab="appearance"',
+  'data-onscreen-tab="effects"',
+  'data-onscreen-tab="karaoke"',
+  'data-setting="karaokeHighlightColor"',
+  'data-setting="karaokeHighlightStyle"'
+].forEach((snippet) => {
+  if (!shared.includes(snippet)) {
+    throw new Error(`El modal de texto en pantalla debe exponer pestañas y controles karaoke. Falta: ${snippet}`);
+  }
+});
+
 if (!/function normalizeOnScreenTextTrackSettings\(raw = \{\}\) \{[\s\S]*const strokeColor = String\(source\.strokeColor \|\| ""\)\.trim\(\) \|\| "#0f172a";[\s\S]*const strokeWidthPx = Math\.max\(0, Math\.min\(12, toFiniteNumber\(source\.strokeWidthPx, Number\.NaN\)\)\);[\s\S]*strokeColor,[\s\S]*strokeWidthPx:/m.test(shared)) {
   throw new Error("La normalización del track debe vivir en la spec compartida y soportar strokeColor y strokeWidthPx.");
 }

@@ -2,6 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  normalizeOnScreenTextTrackSettings,
+  applyOnScreenTextTrackSettingValue,
+  buildOnScreenTextTrackModalMarkup,
   resolveOnScreenTextMeasuredWrapResult,
   resolveOnScreenTextRenderSpec,
   resolveOnScreenTextClipVisibleTiming
@@ -145,4 +148,50 @@ test("clip visible timing offsets start by trimIn and shortens duration by trim 
 
   assert.equal(timing.startMs, 4750);
   assert.equal(timing.durationMs, 2500);
+});
+
+test("normalizes karaoke highlight style settings with safe defaults", () => {
+  const defaults = normalizeOnScreenTextTrackSettings({});
+  assert.equal(defaults.karaokeHighlightColor, "#facc15");
+  assert.equal(defaults.karaokeHighlightStyle, "glow");
+  assert.equal(defaults.karaokeHighlightOpacity, 0.92);
+  assert.equal(defaults.karaokeHighlightPaddingXPx, 10);
+  assert.equal(defaults.karaokeHighlightPaddingYPx, 4);
+  assert.equal(defaults.karaokeHighlightRadiusPx, 12);
+
+  const custom = normalizeOnScreenTextTrackSettings({
+    karaokeHighlightColor: "#22c55e",
+    karaokeHighlightStyle: "pill",
+    karaokeHighlightOpacity: 72,
+    karaokeHighlightPaddingXPx: 14,
+    karaokeHighlightPaddingYPx: 5,
+    karaokeHighlightRadiusPx: 10
+  });
+  assert.equal(custom.karaokeHighlightColor, "#22c55e");
+  assert.equal(custom.karaokeHighlightStyle, "pill");
+  assert.equal(custom.karaokeHighlightOpacity, 0.72);
+  assert.equal(custom.karaokeHighlightPaddingXPx, 14);
+  assert.equal(custom.karaokeHighlightPaddingYPx, 5);
+  assert.equal(custom.karaokeHighlightRadiusPx, 10);
+  assert.equal(
+    normalizeOnScreenTextTrackSettings({ karaokeHighlightStyle: "invalid" }).karaokeHighlightStyle,
+    "glow"
+  );
+});
+
+test("applies karaoke highlight setting values and renders the karaoke modal tab", () => {
+  const next = applyOnScreenTextTrackSettingValue({}, "karaokeHighlightStyle", "rect");
+  assert.equal(next.karaokeHighlightStyle, "rect");
+  assert.equal(applyOnScreenTextTrackSettingValue(next, "karaokeHighlightOpacity", "65").karaokeHighlightOpacity, 0.65);
+
+  const markup = buildOnScreenTextTrackModalMarkup({
+    karaokeHighlightColor: "#22c55e",
+    karaokeHighlightStyle: "pill"
+  });
+  assert.match(markup, /data-onscreen-tab="layout"/);
+  assert.match(markup, /data-onscreen-tab="appearance"/);
+  assert.match(markup, /data-onscreen-tab="effects"/);
+  assert.match(markup, /data-onscreen-tab="karaoke"/);
+  assert.match(markup, /data-setting="karaokeHighlightColor"/);
+  assert.match(markup, /data-setting="karaokeHighlightStyle"/);
 });

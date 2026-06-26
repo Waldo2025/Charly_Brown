@@ -246,7 +246,17 @@ export function createPodcasterOnScreenTextTrackEditorApi(deps = {}) {
     if (!els.onScreenTextTrackModalBody) return;
     const activeSession = session || getActiveSession();
     const settings = getOnScreenTextTrackSettings(activeSession);
+    const activeTab = String(els.onScreenTextTrackModal?.dataset?.activeTab || "layout").trim() || "layout";
     els.onScreenTextTrackModalBody.innerHTML = buildSharedOnScreenTextTrackModalMarkup(settings);
+    const panel = els.onScreenTextTrackPanel || null;
+    panel?.querySelectorAll("[data-action='onscreen-text-track-tab'][data-onscreen-tab]").forEach((button) => {
+      const active = String(button.dataset.onscreenTab || "").trim() === activeTab;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    panel?.querySelectorAll("[data-onscreen-tab-panel]").forEach((tabPanel) => {
+      tabPanel.classList.toggle("is-active", String(tabPanel.dataset.onscreenTabPanel || "").trim() === activeTab);
+    });
   }
 
   function setModalOpen(open = false) {

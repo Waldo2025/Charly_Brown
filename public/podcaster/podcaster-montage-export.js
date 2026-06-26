@@ -3106,9 +3106,11 @@ export function buildMontageExportPayload(session = null) {
     const startOffsetMs = Math.max(0, Math.round(Number(panelMusic?.startOffsetMs || 0) || 0));
     const segments = [];
     let cursorMs = Math.max(0, startOffsetMs);
+    const loopEnabled = panelMusic?.loopEnabled !== false;
     while (cursorMs < timelineDurationMs) {
       const relativeMs = Math.max(0, cursorMs - startOffsetMs);
       const loopIndex = Math.max(0, Math.floor(relativeMs / effectiveLoopMs));
+      if (!loopEnabled && loopIndex > 0) break;
       const loopPositionMs = relativeMs % effectiveLoopMs;
       const chunkDurationMs = Math.max(
         STUDIO_TIMELINE_MIN_CLIP_MS,

@@ -25,7 +25,8 @@ test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per
       bgPreset: "none",
       textColor: "#f8fafc",
       strokeColor: "#0f172a",
-      textOpacity: 1
+      textOpacity: 1,
+      karaokeHighlightOpacity: 1
     },
     segments: [
       {
@@ -38,7 +39,8 @@ test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per
           bgPreset: "none",
           textColor: "#f8fafc",
           strokeColor: "#0f172a",
-          textOpacity: 1
+          textOpacity: 1,
+          karaokeHighlightOpacity: 1
         },
         spec: {
           text: "Hola mundo",

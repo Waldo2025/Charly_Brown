@@ -64,3 +64,62 @@ test("video mode toggle persists and marks the session dirty immediately", () =>
     /setPodcastVideoModeEnabled\(enableVideoPodcast, \{ render: false, reason: "video-content-type" \}\);/
   );
 });
+
+test("cloud session payload preserves karaoke highlight track settings", () => {
+  const sourceTrack = {
+    enabled: true,
+    showTrack: true,
+    stylePreset: "3d",
+    fontFamily: "Inter",
+    karaokeHighlightColor: "#22c55e",
+    karaokeHighlightStyle: "pill",
+    karaokeHighlightOpacity: 0.74,
+    karaokeHighlightPaddingXPx: 16,
+    karaokeHighlightPaddingYPx: 7,
+    karaokeHighlightRadiusPx: 20
+  };
+  const payload = buildCloudSessionPayload({
+    id: "session-karaoke",
+    title: "Sesion",
+    videoContentType: "videopodcast",
+    script: {
+      videoContentType: "videopodcast",
+      rows: []
+    },
+    podcastVideoConfig: {
+      enabled: true,
+      onScreenTextTrack: sourceTrack
+    }
+  }, {}, [], {
+    makeId: (prefix) => `${prefix}-1`,
+    nowIso: () => "2026-06-26T17:00:00.000Z",
+    isCreativeVideoMode: () => false,
+    getSpeakerOptions: () => [],
+    normalizePodcastStudioUiState: () => ({}),
+    getSpeakerVoiceMap: () => ({}),
+    getSpeakerExpressionMap: () => ({}),
+    getSpeakerNameMap: () => ({}),
+    getSpeakerScenarioMap: () => ({}),
+    getSpeakerScenarioVariantsMap: () => ({}),
+    getGlobalScenarioDeck: () => null,
+    normalizeDisfluencyConfig: (value) => value || {},
+    DEFAULT_DISFLUENCY_CONFIG: {},
+    resolvePanelMusicTrackKind: () => "preset",
+    getPanelMusicUploadedTracks: () => [],
+    normalizePanelMusicLoopSettings: (value) => value || [],
+    normalizePanelMusicMutedLoopIndexes: (value) => value || [],
+    getSpeakerPortraitMap: () => ({}),
+    getSpeakerReferenceImageMap: () => ({}),
+    getScenarioReferenceImageMap: () => ({}),
+    getRowReferenceImageListMap: () => ({}),
+    getRowReferenceImageMap: () => ({}),
+    getRowReferenceVideoMap: () => ({}),
+    getRowReferenceModeByRowId: () => ({}),
+    getDialogueVideoMap: () => ({}),
+    getDialogueAudioMap: () => ({}),
+    normalizePodcastVideoConfig: (value) => value,
+    normalizeCreativeVideoConfig: () => ({})
+  });
+
+  assert.deepEqual(payload.podcastVideoConfig.onScreenTextTrack, sourceTrack);
+});

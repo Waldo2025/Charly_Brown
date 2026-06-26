@@ -7,16 +7,20 @@ const version = JSON.parse(
 
 assert.match(version.version, /^1\.0\.10\.\d+$/);
 assert.equal(version.cache_version, version.build);
+const changelog = Array.isArray(version.changelog) ? version.changelog : [];
+const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
+const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(version.releaseNotes?.[0] || "").includes("Firestore"),
-  "La release note más reciente debe reflejar el nuevo fix del persistido del job de export."
+  String(changelog[0] || "").includes("texto estilizado")
+    && String(changelog[0] || "").includes("offset relativo"),
+  "La nota más reciente debe reflejar el fix actual de texto estilizado y estabilidad de trim."
 );
 assert.ok(
-  version.releaseNotes?.some((note) => String(note || "").includes("same-origin")),
+  notes.some((note) => String(note || "").includes("same-origin")),
   "Las release notes deben conservar el fix de same-origin."
 );
 assert.ok(
-  version.releaseNotes?.some((note) => String(note || "").includes("job_not_found")),
+  notes.some((note) => String(note || "").includes("job_not_found")),
   "Las release notes deben conservar el fix de retry tolerante para job_not_found."
 );
 

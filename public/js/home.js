@@ -13,7 +13,7 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.1.34";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-06-26.7";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
@@ -3074,6 +3074,7 @@ function normalizeHomePanelMusicTrack(track = null) {
     libraryId: String(track.libraryId || "").trim(),
     slotLabel: String(track.slotLabel || "").trim(),
     enabledInSession: track.enabledInSession !== false,
+    loopEnabled: track.loopEnabled !== false,
     name: String(track.name || "Audio").trim() || "Audio",
     mimeType: String(track.mimeType || "audio/mpeg").trim() || "audio/mpeg",
     size: Math.max(0, Number(track.size || 0) || 0),
@@ -3260,7 +3261,8 @@ function buildHomeUploadedPanelMusicSegments(session = null, options = {}) {
     const segments = [];
     let sceneCursor = 0;
     let loopIndex = 0;
-    while (sceneCursor < sceneEntries.length && loopIndex < 120) {
+    const maxLoopCount = single.loopEnabled === false ? 1 : 120;
+    while (sceneCursor < sceneEntries.length && loopIndex < maxLoopCount) {
       const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
       let endSceneCursor = sceneCursor;
       let segmentEndMs = Math.max(startMs, Number(sceneEntries[sceneCursor]?.endMs || startMs) || startMs);
@@ -3441,6 +3443,7 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
     startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
     trimInMs: Math.max(0, Number(activeTrack?.trimInMs || 0) || 0),
     trimOutMs: Math.max(0, Number(activeTrack?.trimOutMs || 0) || 0),
+    loopEnabled: activeTrack?.loopEnabled !== false,
     loopSettings: Array.isArray(activeTrack?.loopSettings)
       ? activeTrack.loopSettings.map((item) => ({
         loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
@@ -3863,7 +3866,7 @@ const multimediaPlaybackDeps = {
     }
 
     if (!cfg.onScreenTextTrack) {
-      cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow' };
+      cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow', karaokeHighlightStyle: 'glow' };
     }
     // Asegurar que enabled y showTrack estén habilitados para visualización garantizada en el Dashboard
     cfg.onScreenTextTrack.enabled = true;

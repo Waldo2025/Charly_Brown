@@ -167,17 +167,52 @@
     return active ? Number(active.tokenIndex || 0) : -1;
   }
 
-  function buildKaraokeSubtitleMarkup(text = "", wordTimings = [], activeIndex = -1) {
+  function resolveKaraokeHighlightSettings(settings = {}) {
+    const source = settings && typeof settings === "object" ? settings : {};
+    const styleRaw = String(source.karaokeHighlightStyle || "").trim().toLowerCase();
+    const style = ["glow", "text", "pill", "rect", "underline"].includes(styleRaw) ? styleRaw : "glow";
+    const color = String(source.karaokeHighlightColor || "").trim() || "#facc15";
+    const clamp01 = (value, fallback) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return fallback;
+      const bounded = numeric > 1 ? numeric / 100 : numeric;
+      return Math.max(0, Math.min(1, bounded));
+    };
+    return {
+      color,
+      style,
+      opacity: clamp01(source.karaokeHighlightOpacity, 0.92),
+      paddingX: Math.max(0, Math.min(40, Math.round(Number(source.karaokeHighlightPaddingXPx ?? 10) || 0))),
+      paddingY: Math.max(0, Math.min(28, Math.round(Number(source.karaokeHighlightPaddingYPx ?? 4) || 0))),
+      radius: Math.max(0, Math.min(40, Math.round(Number(source.karaokeHighlightRadiusPx ?? 12) || 0)))
+    };
+  }
+
+  function buildKaraokeHighlightInlineStyle(settings = {}) {
+    const highlight = resolveKaraokeHighlightSettings(settings);
+    return [
+      `--pod-karaoke-highlight-color:${escapeHtml(highlight.color)}`,
+      `--pod-karaoke-highlight-opacity:${Number(highlight.opacity.toFixed(3))}`,
+      `--pod-karaoke-highlight-pad-x:${highlight.paddingX}px`,
+      `--pod-karaoke-highlight-pad-y:${highlight.paddingY}px`,
+      `--pod-karaoke-highlight-radius:${highlight.radius}px`,
+      "font-size: inherit !important"
+    ].join(";");
+  }
+
+  function buildKaraokeSubtitleMarkup(text = "", wordTimings = [], activeIndex = -1, settings = {}) {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length || !Array.isArray(wordTimings) || !wordTimings.length) {
       return escapeHtml(text);
     }
+    const highlight = resolveKaraokeHighlightSettings(settings);
+    const highlightStyle = buildKaraokeHighlightInlineStyle(settings);
     let wordIndex = 0;
     return tokens.map((token) => {
       if (/^\s+$/.test(token)) return token;
       const isActive = wordIndex === activeIndex;
-      const className = `podcast-karaoke-word${isActive ? " is-active" : ""}`;
-      const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="font-size: inherit !important;">${escapeHtml(token)}</span>`;
+      const className = `podcast-karaoke-word${isActive ? ` is-active is-highlight-${highlight.style}` : ""}`;
+      const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="${highlightStyle}">${escapeHtml(token)}</span>`;
       wordIndex += 1;
       return html;
     }).join("");
@@ -320,15 +355,45 @@
         font-weight: inherit;
         font-style: inherit;
       }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word {
+        --pod-karaoke-highlight-color: #facc15;
+        --pod-karaoke-highlight-opacity: 0.92;
+        --pod-karaoke-highlight-radius: 12px;
+        --pod-karaoke-highlight-pad-x: 10px;
+        --pod-karaoke-highlight-pad-y: 4px;
+      }
       .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active {
-        color: #facc15;
+        color: var(--pod-karaoke-highlight-color, #facc15);
         filter: brightness(1.08);
         text-shadow:
-          0 0 0.2em rgba(250, 204, 21, 0.96),
-          0 0 0.72em rgba(250, 204, 21, 0.62),
+          0 0 0.2em var(--pod-karaoke-highlight-color, #facc15),
+          0 0 0.72em var(--pod-karaoke-highlight-color, #facc15),
           var(--pod-onscreen-text-stroke-shadow),
           var(--pod-onscreen-text-preset-shadow),
           var(--pod-onscreen-text-user-shadow);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-text {
+        filter: none;
+        text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-pill,
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect {
+        padding: var(--pod-karaoke-highlight-pad-y, 4px) var(--pod-karaoke-highlight-pad-x, 10px);
+        border-radius: var(--pod-karaoke-highlight-radius, 12px);
+        background: var(--pod-karaoke-highlight-color, #facc15);
+        color: #020617;
+        text-shadow: none;
+        box-decoration-break: clone;
+        -webkit-box-decoration-break: clone;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect {
+        border-radius: min(4px, var(--pod-karaoke-highlight-radius, 4px));
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-underline {
+        text-decoration-line: underline;
+        text-decoration-thickness: max(0.08em, var(--pod-karaoke-highlight-pad-y, 4px));
+        text-decoration-color: var(--pod-karaoke-highlight-color, #facc15);
+        text-underline-offset: 0.14em;
       }
     `;
   }
@@ -337,10 +402,11 @@
     return escapeHtml(value);
   }
 
-  function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false, textColor = "currentColor") {
+  function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false, textColor = "currentColor", settings = {}) {
     const safeToken = escapeSvgText(token);
+    const highlight = resolveKaraokeHighlightSettings(settings);
     return isActive
-      ? `<tspan fill="#FACC15" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
+      ? `<tspan fill="${escapeSvgText(highlight.color)}" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
       : `<tspan fill="${escapeSvgText(textColor)}">${safeToken}</tspan>`;
   }
 
@@ -348,12 +414,13 @@
     const tokens = tokenizeSubtitleText(line);
     const activeWordIndex = Number.isFinite(Number(options.activeWordIndex)) ? Number(options.activeWordIndex) : -1;
     const textColor = String(options.textColor || "currentColor").trim();
+    const settings = options.settings && typeof options.settings === "object" ? options.settings : {};
     let wordIndex = Number(options.wordIndex || 0) || 0;
     const parts = tokens.map((token) => {
       if (/^\s+$/.test(token)) {
         return `<tspan xml:space="preserve">${escapeSvgText(token)}</tspan>`;
       }
-      const markup = buildOnScreenTextRasterTokenMarkup(token, wordIndex === activeWordIndex, textColor);
+      const markup = buildOnScreenTextRasterTokenMarkup(token, wordIndex === activeWordIndex, textColor, settings);
       wordIndex += 1;
       return markup;
     });
@@ -398,6 +465,7 @@
     const resolvedBgPreset = ["none", "solid", "glass"].includes(bgPreset) ? bgPreset : "none";
     const textColor = String(settings.textColor || "#f8fafc").trim() || "#f8fafc";
     const strokeColor = String(settings.strokeColor || "#0f172a").trim() || "#0f172a";
+    const highlight = resolveKaraokeHighlightSettings(settings);
     const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
     const contentPadXPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
     const contentPadYPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
@@ -428,7 +496,8 @@
       const current = buildOnScreenTextRasterLineMarkup(line, {
         activeWordIndex,
         wordIndex,
-        textColor
+        textColor,
+        settings
       });
       wordIndex = current.wordIndex;
       const y = lineStartY + (index * lineStepY) + textOffsetYPx;
@@ -492,7 +561,7 @@
             <feDropShadow dx="${Math.round(shadowX)}" dy="${Math.round(shadowY)}" stdDeviation="${Math.max(0.4, shadowBlurPx / 3).toFixed(2)}" flood-color="rgb(2, 6, 23)" flood-opacity="${shadowOpacityValue}" />
           </filter>
           <filter id="pod-karaoke-active" x="-20%" y="-20%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="rgb(250, 204, 21)" flood-opacity="0.72" />
+            <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="${escapeSvgText(highlight.color)}" flood-opacity="${Math.max(0, Math.min(1, highlight.opacity)).toFixed(3)}" />
           </filter>
         </defs>
         ${resolvedBgPreset === "none" || !boxFillRgb ? "" : `<rect ${bgAttrs} />`}
@@ -555,7 +624,7 @@
     const activeWordIndex = Number.isFinite(Number(config.activeWordIndex)) ? Number(config.activeWordIndex) : -1;
     const text = String(config.text || "").trim();
     const contentHtml = wordTimings.length
-      ? buildKaraokeSubtitleMarkup(text, wordTimings, activeWordIndex)
+      ? buildKaraokeSubtitleMarkup(text, wordTimings, activeWordIndex, settings)
       : escapeHtml(text);
     const inlineStyle = buildBubbleInlineStyle
       ? buildBubbleInlineStyle(settings, {
@@ -761,7 +830,8 @@
     }
 
     if (isKaraoke) {
-      const activeTextColor = toFfmpegColor("#FACC15", 1, "FACC15");
+      const highlight = resolveKaraokeHighlightSettings(settings);
+      const activeTextColor = toFfmpegColor(highlight.color, highlight.opacity, "FACC15");
       wordTimings.forEach((word, index) => {
         const wordStartSec = startSec + (Number(word.startMs || 0) / 1000);
         const wordEndSec = startSec + (Number(word.endMs || 0) / 1000);
@@ -946,7 +1016,8 @@
       const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
       const textOpacity = Math.max(0, Math.min(1, Number(settings?.textOpacity ?? spec.textOpacity ?? 1) || 0));
       const baseColor = toAssColor(settings?.textColor || "#F8FAFC", textOpacity, "F8FAFC");
-      const activeColor = toAssColor("#FACC15", 1, "FACC15");
+      const highlight = resolveKaraokeHighlightSettings(settings);
+      const activeColor = toAssColor(highlight.color, Math.max(0, Math.min(1, highlight.opacity)), "FACC15");
       const outlineColor = toAssColor(settings?.strokeColor || spec.strokeColor || "#0F172A", 1, "0F172A");
       const depthColor = toAssColor("#020617", 0.58, "020617");
       const shadowColor = toAssColor("#020617", 0.62, "020617");
@@ -1003,6 +1074,7 @@
     scaleKaraokeWordTimingsForPlaybackRate,
     selectKaraokeWordTimingIndicesForExport,
     resolveActiveKaraokeWordIndex,
+    resolveKaraokeHighlightSettings,
     buildKaraokeSubtitleMarkup,
     escapeFfmpegExpr,
     escapeFfmpegFilterPath,

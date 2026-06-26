@@ -1,9 +1,9 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-06-26.4";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.5";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.7";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17.1";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
-import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-12.2";
+import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-26.6";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -40,20 +40,20 @@ import {
   setMontageExportProgress,
   setMontageExportStatus,
   configureMontageExportRuntime
-} from "./podcaster-montage-export.js?v=2026-06-26.4";
+} from "./podcaster-montage-export.js?v=2026-06-26.6";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-18.3";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-20.1";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-26.6";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-06-12.2";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-05-30-1";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
-import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-12.2";
+import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-26.6";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-24.15";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-26.6";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -1093,7 +1093,6 @@ let podcastVideoState = {
 window.podcastVideoState = podcastVideoState;
 
 function scheduleSessionLocalPersist(reason = "") {
-  if (PODCAST_SESSION_MANUAL_SAVE_ONLY === true) return;
   const session = getActiveSession();
   if (!session?.id) return;
   if (cloudAutosaveTimeout) clearTimeout(cloudAutosaveTimeout);
@@ -1535,6 +1534,7 @@ const {
   ensurePanelMusicTrackDuration,
   ensureAllEnabledUploadedTrackDurations,
   togglePanelMusicLoopMute,
+  togglePanelMusicTrackLoopEnabled,
   updatePanelMusicTrack,
   syncActivePanelMusicTrack,
   selectPanelMusicTrackKind,
@@ -4928,6 +4928,38 @@ function alignOnScreenTextClipsToGeminiTrack(session = null, clipMap = {}) {
   return next;
 }
 
+function alignOnScreenTextClipsToSceneTrack(session = null, clipMap = {}) {
+  const activeSession = session || getActiveSession();
+  const next = normalizeOnScreenTextClipsByRowId(clipMap || {});
+  const sceneClips = ensureTimelineClipsByRowId(activeSession, { persist: false });
+  const drag = window.podcastVideoState?.timelineDrag || null;
+  Object.keys(next).forEach((rowId) => {
+    const sceneClip = sceneClips[String(rowId || "").trim()] || null;
+    if (!sceneClip) return;
+    const sceneStartMs = Math.max(0, Math.round(Number(sceneClip?.startMs || 0) || 0));
+    let referenceSceneStartMs = sceneStartMs;
+    if (drag && String(drag.rowId || "").trim() === String(rowId || "").trim()) {
+      referenceSceneStartMs = Math.max(0, Math.round(Number(drag.initialStartMs ?? sceneStartMs) || 0));
+    } else if (drag && Array.isArray(drag.dragGroup)) {
+      const groupEntry = drag.dragGroup.find((entry) => String(entry?.rowId || "").trim() === String(rowId || "").trim()) || null;
+      if (groupEntry) referenceSceneStartMs = Math.max(0, Math.round(Number(groupEntry.initialStartMs ?? sceneStartMs) || 0));
+    }
+    const relativeOffsetMs = Math.max(0, Math.round(Number(next[rowId]?.startMs || 0) - referenceSceneStartMs));
+    const aligned = constrainOnScreenTextClipToScene({
+      ...next[rowId],
+      startMs: sceneStartMs + relativeOffsetMs
+    }, sceneClip, rowId);
+    if (!aligned) return;
+    next[rowId] = {
+      ...aligned,
+      hidden: next[rowId]?.hidden === true,
+      autoHidden: next[rowId]?.autoHidden === true,
+      zIndex: Math.max(1, Number(next[rowId]?.zIndex || aligned.zIndex || 1) || 1)
+    };
+  });
+  return next;
+}
+
 function syncOnScreenTextClipsWithGeminiTrack(options = {}) {
   const activeSession = getActiveSession();
   if (!activeSession) return false;
@@ -4935,6 +4967,28 @@ function syncOnScreenTextClipsWithGeminiTrack(options = {}) {
   upsertPodcastVideoConfig((cfg) => {
     const current = normalizeOnScreenTextClipsByRowId(cfg?.timelineOnScreenTextClipsByRowId || {});
     const aligned = alignOnScreenTextClipsToGeminiTrack(activeSession, current);
+    changed = JSON.stringify(aligned) !== JSON.stringify(current);
+    if (!changed) return cfg;
+    return {
+      ...cfg,
+      timelineOnScreenTextTrackVersion: STUDIO_TIMELINE_TRACK_VERSION,
+      timelineOnScreenTextClipsByRowId: aligned
+    };
+  }, { autosave: options.autosave !== false });
+  if (changed && options.render !== false) {
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    syncPodcastStudioInspector(getActiveSession());
+  }
+  return changed;
+}
+
+function syncOnScreenTextClipsWithSceneTrack(options = {}) {
+  const activeSession = getActiveSession();
+  if (!activeSession) return false;
+  let changed = false;
+  upsertPodcastVideoConfig((cfg) => {
+    const current = normalizeOnScreenTextClipsByRowId(cfg?.timelineOnScreenTextClipsByRowId || {});
+    const aligned = alignOnScreenTextClipsToSceneTrack(activeSession, current);
     changed = JSON.stringify(aligned) !== JSON.stringify(current);
     if (!changed) return cfg;
     return {
@@ -6113,10 +6167,11 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       }
     }
 
+    const referenceSceneStartMs = sceneStartMs - shiftSceneStartMs;
     const relativeOffsetMs = (preserveStartMs && existingSegment && (hasManualStartMs || options?.isTrimStart))
       ? (options?.isTrimStart
-          ? Math.max(0, Math.round((existingSegment.startMs || 0) - sceneStartMs))
-          : resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs - shiftSceneStartMs, automaticOffsetMs)
+          ? Math.max(0, Math.round((existingSegment.startMs || 0) - referenceSceneStartMs))
+          : resolveGeminiSegmentRelativeOffsetMs(existingSegment, referenceSceneStartMs, automaticOffsetMs)
         )
       : automaticOffsetMs;
 
@@ -6208,10 +6263,15 @@ function syncGeminiDialogueTrackWithRuntime(options = {}) {
       geminiDialogueTrack: reconciled.track
     };
   }, { autosave: options.autosave !== false });
-  const syncedText = syncOnScreenTextClipsWithGeminiTrack({
-    render: false,
-    autosave: options.autosave !== false
-  });
+  const syncedText = options.syncTextToScene === true
+    ? syncOnScreenTextClipsWithSceneTrack({
+      render: false,
+      autosave: options.autosave !== false
+    })
+    : syncOnScreenTextClipsWithGeminiTrack({
+      render: false,
+      autosave: options.autosave !== false
+    });
   if (changed && options.render !== false) {
     renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
     syncPodcastStudioInspector(getActiveSession());
@@ -12189,7 +12249,13 @@ function buildPodcastTimelineStructureKey(session = null, mode = "") {
       enabled: onScreenTextTrack.enabled === true,
       showTrack: onScreenTextTrack.showTrack !== false,
       stylePreset: onScreenTextTrack.stylePreset,
-      fontFamily: onScreenTextTrack.fontFamily
+      fontFamily: onScreenTextTrack.fontFamily,
+      karaokeHighlightColor: onScreenTextTrack.karaokeHighlightColor,
+      karaokeHighlightStyle: onScreenTextTrack.karaokeHighlightStyle,
+      karaokeHighlightOpacity: onScreenTextTrack.karaokeHighlightOpacity,
+      karaokeHighlightPaddingXPx: onScreenTextTrack.karaokeHighlightPaddingXPx,
+      karaokeHighlightPaddingYPx: onScreenTextTrack.karaokeHighlightPaddingYPx,
+      karaokeHighlightRadiusPx: onScreenTextTrack.karaokeHighlightRadiusPx
     },
     tracks: trackRows.map((track) => ({
       id: String(track?.id || "").trim(),
@@ -17717,6 +17783,22 @@ function attachEvents() {
         event.preventDefault();
         return;
       }
+      const toggleBackgroundAudioLoopBtn = event.target.closest("[data-action='timeline-toggle-background-audio-loop']");
+      if (toggleBackgroundAudioLoopBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        const trackKind = resolvePanelMusicTrackKind(toggleBackgroundAudioLoopBtn.dataset.trackKind || panelMusicState.selectedTrackKind);
+        const trackIndex = Number(toggleBackgroundAudioLoopBtn.dataset.trackIndex);
+        if (trackKind === "uploaded" && Number.isFinite(trackIndex)) {
+          selectUploadedPanelMusicTrackByIndex(Math.max(0, Math.floor(trackIndex || 0)));
+        }
+        togglePanelMusicTrackLoopEnabled(trackKind);
+        try {
+          const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
+          playbackController.syncBackgroundMusic(Math.max(0, Number(podcastVideoState.montageCursorMs || 0)), speed);
+        } catch (_) { }
+        return;
+      }
       const toggleUploadedTrackEnabledBtn = event.target.closest("[data-action='timeline-toggle-uploaded-track-enabled']");
       if (toggleUploadedTrackEnabledBtn) {
         event.preventDefault();
@@ -18108,6 +18190,23 @@ function attachEvents() {
       const lookPresetBtn = event.target.closest("[data-action='onscreen-text-look-preset'][data-preset]");
       if (lookPresetBtn) {
         applyOnScreenTextLookPreset(lookPresetBtn.dataset.preset);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const tabBtn = event.target.closest("[data-action='onscreen-text-track-tab'][data-onscreen-tab]");
+      if (tabBtn) {
+        const panel = tabBtn.closest("#onScreenTextTrackPanel") || els.onScreenTextTrackPanel || null;
+        const tabKey = String(tabBtn.dataset.onscreenTab || "").trim();
+        if (els.onScreenTextTrackModal) els.onScreenTextTrackModal.dataset.activeTab = tabKey || "layout";
+        panel?.querySelectorAll("[data-action='onscreen-text-track-tab'][data-onscreen-tab]").forEach((button) => {
+          const active = String(button.dataset.onscreenTab || "").trim() === tabKey;
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        panel?.querySelectorAll("[data-onscreen-tab-panel]").forEach((tabPanel) => {
+          tabPanel.classList.toggle("is-active", String(tabPanel.dataset.onscreenTabPanel || "").trim() === tabKey);
+        });
         event.preventDefault();
         event.stopPropagation();
         return;

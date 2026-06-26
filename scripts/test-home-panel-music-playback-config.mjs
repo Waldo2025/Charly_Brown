@@ -53,6 +53,9 @@ const context = {
   buildApiUrl(path) {
     return `https://example.test${path}`;
   },
+  buildApiUrlPreferRemote(path) {
+    return `https://example.test${path}`;
+  },
   hasAvailableApiBase() {
     return true;
   },

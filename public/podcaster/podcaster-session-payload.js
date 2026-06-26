@@ -192,6 +192,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
       limiterEnabled: panelMusicConfig.limiterEnabled === true,
       sourceType: panelMusicConfig.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind?.(panelMusicConfig.selectedTrackKind) || "preset",
+      loopEnabled: panelMusicConfig.loopEnabled !== false,
       trackLibrary: {
         uploaded: panelMusicConfig.trackLibrary?.uploaded
           ? {
@@ -205,6 +206,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             trimInMs: Math.max(0, Number(panelMusicConfig.trackLibrary.uploaded.trimInMs || 0) || 0),
             trimOutMs: Math.max(0, Number(panelMusicConfig.trackLibrary.uploaded.trimOutMs || 0) || 0),
             enabledInSession: panelMusicConfig.trackLibrary.uploaded.enabledInSession !== false,
+            loopEnabled: panelMusicConfig.trackLibrary.uploaded.loopEnabled !== false,
             durationMeasuredWith: String(panelMusicConfig.trackLibrary.uploaded.durationMeasuredWith || "").trim().toLowerCase(),
             loopSettings: normalizePanelMusicLoopSettings?.(
               panelMusicConfig.trackLibrary.uploaded.loopSettings || [],
@@ -218,6 +220,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
               : [],
             downloadUrl: String(panelMusicConfig.trackLibrary.uploaded.downloadUrl || "").trim(),
             storagePath: String(panelMusicConfig.trackLibrary.uploaded.storagePath || "").trim(),
+            localMediaCacheKey: String(panelMusicConfig.trackLibrary.uploaded.localMediaCacheKey || "").trim(),
             updatedAt: String(panelMusicConfig.trackLibrary.uploaded.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
             mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.trackLibrary.uploaded.mutedLoopIndexes || []) || [],
             montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.trackLibrary.uploaded.montageVolume ?? 100))),
@@ -237,6 +240,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             trimInMs: Math.max(0, Number(track?.trimInMs || 0) || 0),
             trimOutMs: Math.max(0, Number(track?.trimOutMs || 0) || 0),
             enabledInSession: track?.enabledInSession !== false,
+            loopEnabled: track?.loopEnabled !== false,
             durationMeasuredWith: String(track?.durationMeasuredWith || "").trim().toLowerCase(),
             loopSettings: normalizePanelMusicLoopSettings?.(
               track?.loopSettings || [],
@@ -250,6 +254,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
               : [],
             downloadUrl: String(track?.downloadUrl || "").trim(),
             storagePath: String(track?.storagePath || "").trim(),
+            localMediaCacheKey: String(track?.localMediaCacheKey || "").trim(),
             updatedAt: String(track?.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
             mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(track?.mutedLoopIndexes || []) || [],
             montageVolume: Math.max(0, Math.min(100, Number(track?.montageVolume ?? 100))),
@@ -266,6 +271,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             startOffsetMs: Math.max(0, Number(panelMusicConfig.trackLibrary.ai.startOffsetMs || 0) || 0),
             trimInMs: Math.max(0, Number(panelMusicConfig.trackLibrary.ai.trimInMs || 0) || 0),
             trimOutMs: Math.max(0, Number(panelMusicConfig.trackLibrary.ai.trimOutMs || 0) || 0),
+            loopEnabled: panelMusicConfig.trackLibrary.ai.loopEnabled !== false,
             durationMeasuredWith: String(panelMusicConfig.trackLibrary.ai.durationMeasuredWith || "").trim().toLowerCase(),
             loopSettings: normalizePanelMusicLoopSettings?.(
               panelMusicConfig.trackLibrary.ai.loopSettings || [],
@@ -279,6 +285,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
               : [],
             downloadUrl: String(panelMusicConfig.trackLibrary.ai.downloadUrl || "").trim(),
             storagePath: String(panelMusicConfig.trackLibrary.ai.storagePath || "").trim(),
+            localMediaCacheKey: String(panelMusicConfig.trackLibrary.ai.localMediaCacheKey || "").trim(),
             updatedAt: String(panelMusicConfig.trackLibrary.ai.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
             model: String(panelMusicConfig.trackLibrary.ai.model || "").trim(),
             prompt: String(panelMusicConfig.trackLibrary.ai.prompt || "").trim(),
@@ -300,6 +307,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
           startOffsetMs: Math.max(0, Number(panelMusicConfig.track.startOffsetMs || 0) || 0),
           trimInMs: Math.max(0, Number(panelMusicConfig.track.trimInMs || 0) || 0),
           trimOutMs: Math.max(0, Number(panelMusicConfig.track.trimOutMs || 0) || 0),
+          loopEnabled: panelMusicConfig.track.loopEnabled !== false,
           durationMeasuredWith: String(panelMusicConfig.track.durationMeasuredWith || "").trim().toLowerCase(),
           loopSettings: normalizePanelMusicLoopSettings?.(
             panelMusicConfig.track.loopSettings || [],
@@ -313,6 +321,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             : [],
           downloadUrl: String(panelMusicConfig.track.downloadUrl || "").trim(),
           storagePath: String(panelMusicConfig.track.storagePath || "").trim(),
+          localMediaCacheKey: String(panelMusicConfig.track.localMediaCacheKey || "").trim(),
           updatedAt: String(panelMusicConfig.track.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
           model: String(panelMusicConfig.track.model || "").trim(),
           prompt: String(panelMusicConfig.track.prompt || "").trim(),

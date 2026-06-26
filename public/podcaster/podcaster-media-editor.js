@@ -235,11 +235,20 @@ function transformStylizedTextSceneData(raw = null, fromWidth = STYLIZED_TEXT_ST
 function fitFabricCanvasToEditorContainer() {
     if (!fabricCanvas) return { width: STYLIZED_TEXT_STAGE_WIDTH, height: STYLIZED_TEXT_STAGE_HEIGHT };
     const container = document.querySelector('.pme-canvas-container');
-    const width = Math.max(320, Math.round(Number(container?.clientWidth || 0) || 0) || 960);
-    const height = Math.max(180, Math.round(Number(container?.clientHeight || 0) || 0) || 540);
-    fabricCanvas.setDimensions({ width, height });
+    const containerWidth = Math.max(1, Math.round(Number(container?.clientWidth || 0) || 0) || 960);
+    const containerHeight = Math.max(1, Math.round(Number(container?.clientHeight || 0) || 0) || 540);
+    const scale = Math.min(
+        containerWidth / STYLIZED_TEXT_STAGE_WIDTH,
+        containerHeight / STYLIZED_TEXT_STAGE_HEIGHT
+    ) || 1;
+    if (container) {
+        container.style.setProperty('--pme-canvas-scale', String(scale));
+        container.style.setProperty('--pme-stage-width', `${STYLIZED_TEXT_STAGE_WIDTH}px`);
+        container.style.setProperty('--pme-stage-height', `${STYLIZED_TEXT_STAGE_HEIGHT}px`);
+    }
+    fabricCanvas.setDimensions({ width: STYLIZED_TEXT_STAGE_WIDTH, height: STYLIZED_TEXT_STAGE_HEIGHT });
     fabricCanvas.setBackgroundColor('transparent', fabricCanvas.renderAll.bind(fabricCanvas));
-    return { width, height };
+    return { width: STYLIZED_TEXT_STAGE_WIDTH, height: STYLIZED_TEXT_STAGE_HEIGHT };
 }
 
 function resolveStylizedTextRenderBox(container = null) {
@@ -370,6 +379,16 @@ function buildStylizedTextBitmapCacheKey(textData = null) {
     return textData ? JSON.stringify(textData) : '';
 }
 
+function invalidateStylizedTextBitmapCache(textData = null) {
+    if (!textData) {
+        stylizedTextBitmapCache.clear();
+        return;
+    }
+    const sanitizedTextData = sanitizeStylizedTextSceneData(textData);
+    const cacheKey = buildStylizedTextBitmapCacheKey(sanitizedTextData);
+    if (cacheKey) stylizedTextBitmapCache.delete(cacheKey);
+}
+
 function renderStylizedTextToDataUrl(textData = null) {
     const sanitizedTextData = sanitizeStylizedTextSceneData(textData);
     const cacheKey = buildStylizedTextBitmapCacheKey(sanitizedTextData);
@@ -404,14 +423,10 @@ function renderStylizedTextToDataUrl(textData = null) {
 function initFabric() {
     if (fabricCanvas) return;
     patchFabricTextBaselineDefaults();
-    
-    const container = document.querySelector('.pme-canvas-container');
-    const w = container.clientWidth || 960;
-    const h = container.clientHeight || 540;
 
     fabricCanvas = new fabric.Canvas('stylized-text-fabric-canvas', {
-        width: w,
-        height: h,
+        width: STYLIZED_TEXT_STAGE_WIDTH,
+        height: STYLIZED_TEXT_STAGE_HEIGHT,
         backgroundColor: 'transparent'
     });
     if (fabricCanvas.lowerCanvasEl) {
@@ -542,8 +557,8 @@ async function openStylizedTextEditor() {
             existingText,
             parseStylizedTextSceneData(existingText)?.width || STYLIZED_TEXT_STAGE_WIDTH,
             parseStylizedTextSceneData(existingText)?.height || STYLIZED_TEXT_STAGE_HEIGHT,
-            editorSize.width,
-            editorSize.height
+            STYLIZED_TEXT_STAGE_WIDTH,
+            STYLIZED_TEXT_STAGE_HEIGHT
         );
 
         if (sanitizedTextData) {
@@ -596,8 +611,8 @@ function setupEventListeners() {
 
         const stageData = transformStylizedTextSceneData(
             fabricCanvas.toJSON(),
-            fabricCanvas.getWidth(),
-            fabricCanvas.getHeight(),
+            STYLIZED_TEXT_STAGE_WIDTH,
+            STYLIZED_TEXT_STAGE_HEIGHT,
             STYLIZED_TEXT_STAGE_WIDTH,
             STYLIZED_TEXT_STAGE_HEIGHT
         );
@@ -611,8 +626,26 @@ function setupEventListeners() {
                 [textMapRef]: json
             });
 
+            invalidateStylizedTextBitmapCache();
+            if (window.PodcasterUI?.upsertActiveSession) {
+                window.PodcasterUI.upsertActiveSession((current) => ({
+                    ...current,
+                    stylizedTextMap: {
+                        ...(current?.stylizedTextMap || {}),
+                        [currentEditingRowId]: json
+                    }
+                }), { render: false, persist: true, markDirty: true, autosaveReason: "stylized-text" });
+            } else if (session && typeof session === 'object') {
+                session.stylizedTextMap = {
+                    ...(session.stylizedTextMap || {}),
+                    [currentEditingRowId]: json
+                };
+            }
             clearStylizedScenePreviewMedia();
             els.textModal.hidden = true;
+            if (window.PodcasterUI?.render) {
+                window.PodcasterUI.render();
+            }
             if (window.PodcasterUI?.refreshSession) {
                 await window.PodcasterUI.refreshSession();
             }
@@ -633,8 +666,26 @@ function setupEventListeners() {
                 [textMapRef]: null
             });
 
+            invalidateStylizedTextBitmapCache();
+            if (window.PodcasterUI?.upsertActiveSession) {
+                window.PodcasterUI.upsertActiveSession((current) => {
+                    const nextMap = { ...(current?.stylizedTextMap || {}) };
+                    delete nextMap[currentEditingRowId];
+                    return {
+                        ...current,
+                        stylizedTextMap: nextMap
+                    };
+                }, { render: false, persist: true, markDirty: true, autosaveReason: "stylized-text" });
+            } else if (session && typeof session === 'object') {
+                const nextMap = { ...(session.stylizedTextMap || {}) };
+                delete nextMap[currentEditingRowId];
+                session.stylizedTextMap = nextMap;
+            }
             clearStylizedScenePreviewMedia();
             els.textModal.hidden = true;
+            if (window.PodcasterUI?.render) {
+                window.PodcasterUI.render();
+            }
             if (window.PodcasterUI?.refreshSession) {
                 await window.PodcasterUI.refreshSession();
             }

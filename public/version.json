@@ -1,8 +1,14 @@
 {
-  "version": "1.0.10.248",
-  "build": "2026-1.0.10.248",
+  "version": "1.0.10.254",
+  "build": "2026-1.0.10.254",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Al guardar texto estilizado, el preview actualiza inmediatamente el stylizedTextMap local y limpia cache bitmap sin esperar recarga; además, los trims de escena preservan el offset relativo de audio Gemini y texto en pantalla respecto a su escena. Se incrementa podcaster-media-editor.js a la v2026-06-26.9.",
+    "Corregido: Los cambios del estilo highlight karaoke del texto en pantalla ahora actualizan localStorage y marcan la sesión como dirty incluso en modo guardado manual, evitando rehidratar valores viejos antes/después de guardar en Firebase. Se incrementa podcaster.js a la v2026-06-26.9.",
+    "Corregido: Los estilos de highlight karaoke del texto en pantalla ahora forman parte de la clave de estructura del timeline, por lo que se guardan y rehidratan correctamente al abrir una sesión. Se incrementa podcaster.js a la v2026-06-26.8.",
+    "Corregido: El editor de texto estilizado de Podcaster mantiene Fabric en stage canónico 1280x720, escala solo visualmente el canvas del modal y centra el cuadro de texto en el preview; al agrandar texto, el tamaño se refleja correctamente. Se incrementa podcaster-media-editor.js a la v2026-06-26.8.",
+    "Mejorado: El texto en pantalla de Podcaster agrega pestañas en onScreenTextTrackModal y permite configurar el highlight karaoke por color, forma, opacidad, padding y radio; preview, render, export y Home consumen los mismos estilos. Se incrementan cache-busters a la v2026-06-26.7.",
+    "Mejorado: El timeline de Podcaster agrega un control para activar/desactivar el loop del audio de fondo; preview, export y sesión persistida respetan loopEnabled=false. Además, el drag manual del chip de audio de fondo se mueve en tiempo real con transform y persiste el offset al soltar. Se incrementan cache-busters a la v2026-06-26.6.",
     "Corregido: Podcaster instala un guard previo a Fabric para convertir CanvasRenderingContext2D.textBaseline=alphabetical a alphabetic antes de llegar al setter nativo, eliminando los warnings restantes de CanvasTextBaseline. Se incrementa podcaster-media-editor.js a la v2026-1.0.11.60.",
     "Corregido: El editor de texto estilizado de Podcaster sanea los defaults y objetos Fabric para usar textBaseline=alphabetic, eliminando los warnings de CanvasTextBaseline por el valor heredado alphabetical. Se incrementa el cache-buster de podcaster-media-editor.js a la v2026-1.0.11.59.",
     "Corregido: El preview de montaje de Podcaster ahora actualiza el color de fondo de cada escena durante la reproducción del timeline, incluyendo escenas sin video. Se incrementan cache-busters de Podcaster a la v2026-06-26.5.",
@@ -45,6 +51,10 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El preview refleja de inmediato el tamaño nuevo del texto estilizado y los chips ligados se mantienen estables al abrir/cerrar escenas desde el timeline.",
+    "Corregido: localStorage se actualiza con los estilos karaoke nuevos aunque el guardado de Firebase sea manual.",
+    "Corregido: Los estilos de highlight karaoke del texto en pantalla se rehidratan correctamente al cargar una sesión guardada.",
+    "Corregido: El texto estilizado ahora conserva su tamaño real al agrandarlo y el canvas del editor queda centrado en el preview.",
     "Corregido: Los warnings restantes de Fabric por CanvasTextBaseline alphabetical se filtran antes de que el canvas los emita.",
     "Corregido: El editor Snoopy ya no emite warnings repetidos de CanvasTextBaseline por Fabric al renderizar texto estilizado.",
     "Corregido: El preview de montaje ya no arrastra el color de fondo de la escena anterior al reproducir escenas sin video con fondo personalizado.",
@@ -206,5 +216,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.248"
+  "cache_version": "2026-1.0.10.254"
 }

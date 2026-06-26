@@ -246,7 +246,7 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     ? globalThis.resolveActiveKaraokeWordIndex(audioClip?.wordTimings || [], currentMs, Number(activeSegment.startMs || 0) || 0, Number(audioClip?.playbackRate || 1) || 1)
     : -1;
   const markup = typeof globalThis.buildKaraokeSubtitleMarkup === "function"
-    ? globalThis.buildKaraokeSubtitleMarkup(text, audioClip?.wordTimings || [], activeWordIndex)
+    ? globalThis.buildKaraokeSubtitleMarkup(text, audioClip?.wordTimings || [], activeWordIndex, settings)
     : escapeHtml(text);
   const signature = JSON.stringify({
     id: activeSegment.id || activeSegment.rowId || "",
@@ -259,7 +259,9 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     fontSizePx: metrics.previewFontSizePx,
     wrappedText: previewSpec?.wrappedText || text,
     presetClass: previewSpec?.presetClass,
-    bgClass: previewSpec?.bgClass
+    bgClass: previewSpec?.bgClass,
+    karaokeHighlightColor: settings?.karaokeHighlightColor,
+    karaokeHighlightStyle: settings?.karaokeHighlightStyle
   });
   if (signature === renderState.lastTextSignature) return;
   renderState.lastTextSignature = signature;

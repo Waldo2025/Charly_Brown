@@ -242,6 +242,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       libraryId: String(track.libraryId || "").trim(),
       slotLabel: String(track.slotLabel || "").trim(),
       enabledInSession: track.enabledInSession !== false,
+      loopEnabled: track.loopEnabled !== false,
       name: String(track.name || "Audio").trim() || "Audio",
       mimeType: String(track.mimeType || "audio/mpeg").trim() || "audio/mpeg",
       size: Math.max(0, Number(track.size || 0) || 0),
@@ -250,6 +251,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       trimInMs,
       trimOutMs,
       localDataUrl: String(track.localDataUrl || "").trim().slice(0, maxLocalMusicDataUrlChars),
+      localMediaCacheKey: String(track.localMediaCacheKey || "").trim(),
       downloadUrl: String(track.downloadUrl || "").trim(),
       storagePath: String(track.storagePath || "").trim(),
       updatedAt: String(track.updatedAt || nowIso()).trim() || nowIso(),
@@ -299,6 +301,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       libraryId: normalized.libraryId,
       slotLabel: normalized.slotLabel,
       enabledInSession: normalized.enabledInSession !== false,
+      loopEnabled: normalized.loopEnabled !== false,
       name: normalized.name,
       mimeType: normalized.mimeType,
       size: normalized.size,
@@ -307,6 +310,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       trimInMs: normalized.trimInMs,
       trimOutMs: normalized.trimOutMs,
       localDataUrl: "",
+      localMediaCacheKey: String(normalized.localMediaCacheKey || "").trim(),
       downloadUrl: normalized.downloadUrl,
       storagePath: normalized.storagePath,
       updatedAt: normalized.updatedAt,
@@ -721,7 +725,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const segments = [];
       let sceneCursor = 0;
       let loopIndex = 0;
-      while (sceneCursor < sceneEntries.length && loopIndex < 120) {
+      const maxLoopCount = single.loopEnabled === false ? 1 : 120;
+      while (sceneCursor < sceneEntries.length && loopIndex < maxLoopCount) {
         const loopVisibleDurationMs = getPanelMusicLoopVisibleDurationMs(single, loopIndex);
         const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
         let endSceneCursor = sceneCursor;
@@ -838,7 +843,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const segments = [];
     let cursorMs = startOffsetMs;
     let loopIndex = 0;
-    while (cursorMs < totalDurationMs && loopIndex < 120) {
+    const maxLoopCount = normalized.loopEnabled === false ? 1 : 120;
+    while (cursorMs < totalDurationMs && loopIndex < maxLoopCount) {
       const loopSetting = loopSettings.find((item) => item.loopIndex === loopIndex) || getPanelMusicLoopSetting(normalized, loopIndex);
       const effectiveLoopMs = Math.max(
         minClipMs,
@@ -1159,6 +1165,10 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       return {
         slotLabel: String(segment?.slotLabel || "").trim(),
         sourceUrl: String(resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim(),
+        localDataUrl: String(segment?.localDataUrl || "").trim(),
+        localMediaCacheKey: String(segment?.localMediaCacheKey || "").trim(),
+        downloadUrl: String(segment?.downloadUrl || "").trim(),
+        storagePath: String(segment?.storagePath || "").trim(),
         startOffsetMs: Math.max(0, Number(segment?.startMs || 0) || 0),
         endOffsetMs: Math.max(0, Number(segment?.endMs || 0) || 0),
         loop: segment?.loop === true,
@@ -1189,7 +1199,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       downloadUrl: String(activeTrack?.downloadUrl || "").trim(),
       storagePath: String(activeTrack?.storagePath || "").trim(),
       localDataUrl: String(activeTrack?.localDataUrl || "").trim(),
+      localMediaCacheKey: String(activeTrack?.localMediaCacheKey || "").trim(),
       sourceItems,
+      loopEnabled: activeTrack?.loopEnabled !== false,
       volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
       montageVolume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
       duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
@@ -1897,6 +1909,22 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return true;
   }
 
+  function togglePanelMusicTrackLoopEnabled(kind = "", enabled = null) {
+    const trackKind = resolvePanelMusicTrackKind(kind || panelMusicState.selectedTrackKind);
+    const track = getPanelMusicTrackByKind(trackKind);
+    if (!track) return false;
+    const nextEnabled = typeof enabled === "boolean" ? enabled : track.loopEnabled === false;
+    setPanelMusicTrack(trackKind, {
+      ...track,
+      loopEnabled: nextEnabled,
+      updatedAt: nowIso()
+    }, { select: panelMusicState.selectedTrackKind === trackKind });
+    persistAudioTrackMixSettings();
+    syncMusicControls();
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "audio-loop-toggle" });
+    return true;
+  }
+
   function updatePanelMusicTrack(kind = "", mutator = null, options = {}) {
     const trackKind = resolvePanelMusicTrackKind(kind || panelMusicState.selectedTrackKind);
     const track = getPanelMusicTrackByKind(trackKind);
@@ -1904,9 +1932,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const nextTrack = normalizePanelMusicTrack(mutator({ ...track }));
     if (!nextTrack) return false;
     setPanelMusicTrack(trackKind, nextTrack, { select: panelMusicState.selectedTrackKind === trackKind || options.select === true });
-    persistAudioTrackMixSettings();
-    syncMusicControls();
-    renderPodcastVideoTimeline(getActiveSession());
+    if (options.persist !== false) persistAudioTrackMixSettings();
+    if (options.sync !== false) syncMusicControls();
+    if (options.render !== false) renderPodcastVideoTimeline(getActiveSession());
     return true;
   }
 
@@ -2057,6 +2085,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     ensurePanelMusicTrackDuration,
     ensureAllEnabledUploadedTrackDurations,
     togglePanelMusicLoopMute,
+    togglePanelMusicTrackLoopEnabled,
     updatePanelMusicTrack,
     syncActivePanelMusicTrack,
     selectPanelMusicTrackKind,

@@ -184,9 +184,31 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       startClientX: Number(event.clientX || 0),
       initialStartOffsetMs: Math.max(0, Number(track.startOffsetMs || 0) || 0),
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
-      selectedTrackIndex: requestedTrackIndex
+      selectedTrackIndex: requestedTrackIndex,
+      previewChip: event.target?.closest?.(".podcast-audio-timeline-chip") || null,
+      previewTranslatePx: 0,
+      nextStartOffsetMs: Math.max(0, Number(track.startOffsetMs || 0) || 0)
     };
     document.body.classList.add("podcast-timeline-dragging");
+  }
+
+  function resetAudioMoveDragPreview(drag = null) {
+    const previewChip = drag?.previewChip || null;
+    if (!previewChip) return;
+    previewChip.style.transform = "";
+    previewChip.style.willChange = "";
+    previewChip.classList.remove("is-drag-preview");
+  }
+
+  function syncAudioMoveDragPreview(drag = null, nextStartOffsetMs = 0, session = null) {
+    const previewChip = drag?.previewChip || null;
+    if (!previewChip) return;
+    const shiftMs = Math.round(Number(nextStartOffsetMs || 0) - Number(drag.initialStartOffsetMs || 0));
+    const shiftPx = timelineMsToPx(shiftMs, session || getActiveSession());
+    drag.previewTranslatePx = shiftPx;
+    previewChip.classList.add("is-drag-preview");
+    previewChip.style.willChange = "transform";
+    previewChip.style.transform = `translate3d(${shiftPx.toFixed(3)}px, 0, 0)`;
   }
 
   function buildPanelAudioSelectionKey(kind = "", loopIndex = 0) {
@@ -532,6 +554,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     }
     const moved = podcastVideoState.timelineDrag.moved === true;
     if (!moved) {
+      resetAudioMoveDragPreview(podcastVideoState.timelineDrag);
       clearPodcastTimelineDragUi();
       return;
     }
@@ -549,7 +572,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       syncGeminiDialogueTrackWithRuntime({
         render: false,
         preserveStartMs: true,
-        isTrimStart: dragMode === "trim-start"
+        isTrimStart: dragMode === "trim-start",
+        syncTextToScene: true
       });
       persistCompactedTimelineTrackFromRow(String(podcastVideoState.timelineDrag.rowId || "").trim(), {
         render: false,
@@ -571,6 +595,15 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       || dragMode === "audio-fadeout"
       || dragMode === "audio-move"
     ) {
+      if (dragMode === "audio-move") {
+        const drag = podcastVideoState.timelineDrag;
+        const trackKind = resolvePanelMusicTrackKind(drag?.selectedTrackKind || panelMusicState.selectedTrackKind);
+        const nextStartOffsetMs = Math.max(0, Number(drag?.nextStartOffsetMs ?? drag?.initialStartOffsetMs ?? 0) || 0);
+        updatePanelMusicTrack(trackKind, (track) => ({
+          ...track,
+          startOffsetMs: nextStartOffsetMs
+        }), { render: false, sync: false });
+      }
       flushSessionLocalPersistNow("", "background-music").catch(() => { });
     }
     clearPodcastTimelineDragUi();
@@ -1201,10 +1234,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         0,
         Math.min(maxStartOffsetMs, snapTimelineMsWithStep(Number(drag.initialStartOffsetMs || 0) + deltaMsRaw, dragStepMs))
       );
-      updatePanelMusicTrack(trackKind, (currentTrack) => ({
-        ...currentTrack,
-        startOffsetMs: nextStartOffsetMs
-      }));
+      drag.nextStartOffsetMs = nextStartOffsetMs;
+      syncAudioMoveDragPreview(drag, nextStartOffsetMs, session);
       return;
     }
     if (drag.mode === "gemini-segment-move") {
@@ -1586,6 +1617,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       render: false,
       preserveStartMs: true,
       isTrimStart: dragMode === "trim-start",
+      syncTextToScene: true,
       autosave: false
     });
     if (PODCAST_SESSION_MANUAL_SAVE_ONLY !== true) {
@@ -1611,6 +1643,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       timelinePointerMoveRafId = 0;
     }
     if (options.keepUi !== true) {
+      resetAudioMoveDragPreview(podcastVideoState.timelineDrag);
       clearPodcastTimelineDragUi();
     } else {
       podcastVideoState.timelineDrag = null;

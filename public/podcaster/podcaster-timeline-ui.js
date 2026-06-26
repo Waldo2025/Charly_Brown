@@ -1221,6 +1221,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       const groupSegments = Array.isArray(group?.segments) ? group.segments : [];
       const groupMutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(safeTrack?.mutedLoopIndexes || []));
       const rowTitle = String(safeTrack?.slotLabel || `Audio ${trackIndex + 1}`).trim() || `Audio ${trackIndex + 1}`;
+      const isLoopEnabled = safeTrack?.loopEnabled !== false;
       const chipsHtml = groupSegments.map((segment) => {
         const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
         const isLastGroupSegment = groupSegments[groupSegments.length - 1] === segment;
@@ -1272,6 +1273,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               <button class="row-icon-btn" type="button" data-action="timeline-toggle-uploaded-track-enabled" data-track-index="${trackIndex}" title="${isTrackEnabled ? "Deshabilitar track en esta sesión" : "Habilitar track en esta sesión"}" aria-label="${isTrackEnabled ? "Deshabilitar track" : "Habilitar track"}">
                 <i class="fas ${isTrackEnabled ? "fa-volume-up" : "fa-volume-mute"}" aria-hidden="true"></i>
               </button>
+              <button class="row-icon-btn${isLoopEnabled ? "" : " is-off"}" type="button" data-action="timeline-toggle-background-audio-loop" data-track-kind="uploaded" data-track-index="${trackIndex}" title="${isLoopEnabled ? "Desactivar loop de audio de fondo" : "Activar loop de audio de fondo"}" aria-label="${isLoopEnabled ? "Desactivar loop de audio de fondo" : "Activar loop de audio de fondo"}" aria-pressed="${isLoopEnabled ? "true" : "false"}">
+                <i class="fas ${isLoopEnabled ? "fa-redo-alt" : "fa-long-arrow-alt-right"}" aria-hidden="true"></i>
+              </button>
               ${rowIndex === 0 ? `<button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio" aria-label="Configurar mezcla de audio">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i>
               </button>` : ""}
@@ -1289,6 +1293,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     if (panelMusicState.selectedTrackKind === "uploaded" && uploadedTracks.length) {
       timelineTrackBlocks.push(uploadedTracks.map((track, rowIndex) => renderUploadedGroupRow(track, rowIndex)).join(""));
     } else {
+      const isPanelLoopEnabled = panelTrack?.loopEnabled !== false;
       timelineTrackBlocks.push(`
         <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="audio-track" data-track-index="-1">
           <div class="podcast-video-track-label is-locked is-audio-track">
@@ -1297,6 +1302,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               <span class="podcast-track-label-text">Audio de fondo</span>
             </div>
             <div class="podcast-track-label-actions">
+              <button class="row-icon-btn${isPanelLoopEnabled ? "" : " is-off"}" type="button" data-action="timeline-toggle-background-audio-loop" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" title="${isPanelLoopEnabled ? "Desactivar loop de audio de fondo" : "Activar loop de audio de fondo"}" aria-label="${isPanelLoopEnabled ? "Desactivar loop de audio de fondo" : "Activar loop de audio de fondo"}" aria-pressed="${isPanelLoopEnabled ? "true" : "false"}">
+                <i class="fas ${isPanelLoopEnabled ? "fa-redo-alt" : "fa-long-arrow-alt-right"}" aria-hidden="true"></i>
+              </button>
               <button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio" aria-label="Configurar mezcla de audio">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i>
               </button>

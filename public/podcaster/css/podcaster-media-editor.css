@@ -194,11 +194,14 @@
 }
 
 .pme-canvas-container .canvas-container {
-    position: relative;
+    position: absolute !important;
+    left: 50%;
+    top: 50%;
     z-index: 3;
-    max-width: 100%;
-    max-height: 100%;
-    transform: scale(var(--pme-canvas-scale, 1));
+    width: var(--pme-stage-width, 1280px) !important;
+    height: var(--pme-stage-height, 720px) !important;
+    transform: translate(-50%, -50%) scale(var(--pme-canvas-scale, 1));
+    transform-origin: center center;
 }
 
 .pme-canvas-container canvas {
