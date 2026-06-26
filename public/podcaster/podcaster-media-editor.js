@@ -68,6 +68,46 @@ function sanitizeStylizedTextValue(value, currentKey = '') {
     return nextValue;
 }
 
+function patchFabricTextBaselineDefaults() {
+    if (typeof fabric === 'undefined' || !fabric || fabric.__podcasterTextBaselinePatched === true) return;
+    [fabric.Text, fabric.IText, fabric.Textbox].filter(Boolean).forEach((Ctor) => {
+        if (Ctor.prototype) {
+            Ctor.prototype.textBaseline = normalizeCanvasTextBaseline(Ctor.prototype.textBaseline || 'alphabetic');
+        }
+        if (Ctor.ownDefaults && typeof Ctor.ownDefaults === 'object') {
+            Ctor.ownDefaults.textBaseline = normalizeCanvasTextBaseline(Ctor.ownDefaults.textBaseline || 'alphabetic');
+        }
+    });
+    fabric.__podcasterTextBaselinePatched = true;
+}
+
+function sanitizeFabricTextObjectInstance(obj = null) {
+    if (!obj || typeof obj !== 'object') return;
+    const type = String(obj.type || '').trim().toLowerCase();
+    if (['i-text', 'text', 'textbox'].includes(type)) {
+        const current = typeof obj.get === 'function' ? obj.get('textBaseline') : obj.textBaseline;
+        const nextBaseline = normalizeCanvasTextBaseline(current || 'alphabetic');
+        if (typeof obj.set === 'function') {
+            obj.set('textBaseline', nextBaseline);
+        } else {
+            obj.textBaseline = nextBaseline;
+        }
+        if (obj.styles && typeof obj.styles === 'object') {
+            obj.styles = sanitizeStylizedTextValue(obj.styles, 'styles');
+        }
+    }
+    if (typeof obj.getObjects === 'function') {
+        obj.getObjects().forEach((child) => sanitizeFabricTextObjectInstance(child));
+    } else if (Array.isArray(obj.objects)) {
+        obj.objects.forEach((child) => sanitizeFabricTextObjectInstance(child));
+    }
+}
+
+function sanitizeFabricCanvasTextBaselines(canvas = null) {
+    if (!canvas || typeof canvas.getObjects !== 'function') return;
+    canvas.getObjects().forEach((obj) => sanitizeFabricTextObjectInstance(obj));
+}
+
 // --- DOM Elements ---
 let els = {};
 
@@ -338,6 +378,7 @@ function renderStylizedTextToDataUrl(textData = null) {
         return Promise.resolve(stylizedTextBitmapCache.get(cacheKey) || '');
     }
     return new Promise((resolve) => {
+        patchFabricTextBaselineDefaults();
         const canvasEl = document.createElement('canvas');
         canvasEl.width = STYLIZED_TEXT_STAGE_WIDTH;
         canvasEl.height = STYLIZED_TEXT_STAGE_HEIGHT;
@@ -348,6 +389,7 @@ function renderStylizedTextToDataUrl(textData = null) {
             renderOnAddRemove: false
         });
         staticCanvas.loadFromJSON(sanitizedTextData, () => {
+            sanitizeFabricCanvasTextBaselines(staticCanvas);
             staticCanvas.setBackgroundColor('transparent', staticCanvas.renderAll.bind(staticCanvas));
             staticCanvas.renderAll();
             const dataUrl = canvasEl.toDataURL('image/png');
@@ -361,6 +403,7 @@ function renderStylizedTextToDataUrl(textData = null) {
 // --- Stylized Text logic (Fabric.js) ---
 function initFabric() {
     if (fabricCanvas) return;
+    patchFabricTextBaselineDefaults();
     
     const container = document.querySelector('.pme-canvas-container');
     const w = container.clientWidth || 960;
@@ -505,6 +548,7 @@ async function openStylizedTextEditor() {
 
         if (sanitizedTextData) {
             fabricCanvas.loadFromJSON(sanitizedTextData, () => {
+                sanitizeFabricCanvasTextBaselines(fabricCanvas);
                 fabricCanvas.setBackgroundColor('transparent', fabricCanvas.renderAll.bind(fabricCanvas));
                 fabricCanvas.renderAll();
                 const obj = fabricCanvas.getObjects()[0];

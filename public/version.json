@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.246",
-  "build": "2026-1.0.10.246",
+  "version": "1.0.10.247",
+  "build": "2026-1.0.10.247",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El editor de texto estilizado de Podcaster sanea los defaults y objetos Fabric para usar textBaseline=alphabetic, eliminando los warnings de CanvasTextBaseline por el valor heredado alphabetical. Se incrementa el cache-buster de podcaster-media-editor.js a la v2026-1.0.11.59.",
     "Corregido: El preview de montaje de Podcaster ahora actualiza el color de fondo de cada escena durante la reproducción del timeline, incluyendo escenas sin video. Se incrementan cache-busters de Podcaster a la v2026-06-26.5.",
     "Corregido: El texto en pantalla de montaje, preview y export ahora se recorta al intervalo real del chip de audio Gemini; al terminar el clip de audio, el overlay se oculta. Se incrementan cache-busters de Podcaster a la v2026-06-26.4.",
     "Corregido: La hidratación previa del export MP4 reescribe proxy-media/proxy-image hacia snoopy-export antes de descargar assets, evitando que charly-brown-gemini-backend reciba logs de videos durante la exportación. Se incrementan cache-busters de Podcaster a la v2026-06-26.3.",
@@ -43,6 +44,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El editor Snoopy ya no emite warnings repetidos de CanvasTextBaseline por Fabric al renderizar texto estilizado.",
     "Corregido: El preview de montaje ya no arrastra el color de fondo de la escena anterior al reproducir escenas sin video con fondo personalizado.",
     "Corregido: El texto en pantalla del montaje se sincroniza con la duración del chip de audio Gemini en preview/render/export de Render/Firestore y se oculta al terminar el clip.",
     "Corregido: La preparación de assets del export MP4 ahora descarga proxy-media/proxy-image desde snoopy-export en Render/Firestore antes del POST, para que el backend Gemini no procese videos de exportación.",
@@ -202,5 +204,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.246"
+  "cache_version": "2026-1.0.10.247"
 }
