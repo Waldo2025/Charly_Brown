@@ -1618,75 +1618,42 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const sourceItems = Array.isArray(panelCfg.sourceItems) ? panelCfg.sourceItems : [];
     const backgroundLookupToleranceMs = this.getTimelineLookupToleranceMs();
-    const activeSegmentLookup = sourceItems.length > 0
-      ? (() => {
-        const matches = [];
-        for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
-          const candidate = sourceItems[segmentIndex];
-          if (!candidate) continue;
-          const candidateStartMs = Number(candidate.startOffsetMs || 0);
-          const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
-          if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
-            matches.push({ segmentIndex, segment: candidate });
-          }
+    const useContinuousSource = Boolean(String(panelCfg.sourceUrl || "").trim());
+    const activeSegmentLookup = useContinuousSource
+      ? {
+        segmentIndex: -1,
+        segment: {
+          sourceUrl: panelCfg.sourceUrl,
+          volume: panelCfg.volume,
+          loop: panelCfg.loopEnabled !== false,
+          startOffsetMs: Math.max(0, Number(panelCfg.startOffsetMs || 0) || 0),
+          endOffsetMs: 9999999,
+          trimInMs: Math.max(0, Number(panelCfg.trimInMs || 0)),
+          trimOutMs: Math.max(
+            Math.max(0, Number(panelCfg.trimInMs || 0)) + 1,
+            Number(panelCfg.trimOutMs || Math.max(0, Math.round(Number(panelCfg.durationSec || 0) * 1000))) || 0
+          ),
+          fadeInMs: 0,
+          fadeOutMs: 0
         }
-        if (!matches.length) return null;
-        return matches
-          .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
-      })()
-      : (() => {
-        if (!panelCfg.sourceUrl) return null;
-        const sourceDurationMs = Math.max(0, Math.round(Number(panelCfg.durationSec || 0) * 1000));
-        const trimInMs = Math.max(0, Number(panelCfg.trimInMs || 0));
-        const trimOutMs = Math.max(trimInMs + 1, Number(panelCfg.trimOutMs || sourceDurationMs || 0));
-        const startOffsetMs = Math.max(0, Number(panelCfg.startOffsetMs || 0) || 0);
-        const loopSettings = Array.isArray(panelCfg.loopSettings) ? panelCfg.loopSettings : [];
-        const loopEnabled = panelCfg.loopEnabled !== false;
-        let cursorMs = startOffsetMs;
-        let loopIndex = 0;
-        const maxLoopCount = loopEnabled ? 120 : 1;
-        while (loopIndex < maxLoopCount) {
-          const loopSetting = loopSettings.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex) || null;
-          const segmentTrimInMs = Math.max(0, Number(loopSetting?.trimInMs ?? trimInMs) || 0);
-          const segmentTrimOutMs = Math.max(segmentTrimInMs + 1, Number(loopSetting?.trimOutMs ?? trimOutMs) || trimOutMs);
-          const effectiveLoopMs = Math.max(1, segmentTrimOutMs - segmentTrimInMs);
-          const endOffsetMs = cursorMs + effectiveLoopMs;
-          if (this.isTimelineMsInRange(currentMs, cursorMs, endOffsetMs, { toleranceMs: backgroundLookupToleranceMs })) {
-            return {
-              segmentIndex: -1,
-              segment: {
-                sourceUrl: panelCfg.sourceUrl,
-                volume: panelCfg.volume,
-                loop: loopEnabled,
-                startOffsetMs: cursorMs,
-                endOffsetMs,
-                trimInMs: segmentTrimInMs,
-                trimOutMs: segmentTrimOutMs,
-                fadeInMs: Math.max(0, Number(loopSetting?.fadeInMs || 0)),
-                fadeOutMs: Math.max(0, Number(loopSetting?.fadeOutMs || 0))
-              }
-            };
+      }
+      : sourceItems.length > 0
+        ? (() => {
+          const matches = [];
+          for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
+            const candidate = sourceItems[segmentIndex];
+            if (!candidate) continue;
+            const candidateStartMs = Number(candidate.startOffsetMs || 0);
+            const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
+            if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
+              matches.push({ segmentIndex, segment: candidate });
+            }
           }
-          if (cursorMs > currentMs && loopIndex > 0) break;
-          cursorMs = endOffsetMs;
-          loopIndex += 1;
-        }
-        if (!panelCfg.sourceUrl || !loopEnabled) return null;
-        return {
-          segmentIndex: -1,
-          segment: {
-            sourceUrl: panelCfg.sourceUrl,
-            volume: panelCfg.volume,
-            loop: true,
-            startOffsetMs: 0,
-            endOffsetMs: 9999999,
-            trimInMs,
-            trimOutMs,
-            fadeInMs: 0,
-            fadeOutMs: 0
-          }
-        };
-      })();
+          if (!matches.length) return null;
+          return matches
+            .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
+        })()
+        : null;
 
     if (!activeSegmentLookup || !activeSegmentLookup.segment) {
       if (this.state.isPlaying && this.backgroundAudio && !this.backgroundAudio.paused && this.backgroundSourceKey) {
@@ -1717,33 +1684,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
     const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}`;
     const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey;
-
-    const isBoundaryTransition = Number(this.backgroundSegmentIndex) !== activeSegmentIndex;
-    const continuityToleranceMs = Math.max(12, this.getTimelineLookupToleranceMs() * 2);
-    const prevSiblingOnSource = sourceItems.length > 0
-      ? (() => {
-        const activeSegmentKey = activeSegmentSourceKey;
-        const candidates = [];
-        for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
-          if (segmentIndex === activeSegmentIndex) continue;
-          const segment = sourceItems[segmentIndex];
-          if (!segment) continue;
-          const segmentSourceKey = this.resolveAudioSourceKey(segment);
-          if (segmentSourceKey !== activeSegmentKey) continue;
-          const segmentStartMs = Math.max(0, Number(segment.startOffsetMs || 0) || 0);
-          const segmentEndMs = Math.max(segmentStartMs, Number(segment.endOffsetMs || segmentStartMs) || 0);
-          if (segmentStartMs <= activeSegmentStartMs + continuityToleranceMs) {
-            candidates.push({ segment, segmentIndex, segmentStartMs, segmentEndMs });
-          }
-        }
-        candidates.sort((a, b) => b.segmentStartMs - a.segmentStartMs);
-        return candidates[0] || null;
-      })()
-      : null;
-    const prevSiblingSkewCompatible = sourceHasNotChanged
-      && isBoundaryTransition
-      && prevSiblingOnSource
-      && activeSegmentStartMs <= (prevSiblingOnSource.segmentEndMs + continuityToleranceMs);
+    const sourceIsContinuous = useContinuousSource === true;
 
     if (!sourceHasNotChanged) {
       this.backgroundSegmentSkewMs = null;
@@ -1848,29 +1789,33 @@ export class PodcasterPlaybackController extends EventEmitter {
     const segmentBaseOffsetMs = trimInMs + elapsedMs;
     let offsetMs = segmentBaseOffsetMs;
     if (sourceHasNotChanged) {
-      if (isBoundaryTransition && !prevSiblingSkewCompatible) {
-        const fallbackBoundarySkew = segmentBaseOffsetMs - Number(currentMs || 0);
-        const boundarySkew = Number(this.backgroundAudio.currentTime || 0) * 1000 - Number(currentMs || 0);
-        if (Number.isFinite(boundarySkew) && Number.isFinite(fallbackBoundarySkew)
-          && Math.abs(boundarySkew - fallbackBoundarySkew) <= 2000) {
-          this.backgroundSegmentSkewMs = boundarySkew;
+      if (sourceIsContinuous) {
+        if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
+          this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
+        }
+        const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
+        const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - segmentBaseOffsetMs);
+        if (expectedJumpMs > 800 && this.backgroundAudio.dataset.initialized === "true") {
+          this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
+          offsetMs = segmentBaseOffsetMs;
         } else {
-          this.backgroundSegmentSkewMs = fallbackBoundarySkew;
+          offsetMs = expectedOffsetFromSkewMs;
+        }
+      } else {
+        this.backgroundSegmentIndex = activeSegmentIndex;
+        if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
+          this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
+        }
+        const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
+        const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - segmentBaseOffsetMs);
+        if (expectedJumpMs > 800 && this.backgroundAudio.dataset.initialized === "true") {
+          this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
+          offsetMs = segmentBaseOffsetMs;
+        } else {
+          offsetMs = expectedOffsetFromSkewMs;
         }
         this.backgroundSegmentIndex = activeSegmentIndex;
       }
-      if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
-        this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
-      }
-      const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
-      const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - segmentBaseOffsetMs);
-      if (!isBoundaryTransition && expectedJumpMs > 800) {
-        this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
-        offsetMs = segmentBaseOffsetMs;
-      } else {
-        offsetMs = expectedOffsetFromSkewMs;
-      }
-      this.backgroundSegmentIndex = activeSegmentIndex;
     } else {
       this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
       this.backgroundSegmentIndex = activeSegmentIndex;
