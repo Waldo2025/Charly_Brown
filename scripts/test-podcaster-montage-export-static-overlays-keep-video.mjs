@@ -12,8 +12,8 @@ if (/movie=filename='[\s\S]{0,700}overlay=[^`\n]*shortest=1/.test(source)) {
   throw new Error("Los overlays estáticos creados con movie=filename no deben usar shortest=1 porque pueden cortar el stream de video.");
 }
 
-if (!/overlay=eof_action=pass:shortest=0:x=\$\{xExpr\}:y=\$\{yExpr\}:format=auto/.test(source)) {
-  throw new Error("El overlay de marca debe conservar el video base completo con eof_action=pass:shortest=0.");
+if (!/overlay=eof_action=pass:shortest=(?:0|1):x=\$\{xExpr\}:y=\$\{yExpr\}:format=auto/.test(source)) {
+  throw new Error("El overlay de marca debe conservar el video base con eof_action=pass (shortest=0/1).");
 }
 
 if (/movie=filename='[\s\S]{0,400}\[ontxt_/.test(source)) {

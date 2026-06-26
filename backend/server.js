@@ -3428,6 +3428,14 @@ function sanitizePodcasterSession(raw = {}) {
     fontStyle: clampText(trackRaw?.fontStyle || "normal", 24) || "normal",
     textAlign: clampText(trackRaw?.textAlign || "center", 24) || "center",
     textColor: clampText(trackRaw?.textColor || "#FFFFFF", 24) || "#FFFFFF",
+    karaokeHighlightColor: clampText(trackRaw?.karaokeHighlightColor || "#facc15", 24) || "#facc15",
+    karaokeHighlightStyle: ["glow", "text", "pill", "rect", "underline"].includes(String(trackRaw?.karaokeHighlightStyle || "").trim().toLowerCase())
+      ? String(trackRaw.karaokeHighlightStyle).trim().toLowerCase()
+      : "glow",
+    karaokeHighlightOpacity: clampNumber(trackRaw?.karaokeHighlightOpacity, 0, 1, 0.92),
+    karaokeHighlightPaddingXPx: clampNumber(trackRaw?.karaokeHighlightPaddingXPx, 0, 40, 10),
+    karaokeHighlightPaddingYPx: clampNumber(trackRaw?.karaokeHighlightPaddingYPx, 0, 28, 4),
+    karaokeHighlightRadiusPx: clampNumber(trackRaw?.karaokeHighlightRadiusPx, 0, 40, 12),
     strokeColor: clampText(trackRaw?.strokeColor || "#0f172a", 24) || "#0f172a",
     strokeWidthPx: clampNumber(trackRaw?.strokeWidthPx, 0, 12, 2),
     textOpacity: clampNumber(trackRaw?.textOpacity, 0, 1, 1),
@@ -3586,6 +3594,7 @@ function sanitizePodcasterSession(raw = {}) {
         libraryId: clampText(trackRaw?.libraryId || "", 140),
         slotLabel: clampText(trackRaw?.slotLabel || "", 80),
         enabledInSession: trackRaw?.enabledInSession !== false,
+        loopEnabled: trackRaw?.loopEnabled !== false,
         name: clampText(trackRaw?.name || fallbackName, 180) || fallbackName,
         mimeType: clampText(trackRaw?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
         size: Math.max(0, Number(trackRaw?.size) || 0),
@@ -11297,7 +11306,7 @@ async function renderMontageOverlapComposition({
         overlayY = `(${canvas.height}-h)/2`;
       }
       const overlayOutLabel = `base${index + 1}`;
-      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
+      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=1:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
       baseLabel = overlayOutLabel;
       if (transitionType === "dip-black" || transitionType === "flash-white") {
         const pulseLabel = `transition_pulse_${index}`;
@@ -11305,7 +11314,7 @@ async function renderMontageOverlapComposition({
         const color = transitionType === "flash-white" ? "white" : "black";
         const halfTransitionSec = Math.max(0.01, transitionSec / 2);
         filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24,format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
-        filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[${pulseOutLabel}]`);
+        filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=1:x=0:y=0:format=auto[${pulseOutLabel}]`);
         baseLabel = pulseOutLabel;
       }
 
@@ -11733,7 +11742,7 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     : `${marginPx}`;
   return [
     `${brandInputLabel}format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
-    `${baseInputLabel}[brand]overlay=eof_action=pass:shortest=0:x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
+    `${baseInputLabel}[brand]overlay=eof_action=pass:shortest=1:x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
   ].join(";");
 }
 
@@ -12798,7 +12807,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
     );
+    const forcedKaraokeBrowserVisualPass = Boolean(
+      hasTimelineOverlapOrGaps
+      && shouldAttemptBrowserRenderer
+      && browserRendererAvailability.available === true
+      && isTextTrackVisible
+      && Array.isArray(input.onScreenTextSegments)
+      && input.onScreenTextSegments.length > 0
+      && ["pill", "rect", "underline"].includes(
+        String(input?.onScreenTextSettings?.karaokeHighlightStyle || "").trim().toLowerCase()
+      )
+    );
     const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
+    const hasBrowserVisualPassFallback = hasBrowserVisualPass || (forcedKaraokeBrowserVisualPass && hasFinalVisualPass);
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -12807,6 +12828,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     console.info("[backend][montage-export][visual-pass-decision]", {
       hasFinalVisualPass,
       hasBrowserVisualPass,
+      forcedKaraokeBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
       browserVisualPassDisabled: shouldAttemptBrowserRenderer,
       browserVisualPassOverlapFallback: hasTimelineOverlapOrGaps,
@@ -12822,7 +12844,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       brandOverlayEnabled: input.brandOverlay?.enabled === true,
       brandOverlayAssetPath: String(input.brandOverlay?.assetPath || "").trim() || null
     });
-    if (hasBrowserVisualPass) {
+    if (hasBrowserVisualPassFallback) {
       finalOutPath = await renderMontageBrowserFinalVisualPass({
         input: {
           ...input,
@@ -12837,7 +12859,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         registerAbortHandler: context?.registerAbortHandler
       });
     }
-    if (hasFinalVisualPass && !hasBrowserVisualPass) {
+    if (hasFinalVisualPass && !hasBrowserVisualPassFallback) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
       const visualDims = input.exportMode === "review"
         ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
