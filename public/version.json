@@ -1,8 +1,12 @@
 {
-  "version": "1.0.10.254",
-  "build": "2026-1.0.10.254",
+  "version": "1.0.10.257",
+  "build": "2026-1.0.10.257",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Actualizado: Se incrementan version.json y los cache-busters de podcaster.html y podcaster.js para forzar en producción la carga del fix de audio de fondo entre escenas y del preview rehidratado.",
+    "Corregido: El audio de fondo local en preview ya no corta al mover escenas: se mantiene segmentación tolerante y se evita reinicio de Audio durante pequeños huecos de tiempo/arrastre del timeline. También se protege la resolución de `podcaster-local-media:` en medición de duración.",
+    "Corregido: El audio de fondo MP3 subido localmente se vuelve a reproducir en preview y export sin CORS cuando llega desde localMediaCacheKey/dataUrl en sesiones locales o de producción. Se prioriza la resolución local antes de pasar la URL a `new Audio`.",
+    "Corregido: La configuración de panel de música ahora mantiene segmentos locales en `sourceItems` en editor y home (también en track de fondo) aunque no exista `sourceUrl` remoto, evitando que se dropee audio local al reconstruir el payload del montage.",
     "Corregido: Al guardar texto estilizado, el preview actualiza inmediatamente el stylizedTextMap local y limpia cache bitmap sin esperar recarga; además, los trims de escena preservan el offset relativo de audio Gemini y texto en pantalla respecto a su escena. Se incrementa podcaster-media-editor.js a la v2026-06-26.9.",
     "Corregido: Los cambios del estilo highlight karaoke del texto en pantalla ahora actualizan localStorage y marcan la sesión como dirty incluso en modo guardado manual, evitando rehidratar valores viejos antes/después de guardar en Firebase. Se incrementa podcaster.js a la v2026-06-26.9.",
     "Corregido: Los estilos de highlight karaoke del texto en pantalla ahora forman parte de la clave de estructura del timeline, por lo que se guardan y rehidratan correctamente al abrir una sesión. Se incrementa podcaster.js a la v2026-06-26.8.",
@@ -51,6 +55,8 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El audio de fondo con origen local vuelve a escucharse en el timeline y se exporta sin tratar `podcaster-local-media:` como URL remota; se rehidratan `localMediaCacheKey` y `localDataUrl` también en home.",
+    "Corregido: Los segmentos de música de fondo ya no se descartan en home/podcaster cuando solo tienen fuentes locales (sin `downloadUrl`/`storagePath`).",
     "Corregido: El preview refleja de inmediato el tamaño nuevo del texto estilizado y los chips ligados se mantienen estables al abrir/cerrar escenas desde el timeline.",
     "Corregido: localStorage se actualiza con los estilos karaoke nuevos aunque el guardado de Firebase sea manual.",
     "Corregido: Los estilos de highlight karaoke del texto en pantalla se rehidratan correctamente al cargar una sesión guardada.",
@@ -216,5 +222,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.254"
+  "cache_version": "2026-1.0.10.257"
 }
