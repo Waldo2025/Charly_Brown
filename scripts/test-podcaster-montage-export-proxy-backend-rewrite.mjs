@@ -47,7 +47,7 @@ const context = {
 };
 
 vm.createContext(context);
-vm.runInContext(`${extractFunction("normalizeMontageSubmissionMediaUrl")};`, context);
+vm.runInContext(`${extractFunction("normalizeMontageSubmissionMediaUrl")};async ${extractFunction("resolveMontageSceneMediaSourceUrl")};`, context);
 
 assert.equal(
   context.normalizeMontageSubmissionMediaUrl("/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"),
@@ -69,6 +69,14 @@ assert.equal(
   ),
   "https://snoopy-export.onrender.com/api/assets/proxy-image?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Fthumb.png%3Falt%3Dmedia&noRange=1",
   "proxy-image también debe reescribirse al backend de export cuando viaje dentro del payload."
+);
+
+assert.equal(
+  await context.resolveMontageSceneMediaSourceUrl({
+    url: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fcharly-brown.firebasestorage.app%2Fo%2Fpodcaster%252Fsessions%252Fsession_omz5q1yf%252Fowners%252F9ifaac0zddou10egfq33owkuthx2%252Fvideos%252Frow_mjyqbopi-narrador%252Fcb38eb77-cd26-40bd-9040-1233c5976cba.mp4%3Falt%3Dmedia%26token%3DREDACTED"
+  }, "video"),
+  "https://snoopy-export.onrender.com/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fcharly-brown.firebasestorage.app%2Fo%2Fpodcaster%252Fsessions%252Fsession_omz5q1yf%252Fowners%252F9ifaac0zddou10egfq33owkuthx2%252Fvideos%252Frow_mjyqbopi-narrador%252Fcb38eb77-cd26-40bd-9040-1233c5976cba.mp4%3Falt%3Dmedia%26token%3DREDACTED",
+  "La hidratación previa al POST también debe descargar proxy-media desde snoopy-export, no desde Gemini."
 );
 
 console.log("Podcaster montage export rewrites proxy asset URLs to snoopy-export OK.");
