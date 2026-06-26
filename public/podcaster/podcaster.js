@@ -14423,7 +14423,7 @@ function renderPodcastVideoShell(session = null) {
   } else {
     setPodcastVideoSpeaker(activeSession, podcastVideoState.activeSpeaker, { speaking: podcastVideoState.speaking });
   }
-  syncPodcastVideoStageMedia(activeSession, audioOnlyPodcastMode ? "" : podcastVideoState.activeRowId);
+  syncPodcastVideoStageMedia(activeSession, audioOnlyPodcastMode ? "" : podcastVideoState.activeRowId, { force: true });
   syncPodcastStudioInspector(activeSession);
   if (audioOnlyPodcastMode) {
     if (els.podcastOnScreenTextOverlay) {

@@ -3394,7 +3394,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       String(firstSegment?.storagePath || clip?.storagePath || "").trim(),
       String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
       String(firstSegment?.type || clip?.type || "").trim().toLowerCase(),
-      String(clipCfg?.backgroundColor || "").trim()
+      String(clipCfg?.backgroundColor || "").trim(),
+      String(clipCfg?.visualLayoutMode || "").trim().toLowerCase(),
+      String(clipCfg?.mediaScale ?? "").trim(),
+      String(clipCfg?.mediaOffsetXPct ?? "").trim(),
+      String(clipCfg?.mediaOffsetYPct ?? "").trim(),
+      String(clipCfg?.mediaMotionPreset || "").trim().toLowerCase()
     ].join("|");
     const stateKey = `${sessionId}_${key}_${isSpeaking}_${playbackActive}_${(this.deps?.podcastVideoState || window.podcastVideoState)?.montageActive}_${mediaSignature}`;
     
