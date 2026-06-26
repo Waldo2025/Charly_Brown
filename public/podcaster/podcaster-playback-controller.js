@@ -74,6 +74,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSrc = "";
     this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
+    this.backgroundSegmentSkewMs = null;
+    this.backgroundSegmentIndex = -1;
 
     this.stageMachine = {
       loadingSrc: '',
@@ -514,26 +516,47 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   async resolveAudioSource(clip = null) {
     const localKey = String(clip?.localMediaCacheKey || "").trim();
+    const localMediaPrefix = "podcaster-local-media:";
     if (localKey) {
       const localSrc = await this.resolveLocalMediaObjectUrl(localKey);
       if (localSrc) return localSrc;
     }
+
     const localDataUrl = String(clip?.localDataUrl || clip?.dataUrl || "").trim();
     if (localDataUrl) {
-      if (localDataUrl.startsWith("podcaster-local-media:")) {
-        const localBlobUrl = await this.resolveLocalMediaObjectUrl(localDataUrl.replace("podcaster-local-media:", ""));
-        if (localBlobUrl) return localBlobUrl;
+      if (localDataUrl.startsWith(localMediaPrefix)) {
+        const localDataKey = localDataUrl.replace(localMediaPrefix, "").trim();
+        if (localDataKey) {
+          const localBlobUrl = await this.resolveLocalMediaObjectUrl(localDataKey);
+          if (localBlobUrl) return localBlobUrl;
+        }
+      }
+      if (!localKey) {
+        const fallbackLocalBlob = await this.resolveLocalMediaObjectUrl(localDataUrl);
+        if (fallbackLocalBlob) return fallbackLocalBlob;
+      }
+      if (localDataUrl.startsWith("data:")) {
+        return localDataUrl;
+      }
+      if (localDataUrl.startsWith(localMediaPrefix)) {
+        return "";
       }
       return localDataUrl;
     }
+
     const directSource = String(clip?.sourceUrl || "").trim();
     if (directSource) {
-      if (directSource.startsWith("podcaster-local-media:")) {
-        const directBlobUrl = await this.resolveLocalMediaObjectUrl(directSource.replace("podcaster-local-media:", ""));
-        if (directBlobUrl) return directBlobUrl;
+      if (directSource.startsWith(localMediaPrefix)) {
+        const localSourceKey = directSource.replace(localMediaPrefix, "").trim();
+        if (localSourceKey) {
+          const localBlobUrl = await this.resolveLocalMediaObjectUrl(localSourceKey);
+          if (localBlobUrl) return localBlobUrl;
+        }
+        return "";
       }
       return directSource;
     }
+
     const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
     if (!rawUrl) {
       const fallbackUrl = String(clip?.downloadUrl || "").trim();
@@ -544,11 +567,21 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   resolveAudioSourceKey(clip = null) {
+    const localMediaPrefix = "podcaster-local-media:";
     const localKey = String(clip?.localMediaCacheKey || "").trim();
     if (localKey) return `local:${localKey}`;
     const sourceUrl = String(clip?.sourceUrl || "").trim();
+    if (sourceUrl.startsWith(localMediaPrefix)) {
+      const normalizedLocalKey = sourceUrl.replace(localMediaPrefix, "").trim();
+      if (normalizedLocalKey) return `local:${normalizedLocalKey}`;
+      return sourceUrl;
+    }
     if (sourceUrl) return sourceUrl;
     const localDataUrl = String(clip?.localDataUrl || clip?.dataUrl || "").trim();
+    if (localDataUrl.startsWith(localMediaPrefix)) {
+      const normalizedLocalKey = localDataUrl.replace(localMediaPrefix, "").trim();
+      if (normalizedLocalKey) return `local:${normalizedLocalKey}`;
+    }
     if (localDataUrl) return localDataUrl.slice(0, 240);
     const downloadUrl = String(clip?.downloadUrl || "").trim();
     if (downloadUrl) return downloadUrl;
@@ -1562,27 +1595,38 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!panelCfg || panelCfg.sourceType === "none") { this.stopBackgroundMusic(); return; }
 
     const sourceItems = Array.isArray(panelCfg.sourceItems) ? panelCfg.sourceItems : [];
-    const activeSegment = sourceItems.length > 0
-      ? sourceItems.find(s => currentMs >= s.startOffsetMs && currentMs < s.endOffsetMs)
+    const activeSegmentLookup = sourceItems.length > 0
+      ? (() => {
+        for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
+          const candidate = sourceItems[segmentIndex];
+          if (!candidate) continue;
+          if (currentMs >= Number(candidate.startOffsetMs || 0) && currentMs < Number(candidate.endOffsetMs || 0)) {
+            return { segmentIndex, segment: candidate };
+          }
+        }
+        return null;
+      })()
       : (() => {
-          if (!panelCfg.sourceUrl) return null;
-          const sourceDurationMs = Math.max(0, Math.round(Number(panelCfg.durationSec || 0) * 1000));
-          const trimInMs = Math.max(0, Number(panelCfg.trimInMs || 0));
-          const trimOutMs = Math.max(trimInMs + 1, Number(panelCfg.trimOutMs || sourceDurationMs || 0));
-          const startOffsetMs = Math.max(0, Number(panelCfg.startOffsetMs || 0) || 0);
-          const loopSettings = Array.isArray(panelCfg.loopSettings) ? panelCfg.loopSettings : [];
-          const loopEnabled = panelCfg.loopEnabled !== false;
-          let cursorMs = startOffsetMs;
-          let loopIndex = 0;
-          const maxLoopCount = loopEnabled ? 120 : 1;
-          while (loopIndex < maxLoopCount) {
-            const loopSetting = loopSettings.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex) || null;
-            const segmentTrimInMs = Math.max(0, Number(loopSetting?.trimInMs ?? trimInMs) || 0);
-            const segmentTrimOutMs = Math.max(segmentTrimInMs + 1, Number(loopSetting?.trimOutMs ?? trimOutMs) || trimOutMs);
-            const effectiveLoopMs = Math.max(1, segmentTrimOutMs - segmentTrimInMs);
-            const endOffsetMs = cursorMs + effectiveLoopMs;
-            if (currentMs >= cursorMs && currentMs < endOffsetMs) {
-              return {
+        if (!panelCfg.sourceUrl) return null;
+        const sourceDurationMs = Math.max(0, Math.round(Number(panelCfg.durationSec || 0) * 1000));
+        const trimInMs = Math.max(0, Number(panelCfg.trimInMs || 0));
+        const trimOutMs = Math.max(trimInMs + 1, Number(panelCfg.trimOutMs || sourceDurationMs || 0));
+        const startOffsetMs = Math.max(0, Number(panelCfg.startOffsetMs || 0) || 0);
+        const loopSettings = Array.isArray(panelCfg.loopSettings) ? panelCfg.loopSettings : [];
+        const loopEnabled = panelCfg.loopEnabled !== false;
+        let cursorMs = startOffsetMs;
+        let loopIndex = 0;
+        const maxLoopCount = loopEnabled ? 120 : 1;
+        while (loopIndex < maxLoopCount) {
+          const loopSetting = loopSettings.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex) || null;
+          const segmentTrimInMs = Math.max(0, Number(loopSetting?.trimInMs ?? trimInMs) || 0);
+          const segmentTrimOutMs = Math.max(segmentTrimInMs + 1, Number(loopSetting?.trimOutMs ?? trimOutMs) || trimOutMs);
+          const effectiveLoopMs = Math.max(1, segmentTrimOutMs - segmentTrimInMs);
+          const endOffsetMs = cursorMs + effectiveLoopMs;
+          if (currentMs >= cursorMs && currentMs < endOffsetMs) {
+            return {
+              segmentIndex: -1,
+              segment: {
                 sourceUrl: panelCfg.sourceUrl,
                 volume: panelCfg.volume,
                 loop: loopEnabled,
@@ -1592,13 +1636,17 @@ export class PodcasterPlaybackController extends EventEmitter {
                 trimOutMs: segmentTrimOutMs,
                 fadeInMs: Math.max(0, Number(loopSetting?.fadeInMs || 0)),
                 fadeOutMs: Math.max(0, Number(loopSetting?.fadeOutMs || 0))
-              };
-            }
-            if (cursorMs > currentMs && loopIndex > 0) break;
-            cursorMs = endOffsetMs;
-            loopIndex += 1;
+              }
+            };
           }
-          return panelCfg.sourceUrl && loopEnabled ? {
+          if (cursorMs > currentMs && loopIndex > 0) break;
+          cursorMs = endOffsetMs;
+          loopIndex += 1;
+        }
+        if (!panelCfg.sourceUrl || !loopEnabled) return null;
+        return {
+          segmentIndex: -1,
+          segment: {
             sourceUrl: panelCfg.sourceUrl,
             volume: panelCfg.volume,
             loop: true,
@@ -1608,139 +1656,176 @@ export class PodcasterPlaybackController extends EventEmitter {
             trimOutMs,
             fadeInMs: 0,
             fadeOutMs: 0
-          } : null;
-        })();
-    
-    if (activeSegment) {
-      const activeSegmentSourceKey = this.resolveAudioSourceKey(activeSegment);
-      const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
-      const trimOutMs = Math.max(trimInMs + 1, Number(activeSegment.trimOutMs || 0));
-      const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
-      const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
-      const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${trimInMs}|${trimOutMs}|${fadeInMs}|${fadeOutMs}`;
-      const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey
-        && this.backgroundSegmentIdentity === activeSegmentIdentity;
-      if (!sourceHasNotChanged) {
-        if (this.backgroundAudio) {
-          try { this.backgroundAudio.pause(); } catch (_) { }
-          try { this.backgroundAudio.currentTime = 0; } catch (_) { }
-          try { this.backgroundAudio.src = ""; } catch (_) { }
-        }
-        if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
-        this.backgroundSource = null;
-        if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
-        this.backgroundGain = null;
-        if (this.backgroundCompressor) { try { this.backgroundCompressor.disconnect(); } catch (_) { } }
-        this.backgroundCompressor = null;
-        if (this.backgroundFinalLimiter) { try { this.backgroundFinalLimiter.disconnect(); } catch (_) { } }
-        this.backgroundFinalLimiter = null;
-        this.backgroundStabilizeEnabled = null;
-        this.backgroundLimiterEnabled = null;
-        // console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl || "local-blob"}`);
-        this.backgroundSourceKey = activeSegmentSourceKey;
-        this.backgroundSegmentIdentity = activeSegmentIdentity;
-        this.backgroundSrc = String(activeSegment.sourceUrl || "").trim();
-        try {
-          const resolvedSource = await this.resolveAudioSource({
-            ...activeSegment,
-            localDataUrl: String(activeSegment.localDataUrl || "").trim(),
-            localMediaCacheKey: String(activeSegment.localMediaCacheKey || "").trim(),
-            sourceUrl: String(activeSegment.sourceUrl || activeSegment.downloadUrl || activeSegment.storagePath || "").trim(),
-            downloadUrl: String(activeSegment.downloadUrl || "").trim(),
-            storagePath: String(activeSegment.storagePath || "").trim()
-          });
-          const blobSrc = this.getBlobUrlSync(resolvedSource) || await this.getBlobUrl(resolvedSource);
-          if (!blobSrc) {
-            this.backgroundSrc = "";
-            this.backgroundSourceKey = "";
-            return;
           }
-          this.backgroundAudio = new Audio();
-          this.backgroundAudio.crossOrigin = 'anonymous';
-          this.backgroundAudio.src = blobSrc;
-          this.backgroundAudio.dataset.initialized = "false";
-          this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
-        } catch (e) {
-          this.backgroundSrc = "";
-          this.backgroundSourceKey = "";
-          this.backgroundSegmentIdentity = "";
-          return;
-        }
-      } else if (this.backgroundAudio) {
-        this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
-        this.backgroundSegmentIdentity = activeSegmentIdentity;
-      }
+        };
+      })();
 
-      if (!this.backgroundAudio) return;
-
-      const entry = this.getEntryAtMs(currentMs);
-      const mix = entry?.rowId ? this.deps?.resolveTimelineClipMix?.(session, entry.rowId) : null;
-      const sceneBackgroundFactor = mix ? (mix.backgroundVolume ?? 1.0) : 1.0;
-
-      const baseVolume = activeSegment && activeSegment.volume !== undefined ? activeSegment.volume : this.toFiniteNumber(panelCfg.volume, 100);
-      const duckPct = activeSegment && (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct) !== undefined
-        ? (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct)
-        : this.toFiniteNumber(panelCfg.duckingWhenGeminiPct, 60);
-      const segmentDurationMs = Math.max(1, Number(activeSegment.endOffsetMs || 0) - Number(activeSegment.startOffsetMs || 0));
-      const elapsedMs = Math.max(0, currentMs - Number(activeSegment.startOffsetMs || 0));
-      const remainingMs = Math.max(0, segmentDurationMs - elapsedMs);
-      const segmentFadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
-      const fadeInFactor = segmentFadeInMs > 0 && segmentDurationMs > 0
-        ? (elapsedMs < segmentFadeInMs ? Math.max(0, Math.min(1, elapsedMs / segmentFadeInMs)) : 1.0)
-        : 1.0;
-      const segmentFadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
-      const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0
-        ? (remainingMs <= segmentFadeOutMs ? Math.max(0, Math.min(1, remainingMs / segmentFadeOutMs)) : 1.0)
-        : 1.0;
-
-      this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
-      const finalVolume = (baseVolume / 100) * this.backgroundDuckFactor * sceneBackgroundFactor * fadeInFactor * fadeOutFactor;
-
-      const sessionConfig = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
-      const masterVolumeFactor = this.clamp01(this.toFiniteNumber(sessionConfig?.masterVolume, 100) / 100);
-      const stabilizeEnabled = sessionConfig?.audioMasterStabilize === true || (activeSegment && activeSegment.stabilize !== undefined
-        ? activeSegment.stabilize === true
-        : panelCfg.stabilize === true);
-      const limiterEnabled = sessionConfig?.audioMasterLimiterEnabled === true || panelCfg.limiterEnabled === true;
-
-      if (this.audioCtx) {
-        this.ensureBackgroundChain(stabilizeEnabled, limiterEnabled);
-        if (this.backgroundGain) {
-          // Use a slightly longer time constant (0.15s) for ducking transitions to avoid abrupt jumps
-          const smoothingConstant = 0.15;
-          this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume * masterVolumeFactor), this.audioCtx.currentTime, smoothingConstant);
-        } else {
-          this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
-        }
-      } else {
-        this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
-      }
-
-
-      this.backgroundAudio.playbackRate = speed;
-
-      const offsetMs = currentMs - activeSegment.startOffsetMs;
-      const offsetSec = (trimInMs + offsetMs) / 1000;
-      
-      const drift = Math.abs(this.backgroundAudio.currentTime - offsetSec);
-      if (this.backgroundAudio.dataset.initialized === "false" || drift > 0.3) {
-        // console.log(`[Playback:Music] Sincronizando tiempo: ${this.backgroundAudio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s`);
-        this.seekTo(this.backgroundAudio, offsetSec);
-        this.backgroundAudio.dataset.initialized = "true";
-      }
-
-      if (this.state.isPlaying && this.backgroundAudio.paused) {
-        // console.log(`[Playback:Music] Play`);
-        this.backgroundAudio.play().catch(() => { });
-      }
-    } else {
+    if (!activeSegmentLookup || !activeSegmentLookup.segment) {
       if (this.backgroundAudio && !this.backgroundAudio.paused) {
-        // console.log(`[Playback:Music] Stop (fuera de segmento)`);
         this.backgroundAudio.pause();
       }
       this.backgroundSrc = "";
       this.backgroundSourceKey = "";
       this.backgroundSegmentIdentity = "";
+      this.backgroundSegmentSkewMs = null;
+      this.backgroundSegmentIndex = -1;
+      return;
+    }
+
+    const activeSegment = activeSegmentLookup.segment;
+    const rawSegmentIndex = Number(activeSegmentLookup.segmentIndex);
+    const activeSegmentIndex = Number.isFinite(rawSegmentIndex) ? Math.floor(rawSegmentIndex) : -1;
+    const activeSegmentSourceKey = this.resolveAudioSourceKey(activeSegment);
+    const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
+    const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
+    const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
+    const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}`;
+    const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey;
+
+    if (!sourceHasNotChanged) {
+      this.backgroundSegmentSkewMs = null;
+      this.backgroundSegmentIndex = -1;
+      if (this.backgroundAudio) {
+        try { this.backgroundAudio.pause(); } catch (_) { }
+        try { this.backgroundAudio.currentTime = 0; } catch (_) { }
+        try { this.backgroundAudio.src = ""; } catch (_) { }
+      }
+      if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
+      this.backgroundSource = null;
+      if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
+      this.backgroundGain = null;
+      if (this.backgroundCompressor) { try { this.backgroundCompressor.disconnect(); } catch (_) { } }
+      this.backgroundCompressor = null;
+      if (this.backgroundFinalLimiter) { try { this.backgroundFinalLimiter.disconnect(); } catch (_) { } }
+      this.backgroundFinalLimiter = null;
+      this.backgroundStabilizeEnabled = null;
+      this.backgroundLimiterEnabled = null;
+      // console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl || "local-blob"}`);
+      this.backgroundSourceKey = activeSegmentSourceKey;
+      this.backgroundSegmentIdentity = activeSegmentIdentity;
+      this.backgroundSrc = String(activeSegment.sourceUrl || "").trim();
+      try {
+        const resolvedSource = await this.resolveAudioSource({
+          ...activeSegment,
+          localDataUrl: String(activeSegment.localDataUrl || "").trim(),
+          localMediaCacheKey: String(activeSegment.localMediaCacheKey || "").trim(),
+          sourceUrl: String(activeSegment.sourceUrl || activeSegment.downloadUrl || activeSegment.storagePath || "").trim(),
+          downloadUrl: String(activeSegment.downloadUrl || "").trim(),
+          storagePath: String(activeSegment.storagePath || "").trim()
+        });
+        const blobSrc = this.getBlobUrlSync(resolvedSource) || await this.getBlobUrl(resolvedSource);
+        if (!blobSrc) {
+          this.backgroundSrc = "";
+          this.backgroundSourceKey = "";
+          return;
+        }
+        this.backgroundAudio = new Audio();
+        this.backgroundAudio.crossOrigin = 'anonymous';
+        this.backgroundAudio.src = blobSrc;
+        this.backgroundAudio.dataset.initialized = "false";
+        this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+      } catch (e) {
+        this.backgroundSrc = "";
+        this.backgroundSourceKey = "";
+        this.backgroundSegmentIdentity = "";
+        return;
+      }
+    } else if (this.backgroundAudio) {
+      this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+      this.backgroundSegmentIdentity = activeSegmentIdentity;
+    }
+
+    if (!this.backgroundAudio) return;
+
+    const entry = this.getEntryAtMs(currentMs);
+    const mix = entry?.rowId ? this.deps?.resolveTimelineClipMix?.(session, entry.rowId) : null;
+    const sceneBackgroundFactor = mix ? (mix.backgroundVolume ?? 1.0) : 1.0;
+
+    const baseVolume = activeSegment && activeSegment.volume !== undefined ? activeSegment.volume : this.toFiniteNumber(panelCfg.volume, 100);
+    const duckPct = activeSegment && (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct) !== undefined
+      ? (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct)
+      : this.toFiniteNumber(panelCfg.duckingWhenGeminiPct, 60);
+    const segmentDurationMs = Math.max(1, Number(activeSegment.endOffsetMs || 0) - Number(activeSegment.startOffsetMs || 0));
+    const elapsedMs = Math.max(0, currentMs - Number(activeSegment.startOffsetMs || 0));
+    const remainingMs = Math.max(0, segmentDurationMs - elapsedMs);
+    const segmentFadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
+    const fadeInFactor = segmentFadeInMs > 0 && segmentDurationMs > 0
+      ? (elapsedMs < segmentFadeInMs ? Math.max(0, Math.min(1, elapsedMs / segmentFadeInMs)) : 1.0)
+      : 1.0;
+    const segmentFadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
+    const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0
+      ? (remainingMs <= segmentFadeOutMs ? Math.max(0, Math.min(1, remainingMs / segmentFadeOutMs)) : 1.0)
+      : 1.0;
+
+    this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
+    const finalVolume = (baseVolume / 100) * this.backgroundDuckFactor * sceneBackgroundFactor * fadeInFactor * fadeOutFactor;
+
+    const sessionConfig = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
+    const masterVolumeFactor = this.clamp01(this.toFiniteNumber(sessionConfig?.masterVolume, 100) / 100);
+    const stabilizeEnabled = sessionConfig?.audioMasterStabilize === true || (activeSegment && activeSegment.stabilize !== undefined
+      ? activeSegment.stabilize === true
+      : panelCfg.stabilize === true);
+    const limiterEnabled = sessionConfig?.audioMasterLimiterEnabled === true || panelCfg.limiterEnabled === true;
+
+    if (this.audioCtx) {
+      this.ensureBackgroundChain(stabilizeEnabled, limiterEnabled);
+      if (this.backgroundGain) {
+        // Use a slightly longer time constant (0.15s) for ducking transitions to avoid abrupt jumps
+        const smoothingConstant = 0.15;
+        this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume * masterVolumeFactor), this.audioCtx.currentTime, smoothingConstant);
+      } else {
+        this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
+      }
+    } else {
+      this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
+    }
+
+    this.backgroundAudio.playbackRate = speed;
+
+    const segmentBaseOffsetMs = trimInMs + elapsedMs;
+    let offsetMs = segmentBaseOffsetMs;
+    if (sourceHasNotChanged) {
+      const isSegmentBoundaryTransition = Number(this.backgroundSegmentIndex) !== activeSegmentIndex;
+      if (isSegmentBoundaryTransition) {
+        const fallbackBoundarySkew = segmentBaseOffsetMs - Number(currentMs || 0);
+        const boundarySkew = Number(this.backgroundAudio.currentTime || 0) * 1000 - Number(currentMs || 0);
+        if (Number.isFinite(boundarySkew) && Number.isFinite(fallbackBoundarySkew)
+          && Math.abs(boundarySkew - fallbackBoundarySkew) <= 2000) {
+          this.backgroundSegmentSkewMs = boundarySkew;
+        } else {
+          this.backgroundSegmentSkewMs = fallbackBoundarySkew;
+        }
+        this.backgroundSegmentIndex = activeSegmentIndex;
+      }
+      if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
+        this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
+        this.backgroundSegmentIndex = activeSegmentIndex;
+      }
+      const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
+      const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - segmentBaseOffsetMs);
+      if (!isSegmentBoundaryTransition && expectedJumpMs > 800) {
+        this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
+        offsetMs = segmentBaseOffsetMs;
+      } else {
+        offsetMs = expectedOffsetFromSkewMs;
+      }
+    } else {
+      this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
+      this.backgroundSegmentIndex = activeSegmentIndex;
+    }
+
+    const offsetSec = Math.max(0, offsetMs / 1000);
+
+    const drift = Math.abs(this.backgroundAudio.currentTime - offsetSec);
+    if (this.backgroundAudio.dataset.initialized === "false" || drift > 0.3) {
+      // console.log(`[Playback:Music] Sincronizando tiempo: ${this.backgroundAudio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s`);
+      this.seekTo(this.backgroundAudio, offsetSec);
+      this.backgroundAudio.dataset.initialized = "true";
+    }
+
+    if (this.state.isPlaying && this.backgroundAudio.paused) {
+      // console.log(`[Playback:Music] Play`);
+      this.backgroundAudio.play().catch(() => { });
     }
   }
 
@@ -1812,6 +1897,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSrc = "";
     this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
+    this.backgroundSegmentSkewMs = null;
+    this.backgroundSegmentIndex = -1;
     if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
     this.backgroundSource = null;
     if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
