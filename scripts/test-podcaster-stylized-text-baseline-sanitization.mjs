@@ -6,6 +6,10 @@ const source = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-media-editor.js",
   "utf8"
 );
+const guardSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/js/canvas-text-baseline-guard.js",
+  "utf8"
+);
 
 const snippetStart = source.indexOf("const VALID_CANVAS_TEXT_BASELINES = new Set([");
 const snippetEnd = source.indexOf("function cloneStylizedTextData");
@@ -147,6 +151,40 @@ assert.match(
   source,
   /staticCanvas\.loadFromJSON\(sanitizedTextData, \(\) => \{[\s\S]*sanitizeFabricCanvasTextBaselines\(staticCanvas\);/m,
   "La renderización a bitmap debe sanear objetos Fabric después de loadFromJSON."
+);
+
+const baselineWrites = [];
+function CanvasRenderingContext2D() {}
+Object.defineProperty(CanvasRenderingContext2D.prototype, "textBaseline", {
+  configurable: true,
+  enumerable: true,
+  get() {
+    return this._baseline || "alphabetic";
+  },
+  set(value) {
+    baselineWrites.push(value);
+    this._baseline = value;
+  }
+});
+const guardRuntime = {
+  CanvasRenderingContext2D,
+  __podcasterCanvasTextBaselineGuardInstalled: false
+};
+guardRuntime.window = guardRuntime;
+vm.createContext(guardRuntime);
+vm.runInContext(guardSource, guardRuntime);
+const ctx = new guardRuntime.CanvasRenderingContext2D();
+ctx.textBaseline = "alphabetical";
+
+assert.equal(
+  baselineWrites.at(-1),
+  "alphabetic",
+  "El guard previo a Fabric debe convertir 'alphabetical' antes de llegar al setter nativo."
+);
+assert.equal(
+  guardRuntime.__podcasterCanvasTextBaselineGuardInstalled,
+  true,
+  "El guard previo debe marcarse como instalado para evitar doble wrapping."
 );
 
 console.log("Podcaster stylized text baseline sanitization OK.");
