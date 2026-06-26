@@ -585,7 +585,11 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     finalizeClipDrag();
     if (dragMode === "move" || dragMode === "gemini-segment-move") {
       if (!finalizeLinkedGeminiDrag({ dragMode, dragKind })) {
-        syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+        syncGeminiDialogueTrackWithRuntime({
+          render: false,
+          preserveStartMs: false,
+          syncTextToScene: true
+        });
       }
     }
     if (

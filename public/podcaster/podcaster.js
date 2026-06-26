@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-06-26.4";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.7";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.8";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17.1";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-26.6";
@@ -46,7 +46,7 @@ import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-18.3";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-26.6";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-26.7";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-06-12.2";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-05-30-1";
@@ -1039,6 +1039,8 @@ let montageAudioSubtracksOpen = (() => {
     return false;
   }
 })();
+let studioScrubberSeekRafId = 0;
+let studioScrubberSeekTargetMs = 0;
 window.backgroundDialogueAudioWarmupToken = 0;
 let podcastVideoState = {
   undoStack: [],
@@ -5856,8 +5858,12 @@ function reorderTimelineClipsByTracks() {
     timelineOnScreenTextLayoutByRowId: reorderLayouts.layouts
   }), { autosave: false });
   invalidateStudioRuntimeCache();
-  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true, autosave: false });
-  syncOnScreenTextClipsWithGeminiTrack({ render: false, autosave: false });
+  syncGeminiDialogueTrackWithRuntime({
+    render: false,
+    preserveStartMs: false,
+    syncTextToScene: true,
+    autosave: false
+  });
   const refreshedSession = getActiveSession();
   renderPodcastVideoTimeline(refreshedSession, { force: true, reason: "reorder" });
   syncPodcastStudioInspector(refreshedSession);
@@ -17317,22 +17323,36 @@ function attachEvents() {
       });
     });
   }
+  const flushPodcastStudioScrubberSeek = () => {
+    if (!els.podcastStudioScrubber) {
+      studioScrubberSeekRafId = 0;
+      return;
+    }
+    const session = getActiveSession();
+    if (!(session?.script?.rows || []).length) {
+      studioScrubberSeekRafId = 0;
+      return;
+    }
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
+    const nextMs = Math.max(0, Math.min(durationMs, studioScrubberSeekTargetMs));
+    studioScrubberSeekRafId = 0;
+    playbackController.seek(nextMs, {
+      lightweight: true,
+      suppressAutoScroll: true
+    });
+    if (podcastVideoState.montageActive) {
+      playbackController.stop({ keepStatus: true, keepCursor: true });
+    }
+  };
   if (els.podcastStudioScrubber) {
     els.podcastStudioScrubber.addEventListener("input", () => {
       const session = getActiveSession();
       if (!(session?.script?.rows || []).length) return;
       const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
       const ratio = Math.max(0, Math.min(1, Number(els.podcastStudioScrubber.value || 0) / 100));
-      const nextMs = Math.max(0, Math.min(durationMs, ratio * durationMs));
-
-      playbackController.seek(nextMs, {
-        lightweight: true,
-        suppressAutoScroll: true
-      });
-
-      if (podcastVideoState.montageActive) {
-        playbackController.stop({ keepStatus: true, keepCursor: true });
-      }
+      studioScrubberSeekTargetMs = ratio * durationMs;
+      if (studioScrubberSeekRafId) return;
+      studioScrubberSeekRafId = requestAnimationFrame(flushPodcastStudioScrubberSeek);
     });
   }
   if (els.podcastTimelineRuler) {
