@@ -11279,7 +11279,7 @@ async function renderMontageOverlapComposition({
       const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
       const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
       const videoLabel = `v${index}`;
-      let videoChain = `[${index}:v]tpad=stop_mode=clone:stop_duration=${compositeDurSec.toFixed(3)},trim=start=0:duration=${compositeDurSec.toFixed(3)},scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+      let videoChain = `[${index}:v]setpts=PTS-STARTPTS,trim=start=0:duration=${durSec.toFixed(3)},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${padTailSec.toFixed(3)},trim=start=0:duration=${compositeDurSec.toFixed(3)},scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
       if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
         videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
       }
@@ -12792,6 +12792,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       });
       finalShouldAttemptBrowserRenderer = false;
     }
+    const hasTimelineOverlapOrGaps = overlapPlan.hasOverlap || overlapPlan.hasGaps;
+    if (finalShouldAttemptBrowserRenderer && hasTimelineOverlapOrGaps) {
+      console.info("[backend][montage-export][browser-renderer-overlap-fallback]", {
+        jobId,
+        hasOverlap: overlapPlan.hasOverlap,
+        hasGaps: overlapPlan.hasGaps,
+        fallback: "ffmpeg-legacy"
+      });
+      finalShouldAttemptBrowserRenderer = false;
+    }
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
       || normalOnScreenTextEnabled
@@ -12810,6 +12820,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
       browserVisualPassDisabled: shouldAttemptBrowserRenderer,
+      browserVisualPassOverlapFallback: hasTimelineOverlapOrGaps,
       browserRendererAvailable: browserRendererAvailability.available === true,
       browserRendererCode: browserRendererAvailability.available === true ? null : (browserRendererAvailability.code || null),
       reviewOnScreenTextEnabled,
