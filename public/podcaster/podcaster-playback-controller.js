@@ -417,6 +417,11 @@ export class PodcasterPlaybackController extends EventEmitter {
   getBlobUrlSync(url) {
     if (!url) return "";
     if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+
+    const localMediaPrefix = "podcaster-local-media:";
+    if (url.startsWith(localMediaPrefix)) {
+      return this.blobCache.has(url) ? this.blobCache.get(url) : "";
+    }
     
     const activeMode = this.resolveActiveMediaLoadMode(url);
     if (activeMode === "streaming") {
@@ -513,9 +518,21 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (localSrc) return localSrc;
     }
     const localDataUrl = String(clip?.localDataUrl || clip?.dataUrl || "").trim();
-    if (localDataUrl) return localDataUrl;
+    if (localDataUrl) {
+      if (localDataUrl.startsWith("podcaster-local-media:")) {
+        const localBlobUrl = await this.resolveLocalMediaObjectUrl(localDataUrl.replace("podcaster-local-media:", ""));
+        if (localBlobUrl) return localBlobUrl;
+      }
+      return localDataUrl;
+    }
     const directSource = String(clip?.sourceUrl || "").trim();
-    if (directSource) return directSource;
+    if (directSource) {
+      if (directSource.startsWith("podcaster-local-media:")) {
+        const directBlobUrl = await this.resolveLocalMediaObjectUrl(directSource.replace("podcaster-local-media:", ""));
+        if (directBlobUrl) return directBlobUrl;
+      }
+      return directSource;
+    }
     const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
     if (!rawUrl) {
       const fallbackUrl = String(clip?.downloadUrl || "").trim();
@@ -557,6 +574,11 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   async getBlobUrl(url) {
     if (!url) return "";
+    const localMediaPrefix = "podcaster-local-media:";
+    if (url.startsWith(localMediaPrefix)) {
+      return this.resolveLocalMediaObjectUrl(url.replace(localMediaPrefix, ""));
+    }
+
     const cacheKey = this.resolvePersistentMediaCacheKey(url) || url;
     const prefersStreamingProxy = String(url || "").includes('/api/assets/proxy-media');
     // 1. Check in-memory cache
@@ -2704,7 +2726,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.stopStandaloneAudio();
     if (!audioSrc) return false;
 
-    const audio = new Audio(audioSrc);
+    const resolvedAudioSrc = String(audioSrc || "").trim().startsWith("podcaster-local-media:")
+      ? await this.getBlobUrl(String(audioSrc).trim())
+      : audioSrc;
+
+    if (!resolvedAudioSrc) return false;
+
+    const audio = new Audio(resolvedAudioSrc);
     audio.preload = "auto";
     audio.volume = this.clamp01(options.volume ?? 1.0);
     audio.playbackRate = options.playbackRate ?? 1.0;

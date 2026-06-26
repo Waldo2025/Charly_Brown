@@ -28,53 +28,70 @@ function preloadAllDialogueAudios(session = null) {
     const audioSrc = window.resolveStorageAudioUrl(audioClip.downloadUrl || "", audioClip.storagePath || "");
     if (!audioSrc) return;
 
+    const resolvePlayableAudioSrc = async (src = "") => {
+      const cleanSrc = String(src || "").trim();
+      if (!cleanSrc) return "";
+      if (!cleanSrc.startsWith("podcaster-local-media:")) return cleanSrc;
+      if (window?.playbackController?.getBlobUrl) {
+        return (await window.playbackController.getBlobUrl(cleanSrc)) || "";
+      }
+      return cleanSrc;
+    };
+
     // Si ya tenemos una duración medida, no volvemos a cargar
     if (window.podcastVideoState?.montageAudioActualDurationsMs?.[rowId]) {
       return;
     }
 
-    // Crear un elemento Audio temporal en segundo plano para obtener metadatos
-    const audio = new Audio();
-    audio.crossOrigin = "anonymous";
-    audio.src = audioSrc;
-    audio.preload = "metadata";
+    (async () => {
+      const playableAudioSrc = await resolvePlayableAudioSrc(audioSrc);
+      if (!playableAudioSrc) return;
 
-    const cleanup = () => {
-      audio.removeEventListener("loadedmetadata", onLoaded);
-      audio.removeEventListener("error", onError);
-      audio.src = "";
-      try { audio.load(); } catch (_) {}
-    };
+      // Crear un elemento Audio temporal en segundo plano para obtener metadatos
+      const audio = new Audio();
+      audio.crossOrigin = "anonymous";
+      audio.src = playableAudioSrc;
+      audio.preload = "metadata";
 
-    const onLoaded = () => {
-      const duration = Number(audio.duration);
-      if (Number.isFinite(duration) && duration > 0) {
-        const nextMs = Math.round(duration * 1000);
-        if (!window.podcastVideoState.montageAudioActualDurationsMs) {
-          window.podcastVideoState.montageAudioActualDurationsMs = {};
+      const cleanup = () => {
+        audio.removeEventListener("loadedmetadata", onLoaded);
+        audio.removeEventListener("error", onError);
+        audio.src = "";
+        try { audio.load(); } catch (_) {}
+      };
+
+      const onLoaded = () => {
+        const duration = Number(audio.duration);
+        if (Number.isFinite(duration) && duration > 0) {
+          const nextMs = Math.round(duration * 1000);
+          if (!window.podcastVideoState.montageAudioActualDurationsMs) {
+            window.podcastVideoState.montageAudioActualDurationsMs = {};
+          }
+          if (Math.abs(nextMs - (window.podcastVideoState.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
+            window.podcastVideoState.montageAudioActualDurationsMs[rowId] = nextMs;
+            window.invalidateStudioRuntimeCache?.();
+
+            // Reconciliar en segundo plano para que el geminiDialogueTrack tenga la duración real
+            try {
+              window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+            } catch (_) {}
+
+            // Forzar renderizado de la línea de tiempo para actualizar el ancho de los chips
+            window.renderPodcastVideoTimeline(window.getActiveSession(), { force: true, reason: "audio-metadata-loaded" });
+          }
         }
-        if (Math.abs(nextMs - (window.podcastVideoState.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
-          window.podcastVideoState.montageAudioActualDurationsMs[rowId] = nextMs;
-          window.invalidateStudioRuntimeCache?.();
-          
-          // Reconciliar en segundo plano para que el geminiDialogueTrack tenga la duración real
-          try {
-            window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
-          } catch (_) {}
+        cleanup();
+      };
 
-          // Forzar renderizado de la línea de tiempo para actualizar el ancho de los chips
-          window.renderPodcastVideoTimeline(window.getActiveSession(), { force: true, reason: "audio-metadata-loaded" });
-        }
-      }
-      cleanup();
-    };
+      const onError = () => {
+        cleanup();
+      };
 
-    const onError = () => {
-      cleanup();
-    };
+      audio.addEventListener("loadedmetadata", onLoaded);
+      audio.addEventListener("error", onError);
+    })();
 
-    audio.addEventListener("loadedmetadata", onLoaded);
-    audio.addEventListener("error", onError);
+
   });
 }
 
