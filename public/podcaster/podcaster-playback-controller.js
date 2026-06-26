@@ -76,6 +76,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSegmentIdentity = "";
     this.backgroundSegmentSkewMs = null;
     this.backgroundSegmentIndex = -1;
+    this.backgroundSegmentGapStartMs = 0;
+    this.backgroundSegmentGapHoldMs = 240;
 
     this.stageMachine = {
       loadingSrc: '',
@@ -99,6 +101,14 @@ export class PodcasterPlaybackController extends EventEmitter {
   // --- Helpers ---
   clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
   toFiniteNumber(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
+  getTimelineLookupToleranceMs() { return 12; }
+  isTimelineMsInRange(currentMs = 0, startMs = 0, endMs = 0, options = {}) {
+    const toleranceMs = Math.max(0, Number(options.toleranceMs ?? this.getTimelineLookupToleranceMs()) || 0);
+    const current = Math.max(0, Number(currentMs || 0));
+    const start = Math.max(0, Number(startMs || 0));
+    const end = Math.max(start, Number(endMs || 0));
+    return current >= (start - toleranceMs) && current <= (end + toleranceMs);
+  }
   clampPlaybackRate(rate, min = 0.5, max = 10) {
     return Math.max(min, Math.min(max, Number(rate) || 1));
   }
@@ -400,6 +410,8 @@ export class PodcasterPlaybackController extends EventEmitter {
   getEntryAtMs(currentMs) {
     const now = performance.now();
     let entries;
+    const targetMs = Math.max(0, Number(currentMs || 0));
+    const toleranceMs = this.getTimelineLookupToleranceMs();
     if (this.cachedTickEntries && (now - this.cachedTickEntriesTime) < 16) {
       entries = this.cachedTickEntries;
     } else {
@@ -407,7 +419,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.cachedTickEntries = entries;
       this.cachedTickEntriesTime = now;
     }
-    return entries.find(e => currentMs >= e.startMs && currentMs < e.endMs);
+    const strictMatch = entries.find((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0));
+    if (strictMatch) return strictMatch;
+    return entries
+      .filter((entry) => this.isTimelineMsInRange(targetMs, entry?.startMs || 0, entry?.endMs || 0, { toleranceMs }))
+      .sort((a, b) => (
+        Number(b?.startMs || 0) - Number(a?.startMs || 0)
+        || Number(b?.zIndex || 0) - Number(a?.zIndex || 0)
+      ))[0] || null;
   }
   resolveActiveMediaLoadMode(url = "") {
     const configMode = String(this.state.config?.mediaLoadMode || "streaming").trim().toLowerCase();
@@ -1457,11 +1476,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         };
       });
     }
+    const segmentLookupToleranceMs = this.getTimelineLookupToleranceMs();
     const activeSegments = segments.filter((segment) => {
       const rowId = String(segment?.rowId || "").trim();
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const visibleDurationMs = this.resolveSegmentTimelineDurationMs(segment, clipPlaybackRate);
-      return currentMs >= segment.startMs && currentMs < (segment.startMs + visibleDurationMs);
+      const segmentStartMs = Math.max(0, Number(segment?.startMs || 0));
+      const segmentEndMs = segmentStartMs + Math.max(1, visibleDurationMs);
+      return this.isTimelineMsInRange(currentMs, segmentStartMs, segmentEndMs, { toleranceMs: segmentLookupToleranceMs });
     });
     // Upcoming pre-load (look ahead 5 seconds)
     const upcoming = segments.filter((segment) => {
@@ -1595,16 +1617,22 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!panelCfg || panelCfg.sourceType === "none") { this.stopBackgroundMusic(); return; }
 
     const sourceItems = Array.isArray(panelCfg.sourceItems) ? panelCfg.sourceItems : [];
+    const backgroundLookupToleranceMs = this.getTimelineLookupToleranceMs();
     const activeSegmentLookup = sourceItems.length > 0
       ? (() => {
+        const matches = [];
         for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
           const candidate = sourceItems[segmentIndex];
           if (!candidate) continue;
-          if (currentMs >= Number(candidate.startOffsetMs || 0) && currentMs < Number(candidate.endOffsetMs || 0)) {
-            return { segmentIndex, segment: candidate };
+          const candidateStartMs = Number(candidate.startOffsetMs || 0);
+          const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
+          if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
+            matches.push({ segmentIndex, segment: candidate });
           }
         }
-        return null;
+        if (!matches.length) return null;
+        return matches
+          .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
       })()
       : (() => {
         if (!panelCfg.sourceUrl) return null;
@@ -1623,7 +1651,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           const segmentTrimOutMs = Math.max(segmentTrimInMs + 1, Number(loopSetting?.trimOutMs ?? trimOutMs) || trimOutMs);
           const effectiveLoopMs = Math.max(1, segmentTrimOutMs - segmentTrimInMs);
           const endOffsetMs = cursorMs + effectiveLoopMs;
-          if (currentMs >= cursorMs && currentMs < endOffsetMs) {
+          if (this.isTimelineMsInRange(currentMs, cursorMs, endOffsetMs, { toleranceMs: backgroundLookupToleranceMs })) {
             return {
               segmentIndex: -1,
               segment: {
@@ -1661,6 +1689,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       })();
 
     if (!activeSegmentLookup || !activeSegmentLookup.segment) {
+      if (this.state.isPlaying && this.backgroundAudio && !this.backgroundAudio.paused && this.backgroundSourceKey) {
+        const nowMs = performance.now();
+        if (!this.backgroundSegmentGapStartMs) this.backgroundSegmentGapStartMs = nowMs;
+        if ((nowMs - this.backgroundSegmentGapStartMs) <= this.backgroundSegmentGapHoldMs) return;
+      }
+      this.backgroundSegmentGapStartMs = 0;
       if (this.backgroundAudio && !this.backgroundAudio.paused) {
         this.backgroundAudio.pause();
       }
@@ -1673,14 +1707,43 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     const activeSegment = activeSegmentLookup.segment;
+    this.backgroundSegmentGapStartMs = 0;
     const rawSegmentIndex = Number(activeSegmentLookup.segmentIndex);
     const activeSegmentIndex = Number.isFinite(rawSegmentIndex) ? Math.floor(rawSegmentIndex) : -1;
     const activeSegmentSourceKey = this.resolveAudioSourceKey(activeSegment);
+    const activeSegmentStartMs = Math.max(0, Number(activeSegment.startOffsetMs || 0) || 0);
     const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
     const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
     const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
     const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}`;
     const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey;
+
+    const isBoundaryTransition = Number(this.backgroundSegmentIndex) !== activeSegmentIndex;
+    const continuityToleranceMs = Math.max(12, this.getTimelineLookupToleranceMs() * 2);
+    const prevSiblingOnSource = sourceItems.length > 0
+      ? (() => {
+        const activeSegmentKey = activeSegmentSourceKey;
+        const candidates = [];
+        for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
+          if (segmentIndex === activeSegmentIndex) continue;
+          const segment = sourceItems[segmentIndex];
+          if (!segment) continue;
+          const segmentSourceKey = this.resolveAudioSourceKey(segment);
+          if (segmentSourceKey !== activeSegmentKey) continue;
+          const segmentStartMs = Math.max(0, Number(segment.startOffsetMs || 0) || 0);
+          const segmentEndMs = Math.max(segmentStartMs, Number(segment.endOffsetMs || segmentStartMs) || 0);
+          if (segmentStartMs <= activeSegmentStartMs + continuityToleranceMs) {
+            candidates.push({ segment, segmentIndex, segmentStartMs, segmentEndMs });
+          }
+        }
+        candidates.sort((a, b) => b.segmentStartMs - a.segmentStartMs);
+        return candidates[0] || null;
+      })()
+      : null;
+    const prevSiblingSkewCompatible = sourceHasNotChanged
+      && isBoundaryTransition
+      && prevSiblingOnSource
+      && activeSegmentStartMs <= (prevSiblingOnSource.segmentEndMs + continuityToleranceMs);
 
     if (!sourceHasNotChanged) {
       this.backgroundSegmentSkewMs = null;
@@ -1785,8 +1848,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const segmentBaseOffsetMs = trimInMs + elapsedMs;
     let offsetMs = segmentBaseOffsetMs;
     if (sourceHasNotChanged) {
-      const isSegmentBoundaryTransition = Number(this.backgroundSegmentIndex) !== activeSegmentIndex;
-      if (isSegmentBoundaryTransition) {
+      if (isBoundaryTransition && !prevSiblingSkewCompatible) {
         const fallbackBoundarySkew = segmentBaseOffsetMs - Number(currentMs || 0);
         const boundarySkew = Number(this.backgroundAudio.currentTime || 0) * 1000 - Number(currentMs || 0);
         if (Number.isFinite(boundarySkew) && Number.isFinite(fallbackBoundarySkew)
@@ -1799,16 +1861,16 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
         this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
-        this.backgroundSegmentIndex = activeSegmentIndex;
       }
       const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
       const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - segmentBaseOffsetMs);
-      if (!isSegmentBoundaryTransition && expectedJumpMs > 800) {
+      if (!isBoundaryTransition && expectedJumpMs > 800) {
         this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
         offsetMs = segmentBaseOffsetMs;
       } else {
         offsetMs = expectedOffsetFromSkewMs;
       }
+      this.backgroundSegmentIndex = activeSegmentIndex;
     } else {
       this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
       this.backgroundSegmentIndex = activeSegmentIndex;
@@ -1894,6 +1956,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       } catch (_) { } 
       this.backgroundAudio = null; 
     }
+    this.backgroundSegmentGapStartMs = 0;
     this.backgroundSrc = "";
     this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
