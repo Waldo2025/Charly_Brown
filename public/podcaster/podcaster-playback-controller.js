@@ -1787,17 +1787,20 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundAudio.playbackRate = speed;
 
     const segmentBaseOffsetMs = trimInMs + elapsedMs;
-    let offsetMs = segmentBaseOffsetMs;
+    const continuousSourceOffsetMs = sourceIsContinuous
+      ? Math.max(0, Number(currentMs || 0) - activeSegmentStartMs) + trimInMs
+      : segmentBaseOffsetMs;
+    let offsetMs = continuousSourceOffsetMs;
     if (sourceHasNotChanged) {
       if (sourceIsContinuous) {
         if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
-          this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
+          this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - continuousSourceOffsetMs;
         }
         const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
-        const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - segmentBaseOffsetMs);
+        const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - continuousSourceOffsetMs);
         if (expectedJumpMs > 800 && this.backgroundAudio.dataset.initialized === "true") {
-          this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
-          offsetMs = segmentBaseOffsetMs;
+          this.backgroundSegmentSkewMs = continuousSourceOffsetMs - Number(currentMs || 0);
+          offsetMs = continuousSourceOffsetMs;
         } else {
           offsetMs = expectedOffsetFromSkewMs;
         }
