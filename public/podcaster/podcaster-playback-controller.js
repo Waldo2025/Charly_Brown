@@ -76,6 +76,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSegmentIdentity = "";
     this.backgroundSegmentSkewMs = null;
     this.backgroundSegmentIndex = -1;
+    this.backgroundSyncAnchorMs = null;
+    this.backgroundSyncAnchorOffsetMs = null;
+    this.backgroundSyncLastTimelineMs = null;
     this.backgroundSegmentGapStartMs = 0;
     this.backgroundSegmentGapHoldMs = 240;
 
@@ -1691,6 +1694,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.backgroundSegmentIdentity = "";
       this.backgroundSegmentSkewMs = null;
       this.backgroundSegmentIndex = -1;
+      this.backgroundSyncAnchorMs = null;
+      this.backgroundSyncAnchorOffsetMs = null;
+      this.backgroundSyncLastTimelineMs = null;
       return;
     }
 
@@ -1710,6 +1716,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!sourceHasNotChanged) {
       this.backgroundSegmentSkewMs = null;
       this.backgroundSegmentIndex = -1;
+      this.backgroundSyncAnchorMs = null;
+      this.backgroundSyncAnchorOffsetMs = null;
+      this.backgroundSyncLastTimelineMs = null;
       if (this.backgroundAudio) {
         try { this.backgroundAudio.pause(); } catch (_) { }
         try { this.backgroundAudio.currentTime = 0; } catch (_) { }
@@ -1814,17 +1823,29 @@ export class PodcasterPlaybackController extends EventEmitter {
     let offsetMs = continuousSourceOffsetMs;
     if (sourceHasNotChanged) {
       if (sourceIsContinuous) {
-        if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
-          this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - continuousSourceOffsetMs;
-        }
-        const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
-        const expectedJumpMs = Math.abs(expectedOffsetFromSkewMs - continuousSourceOffsetMs);
-        if (expectedJumpMs > 800 && this.backgroundAudio.dataset.initialized === "true") {
-          this.backgroundSegmentSkewMs = continuousSourceOffsetMs - Number(currentMs || 0);
+        const currentTimelineMs = Number(currentMs || 0);
+        const currentAudioOffsetMs = Math.max(0, Number(this.backgroundAudio.currentTime || 0) * 1000);
+        const lastTimelineMs = Number(this.backgroundSyncLastTimelineMs);
+        const timelineJumpMs = Number.isFinite(lastTimelineMs) ? Math.abs(currentTimelineMs - lastTimelineMs) : 0;
+        const needsAnchorReset = this.backgroundSyncAnchorMs === null
+          || this.backgroundSyncAnchorOffsetMs === null
+          || !Number.isFinite(this.backgroundSyncAnchorMs)
+          || !Number.isFinite(this.backgroundSyncAnchorOffsetMs)
+          || this.backgroundAudio.dataset.initialized !== "true"
+          || timelineJumpMs > 1500;
+        if (needsAnchorReset) {
+          this.backgroundSyncAnchorMs = currentTimelineMs;
+          this.backgroundSyncAnchorOffsetMs = continuousSourceOffsetMs;
           offsetMs = continuousSourceOffsetMs;
         } else {
-          offsetMs = expectedOffsetFromSkewMs;
+          offsetMs = Math.max(0, Number(this.backgroundSyncAnchorOffsetMs || 0) + (currentTimelineMs - Number(this.backgroundSyncAnchorMs || 0)));
+          if (Math.abs(currentAudioOffsetMs - offsetMs) > 1200) {
+            this.backgroundSyncAnchorMs = currentTimelineMs;
+            this.backgroundSyncAnchorOffsetMs = continuousSourceOffsetMs;
+            offsetMs = continuousSourceOffsetMs;
+          }
         }
+        this.backgroundSyncLastTimelineMs = currentTimelineMs;
       } else {
         this.backgroundSegmentIndex = activeSegmentIndex;
         if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
@@ -1843,12 +1864,16 @@ export class PodcasterPlaybackController extends EventEmitter {
     } else {
       this.backgroundSegmentSkewMs = segmentBaseOffsetMs - Number(currentMs || 0);
       this.backgroundSegmentIndex = activeSegmentIndex;
+      this.backgroundSyncAnchorMs = Number(currentMs || 0);
+      this.backgroundSyncAnchorOffsetMs = segmentBaseOffsetMs;
+      this.backgroundSyncLastTimelineMs = Number(currentMs || 0);
     }
 
     const offsetSec = Math.max(0, offsetMs / 1000);
 
     const drift = Math.abs(this.backgroundAudio.currentTime - offsetSec);
-    if (this.backgroundAudio.dataset.initialized === "false" || drift > 0.3) {
+    const driftToleranceSec = sourceIsContinuous ? 0.9 : 0.3;
+    if (this.backgroundAudio.dataset.initialized === "false" || drift > driftToleranceSec) {
       // console.log(`[Playback:Music] Sincronizando tiempo: ${this.backgroundAudio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s`);
       this.seekTo(this.backgroundAudio, offsetSec);
       this.backgroundAudio.dataset.initialized = "true";
@@ -1931,6 +1956,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSegmentIdentity = "";
     this.backgroundSegmentSkewMs = null;
     this.backgroundSegmentIndex = -1;
+    this.backgroundSyncAnchorMs = null;
+    this.backgroundSyncAnchorOffsetMs = null;
+    this.backgroundSyncLastTimelineMs = null;
     if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
     this.backgroundSource = null;
     if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
