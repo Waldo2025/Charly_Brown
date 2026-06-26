@@ -73,6 +73,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundDuckFactor = 1.0;
     this.backgroundSrc = "";
     this.backgroundSourceKey = "";
+    this.backgroundSegmentIdentity = "";
 
     this.stageMachine = {
       loadingSrc: '',
@@ -1612,7 +1613,14 @@ export class PodcasterPlaybackController extends EventEmitter {
     
     if (activeSegment) {
       const activeSegmentSourceKey = this.resolveAudioSourceKey(activeSegment);
-      if (this.backgroundSourceKey !== activeSegmentSourceKey || this.backgroundSrc !== String(activeSegment.sourceUrl || "").trim()) {
+      const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
+      const trimOutMs = Math.max(trimInMs + 1, Number(activeSegment.trimOutMs || 0));
+      const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
+      const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
+      const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${trimInMs}|${trimOutMs}|${fadeInMs}|${fadeOutMs}`;
+      const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey
+        && this.backgroundSegmentIdentity === activeSegmentIdentity;
+      if (!sourceHasNotChanged) {
         if (this.backgroundAudio) {
           try { this.backgroundAudio.pause(); } catch (_) { }
           try { this.backgroundAudio.currentTime = 0; } catch (_) { }
@@ -1630,6 +1638,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundLimiterEnabled = null;
         // console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl || "local-blob"}`);
         this.backgroundSourceKey = activeSegmentSourceKey;
+        this.backgroundSegmentIdentity = activeSegmentIdentity;
         this.backgroundSrc = String(activeSegment.sourceUrl || "").trim();
         try {
           const resolvedSource = await this.resolveAudioSource({
@@ -1654,8 +1663,12 @@ export class PodcasterPlaybackController extends EventEmitter {
         } catch (e) {
           this.backgroundSrc = "";
           this.backgroundSourceKey = "";
+          this.backgroundSegmentIdentity = "";
           return;
         }
+      } else if (this.backgroundAudio) {
+        this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+        this.backgroundSegmentIdentity = activeSegmentIdentity;
       }
 
       if (!this.backgroundAudio) return;
@@ -1671,13 +1684,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       const segmentDurationMs = Math.max(1, Number(activeSegment.endOffsetMs || 0) - Number(activeSegment.startOffsetMs || 0));
       const elapsedMs = Math.max(0, currentMs - Number(activeSegment.startOffsetMs || 0));
       const remainingMs = Math.max(0, segmentDurationMs - elapsedMs);
-      const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
-      const fadeInFactor = fadeInMs > 0 && segmentDurationMs > 0
-        ? (elapsedMs < fadeInMs ? Math.max(0, Math.min(1, elapsedMs / fadeInMs)) : 1.0)
+      const segmentFadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
+      const fadeInFactor = segmentFadeInMs > 0 && segmentDurationMs > 0
+        ? (elapsedMs < segmentFadeInMs ? Math.max(0, Math.min(1, elapsedMs / segmentFadeInMs)) : 1.0)
         : 1.0;
-      const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
-      const fadeOutFactor = fadeOutMs > 0 && segmentDurationMs > 0
-        ? (remainingMs <= fadeOutMs ? Math.max(0, Math.min(1, remainingMs / fadeOutMs)) : 1.0)
+      const segmentFadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
+      const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0
+        ? (remainingMs <= segmentFadeOutMs ? Math.max(0, Math.min(1, remainingMs / segmentFadeOutMs)) : 1.0)
         : 1.0;
 
       this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
@@ -1706,7 +1719,6 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       this.backgroundAudio.playbackRate = speed;
 
-      const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
       const offsetMs = currentMs - activeSegment.startOffsetMs;
       const offsetSec = (trimInMs + offsetMs) / 1000;
       
@@ -1728,6 +1740,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       this.backgroundSrc = "";
       this.backgroundSourceKey = "";
+      this.backgroundSegmentIdentity = "";
     }
   }
 
@@ -1797,6 +1810,8 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.backgroundAudio = null; 
     }
     this.backgroundSrc = "";
+    this.backgroundSourceKey = "";
+    this.backgroundSegmentIdentity = "";
     if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
     this.backgroundSource = null;
     if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }

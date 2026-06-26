@@ -36,6 +36,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   let panelMusicAudioEl = null;
   let panelMusicAiGenerating = false;
   let panelMusicDurationProbeCtx = null;
+  const panelMusicSessionLocalCache = new Map();
   const panelMusicDurationProbePendingKinds = new Set();
 
   const getEls = () => deps.getElements?.() || {};
@@ -125,15 +126,16 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const key = resolvePanelMusicSessionCacheKey(sessionId, kind);
     const value = String(localDataUrl || "").trim();
     if (!value) {
+      panelMusicSessionLocalCache.delete(key);
       return;
     }
+    panelMusicSessionLocalCache.set(key, value);
     void putPodcasterLocalMediaDataUrl(key, value.slice(0, maxLocalMusicDataUrlChars), { kind: resolvePanelMusicTrackKind(kind) }).catch(() => { });
   }
 
   function loadPanelMusicSessionTrackCache(sessionId = "", kind = "") {
-    void sessionId;
-    void kind;
-    return "";
+    const key = resolvePanelMusicSessionCacheKey(sessionId, kind);
+    return String(panelMusicSessionLocalCache.get(key) || "").trim();
   }
 
   async function hydratePanelMusicLocalCaches(session = null) {
@@ -146,7 +148,12 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       if (!normalized || String(normalized.localDataUrl || "").trim() || normalized.storagePath || normalized.downloadUrl) return normalized;
       try {
         const localDataUrl = await getPodcasterLocalMediaDataUrl(resolvePanelMusicSessionCacheKey(sessionId, kind));
-        return localDataUrl ? { ...normalized, localDataUrl } : normalized;
+        const hydratedLocalDataUrl = String(localDataUrl || "").trim();
+        if (hydratedLocalDataUrl) {
+          panelMusicSessionLocalCache.set(resolvePanelMusicSessionCacheKey(sessionId, kind), hydratedLocalDataUrl);
+          return { ...normalized, localDataUrl: hydratedLocalDataUrl };
+        }
+        return normalized;
       } catch (_) {
         return normalized;
       }
@@ -1162,9 +1169,16 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
       const track = uploadedTracks[trackIndex] || null;
       const mutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
+      const sourceUrl = String(resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim();
+      const candidateLocalDataUrl = String(segment?.localDataUrl || "").trim();
+      const localMediaCacheKey = String(segment?.localMediaCacheKey || track?.localMediaCacheKey || "").trim();
+      const resolvedSourceUrl = sourceUrl
+        || (candidateLocalDataUrl.startsWith("podcaster-local-media:") ? candidateLocalDataUrl : "")
+        || (localMediaCacheKey ? `podcaster-local-media:${localMediaCacheKey}` : "")
+        || candidateLocalDataUrl;
       return {
         slotLabel: String(segment?.slotLabel || "").trim(),
-        sourceUrl: String(resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim(),
+        sourceUrl: resolvedSourceUrl,
         localDataUrl: String(segment?.localDataUrl || "").trim(),
         localMediaCacheKey: String(segment?.localMediaCacheKey || "").trim(),
         downloadUrl: String(segment?.downloadUrl || "").trim(),
@@ -1184,8 +1198,10 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         duckingWhenGeminiPct: track?.duckingWhenGeminiPct !== undefined ? track.duckingWhenGeminiPct : panelMusicState.duckingWhenGeminiPct,
         stabilize: track?.stabilize !== undefined ? track.stabilize : panelMusicState.stabilize
       };
-    }).filter((segment) => segment.sourceUrl);
-    const sourceUrl = (!uploadedMode && panelMusicState.sourceType === "track") ? resolvePanelMusicTrackSrc() : "";
+    }).filter((segment) => segment.sourceUrl || segment.localDataUrl || segment.localMediaCacheKey);
+    const sourceUrl = (!uploadedMode && panelMusicState.sourceType === "track")
+      ? resolvePanelMusicTrackSourceValue(activeTrack)
+      : "";
     const sourceType = uploadedMode
       ? (activeTrack || sourceItems.length ? "track" : "none")
       : (panelMusicState.sourceType === "track" ? "track" : "none");
@@ -1553,13 +1569,49 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return panelMusicState.track;
   }
 
-  function resolvePanelMusicTrackSrc() {
-    const track = normalizePanelMusicTrack(panelMusicState.track);
-    if (!track) return "";
-    const localDataUrl = String(track.localDataUrl || "").trim();
+  function resolvePanelMusicTrackSourceValue(track = null) {
+    const candidate = normalizePanelMusicTrack(track);
+    if (!candidate) return "";
+    const localDataUrl = String(candidate.localDataUrl || "").trim();
     if (localDataUrl) return localDataUrl;
-    const remote = String(track.downloadUrl || "").trim();
-    return resolveStorageAudioUrl(remote);
+    const localMediaCacheKey = String(candidate.localMediaCacheKey || "").trim();
+    if (localMediaCacheKey) return `podcaster-local-media:${localMediaCacheKey}`;
+    const remote = String(candidate.downloadUrl || "").trim();
+    return resolveStorageAudioUrl(remote, candidate.storagePath);
+  }
+
+  async function resolvePanelMusicTrackPlayableSrc(track = null) {
+    const candidate = normalizePanelMusicTrack(track);
+    if (!candidate) return "";
+    const controller = playbackController();
+    if (controller && typeof controller.resolveAudioSource === "function") {
+      try {
+        const resolvedSource = await controller.resolveAudioSource(candidate);
+        if (resolvedSource) return resolvedSource;
+      } catch (_) {
+        // fallback
+      }
+    }
+    const localDataUrl = String(candidate.localDataUrl || "").trim();
+    if (localDataUrl && localDataUrl.startsWith("podcaster-local-media:")) {
+      const localMediaKey = localDataUrl.replace("podcaster-local-media:", "").trim();
+      if (controller && typeof controller.resolveLocalMediaObjectUrl === "function" && localMediaKey) {
+        const resolvedLocalSrc = await controller.resolveLocalMediaObjectUrl(localMediaKey);
+        if (resolvedLocalSrc) return resolvedLocalSrc;
+      }
+      return localDataUrl;
+    }
+    const localMediaCacheKey = String(candidate.localMediaCacheKey || "").trim();
+    if (localMediaCacheKey && controller && typeof controller.resolveLocalMediaObjectUrl === "function") {
+      const resolvedLocalSrc = await controller.resolveLocalMediaObjectUrl(localMediaCacheKey);
+      if (resolvedLocalSrc) return resolvedLocalSrc;
+    }
+    if (localDataUrl) return localDataUrl;
+    return resolveStorageAudioUrl(String(candidate.downloadUrl || "").trim(), candidate.storagePath || "");
+  }
+
+  function resolvePanelMusicTrackSrc() {
+    return resolvePanelMusicTrackSourceValue(panelMusicState.track);
   }
 
   function stopPanelMusic() {
@@ -1579,7 +1631,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   async function startPanelMusic() {
     if (podcastVideoState()?.montageActive) return;
     if (panelMusicState.playing) return;
-    const musicSrc = panelMusicState.sourceType === "track" ? resolvePanelMusicTrackSrc() : "";
+    const musicSrc = panelMusicState.sourceType === "track"
+      ? await resolvePanelMusicTrackPlayableSrc(panelMusicState.track)
+      : "";
     if (musicSrc) {
       const audio = new Audio(musicSrc);
       audio.crossOrigin = "anonymous";
