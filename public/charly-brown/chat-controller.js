@@ -62,8 +62,10 @@ export function renderProposalMessage({ id = "", title = "", html = "", validati
     <div class="cb-proposal" data-proposal-id="${escapeHtml(id)}">
       <h3>${escapeHtml(title || "Propuesta")}</h3>
       ${valid ? "" : `<p class="cb-warning">La estructura necesita corrección: ${escapeHtml((validation?.errors || []).join(", "))}</p>`}
-      <div class="cb-proposal-part cb-proposal-part--activities">
-        <p class="cb-panel-kicker">Activities</p>
+      <details class="cb-proposal-part cb-proposal-part--activities" open>
+        <summary class="cb-proposal-summary">
+          <p class="cb-panel-kicker">Activities</p>
+        </summary>
         <div class="cb-proposal-html">${parts.activitiesHtml || html || ""}</div>
         <div class="cb-proposal-actions">
           <button type="button" data-proposal-action="accept">${isProject ? "Aceptar proyecto" : "Aceptar activities"}</button>
@@ -71,23 +73,25 @@ export function renderProposalMessage({ id = "", title = "", html = "", validati
           <button type="button" data-proposal-action="easier">${isProject ? "Simplificar proyecto" : "Hacer más fácil"}</button>
           <button type="button" data-proposal-action="harder">${isProject ? "Hacer proyecto más retador" : "Hacer más difícil"}</button>
         </div>
-      </div>
+      </details>
       ${parts.resources.length ? `
         <div class="cb-proposal-part cb-proposal-part--resources">
           <p class="cb-panel-kicker">Materiales</p>
           <div class="cb-proposal-resources">
             ${parts.resources.map((resource, index) => `
-              <article class="cb-approved-card cb-resource-card" data-resource-proposal-index="${index}">
-                <div class="cb-approved-card-head">
-                  <strong>${escapeHtml(resource.title || resource.code || "Recurso")}</strong>
-                  <div class="cb-resource-chip">${escapeHtml(resource.code || resource.type || "Recurso")}</div>
-                </div>
+              <details class="cb-approved-card cb-resource-card" data-resource-proposal-index="${index}">
+                <summary class="cb-proposal-summary">
+                  <div class="cb-approved-card-head">
+                    <strong>${escapeHtml(resource.title || resource.code || "Recurso")}</strong>
+                    <div class="cb-resource-chip">${escapeHtml(resource.code || resource.type || "Recurso")}</div>
+                  </div>
+                </summary>
                 <div class="cb-approved-html">${resource.html || ""}</div>
                 <div class="cb-proposal-actions cb-proposal-actions--resource">
                   <button type="button" data-resource-proposal-action="accept">Usar este recurso</button>
                   <button type="button" data-resource-proposal-action="reject">No usar</button>
                 </div>
-              </article>
+              </details>
             `).join("")}
           </div>
         </div>
@@ -121,6 +125,17 @@ function splitProposalHtml(html = "") {
 
 function renderMessage(message = {}) {
   const deletable = message.role !== "assistant" || Boolean(message.text || message.html);
+  const html = String(message.html || "");
+  if (message.role === "assistant" && html.includes('data-proposal-id="')) {
+    return `
+      <article class="cb-message cb-message--${escapeHtml(message.role || "assistant")}" data-message-id="${escapeHtml(message.id || "")}">
+        <div class="cb-message-bubble">
+          <div class="cb-message-body">${html}</div>
+          ${deletable ? `<div class="cb-message-actions"><button type="button" data-message-action="delete">Eliminar</button></div>` : ""}
+        </div>
+      </article>
+    `;
+  }
   return `
     <article class="cb-message cb-message--${escapeHtml(message.role || "assistant")}" data-message-id="${escapeHtml(message.id || "")}">
       <details class="cb-message-bubble" ${message.role === "user" ? "open" : ""}>

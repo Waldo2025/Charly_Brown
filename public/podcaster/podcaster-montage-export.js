@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js?v=2026-06-26.3";
+import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js?v=2026-06-26.4";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import JASSUB from "../vendor/jassub/jassub.js";
 import {
@@ -2783,6 +2783,46 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
   };
 }
 
+function clampMontageOnScreenTextSegmentsToGeminiTimeline(segments = [], geminiTimelineSegments = []) {
+  const sourceSegments = Array.isArray(segments) ? segments : [];
+  const geminiByRowId = new Map(
+    (Array.isArray(geminiTimelineSegments) ? geminiTimelineSegments : [])
+      .map((segment) => {
+        const rowId = String(segment?.rowId || "").trim();
+        const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+        const durationMs = Math.max(
+          STUDIO_TIMELINE_MIN_CLIP_MS,
+          Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS)
+        );
+        return rowId ? [rowId, { startMs, endMs: startMs + durationMs, durationMs }] : null;
+      })
+      .filter(Boolean)
+  );
+  if (!geminiByRowId.size) return sourceSegments;
+  return sourceSegments
+    .map((segment) => {
+      if (!segment || typeof segment !== "object") return null;
+      const rowId = String(segment?.rowId || "").trim();
+      const gemini = rowId ? geminiByRowId.get(rowId) : null;
+      if (!gemini) return segment;
+      const textStartMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+      const textDurationMs = Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Math.round(Number(segment?.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS)
+      );
+      const textEndMs = textStartMs + textDurationMs;
+      const startMs = Math.max(textStartMs, gemini.startMs);
+      const endMs = Math.min(textEndMs, gemini.endMs);
+      if (endMs <= startMs) return null;
+      return {
+        ...segment,
+        startMs,
+        durationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, endMs - startMs)
+      };
+    })
+    .filter(Boolean);
+}
+
 function resolveEffectiveMontageOnScreenTextTimeline({
   activeSession = null,
   onScreenTextTimeline = null,
@@ -2826,9 +2866,11 @@ function resolveEffectiveMontageOnScreenTextTimeline({
       suppressFallbackFromEntries: false
     }
     : buildMontageFallbackOnScreenTextTimeline(baseTimeline, validEntries, geminiTimelineSegments);
+  const boundedSegments = clampMontageOnScreenTextSegmentsToGeminiTimeline(nextTimeline.segments, geminiTimelineSegments);
 
   return {
     ...nextTimeline,
+    segments: boundedSegments,
     debug: {
       trackVisible,
       allHidden,

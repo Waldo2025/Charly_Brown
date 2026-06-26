@@ -288,6 +288,32 @@ export class PodcasterPlaybackController extends EventEmitter {
     );
     return Math.max(500, Math.round(rawVisibleMs / this.clampPlaybackRate(clipPlaybackRate, 0.5, 10)));
   }
+  resolveGeminiSegmentWindowForRow(session = null, cfg = null, rowId = "", currentMs = 0) {
+    const key = String(rowId || "").trim();
+    if (!key) return null;
+    const track = cfg?.geminiDialogueTrack || {};
+    if (track?.enabled !== true || !Array.isArray(track?.segments) || !track.segments.length) return null;
+    const candidates = track.segments
+      .filter((segment) => String(segment?.rowId || "").trim() === key)
+      .map((segment) => {
+        const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+        const playbackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, key) || 1;
+        const durationMs = this.resolveSegmentTimelineDurationMs(segment, playbackRate);
+        return {
+          rowId: key,
+          startMs,
+          endMs: startMs + durationMs,
+          durationMs
+        };
+      })
+      .filter((segment) => segment.durationMs > 0)
+      .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+    if (!candidates.length) return null;
+    const now = Math.max(0, Number(currentMs || 0) || 0);
+    return candidates.find((segment) => now >= segment.startMs && now < segment.endMs)
+      || candidates.find((segment) => now < segment.endMs)
+      || candidates[candidates.length - 1];
+  }
   isImageStageEntry(entry = null) {
     if (!entry) return false;
     if (entry.isImageClip === true) return true;
@@ -2364,18 +2390,38 @@ export class PodcasterPlaybackController extends EventEmitter {
     const clipList = Object.values(clips);
     const candidates = clipList.map((clip) => {
       const rowId = String(clip?.rowId || "").trim();
-      const isTimeActive = (currentMs + 1) >= clip.startMs
-        && currentMs < (clip.startMs + this.deps.getOnScreenTextClipEffectiveDurationMs(clip));
+      const clipStartMs = Math.max(0, Number(clip?.startMs || 0) || 0);
+      const clipEndMs = clipStartMs + this.deps.getOnScreenTextClipEffectiveDurationMs(clip);
+      const geminiWindow = this.resolveGeminiSegmentWindowForRow(session, cfg, rowId, currentMs);
+      const effectiveStartMs = geminiWindow ? Math.max(clipStartMs, geminiWindow.startMs) : clipStartMs;
+      const effectiveEndMs = geminiWindow ? Math.min(clipEndMs, geminiWindow.endMs) : clipEndMs;
+      const effectiveDurationMs = Math.max(0, effectiveEndMs - effectiveStartMs);
+      const isTimeActive = effectiveDurationMs > 0
+        && (currentMs + 1) >= effectiveStartMs
+        && currentMs < effectiveEndMs;
       const isPreferred = Boolean(preferredRowId) && rowId === preferredRowId;
+      const canShowPreferred = isPreferred
+        && shouldShowPreferredRow
+        && (!geminiWindow || forceRow || (currentMs >= geminiWindow.startMs && currentMs < geminiWindow.endMs));
       return {
-        clip,
+        clip: effectiveDurationMs > 0
+          ? {
+            ...clip,
+            startMs: effectiveStartMs,
+            sourceDurationMs: Math.max(500, effectiveDurationMs),
+            trimInMs: 0,
+            trimOutMs: Math.max(500, effectiveDurationMs),
+            durationMs: Math.max(500, effectiveDurationMs)
+          }
+          : clip,
         rowId,
         isTimeActive,
-        isPreferred
+        isPreferred,
+        canShowPreferred
       };
     });
 
-    let selected = candidates.find((item) => item.isPreferred && (item.isTimeActive || shouldShowPreferredRow))?.clip
+    let selected = candidates.find((item) => item.isPreferred && (item.isTimeActive || item.canShowPreferred))?.clip
       || candidates.find((item) => item.isTimeActive)?.clip
       || null;
 
