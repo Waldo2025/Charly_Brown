@@ -1618,42 +1618,63 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const sourceItems = Array.isArray(panelCfg.sourceItems) ? panelCfg.sourceItems : [];
     const backgroundLookupToleranceMs = this.getTimelineLookupToleranceMs();
-    const useContinuousSource = Boolean(String(panelCfg.sourceUrl || "").trim());
-    const activeSegmentLookup = useContinuousSource
-      ? {
-        segmentIndex: -1,
-        segment: {
-          sourceUrl: panelCfg.sourceUrl,
-          volume: panelCfg.volume,
-          loop: panelCfg.loopEnabled !== false,
-          startOffsetMs: Math.max(0, Number(panelCfg.startOffsetMs || 0) || 0),
-          endOffsetMs: 9999999,
-          trimInMs: Math.max(0, Number(panelCfg.trimInMs || 0)),
-          trimOutMs: Math.max(
-            Math.max(0, Number(panelCfg.trimInMs || 0)) + 1,
-            Number(panelCfg.trimOutMs || Math.max(0, Math.round(Number(panelCfg.durationSec || 0) * 1000))) || 0
-          ),
-          fadeInMs: 0,
-          fadeOutMs: 0
+    const uniqueSourceKeys = new Set(
+      sourceItems
+        .map((item) => this.resolveAudioSourceKey(item))
+        .map((key) => String(key || "").trim())
+        .filter(Boolean)
+    );
+    const useContinuousSource = Boolean(String(panelCfg.sourceUrl || "").trim())
+      || (sourceItems.length > 0 && uniqueSourceKeys.size <= 1);
+    const activeSegmentLookup = (() => {
+      if (useContinuousSource) {
+        const orderedItems = sourceItems
+          .slice()
+          .sort((a, b) => Number(a.startOffsetMs || 0) - Number(b.startOffsetMs || 0));
+        const firstSegment = orderedItems[0] || null;
+        const lastSegment = orderedItems.slice().sort((a, b) => Number(b.endOffsetMs || 0) - Number(a.endOffsetMs || 0))[0] || firstSegment;
+        const trackStartMs = Math.max(0, Number(firstSegment?.startOffsetMs || panelCfg.startOffsetMs || 0) || 0);
+        const trackEndMs = Math.max(
+          trackStartMs,
+          Number(lastSegment?.endOffsetMs || panelCfg.trimOutMs || trackStartMs) || trackStartMs
+        );
+        if (!firstSegment || !this.isTimelineMsInRange(currentMs, trackStartMs, trackEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
+          return null;
+        }
+        return {
+          segmentIndex: 0,
+          segment: {
+            ...(firstSegment || {}),
+            sourceUrl: firstSegment?.sourceUrl || panelCfg.sourceUrl || "",
+            volume: panelCfg.volume,
+            loop: panelCfg.loopEnabled !== false,
+            startOffsetMs: trackStartMs,
+            endOffsetMs: trackEndMs,
+            trimInMs: Math.max(0, Number(panelCfg.trimInMs || firstSegment?.trimInMs || 0) || 0),
+            trimOutMs: Math.max(
+              Math.max(0, Number(panelCfg.trimInMs || firstSegment?.trimInMs || 0) || 0) + 1,
+              Number(panelCfg.trimOutMs || lastSegment?.trimOutMs || trackEndMs) || trackEndMs
+            ),
+            fadeInMs: 0,
+            fadeOutMs: 0
+          }
+        };
+      }
+      if (!sourceItems.length) return null;
+      const matches = [];
+      for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
+        const candidate = sourceItems[segmentIndex];
+        if (!candidate) continue;
+        const candidateStartMs = Number(candidate.startOffsetMs || 0);
+        const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
+        if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
+          matches.push({ segmentIndex, segment: candidate });
         }
       }
-      : sourceItems.length > 0
-        ? (() => {
-          const matches = [];
-          for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
-            const candidate = sourceItems[segmentIndex];
-            if (!candidate) continue;
-            const candidateStartMs = Number(candidate.startOffsetMs || 0);
-            const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
-            if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
-              matches.push({ segmentIndex, segment: candidate });
-            }
-          }
-          if (!matches.length) return null;
-          return matches
-            .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
-        })()
-        : null;
+      if (!matches.length) return null;
+      return matches
+        .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
+    })();
 
     if (!activeSegmentLookup || !activeSegmentLookup.segment) {
       if (this.state.isPlaying && this.backgroundAudio && !this.backgroundAudio.paused && this.backgroundSourceKey) {
