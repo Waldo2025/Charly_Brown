@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.272",
-  "build": "2026-1.0.10.272",
+  "version": "1.0.10.273",
+  "build": "2026-1.0.10.273",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El input temporal del pass browser de Podcaster cambia de VP8/WebM a MP4/H.264 ultrafast, evitando que FFmpeg se quede codificando VP8 durante 10 minutos en Render.",
     "Corregido: El WebM/VP8 usado como entrada del pass final browser de Podcaster ahora se genera con resolución limitada, bitrate bajo y parámetros realtime, evitando timeouts largos de FFmpeg en Render.",
     "Corregido: El pass final browser del export MP4 de Podcaster ahora prepara un WebM/VP8 sin audio compatible con Chromium antes de reproducir el montaje, evitando timeouts cuando el MP4 intermedio contiene codecs no reproducibles por el navegador.",
     "Corregido: El pass final browser del export MP4 de Podcaster declara totalDurationMs antes de construir el payload del renderer, evitando el ReferenceError Cannot access 'totalDurationMs' before initialization.",
@@ -68,6 +69,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El export MP4 de Podcaster evita el timeout del transcode VP8 previo al pass browser usando un MP4/H.264 ultrafast de entrada para Chromium.",
     "Corregido: El export MP4 de Podcaster reduce drásticamente el costo del transcode previo al pass browser para evitar `ffmpeg_timeout` en Render.",
     "Corregido: El export MP4 de Podcaster ya no entrega directamente a Chromium el MP4 intermedio con codecs de FFmpeg no aptos para video HTML; primero genera una entrada WebM compatible para el pass visual final.",
     "Corregido: El export MP4 de Podcaster ya no falla al iniciar el pass final browser por usar totalDurationMs antes de inicializarlo.",
