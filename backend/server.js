@@ -10664,6 +10664,104 @@ function resolveMontageSceneOnScreenTextSegments({
     .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
 }
 
+function doesMontageStylizedTextSegmentBelongToScene(segment = {}, entry = {}, sceneIndex = 1, sceneStartMs = 0, sceneEndMs = 0) {
+  const segmentRowId = String(segment?.rowId || "").trim();
+  const entryRowId = String(entry?.rowId || "").trim();
+  if (segmentRowId && entryRowId && segmentRowId === entryRowId) return true;
+  const normalizedSceneIndex = Math.max(1, Math.round(Number(sceneIndex || 1) || 1));
+  const segmentSceneIndex = Math.max(1, Math.round(Number(segment?.sceneIndex || normalizedSceneIndex) || normalizedSceneIndex));
+  if (segmentSceneIndex === normalizedSceneIndex) return true;
+  const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+  const durationMs = Math.max(1, Math.round(Number(segment?.durationMs || 0) || 0));
+  const endMs = startMs + durationMs;
+  return endMs > sceneStartMs && startMs < sceneEndMs;
+}
+
+function resolveMontageSceneStylizedTextSegments({
+  input = {},
+  entry = {},
+  sceneIndex = 1,
+  sceneStartMs = 0,
+  sceneEndMs = 0
+} = {}) {
+  const segments = resolveMontageStylizedTextPayload(input)?.segments || [];
+  return (Array.isArray(segments) ? segments : [])
+    .filter((segment) => doesMontageStylizedTextSegmentBelongToScene(segment, entry, sceneIndex, sceneStartMs, sceneEndMs))
+    .map((segment) => ({ ...segment }))
+    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
+}
+
+async function appendMontageSceneStylizedTextFilters({
+  input = {},
+  entry = {},
+  sceneIndex = 1,
+  sceneTimelineStartMs = 0,
+  sceneTimelineEndMs = 0,
+  canvas = { width: 1280, height: 720 },
+  videoFilterGraph = "",
+  baseVideoMapLabel = "[vout]",
+  tmpDir = "",
+  args = [],
+  nextInputIndex = 2,
+  tempPaths = []
+} = {}) {
+  const sceneSegments = resolveMontageSceneStylizedTextSegments({
+    input,
+    entry,
+    sceneIndex,
+    sceneStartMs: sceneTimelineStartMs,
+    sceneEndMs: sceneTimelineEndMs
+  }).filter((segment) => String(segment?.dataUrl || "").trim().startsWith("data:image/"));
+  if (!sceneSegments.length) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      nextInputIndex,
+      appliedOverlayCount: 0
+    };
+  }
+  let graph = String(videoFilterGraph || "");
+  let currentLabel = String(baseVideoMapLabel || "[vout]");
+  let inputIndex = Math.max(0, Math.round(Number(nextInputIndex || 0) || 0));
+  let appliedOverlayCount = 0;
+  for (let idx = 0; idx < sceneSegments.length; idx += 1) {
+    const segment = sceneSegments[idx] || {};
+    const dataUrl = String(segment?.dataUrl || "").trim();
+    if (!dataUrl.startsWith("data:image/")) continue;
+    const decoded = decodeInlineDataUrl(dataUrl, MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES);
+    if (!String(decoded.mimeType || "").startsWith("image/")) continue;
+    const ext = getScreenshotExtension(decoded.mimeType);
+    const overlayPath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-stylized-${String(idx + 1).padStart(2, "0")}.${ext}`);
+    await fs.promises.writeFile(overlayPath, decoded.buffer);
+    tempPaths.push(overlayPath);
+    args.push("-loop", "1", "-framerate", "24", "-i", overlayPath);
+    const segmentStartMs = Math.max(0, Math.round(Number(segment?.startMs || sceneTimelineStartMs) || sceneTimelineStartMs));
+    const segmentDurationMs = Math.max(1, Math.round(Number(segment?.durationMs || (sceneTimelineEndMs - sceneTimelineStartMs)) || (sceneTimelineEndMs - sceneTimelineStartMs)));
+    const startSec = Math.max(0, (segmentStartMs - sceneTimelineStartMs) / 1000);
+    const endSec = Math.max(startSec + 0.001, (segmentStartMs + segmentDurationMs - sceneTimelineStartMs) / 1000);
+    const imageLabel = `stylized_img_${sceneIndex}_${idx + 1}`;
+    const outLabel = `stylized_out_${sceneIndex}_${idx + 1}`;
+    const filter = `[${inputIndex}:v]format=rgba,scale=${Math.max(2, canvas.width)}:${Math.max(2, canvas.height)}:flags=fast_bilinear[${imageLabel}];${currentLabel}[${imageLabel}]overlay=x=0:y=0:format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
+    graph = graph ? `${graph};${filter}` : filter;
+    currentLabel = `[${outLabel}]`;
+    inputIndex += 1;
+    appliedOverlayCount += 1;
+  }
+  if (appliedOverlayCount > 0) {
+    console.info("[backend][montage-export][scene-stylized-text]", {
+      sceneIndex,
+      rowId: String(entry?.rowId || "").trim() || undefined,
+      segmentCount: appliedOverlayCount
+    });
+  }
+  return {
+    videoFilterGraph: graph,
+    finalVideoMapLabel: currentLabel,
+    nextInputIndex: inputIndex,
+    appliedOverlayCount
+  };
+}
+
 function sanitizeMontageExportReference(value = null) {
   if (!value || typeof value !== "object") return null;
   const downloadUrl = clampText(String(value?.downloadUrl || value?.url || "").trim(), 3000);
@@ -12367,26 +12465,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
     let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input);
     const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
-    const stylizedKaraokeStyle = String(input?.onScreenTextSettings?.karaokeHighlightStyle || "").trim().toLowerCase();
-    const canForceBrowserVisualPass = input.exportMode === "normal" && input.onlyAudio !== true;
-    const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
-    const requiresBrowserKaraokePass = canForceBrowserVisualPass
-      && isTextTrackVisible
-      && Array.isArray(input.onScreenTextSegments)
-      && input.onScreenTextSegments.length > 0
-      && ["text", "pill", "rect", "underline"].includes(stylizedKaraokeStyle);
-    const hasStylizedTextSegments = canForceBrowserVisualPass && hasMontageStylizedTextSegments(input);
-    const earlyOverlayCardSegments = Array.isArray(input.overlayCards?.segments)
-      ? input.overlayCards.segments
-      : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
-    const hasBrowserOnlyVisualLayers = Boolean(
-      hasStylizedTextSegments
-      || earlyOverlayCardSegments.length
-      || input.brandOverlay?.enabled === true
-    );
-    const browserRendererAvailability = (shouldAttemptBrowserRenderer || requiresBrowserKaraokePass || hasStylizedTextSegments)
-      ? getMontageBrowserRendererAvailability()
-      : { available: false };
+    const hasStylizedTextSegments = input.exportMode === "normal" && input.onlyAudio !== true && hasMontageStylizedTextSegments(input);
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const exportedEntries = [];
@@ -12394,10 +12473,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const resolvedInlineBrandOverlayPath = input.brandOverlay?.enabled === true
       ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath)
       : "";
-    const shouldInlineSingleSceneBrandOverlay = Boolean(
+    const shouldInlineSceneBrandOverlay = Boolean(
       input.exportMode === "normal"
-      && Array.isArray(input.entries)
-      && input.entries.length === 1
       && resolvedInlineBrandOverlayPath
       && fs.existsSync(resolvedInlineBrandOverlayPath)
     );
@@ -12421,29 +12498,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         lastHeartbeatAt: new Date().toISOString()
       });
     };
-    if (canForceBrowserVisualPass && hasBrowserOnlyVisualLayers) {
-      emitStage("boot_renderer", 0.12, "Verificando renderer fiel al preview.");
-      const preflightBrandOverlay = resolveMontageBrowserBrandOverlay(input.brandOverlay);
-      const stylizedTextPayload = resolveMontageStylizedTextPayload(input);
-      await preflightMontageBrowserRenderer({
-        publicRoot: PUBLIC_ROOT,
-        payload: {
-          ...input,
-          onScreenTextTimeline: {
-            settings: input.onScreenTextSettings,
-            segments: []
-          },
-          browserOnScreenTextEnabled: false,
-          stylizedTextTimeline: stylizedTextPayload,
-          renderMode: "browser",
-          preflightOnly: true,
-          brandOverlay: preflightBrandOverlay
-        },
-        bootstrapHtmlPath: path.join(tmpDir, "montage-browser-preflight.html"),
-        viewport: { width: 1280, height: 720 },
-        timeoutMs: 20000
-      });
-    }
     emitStage("download_assets", 0.14, "Descargando videos y audio fuente.");
     logMontageMemory("download_assets_start", {
       jobId,
@@ -12523,6 +12577,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       let currentSceneSubstage = isImageAsset ? "scene_download_image" : "scene_download_video";
       let inputVisualPath = "";
       let inputAudioPath = "";
+      const sceneOverlayTempPaths = [];
       try {
         throwIfCancelled(`scene_${sceneIndex}_before_download`);
         const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
@@ -12673,12 +12728,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         }
 
-        if (isImageAsset) {
-          args.push("-t", String(durSec));
-        } else {
-          args.push("-ss", String(trimSec), "-t", String(durSec));
-        }
-        
         // Filtro de video para asegurar duración exacta (tpad congela el último frame si el video es corto)
         const visualEffects = normalizeMontageVisualEffects(entry?.visualEffects || null);
         const sceneTimelineStartMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
@@ -12736,6 +12785,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
 
         let finalVideoMapLabel = "[vout]";
+        let nextOverlayInputIndex = (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2;
         if (shouldBurnSceneOnScreenText) {
           const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
             input,
@@ -12751,9 +12801,28 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoFilterGraph = textOverlayResult.videoFilterGraph;
           finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
         }
-        if (shouldInlineSingleSceneBrandOverlay) {
+        const stylizedOverlayResult = await appendMontageSceneStylizedTextFilters({
+          input,
+          entry,
+          sceneIndex,
+          sceneTimelineStartMs,
+          sceneTimelineEndMs,
+          canvas,
+          videoFilterGraph,
+          baseVideoMapLabel: finalVideoMapLabel,
+          tmpDir,
+          args,
+          nextInputIndex: nextOverlayInputIndex,
+          tempPaths: sceneOverlayTempPaths
+        });
+        videoFilterGraph = stylizedOverlayResult.videoFilterGraph;
+        finalVideoMapLabel = stylizedOverlayResult.finalVideoMapLabel;
+        nextOverlayInputIndex = stylizedOverlayResult.nextInputIndex;
+
+        if (shouldInlineSceneBrandOverlay) {
           args.push("-loop", "1", "-i", resolvedInlineBrandOverlayPath);
-          const brandInputIndex = (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2;
+          const brandInputIndex = nextOverlayInputIndex;
+          nextOverlayInputIndex += 1;
           const brandOutLabel = `scene_brand_${sceneIndex}`;
           const brandFilterComplex = buildMontageBrandOverlayFilter(input.brandOverlay, {
             width: canvas.width,
@@ -12770,6 +12839,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
 
 
+        if (isImageAsset) {
+          args.push("-t", String(durSec));
+        } else {
+          args.push("-ss", String(trimSec), "-t", String(durSec));
+        }
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
         args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
         args.push("-r", "24", "-c:v", intermediateParams.vCodec);
@@ -12890,7 +12964,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         };
         throw error;
       } finally {
-        await removeMontageTempPaths([inputVisualPath, inputAudioPath]);
+        await removeMontageTempPaths([inputVisualPath, inputAudioPath, ...sceneOverlayTempPaths]);
       }
     }
 
@@ -13011,48 +13085,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
     const resolvedBrandPath = resolvedInlineBrandOverlayPath;
-    const hasBrandOverlay = Boolean(!shouldInlineSingleSceneBrandOverlay && resolvedBrandPath && fs.existsSync(resolvedBrandPath));
-    const isStylizedKaraokeRendererForced = (requiresBrowserKaraokePass || hasStylizedTextSegments) && !shouldAttemptBrowserRenderer;
-    let finalShouldAttemptBrowserRenderer = shouldAttemptBrowserRenderer;
-    if ((requiresBrowserKaraokePass || hasStylizedTextSegments) && browserRendererAvailability.available === true) {
-      finalShouldAttemptBrowserRenderer = true;
-      normalOnScreenTextEnabled = false;
-    }
+    const hasBrandOverlay = Boolean(!shouldInlineSceneBrandOverlay && resolvedBrandPath && fs.existsSync(resolvedBrandPath));
+    const browserRendererAvailability = { available: false };
+    const isStylizedKaraokeRendererForced = false;
+    const finalShouldAttemptBrowserRenderer = false;
     const hasTimelineOverlapOrGaps = overlapPlan.hasOverlap || overlapPlan.hasGaps;
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
       || normalOnScreenTextEnabled
-      || hasStylizedTextSegments
       || overlayCardSegments.length
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
     );
-    const forcedKaraokeBrowserVisualPass = Boolean(
-      (requiresBrowserKaraokePass || hasStylizedTextSegments)
-      && browserRendererAvailability.available === true
-      && (
-        hasStylizedTextSegments
-        || (
-          isTextTrackVisible
-          && Array.isArray(input.onScreenTextSegments)
-          && input.onScreenTextSegments.length > 0
-          && ["text", "pill", "rect", "underline"].includes(stylizedKaraokeStyle)
-        )
-      )
-    );
+    const forcedKaraokeBrowserVisualPass = false;
     const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
     const hasBrowserVisualPassRequired = hasBrowserVisualPass || (forcedKaraokeBrowserVisualPass && hasFinalVisualPass);
-    if (hasBrowserVisualPassRequired && browserRendererAvailability.available !== true) {
-      const err = new Error("montage_browser_renderer_unavailable");
-      err.status = 503;
-      err.code = "montage_browser_renderer_unavailable";
-      err.detail = {
-        jobId,
-        code: String(browserRendererAvailability.code || "playwright_unavailable").trim() || "playwright_unavailable",
-        message: String(browserRendererAvailability.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
-      };
-      throw err;
-    }
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -13063,7 +13110,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasBrowserVisualPass,
       forcedKaraokeBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
-      browserVisualPassDisabled: finalShouldAttemptBrowserRenderer !== true && shouldAttemptBrowserRenderer,
+      browserVisualPassDisabled: true,
       timelineHasOverlapOrGaps: hasTimelineOverlapOrGaps,
       browserRendererAvailable: browserRendererAvailability.available === true,
       browserRendererCode: browserRendererAvailability.available === true ? null : (browserRendererAvailability.code || null),
