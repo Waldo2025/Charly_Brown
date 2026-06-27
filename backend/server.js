@@ -7,6 +7,8 @@ const { spawn, execSync } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
+const REPO_ROOT = path.resolve(__dirname, "..");
+const PUBLIC_ROOT = path.resolve(REPO_ROOT, "public");
 const {
   normalizePersistedMediaReference
 } = require("./media-reference.js");
@@ -66,10 +68,10 @@ const {
   buildMontageOnScreenTextAss,
   buildMontageOnScreenTextDrawFilters,
   buildMontageOnScreenTextKaraokeBoxFilters
-} = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-text-render.js"));
+} = require(path.resolve(PUBLIC_ROOT, "podcaster", "podcaster-text-render.js"));
 const {
   resolveSceneMediaRenderSpec
-} = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-scene-media-render-spec.js"));
+} = require(path.resolve(PUBLIC_ROOT, "podcaster", "podcaster-scene-media-render-spec.js"));
 const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");
@@ -9638,7 +9640,7 @@ async function downloadUrlToFile(url = "", outPath = "", options = {}) {
 
   const isAbsoluteHttp = cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://");
   if (!isAbsoluteHttp) {
-    const localPath = path.resolve(process.cwd(), "public", cleanUrl.replace(/^\//, ""));
+    const localPath = path.resolve(PUBLIC_ROOT, cleanUrl.replace(/^\//, ""));
     try {
       await fs.promises.access(localPath);
       await fs.promises.copyFile(localPath, targetPath);
@@ -11779,21 +11781,20 @@ function resolveBrandOverlayAssetPath(assetPathRaw = "") {
   }
   const cleanPath = inputPath.replace(/^[/\\]+/g, "");
   if (!cleanPath) return "";
-  const repoRoot = path.resolve(__dirname, "..");
   const candidates = [
-    path.resolve(repoRoot, "public", cleanPath),
-    path.resolve(repoRoot, cleanPath),
+    path.resolve(PUBLIC_ROOT, cleanPath),
+    path.resolve(REPO_ROOT, cleanPath),
     path.resolve(process.cwd(), cleanPath),
     path.resolve(process.cwd(), "public", cleanPath)
   ];
   for (const cand of candidates) {
     const resolved = path.resolve(cand);
-    if (fs.existsSync(resolved) && (resolved === repoRoot || resolved.startsWith(`${repoRoot}${path.sep}`))) {
+    if (fs.existsSync(resolved) && (resolved === REPO_ROOT || resolved.startsWith(`${REPO_ROOT}${path.sep}`))) {
       return resolved;
     }
   }
-  const fallback = path.resolve(repoRoot, "public", cleanPath);
-  if (fallback === repoRoot || fallback.startsWith(`${repoRoot}${path.sep}`)) {
+  const fallback = path.resolve(PUBLIC_ROOT, cleanPath);
+  if (fallback === REPO_ROOT || fallback.startsWith(`${REPO_ROOT}${path.sep}`)) {
     return fallback;
   }
   return "";
@@ -11950,7 +11951,7 @@ async function renderMontageBrowserFinalVisualPass({
   emitStage("boot_renderer", 0.8, "Iniciando renderer fiel al preview.");
   throwIfCancelled("boot_renderer");
   const renderedVideoPath = await renderMontageBrowserOverlayVideo({
-    publicRoot: path.resolve(process.cwd(), "public"),
+    publicRoot: PUBLIC_ROOT,
     payload: browserPayload,
     baseVideoPath: finalOutPath,
     bootstrapHtmlPath,
@@ -12331,7 +12332,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       emitStage("boot_renderer", 0.12, "Verificando renderer fiel al preview.");
       const preflightBrandOverlay = resolveMontageBrowserBrandOverlay(input.brandOverlay);
       await preflightMontageBrowserRenderer({
-        publicRoot: path.resolve(process.cwd(), "public"),
+        publicRoot: PUBLIC_ROOT,
         payload: {
           ...input,
           onScreenTextTimeline: {
