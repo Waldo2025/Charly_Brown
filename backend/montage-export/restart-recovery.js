@@ -2,7 +2,7 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   queueAvailable = false
 } = {}) {
   const source = job && typeof job === "object" ? job : null;
-  if (!source || queueAvailable) return false;
+  if (!source) return false;
   const status = String(source.status || "").trim().toLowerCase();
   if (!["queued", "running", "error"].includes(status)) return false;
   const request = source.request && typeof source.request === "object" ? source.request : null;
@@ -14,7 +14,8 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   const stage = String(source.stage || "").trim().toLowerCase();
   const progress = Math.max(0, Math.min(1, Number(source.progress || 0) || 0));
   const currentSceneIndex = Math.max(0, Math.round(Number(source.currentSceneIndex || 0) || 0));
-  if (progress >= 0.48) return false;
+  if (queueAvailable && stage !== "concat_timeline") return false;
+  if (progress >= 0.48 && stage !== "concat_timeline") return false;
   if ([
     "concat_timeline",
     "encode_visual_pass",
@@ -25,7 +26,7 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
     "ready",
     "completed"
   ].includes(stage)) {
-    return false;
+    return stage === "concat_timeline";
   }
   if (stage === "render_scene_segments" && currentSceneIndex > 1) return false;
   return true;

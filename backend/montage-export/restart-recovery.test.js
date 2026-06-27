@@ -36,10 +36,10 @@ test("canAutoResumeInterruptedMontageExportJob returns false when the restart wa
   assert.equal(result, false);
 });
 
-test("canAutoResumeInterruptedMontageExportJob returns false for late-stage restarted jobs", () => {
+test("canAutoResumeInterruptedMontageExportJob returns false for other late-stage restarted jobs", () => {
   const result = canAutoResumeInterruptedMontageExportJob({
     status: "running",
-    stage: "concat_timeline",
+    stage: "mix_timeline_audio",
     progress: 0.48,
     currentSceneIndex: 20,
     request: {
@@ -50,6 +50,38 @@ test("canAutoResumeInterruptedMontageExportJob returns false for late-stage rest
   });
 
   assert.equal(result, false);
+});
+
+test("canAutoResumeInterruptedMontageExportJob returns true for concat_timeline when the worker restarted and the job has persisted input", () => {
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "running",
+    stage: "concat_timeline",
+    progress: 0.48,
+    currentSceneIndex: 24,
+    request: {
+      input: { sessionId: "session-1", entries: [{ rowId: "row-1" }] }
+    }
+  }, {
+    queueAvailable: false
+  });
+
+  assert.equal(result, true);
+});
+
+test("canAutoResumeInterruptedMontageExportJob returns true for concat_timeline even when the queue is configured", () => {
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "running",
+    stage: "concat_timeline",
+    progress: 0.48,
+    currentSceneIndex: 24,
+    request: {
+      input: { sessionId: "session-1", entries: [{ rowId: "row-1" }] }
+    }
+  }, {
+    queueAvailable: true
+  });
+
+  assert.equal(result, true);
 });
 
 test("canAutoResumeInterruptedMontageExportJob returns false when inline rasters were redacted from persisted input", () => {
