@@ -797,6 +797,8 @@
     const textFileResolver = typeof options.textFileResolver === "function" ? options.textFileResolver : null;
     const isKaraoke = settings?.partyKaraoke !== false && wordTimings.length > 0 && textFileResolver && String(spec.wrappedText || spec.text || "").trim();
     const baseTextColor = isKaraoke ? toFfmpegColor("#94A3B8", settings?.textOpacity ?? 1, "94A3B8") : textColor;
+    const karaokeStyle = String(settings?.karaokeHighlightStyle || "").trim().toLowerCase();
+    const isPillStyle = karaokeStyle === "pill" || karaokeStyle === "rect";
     const filters = [];
 
     if ((stylePreset === "3d" && bgPreset === "none") || (stylePreset === "3d" && bgPreset !== "none")) {
@@ -842,7 +844,24 @@
         const wordTextPath = textFileResolver(overlayText);
         const wordEnableExpr = escapeFfmpegExpr(`between(t,${clampedStartSec.toFixed(3)},${clampedEndSec.toFixed(3)})`);
 
-        if ((stylePreset === "3d" && bgPreset === "none") || (stylePreset === "3d" && bgPreset !== "none")) {
+        if (isPillStyle) {
+          const boxColor = toFfmpegColor(highlight.color, highlight.opacity, "FACC15");
+          filters.push(
+            buildLayer({
+              fontcolor: "#020617",
+              textPath: wordTextPath,
+              enableExpr: wordEnableExpr,
+              boxEnabled: true,
+              boxcolor: boxColor,
+              boxborderw: Math.max(2, Math.round(Number(spec.fontSizePx || 44) * 0.12)),
+              borderw: 0,
+              bordercolor: "#020617@1.000",
+              shadowx: 0,
+              shadowy: 0,
+              shadowcolor: "#020617@0.220"
+            })
+          );
+        } else if ((stylePreset === "3d" && bgPreset === "none") || (stylePreset === "3d" && bgPreset !== "none")) {
           const depth = Math.max(2, Math.round(Number(spec.fontSizePx || 44) * 0.06));
           const visibleStrokeWidth = Math.max(baseStrokeWidth, Math.round(Number(spec.fontSizePx || 44) * 0.055), 2);
           filters.push(
@@ -943,7 +962,52 @@
     return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(3).replace(/\.?0+$/, "");
   }
 
-  function buildAssActiveWordColorOverlayText(text = "", activeWordIndex = -1, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8") {
+  function normalizeKaraokeHighlightInput(highlight = {}) {
+    if (!highlight || typeof highlight !== "object") {
+      return resolveKaraokeHighlightSettings({});
+    }
+    const hasResolvedKeys = Object.prototype.hasOwnProperty.call(highlight, "style")
+      || Object.prototype.hasOwnProperty.call(highlight, "color")
+      || Object.prototype.hasOwnProperty.call(highlight, "opacity")
+      || Object.prototype.hasOwnProperty.call(highlight, "paddingX")
+      || Object.prototype.hasOwnProperty.call(highlight, "paddingY")
+      || Object.prototype.hasOwnProperty.call(highlight, "radius");
+    if (!hasResolvedKeys) {
+      return resolveKaraokeHighlightSettings(highlight);
+    }
+    const styleRaw = String(highlight.style || "").trim().toLowerCase();
+    const opacityRaw = Number(highlight.opacity ?? highlight.karaokeHighlightOpacity);
+    return {
+      color: String(highlight.color || highlight.karaokeHighlightColor || "").trim() || "#facc15",
+      style: ["glow", "text", "pill", "rect", "underline"].includes(styleRaw) ? styleRaw : "glow",
+      opacity: Number.isFinite(opacityRaw)
+        ? Math.max(0, Math.min(1, opacityRaw > 1 ? opacityRaw / 100 : opacityRaw))
+        : resolveKaraokeHighlightSettings(highlight).opacity,
+      paddingX: Math.max(0, Math.min(40, Math.round(Number(highlight.paddingX ?? highlight.karaokeHighlightPaddingXPx ?? 10) || 0))),
+      paddingY: Math.max(0, Math.min(28, Math.round(Number(highlight.paddingY ?? highlight.karaokeHighlightPaddingYPx ?? 4) || 0))),
+      radius: Math.max(0, Math.min(40, Math.round(Number(highlight.radius ?? highlight.karaokeHighlightRadiusPx ?? 12) || 0)))
+    };
+  }
+
+  function buildAssKaraokeActiveWordStyleTag(highlight = {}, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8", baseOutlineColor = "&H000F172A") {
+    const normalized = normalizeKaraokeHighlightInput(highlight);
+    const style = String(normalized?.style || "glow").trim().toLowerCase();
+    const activePrimary = formatAssOverrideColor(activeColor, "1");
+    const activeSecondary = formatAssOverrideColor(activeColor, "2");
+    const baseBorder = formatAssOverrideColor(baseColor, "3");
+
+    if (style === "underline") {
+      return `${activePrimary}${activeSecondary}\\u1`;
+    }
+
+    if (style === "pill" || style === "rect") {
+      return `${activePrimary}${activeSecondary}${formatAssOverrideColor(baseOutlineColor, "3")}\\bord1\\shad0${formatAssOverrideColor(activeColor, "4")}\\1a&HFF&`;
+    }
+
+    return `${activePrimary}${activeSecondary}`;
+  }
+
+  function buildAssActiveWordColorOverlayText(text = "", activeWordIndex = -1, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8", highlight = {}) {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
     let wordIndex = 0;
@@ -953,7 +1017,7 @@
       const isActive = wordIndex === activeWordIndex;
       wordIndex += 1;
       if (isActive) {
-        return `{${formatAssOverrideColor(activeColor, "1")}${formatAssOverrideColor(activeColor, "2")}}${escaped}`;
+        return `{${buildAssKaraokeActiveWordStyleTag(highlight, activeColor, baseColor)}}${escaped}`;
       }
       return `{${formatAssOverrideColor(baseColor, "1")}${formatAssOverrideColor(baseColor, "2")}}${escaped}`;
     }).join("");
@@ -1055,7 +1119,7 @@
         const wordStartSec = startSec + (Math.max(0, Number(word?.startMs || 0) || 0) / 1000);
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
-        const activeText = buildAssActiveWordColorOverlayText(wrappedText, index, activeColor, baseColor);
+        const activeText = buildAssActiveWordColorOverlayText(wrappedText, index, activeColor, baseColor, highlight);
         const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}${formatAssOverrideColor(activeColor, "1")}${formatAssOverrideColor(activeColor, "2")}${formatAssOverrideColor(outlineColor, "3")}\\4a&HFF&}`;
         events.push(`Dialogue: 2,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
       });

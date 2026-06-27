@@ -130,3 +130,99 @@ test("raster and ASS karaoke use configured highlight color", () => {
   });
   assert.match(ass, /&H5EC522&/i);
 });
+
+test("ASS karaoke highlight supports pill and rect styles", () => {
+  const makeAss = (karaokeHighlightStyle) => buildMontageOnScreenTextAss({
+    width: 1280,
+    height: 720,
+    settings: {
+      fontFamily: "Inter",
+      fontSizePx: 44,
+      textColor: "#f8fafc",
+      strokeColor: "#0f172a",
+      karaokeHighlightStyle,
+      karaokeHighlightColor: "#22c55e",
+      karaokeHighlightOpacity: 0.85
+    },
+    segments: [{
+      startSec: 0,
+      endSec: 2,
+      spec: {
+        wrappedText: "Hola mundo",
+        fontFamily: "Inter",
+        fontSizePx: 44,
+        textAlign: "center",
+        rawXPx: 200,
+        boxWidthPx: 600,
+        yPx: 520,
+        strokeEnabled: true,
+        strokeWidthPx: 2
+      },
+      settings: {
+        fontFamily: "Inter",
+        fontSizePx: 44,
+        textColor: "#f8fafc",
+        strokeColor: "#0f172a",
+        karaokeHighlightStyle,
+        karaokeHighlightColor: "#22c55e",
+        karaokeHighlightOpacity: 0.85
+      },
+      wordTimings: [
+        { tokenIndex: 0, startMs: 0, endMs: 300 },
+        { tokenIndex: 1, startMs: 300, endMs: 700 }
+      ]
+    }]
+  });
+
+  const assPill = makeAss("pill");
+  const assRect = makeAss("rect");
+
+  assert.match(assPill, /\\bord1/);
+  assert.match(assRect, /\\bord1/);
+});
+
+test("ASS karaoke highlight supports underline style", () => {
+  const ass = buildMontageOnScreenTextAss({
+    width: 1280,
+    height: 720,
+    settings: {
+      fontFamily: "Inter",
+      fontSizePx: 44,
+      textColor: "#f8fafc",
+      strokeColor: "#0f172a",
+      karaokeHighlightStyle: "underline",
+      karaokeHighlightColor: "#22c55e",
+      karaokeHighlightOpacity: 0.85
+    },
+    segments: [{
+      startSec: 0,
+      endSec: 2,
+      spec: {
+        wrappedText: "Hola mundo",
+        fontFamily: "Inter",
+        fontSizePx: 44,
+        textAlign: "center",
+        rawXPx: 200,
+        boxWidthPx: 600,
+        yPx: 520,
+        strokeEnabled: true,
+        strokeWidthPx: 2
+      },
+      settings: {
+        fontFamily: "Inter",
+        fontSizePx: 44,
+        textColor: "#f8fafc",
+        strokeColor: "#0f172a",
+        karaokeHighlightStyle: "underline",
+        karaokeHighlightColor: "#22c55e",
+        karaokeHighlightOpacity: 0.85
+      },
+      wordTimings: [
+        { tokenIndex: 0, startMs: 0, endMs: 300 },
+        { tokenIndex: 1, startMs: 300, endMs: 700 }
+      ]
+    }]
+  });
+
+  assert.match(ass, /\\u1/);
+});
