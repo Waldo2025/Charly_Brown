@@ -418,6 +418,7 @@ async function renderMontageBrowserOverlayVideo({
           const forcedPageState = await readMontageBrowserRenderState(page);
           if (forcedPageState?.done === true) {
             await page.waitForTimeout(200).catch(() => {});
+            return;
           } else {
             const err = new Error("montage_browser_renderer_record_timeout");
             err.code = "montage_browser_renderer_record_timeout";
