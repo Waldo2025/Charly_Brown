@@ -713,14 +713,15 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
       url,
       filename: name
     });
-    if (url) {
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = name;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-    }
+    persistMontageExportReferenceToSession({
+      exportId: String(data?.export?.exportId || "").trim(),
+      downloadUrl: url,
+      storagePath: String(data?.export?.storagePath || "").trim(),
+      filename: name,
+      mimeType: String(data?.export?.mimeType || "").trim(),
+      createdAtIso: String(data?.export?.createdAt || "").trim(),
+      expiresAtIso: String(data?.export?.expiresAt || "").trim()
+    });
     if (window.montageExportJobState.reviewExcelEnabled === true && window.montageExportState.exportMode === "review") {
       try {
         await downloadMontageReviewExcel(
@@ -1224,6 +1225,65 @@ function setMontageExportDownloadButton({ visible = false, url = "", filename = 
   window.els.montageExportDownloadBtn.dataset.filename = shouldShow ? cleanFilename : "";
   const textEl = window.els.montageExportDownloadBtn.querySelector("span");
   if (textEl) textEl.textContent = cleanFilename.toLowerCase().endsWith(".mp4") ? "Descargar MP4" : "Descargar archivo";
+}
+
+function normalizeMontageExportReference(raw = null) {
+  if (!raw || typeof raw !== "object") return null;
+  const downloadUrl = String(raw?.downloadUrl || raw?.url || "").trim();
+  const storagePath = String(raw?.storagePath || raw?.path || "").trim();
+  if (!downloadUrl && !storagePath) return null;
+  return {
+    exportId: String(raw?.exportId || raw?.jobId || "").trim(),
+    downloadUrl,
+    storagePath,
+    filename: String(raw?.filename || "").trim(),
+    mimeType: String(raw?.mimeType || "").trim().toLowerCase() || "video/mp4",
+    createdAtIso: String(raw?.createdAtIso || raw?.createdAt || "").trim(),
+    expiresAtIso: String(raw?.expiresAtIso || raw?.expiresAt || "").trim(),
+    bucketName: String(raw?.bucketName || "").trim()
+  };
+}
+
+function getPersistedMontageExportReference(session = null) {
+  const activeSession = session || window.getActiveSession?.() || null;
+  const cfg = window.normalizePodcastVideoConfig?.(activeSession?.podcastVideoConfig || {}) || {};
+  return normalizeMontageExportReference(cfg?.latestMontageExport || null);
+}
+
+function persistMontageExportReferenceToSession(reference = null) {
+  const normalized = normalizeMontageExportReference(reference);
+  const session = window.getActiveSession?.() || null;
+  if (!normalized || !session?.id || typeof window.upsertActiveSession !== "function") return normalized;
+  window.upsertActiveSession((current) => ({
+    ...current,
+    podcastVideoConfig: {
+      ...(current.podcastVideoConfig || {}),
+      latestMontageExport: normalized
+    }
+  }), {
+    persist: true,
+    markDirty: false,
+    render: false,
+    recordHistory: false,
+    autosaveReason: "ui-state"
+  });
+  return normalized;
+}
+
+function hydrateMontageExportDownloadButtonFromSession() {
+  if (window.montageExportJobState?.jobId || window.montageExportBusy === true) return;
+  const reference = getPersistedMontageExportReference();
+  if (!reference?.downloadUrl) {
+    if (!window.montageExportJobState?.readyDownloadUrl) {
+      setMontageExportDownloadButton({ visible: false });
+    }
+    return;
+  }
+  setMontageExportDownloadButton({
+    visible: true,
+    url: reference.downloadUrl,
+    filename: reference.filename || window.montageExportState.filename || "montage.mp4"
+  });
 }
 
 export function downloadReadyMontageExport() {
@@ -2210,6 +2270,9 @@ export function syncMontageExportUi() {
       );
     }
   }
+  if (!window.montageExportBusy && !window.montageExportJobState.jobId) {
+    hydrateMontageExportDownloadButtonFromSession();
+  }
   if (window.els.montageExportModal) {
     const btns = Array.from(window.els.montageExportModal.querySelectorAll("[data-quality]"));
     btns.forEach((btn) => {
@@ -2258,6 +2321,9 @@ export function openMontageExportModal() {
       url: window.montageExportJobState.readyDownloadUrl,
       filename: window.montageExportJobState.readyDownloadFilename
     });
+  }
+  if (!restoringActiveJob) {
+    hydrateMontageExportDownloadButtonFromSession();
   }
 
   const session = window.getActiveSession();

@@ -820,6 +820,28 @@ function buildDefaultTimelineTracks(session = null) {
   return tracks;
 }
 
+function normalizeMontageExportReference(raw = null) {
+  if (!raw || typeof raw !== "object") return null;
+  const downloadUrl = String(raw?.downloadUrl || raw?.url || "").trim();
+  const storagePath = String(raw?.storagePath || raw?.path || "").trim();
+  const exportId = String(raw?.exportId || raw?.jobId || "").trim();
+  const filename = String(raw?.filename || "").trim();
+  const mimeType = String(raw?.mimeType || "").trim().toLowerCase();
+  const createdAtIso = String(raw?.createdAtIso || raw?.createdAt || "").trim();
+  const expiresAtIso = String(raw?.expiresAtIso || raw?.expiresAt || "").trim();
+  if (!downloadUrl && !storagePath) return null;
+  return {
+    exportId,
+    downloadUrl,
+    storagePath,
+    filename,
+    mimeType: mimeType || "video/mp4",
+    createdAtIso,
+    expiresAtIso,
+    bucketName: String(raw?.bucketName || "").trim()
+  };
+}
+
 function normalizePodcastVideoConfig(raw = {}) {
   const normalizeTimelineSceneAudioMixByRowId = (source = {}) => {
     const next = {};
@@ -916,6 +938,7 @@ function normalizePodcastVideoConfig(raw = {}) {
     montageDefaultGeminiVolumePct,
     playbackSpeed: Math.max(0.5, Math.min(2.0, toFiniteNumber(raw?.playbackSpeed, 1.0))),
     reelModeEnabled: raw?.reelModeEnabled === true,
+    latestMontageExport: normalizeMontageExportReference(raw?.latestMontageExport || null),
     mediaLoadMode: ["streaming", "blob", "auto"].includes(String(raw?.mediaLoadMode || "").trim().toLowerCase())
       ? String(raw.mediaLoadMode).trim().toLowerCase()
       : "streaming"
@@ -1541,8 +1564,19 @@ function resolveTimelineRuntimeEntryAtMs(session = null, currentMs = 0, runtimeE
   const activeSession = session || getActiveSession();
   const entries = Array.isArray(runtimeEntries) ? runtimeEntries : buildTimelineRuntimeEntries(activeSession);
   const targetMs = Math.max(0, Number(currentMs || 0) || 0);
+  const strict = entries
+    .filter((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0));
+  if (strict.length) {
+    return strict
+      .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0) || Number(b?.zIndex || 0) - Number(a?.zIndex || 0))[0];
+  }
+  const toleranceMs = 12;
   return entries
-    .filter((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0))
+    .filter((entry) => {
+      const startMs = Math.max(0, Number(entry?.startMs || 0));
+      const endMs = Math.max(startMs, Number(entry?.endMs || 0));
+      return targetMs >= (startMs - toleranceMs) && targetMs <= (endMs + toleranceMs);
+    })
     .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0) || Number(b?.zIndex || 0) - Number(a?.zIndex || 0))[0] || null;
 }
 
@@ -1552,7 +1586,11 @@ function resolveTimelineRuntimeEntriesAtMs(session = null, currentMs = 0, runtim
   const targetMs = Math.max(0, Number(currentMs || 0) || 0);
   const videoOnly = options?.videoOnly === true;
   return entries
-    .filter((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0))
+    .filter((entry) => {
+      const startMs = Math.max(0, Number(entry?.startMs || 0));
+      const endMs = Math.max(startMs, Number(entry?.endMs || 0));
+      return targetMs >= (startMs - 12) && targetMs <= (endMs + 12);
+    })
     .filter((entry) => !videoOnly || Boolean(String(entry?.videoSrc || "").trim()))
     .sort((a, b) => (
       Number(a?.startMs || 0) - Number(b?.startMs || 0)
@@ -1723,8 +1761,15 @@ function getTimelineSceneVideoGenerationStatus(session = null, rowId = "") {
 function resolveTimelineSequenceStartIndex(entries = [], startMs = 0) {
   const list = Array.isArray(entries) ? entries : [];
   const cursorMs = Math.max(0, Number(startMs || 0));
-  const activeIndex = list.findIndex((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs);
-  if (activeIndex >= 0) return activeIndex;
+  const strictIndex = list.findIndex((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs);
+  if (strictIndex >= 0) return strictIndex;
+  const toleranceMs = 12;
+  const toleranceStartIndex = list.findIndex((entry) => {
+    const startMs = Math.max(0, Number(entry?.startMs || 0));
+    const endMs = Math.max(startMs, Number(entry?.endMs || 0));
+    return cursorMs >= (startMs - toleranceMs) && cursorMs <= (endMs + toleranceMs);
+  });
+  if (toleranceStartIndex >= 0) return toleranceStartIndex;
   const nextIndex = list.findIndex((entry) => Number(entry.startMs || 0) >= cursorMs);
   return nextIndex >= 0 ? nextIndex : Math.max(0, list.length - 1);
 }

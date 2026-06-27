@@ -3,7 +3,7 @@ import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, ha
 import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-26.9";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17.1";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
-import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-26.7";
+import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-26.8";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -41,7 +41,7 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-06-26.10";
+} from "./podcaster-montage-export.js?v=2026-06-26.11";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";

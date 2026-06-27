@@ -3581,7 +3581,8 @@ function sanitizePodcasterSession(raw = {}) {
     geminiDialogueTrackIndex: Math.max(0, Math.min(999, Math.floor(Number(raw?.podcastVideoConfig?.geminiDialogueTrackIndex) || 0))),
     montageDefaultVeoVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultVeoVolumePct, 0, 100, 0),
     montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100),
-    reelModeEnabled: raw?.podcastVideoConfig?.reelModeEnabled === true
+    reelModeEnabled: raw?.podcastVideoConfig?.reelModeEnabled === true,
+    latestMontageExport: sanitizeMontageExportReference(raw?.podcastVideoConfig?.latestMontageExport || null)
   };
   const panelMusicConfigRaw = raw?.panelMusicConfig && typeof raw.panelMusicConfig === "object" ? raw.panelMusicConfig : {};
   const panelMusicTrackRaw = panelMusicConfigRaw?.track && typeof panelMusicConfigRaw.track === "object" ? panelMusicConfigRaw.track : null;
@@ -10628,6 +10629,73 @@ function resolveMontageSceneOnScreenTextSegments({
     .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
 }
 
+function sanitizeMontageExportReference(value = null) {
+  if (!value || typeof value !== "object") return null;
+  const downloadUrl = clampText(String(value?.downloadUrl || value?.url || "").trim(), 3000);
+  const storagePath = normalizeStorageFilePath(String(value?.storagePath || value?.path || "").trim());
+  const exportId = clampText(String(value?.exportId || value?.jobId || "").trim(), 120);
+  const filename = clampText(String(value?.filename || "").trim(), 180);
+  const mimeType = clampText(String(value?.mimeType || "").trim(), 120) || "video/mp4";
+  const createdAtIso = clampText(String(value?.createdAtIso || value?.createdAt || "").trim(), 64);
+  const expiresAtIso = clampText(String(value?.expiresAtIso || value?.expiresAt || "").trim(), 64);
+  if (!downloadUrl && !storagePath) return null;
+  return {
+    exportId,
+    downloadUrl,
+    storagePath,
+    filename,
+    mimeType,
+    createdAtIso,
+    expiresAtIso,
+    bucketName: clampText(String(value?.bucketName || "").trim(), 120)
+  };
+}
+
+function buildMontageExportFirebaseDownloadUrl(bucket = null, storagePath = "", token = "") {
+  const bucketName = String(bucket?.name || "").trim();
+  const cleanPath = normalizeStorageFilePath(String(storagePath || "").trim());
+  const cleanToken = String(token || "").trim();
+  if (!bucketName || !cleanPath || !cleanToken) return "";
+  return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(cleanPath)}?alt=media&token=${encodeURIComponent(cleanToken)}`;
+}
+
+async function persistMontageExportLatestSessionMetadata({
+  uid = "",
+  sessionId = "",
+  stored = null,
+  bucket = null
+} = {}) {
+  const cleanUid = String(uid || "").trim();
+  const cleanSessionId = String(sessionId || "").trim();
+  const normalized = sanitizeMontageExportReference(stored);
+  if (!cleanUid || !cleanSessionId || !normalized) return false;
+  const sessionRef = db.collection("podcaster_sessions").doc(cleanSessionId);
+  try {
+    await sessionRef.update({
+      sessionUpdatedAt: normalized.createdAtIso || new Date().toISOString(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      "session.podcastVideoConfig.latestMontageExport": {
+        ...normalized,
+        bucketName: String(bucket?.name || "").trim()
+      }
+    });
+    console.info("[backend][montage-export][persist-session-latest-result]", {
+      sessionId: cleanSessionId,
+      uid: cleanUid,
+      storagePath: normalized.storagePath,
+      downloadUrl: redactUrlForLogs(normalized.downloadUrl)
+    });
+    return true;
+  } catch (error) {
+    console.warn("[backend][montage-export][persist-session-latest-result-failed]", {
+      sessionId: cleanSessionId,
+      uid: cleanUid,
+      message: String(error?.message || error).trim()
+    });
+    return false;
+  }
+}
+
 async function storeMontageExportResult(finalOutPath = "", input = {}, context = {}) {
   const exportId = clampExportId(context?.jobId || randomUUID());
   const token = randomUUID();
@@ -10641,7 +10709,7 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     "exports",
     normalizeStorageSegment(String(context?.uid || "").trim(), "anon"),
     normalizeStorageSegment(String(input?.sessionId || "").trim(), "session"),
-    `${exportId}.${outExt}`
+    `latest.${outExt}`
   ].join("/");
   const stat = await fs.promises.stat(finalOutPath).catch(() => null);
   const candidateBuckets = getStorageBucketCandidates();
@@ -10666,7 +10734,15 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
         bucket: candidateBucket,
         destination: storagePath,
         filePath: finalOutPath,
-        contentType: mimeType
+        contentType: mimeType,
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+          exportId,
+          sessionId: String(input?.sessionId || "").trim(),
+          uid: String(context?.uid || "").trim(),
+          createdAtIso,
+          expiresAtIso
+        }
       });
       console.info("[backend][montage-export][store-result-upload-success]", {
         exportId,
@@ -10694,7 +10770,8 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
   }
   if (lastUploadError) throw lastUploadError;
   const base = String(context?.baseUrl || "").trim() || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
-  const downloadUrl = `${base}/api/assets/montage-download?jobId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
+  const downloadUrl = buildMontageExportFirebaseDownloadUrl(targetBucket, storagePath, token)
+    || `${base}/api/assets/montage-download?jobId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
   let cacheArtifact = null;
   try {
     cacheArtifact = await writeMontageExportCacheArtifact({
@@ -10728,6 +10805,12 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     sizeBytes: Math.max(0, Number(stat?.size || 0) || 0),
     cacheFilePath: cacheArtifact?.filePath || ""
   };
+  await persistMontageExportLatestSessionMetadata({
+    uid: context?.uid || "",
+    sessionId: input?.sessionId || "",
+    stored: result,
+    bucket: targetBucket
+  });
   console.info("[backend][montage-export][store-result-finish]", {
     exportId,
     storagePath,
