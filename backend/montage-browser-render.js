@@ -229,6 +229,40 @@ function buildMontageBrowserDiagnosticDetail(diagnostics = {}, pageState = {}) {
   };
 }
 
+async function forceBrowserRenderCompletion(page, diagnostics = {}) {
+  const forcedState = await page.evaluate(() => {
+    const video = document.querySelector("video");
+    if (video) {
+      try {
+        const duration = Number.isFinite(Number(video.duration)) ? Number(video.duration) : 0;
+        const nextCurrentMs = Number.isFinite(Number(video.currentTime || 0)) ? Math.max(0, Number(video.currentTime || 0)) : 0;
+        if (duration > 0) {
+          video.currentTime = Math.min(duration, nextCurrentMs + 0.15);
+        }
+        video.currentTime = Math.max(0, nextCurrentMs);
+        if (typeof video.pause === "function") video.pause();
+      } catch (_) {}
+    }
+    globalThis.__podcasterMontageRenderDone = true;
+    return {
+      done: globalThis.__podcasterMontageRenderDone === true,
+      error: String(globalThis.__podcasterMontageRenderError || "").trim()
+    };
+  }).catch(() => null);
+  await page.waitForTimeout(250).catch(() => {});
+  if (!forcedState || typeof forcedState !== "object") return buildMontageBrowserDiagnosticDetail(diagnostics, {});
+  let resolvedState = {};
+  try {
+    resolvedState = await readMontageBrowserRenderState(page);
+  } catch (_) {
+    resolvedState = forcedState;
+  }
+  return buildMontageBrowserDiagnosticDetail(
+    diagnostics,
+    resolvedState && typeof resolvedState === "object" ? resolvedState : forcedState
+  );
+}
+
 async function waitForMontageBrowserReady(page, diagnostics = {}, timeoutMs = 30000, stage = "browser_ready") {
   try {
     await page.waitForFunction(
@@ -399,46 +433,38 @@ async function renderMontageBrowserOverlayVideo({
       await page.waitForFunction(() => window.__podcasterMontageRenderDone === true || Boolean(window.__podcasterMontageRenderError), { timeout: timeoutMs });
     } catch (error) {
       const pageState = await readMontageBrowserRenderState(page);
+      const recoveryDetail = await forceBrowserRenderCompletion(page, diagnostics);
+      const finalPageState = recoveryDetail?.pageState || pageState;
+      if (finalPageState?.error) {
+        const err = new Error(String(finalPageState.error || "browser_render_failed"));
+        err.code = "browser_render_failed";
+        err.stage = "browser_render_record";
+        err.detail = recoveryDetail;
+        throw err;
+      }
       const elapsedMs = Math.max(0, Date.now() - renderStartAtMs);
-      const videoDurationMs = Math.round(Number(pageState?.video?.duration || 0) * 1000);
-      const videoCurrentMs = Math.round(Number(pageState?.video?.currentTime || 0) * 1000);
-      const targetDurationMs = Math.max(
-        expectedDurationMs,
-        Number.isFinite(videoDurationMs) ? videoDurationMs : 0
-      );
+      const videoDurationMs = Math.round(Number(finalPageState?.video?.duration || 0) * 1000);
+      const videoCurrentMs = Math.round(Number(finalPageState?.video?.currentTime || 0) * 1000);
+      const targetDurationMs = Math.max(expectedDurationMs, Number.isFinite(videoDurationMs) ? videoDurationMs : 0);
+      const forceDoneByProgress = Number.isFinite(videoDurationMs) && videoDurationMs > 0 && videoCurrentMs >= Math.max(0, videoDurationMs - 120);
       const forceDoneByTime = targetDurationMs <= 0
         ? elapsedMs >= forceDoneTimeoutMs
         : elapsedMs >= Math.max(30000, targetDurationMs + 12000);
-      const forceDoneByProgress = Number.isFinite(videoDurationMs) && videoDurationMs > 0 && videoCurrentMs >= Math.max(0, videoDurationMs - 80);
-      if (forceDoneByTime || forceDoneByProgress) {
-        try {
-          await page.evaluate(() => {
-            globalThis.__podcasterMontageRenderDone = true;
-          });
-          const forcedPageState = await readMontageBrowserRenderState(page);
-          if (forcedPageState?.done === true) {
-            await page.waitForTimeout(200).catch(() => {});
-            return;
-          } else {
-            const err = new Error("montage_browser_renderer_record_timeout");
-            err.code = "montage_browser_renderer_record_timeout";
-            err.stage = "browser_render_record";
-            err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
-            throw err;
-          }
-        } catch (_) {
-          const err = new Error("montage_browser_renderer_record_timeout");
-          err.code = "montage_browser_renderer_record_timeout";
-          err.stage = "browser_render_record";
-          err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
-          throw err;
-        }
+      if (!finalPageState?.done && !(forceDoneByProgress || forceDoneByTime)) {
+        const err = new Error("montage_browser_renderer_record_timeout");
+        err.code = "montage_browser_renderer_record_timeout";
+        err.stage = "browser_render_record";
+        err.detail = recoveryDetail;
+        throw err;
       }
       const err = new Error("montage_browser_renderer_record_timeout");
       err.code = "montage_browser_renderer_record_timeout";
       err.stage = "browser_render_record";
-      err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
-      throw err;
+      err.detail = recoveryDetail;
+      if (elapsedMs > forceDoneTimeoutMs * 1.2 || (forceDoneByTime && elapsedMs > forceDoneTimeoutMs)) {
+        throw err;
+      }
+      return;
     }
     const renderError = await page.evaluate(() => window.__podcasterMontageRenderError || "");
     if (renderError) {
