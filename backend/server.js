@@ -11923,6 +11923,14 @@ async function renderMontageBrowserFinalVisualPass({
     width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
     height: Math.max(2, Math.round(Number(sourceDims.height || 720) || 720))
   };
+  const totalDurationMs = Math.max(
+    1000,
+    Math.round((Array.isArray(input?.entries) ? input.entries : []).reduce((max, entry) => {
+      const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+      const durationMs = Math.max(0, Math.round(Number(entry?.durationMs || 0) || 0));
+      return Math.max(max, startMs + durationMs);
+    }, 0)) || 1000
+  );
   const brandOverlay = resolveMontageBrowserBrandOverlay(input?.brandOverlay);
   const browserPayload = {
     ...input,
@@ -11941,14 +11949,6 @@ async function renderMontageBrowserFinalVisualPass({
   };
   const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
   const renderOutputDir = path.join(tmpDir, "montage-browser-recording");
-  const totalDurationMs = Math.max(
-    1000,
-    Math.round((Array.isArray(input?.entries) ? input.entries : []).reduce((max, entry) => {
-      const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-      const durationMs = Math.max(0, Math.round(Number(entry?.durationMs || 0) || 0));
-      return Math.max(max, startMs + durationMs);
-    }, 0)) || 1000
-  );
   emitStage("boot_renderer", 0.8, "Iniciando renderer fiel al preview.");
   throwIfCancelled("boot_renderer");
   const renderedVideoPath = await renderMontageBrowserOverlayVideo({
