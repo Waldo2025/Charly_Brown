@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.263",
-  "build": "2026-1.0.10.263",
+  "version": "1.0.10.264",
+  "build": "2026-1.0.10.264",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: La hidratación de medios del export de Podcaster ahora cae al downloadUrl directo cuando el proxy local /api/assets/proxy-media no existe o devuelve 404/403, evitando que el export falle en local mientras sigue funcionando en producción.",
     "Corregido: El texto en pantalla del export de Podcaster ahora toma el tiempo visible del segmento Gemini por escena (ajustado por playback rate) en vez de la duración del clip de escena, alineando la aparición con el audio gemini y evitando desfases en el karaoke exportado.",
     "Actualizado: El export final de Podcaster ahora se guarda en Firebase Storage con un path estable por sesión y reemplaza el archivo anterior; además, el último export queda rehidratado en la sesión para poder descargarlo después de reiniciar el sitio, sin auto-descarga al finalizar. Se incrementan los cache-busters de podcaster.html, podcaster.js, podcaster-timeline-model.js y podcaster-montage-export.js.",
     "Actualizado: Se incrementan version.json y los cache-busters de podcaster.html y podcaster.css para forzar en producción la carga del icono claro de reabrir la exportación en la card flotante.",
@@ -226,5 +227,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.263"
+  "cache_version": "2026-1.0.10.264"
 }

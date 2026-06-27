@@ -2513,13 +2513,35 @@ async function readMontageCachedMediaDataUrl(cacheKey = "") {
 async function fetchMontageMediaBlob(sourceUrl = "") {
   const cleanUrl = String(sourceUrl || "").trim();
   if (!cleanUrl) return null;
-  const response = await fetch(cleanUrl, { credentials: "same-origin" });
-  if (!response.ok) {
-    const error = new Error(`No se pudo descargar el asset (${response.status}).`);
-    error.status = response.status;
-    throw error;
+  const tryFetch = async (url) => {
+    if (!url) return null;
+    const response = await fetch(url, { credentials: "same-origin" });
+    if (!response.ok) {
+      const error = new Error(`No se pudo descargar el asset (${response.status}).`);
+      error.status = response.status;
+      error.url = url;
+      throw error;
+    }
+    return response.blob();
+  };
+  try {
+    return await tryFetch(cleanUrl);
+  } catch (error) {
+    const status = Number(error?.status || 0) || 0;
+    const looksLikeProxy = /\/api\/assets\/proxy-(?:media|image)\?/i.test(cleanUrl);
+    if (!looksLikeProxy || !(status === 404 || status === 403 || status === 0)) {
+      throw error;
+    }
+    try {
+      const parsed = new URL(cleanUrl, window.location.origin);
+      const originalUrl = parsed.searchParams.get("url") ? decodeURIComponent(parsed.searchParams.get("url")) : "";
+      const cleanedOriginalUrl = String(originalUrl || "").trim();
+      if (!cleanedOriginalUrl) throw error;
+      return await tryFetch(cleanedOriginalUrl);
+    } catch (fallbackError) {
+      throw fallbackError;
+    }
   }
-  return response.blob();
 }
 
 async function resolveMontageSceneMediaSourceUrl(asset = {}, kind = "video") {
