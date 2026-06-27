@@ -532,7 +532,6 @@ async function renderMontageBrowserOverlayVideo({
         err.detail = recoveryDetail;
         throw err;
       }
-      return;
     }
     const renderError = await page.evaluate(() => window.__podcasterMontageRenderError || "");
     if (renderError) {

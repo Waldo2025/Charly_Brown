@@ -12013,6 +12013,13 @@ async function renderMontageBrowserFinalVisualPass({
     shouldAbort,
     registerAbortHandler
   });
+  if (!renderedVideoPath) {
+    const err = new Error("browser_render_output_missing");
+    err.code = "browser_render_output_missing";
+    err.status = 422;
+    err.detail = { stage: "browser_visual_pass", cause: "missing_render_output" };
+    throw err;
+  }
   emitStage("capture_timeline", 0.88, "Capturando montaje final en navegador.");
   throwIfCancelled("capture_timeline");
   const browserFinalOutPath = path.join(tmpDir, `montage-browser-final.${outExt}`);
