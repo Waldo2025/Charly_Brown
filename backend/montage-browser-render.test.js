@@ -1,12 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
 const path = require("node:path");
 
 const {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
-  buildMontageBrowserRenderBootstrap
+  buildMontageBrowserRenderBootstrap,
+  preflightMontageBrowserRenderer
 } = require("./montage-browser-render.js");
 
 test("normalizeMontageRenderMode defaults invalid values to browser", () => {
@@ -70,4 +72,26 @@ test("buildMontageBrowserRenderBootstrap embeds local render runtime config", ()
   assert.match(html, /podcaster\.css/);
   assert.match(html, /podcaster-render\.js/);
   assert.match(html, /podcaster-text-render\.js/);
+});
+
+test("preflightMontageBrowserRenderer validates the browser runtime before scene rendering", async () => {
+  assert.equal(typeof preflightMontageBrowserRenderer, "function");
+  const availability = getMontageBrowserRendererAvailability();
+  if (availability.available !== true) return;
+
+  await preflightMontageBrowserRenderer({
+    publicRoot: path.resolve(__dirname, "..", "public"),
+    payload: {
+      sessionId: "session-1",
+      renderMode: "browser",
+      exportMode: "normal",
+      preflightOnly: true,
+      overlayCards: [],
+      onScreenTextTimeline: null,
+      brandOverlay: null
+    },
+    bootstrapHtmlPath: path.join(os.tmpdir(), `podcaster-browser-preflight-${Date.now()}.html`),
+    viewport: { width: 640, height: 360 },
+    timeoutMs: 15000
+  });
 });

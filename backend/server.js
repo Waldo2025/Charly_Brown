@@ -90,6 +90,7 @@ const {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
+  preflightMontageBrowserRenderer,
   renderMontageBrowserOverlayVideo
 } = require("./montage-browser-render.js");
 const {
@@ -11862,6 +11863,42 @@ async function renderMontageOverlayCards({
   return outPath;
 }
 
+function resolveMontageBrowserBrandOverlay(brandOverlay = null) {
+  let nextBrandOverlay = brandOverlay && typeof brandOverlay === "object" ? brandOverlay : null;
+  if (nextBrandOverlay?.assetPath && nextBrandOverlay.enabled === true) {
+    const resolvedBrandPath = resolveBrandOverlayAssetPath(nextBrandOverlay.assetPath);
+    if (!resolvedBrandPath || !fs.existsSync(resolvedBrandPath)) {
+      const err = new Error("brand_overlay_asset_missing");
+      err.code = "brand_overlay_asset_missing";
+      err.status = 422;
+      err.detail = {
+        assetPath: String(nextBrandOverlay.assetPath || "").trim(),
+        resolvedAssetPath: resolvedBrandPath || ""
+      };
+      throw err;
+    }
+    try {
+      const ext = path.extname(resolvedBrandPath).toLowerCase().replace(".", "");
+      const mime = ext === "png" ? "image/png" : (ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
+      const base64 = fs.readFileSync(resolvedBrandPath).toString("base64");
+      nextBrandOverlay = {
+        ...nextBrandOverlay,
+        assetUrl: `data:${mime};base64,${base64}`
+      };
+    } catch (error) {
+      const err = new Error("brand_overlay_asset_read_failed");
+      err.code = "brand_overlay_asset_read_failed";
+      err.status = 422;
+      err.detail = {
+        assetPath: resolvedBrandPath,
+        message: String(error?.message || error || "").trim()
+      };
+      throw err;
+    }
+  }
+  return nextBrandOverlay;
+}
+
 async function renderMontageBrowserFinalVisualPass({
   input = {},
   finalOutPath = "",
@@ -11885,23 +11922,7 @@ async function renderMontageBrowserFinalVisualPass({
     width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
     height: Math.max(2, Math.round(Number(sourceDims.height || 720) || 720))
   };
-  let brandOverlay = input?.brandOverlay;
-  if (brandOverlay?.assetPath && brandOverlay.enabled === true) {
-    const resolvedBrandPath = resolveBrandOverlayAssetPath(brandOverlay.assetPath);
-    if (resolvedBrandPath && fs.existsSync(resolvedBrandPath)) {
-      try {
-        const ext = path.extname(resolvedBrandPath).toLowerCase().replace(".", "");
-        const mime = ext === "png" ? "image/png" : (ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
-        const base64 = fs.readFileSync(resolvedBrandPath).toString("base64");
-        brandOverlay = {
-          ...brandOverlay,
-          assetUrl: `data:${mime};base64,${base64}`
-        };
-      } catch (err) {
-        console.warn("[backend][montage-export][brand-overlay-base64-failed]", err.message);
-      }
-    }
-  }
+  const brandOverlay = resolveMontageBrowserBrandOverlay(input?.brandOverlay);
   const browserPayload = {
     ...input,
     onScreenTextTimeline: {
@@ -12306,6 +12327,31 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         lastHeartbeatAt: new Date().toISOString()
       });
     };
+    if (canForceBrowserVisualPass) {
+      emitStage("boot_renderer", 0.12, "Verificando renderer fiel al preview.");
+      const preflightBrandOverlay = resolveMontageBrowserBrandOverlay(input.brandOverlay);
+      await preflightMontageBrowserRenderer({
+        publicRoot: path.resolve(process.cwd(), "public"),
+        payload: {
+          ...input,
+          onScreenTextTimeline: {
+            settings: input.onScreenTextSettings,
+            segments: input.onScreenTextSegments
+          },
+          stylizedTextTimeline: {
+            ...(input.stylizedTextTimeline && typeof input.stylizedTextTimeline === "object" ? input.stylizedTextTimeline : {}),
+            enabled: Array.isArray(input.stylizedTextSegments) && input.stylizedTextSegments.length > 0,
+            segments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments : []
+          },
+          renderMode: "browser",
+          preflightOnly: true,
+          brandOverlay: preflightBrandOverlay
+        },
+        bootstrapHtmlPath: path.join(tmpDir, "montage-browser-preflight.html"),
+        viewport: { width: 1280, height: 720 },
+        timeoutMs: 20000
+      });
+    }
     emitStage("download_assets", 0.14, "Descargando videos y audio fuente.");
     logMontageMemory("download_assets_start", {
       jobId,

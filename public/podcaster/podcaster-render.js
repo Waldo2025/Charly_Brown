@@ -177,8 +177,7 @@ function updateCards(layer, cards = [], currentMs = 0) {
 }
 
 function placeBrandOverlay(img, overlay = {}, width = 1280) {
-  const overlaySrc = overlay?.assetUrl || overlay?.assetPath || "";
-  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlaySrc) {
+  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true) {
     img.hidden = true;
     return;
   }
@@ -188,7 +187,6 @@ function placeBrandOverlay(img, overlay = {}, width = 1280) {
   const marginPx = Math.round(width * marginPct);
   const overlayWidthPx = Math.max(48, Math.round(width * widthPct));
   img.hidden = false;
-  img.src = overlaySrc;
   img.style.width = `${overlayWidthPx}px`;
   img.style.height = "auto";
   img.style.left = side.includes("left") ? `${marginPx}px` : "auto";
@@ -200,23 +198,39 @@ function placeBrandOverlay(img, overlay = {}, width = 1280) {
 }
 
 function prepareBrandOverlay(img, overlay = {}, width = 1280) {
-  placeBrandOverlay(img, overlay, width);
   const overlaySrc = overlay?.assetUrl || overlay?.assetPath || "";
   if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlaySrc) {
+    img.hidden = true;
     return Promise.resolve();
   }
-  if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+  placeBrandOverlay(img, overlay, width);
   return new Promise((resolve, reject) => {
-    const handleLoad = () => {
+    let timeoutHandle = 0;
+    const cleanup = () => {
+      if (timeoutHandle) window.clearTimeout(timeoutHandle);
+      timeoutHandle = 0;
+      img.removeEventListener("load", handleLoad);
       img.removeEventListener("error", handleError);
+    };
+    const handleLoad = () => {
+      cleanup();
       resolve();
     };
     const handleError = () => {
-      img.removeEventListener("load", handleLoad);
-      reject(new Error("brand_overlay_load_failed"));
+      cleanup();
+      reject(new Error(`brand_overlay_load_failed:${overlaySrc}`));
     };
     img.addEventListener("load", handleLoad, { once: true });
     img.addEventListener("error", handleError, { once: true });
+    timeoutHandle = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`brand_overlay_load_timeout:${overlaySrc}`));
+    }, 8000);
+    img.src = overlaySrc;
+    if (img.complete) {
+      if (img.naturalWidth > 0) handleLoad();
+      else handleError();
+    }
   });
 }
 
@@ -404,6 +418,10 @@ async function boot() {
       await document.fonts.ready;
     } catch (_) {}
     globalThis.__podcasterMontageRenderReady = true;
+    if (payload.preflightOnly === true || config.preflightOnly === true) {
+      globalThis.__podcasterMontageRenderDone = true;
+      return;
+    }
 
     const tick = () => {
       if (renderState.completed) return;

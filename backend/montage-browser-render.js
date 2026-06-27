@@ -155,6 +155,146 @@ function buildMontageBrowserRenderBootstrap({
 </html>`;
 }
 
+function pushBounded(list = [], value = "", maxItems = 20) {
+  const clean = String(value || "").trim();
+  if (!clean) return;
+  list.push(clean);
+  if (list.length > maxItems) list.splice(0, list.length - maxItems);
+}
+
+function attachMontageBrowserDiagnostics(page, diagnostics = {}) {
+  const state = diagnostics && typeof diagnostics === "object" ? diagnostics : {};
+  state.consoleErrors = Array.isArray(state.consoleErrors) ? state.consoleErrors : [];
+  state.failedRequests = Array.isArray(state.failedRequests) ? state.failedRequests : [];
+  state.pageErrors = Array.isArray(state.pageErrors) ? state.pageErrors : [];
+  page.on("console", (msg) => {
+    const location = msg.location?.() || {};
+    const locationUrl = String(location?.url || "").trim();
+    const lineNumber = Number(location?.lineNumber || 0) || 0;
+    const detail = `${msg.text()}${locationUrl ? ` @ ${locationUrl}${lineNumber ? `:${lineNumber}` : ""}` : ""}`;
+    console.info(`[backend][montage-browser-render][console] [${msg.type()}]`, detail);
+    if (msg.type() === "error") pushBounded(state.consoleErrors, detail);
+  });
+  page.on("pageerror", (err) => {
+    const detail = `${String(err?.message || err || "pageerror").trim()}${err?.stack ? `\n${err.stack}` : ""}`;
+    console.error("[backend][montage-browser-render][pageerror]", detail);
+    pushBounded(state.pageErrors, detail);
+  });
+  page.on("requestfailed", (request) => {
+    const failure = request.failure?.();
+    const detail = `${request.method()} ${request.url()} :: ${String(failure?.errorText || "request_failed").trim()}`;
+    console.warn("[backend][montage-browser-render][requestfailed]", detail);
+    pushBounded(state.failedRequests, detail);
+  });
+  page.on("response", (response) => {
+    const status = Number(response.status?.() || 0) || 0;
+    if (status < 400) return;
+    const detail = `${status} ${response.url()}`;
+    console.warn("[backend][montage-browser-render][response-error]", detail);
+    pushBounded(state.failedRequests, detail);
+  });
+  return state;
+}
+
+async function readMontageBrowserRenderState(page) {
+  if (!page || page.isClosed()) return {};
+  return await page.evaluate(() => ({
+    ready: globalThis.__podcasterMontageRenderReady === true,
+    done: globalThis.__podcasterMontageRenderDone === true,
+    error: String(globalThis.__podcasterMontageRenderError || "").trim(),
+    href: String(location?.href || "").trim()
+  })).catch(() => ({}));
+}
+
+function buildMontageBrowserDiagnosticDetail(diagnostics = {}, pageState = {}) {
+  return {
+    pageState,
+    failedRequests: Array.isArray(diagnostics.failedRequests) ? diagnostics.failedRequests.slice(-12) : [],
+    consoleErrors: Array.isArray(diagnostics.consoleErrors) ? diagnostics.consoleErrors.slice(-12) : [],
+    pageErrors: Array.isArray(diagnostics.pageErrors) ? diagnostics.pageErrors.slice(-6) : []
+  };
+}
+
+async function waitForMontageBrowserReady(page, diagnostics = {}, timeoutMs = 30000, stage = "browser_ready") {
+  try {
+    await page.waitForFunction(
+      () => globalThis.__podcasterMontageRenderReady === true || Boolean(globalThis.__podcasterMontageRenderError),
+      { timeout: Math.max(1000, Math.min(Number(timeoutMs || 30000) || 30000, 30000)) }
+    );
+  } catch (error) {
+    const pageState = await readMontageBrowserRenderState(page);
+    const err = new Error("montage_browser_renderer_boot_timeout");
+    err.code = "montage_browser_renderer_boot_timeout";
+    err.stage = stage;
+    err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
+    throw err;
+  }
+  const renderError = await page.evaluate(() => globalThis.__podcasterMontageRenderError || "").catch(() => "");
+  if (renderError) {
+    const pageState = await readMontageBrowserRenderState(page);
+    const err = new Error(String(renderError || "browser_render_failed"));
+    err.code = "browser_render_failed";
+    err.stage = stage;
+    err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
+    throw err;
+  }
+}
+
+async function preflightMontageBrowserRenderer({
+  publicRoot = "",
+  payload = {},
+  bootstrapHtmlPath = "",
+  viewport = { width: 1280, height: 720 },
+  timeoutMs = 20000
+} = {}) {
+  const availability = getMontageBrowserRendererAvailability();
+  if (availability.available !== true || !availability.playwright?.chromium) {
+    const err = new Error(availability.message || "playwright_unavailable");
+    err.code = availability.code || "playwright_unavailable";
+    throw err;
+  }
+  const { chromium } = availability.playwright;
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      "--allow-file-access-from-files",
+      "--autoplay-policy=no-user-gesture-required"
+    ]
+  });
+  let context = null;
+  let page = null;
+  try {
+    context = await browser.newContext({
+      viewport: {
+        width: Math.max(2, Math.round(Number(viewport?.width || 1280) || 1280)),
+        height: Math.max(2, Math.round(Number(viewport?.height || 720) || 720))
+      }
+    });
+    page = await context.newPage();
+    const diagnostics = attachMontageBrowserDiagnostics(page, {});
+    const html = buildMontageBrowserRenderBootstrap({
+      publicRoot,
+      payload,
+      baseVideoPath: "",
+      viewport
+    });
+    await fs.promises.writeFile(bootstrapHtmlPath, html, "utf8");
+    await page.goto(pathToFileUrl(bootstrapHtmlPath), { waitUntil: "load", timeout: timeoutMs });
+    await waitForMontageBrowserReady(page, diagnostics, timeoutMs, "browser_preflight");
+    return true;
+  } finally {
+    try {
+      if (page && !page.isClosed()) await page.close();
+    } catch (_) {}
+    try {
+      if (context) await context.close();
+    } catch (_) {}
+    try {
+      await browser.close();
+    } catch (_) {}
+  }
+}
+
 async function renderMontageBrowserOverlayVideo({
   publicRoot = "",
   payload = {},
@@ -201,12 +341,7 @@ async function renderMontageBrowserOverlayVideo({
       }
     });
     page = await context.newPage();
-    page.on("console", (msg) => {
-      console.info(`[backend][montage-browser-render][console] [${msg.type()}]`, msg.text());
-    });
-    page.on("pageerror", (err) => {
-      console.error("[backend][montage-browser-render][pageerror]", err.message, err.stack);
-    });
+    const diagnostics = attachMontageBrowserDiagnostics(page, {});
     const html = buildMontageBrowserRenderBootstrap({ publicRoot, payload, baseVideoPath, viewport });
     await fs.promises.writeFile(bootstrapHtmlPath, html, "utf8");
     const abortBrowserRender = async () => {
@@ -239,12 +374,22 @@ async function renderMontageBrowserOverlayVideo({
       });
     }
     await page.goto(pathToFileUrl(bootstrapHtmlPath), { waitUntil: "load", timeout: timeoutMs });
-    await page.waitForFunction(() => window.__podcasterMontageRenderReady === true, { timeout: Math.min(timeoutMs, 30000) });
-    await page.waitForFunction(() => window.__podcasterMontageRenderDone === true || Boolean(window.__podcasterMontageRenderError), { timeout: timeoutMs });
+    await waitForMontageBrowserReady(page, diagnostics, timeoutMs, "browser_render_ready");
+    try {
+      await page.waitForFunction(() => window.__podcasterMontageRenderDone === true || Boolean(window.__podcasterMontageRenderError), { timeout: timeoutMs });
+    } catch (error) {
+      const pageState = await readMontageBrowserRenderState(page);
+      const err = new Error("montage_browser_renderer_record_timeout");
+      err.code = "montage_browser_renderer_record_timeout";
+      err.stage = "browser_render_record";
+      err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
+      throw err;
+    }
     const renderError = await page.evaluate(() => window.__podcasterMontageRenderError || "");
     if (renderError) {
       const err = new Error(String(renderError || "browser_render_failed"));
       err.code = "browser_render_failed";
+      err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, await readMontageBrowserRenderState(page));
       throw err;
     }
     const videoHandle = await page.video();
@@ -276,5 +421,6 @@ module.exports = {
   getMontageBrowserRendererAvailability,
   isMontageBrowserRendererAvailable,
   buildMontageBrowserRenderBootstrap,
+  preflightMontageBrowserRenderer,
   renderMontageBrowserOverlayVideo
 };
