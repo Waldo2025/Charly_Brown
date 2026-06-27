@@ -18,4 +18,19 @@ if (declarationIndex > usageIndex) {
   throw new Error("totalDurationMs debe declararse antes de usarse en browserPayload.expectedDurationMs.");
 }
 
-console.log("Podcaster browser render duration order OK.");
+const browserInputHelperIndex = source.indexOf("async function prepareMontageBrowserVisualInput");
+if (browserInputHelperIndex < 0) {
+  throw new Error("El pass browser debe preparar una entrada compatible para Chromium.");
+}
+
+if (!source.includes('"montage-browser-input.webm"') || !source.includes('"-c:v", "libvpx"')) {
+  throw new Error("La entrada del browser pass debe transcodificarse a WebM/VP8 compatible con Chromium.");
+}
+
+const browserInputUsageIndex = functionBody.indexOf("const browserInputPath = await prepareMontageBrowserVisualInput");
+const baseVideoUsageIndex = functionBody.indexOf("baseVideoPath: browserInputPath");
+if (browserInputUsageIndex < 0 || baseVideoUsageIndex < 0 || browserInputUsageIndex > baseVideoUsageIndex) {
+  throw new Error("renderMontageBrowserOverlayVideo debe recibir browserInputPath, no el MP4 intermedio directo.");
+}
+
+console.log("Podcaster browser render duration and input compatibility OK.");

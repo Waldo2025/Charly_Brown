@@ -11900,6 +11900,44 @@ function resolveMontageBrowserBrandOverlay(brandOverlay = null) {
   return nextBrandOverlay;
 }
 
+async function prepareMontageBrowserVisualInput({
+  sourcePath = "",
+  tmpDir = "",
+  viewport = {},
+  totalDurationMs = 1000,
+  shouldAbort = () => false,
+  registerAbortHandler = null
+} = {}) {
+  const inputPath = String(sourcePath || "").trim();
+  if (!inputPath) {
+    const err = new Error("browser_visual_input_missing");
+    err.code = "browser_visual_input_missing";
+    throw err;
+  }
+  const width = Math.max(2, Math.round(Number(viewport?.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(viewport?.height || 720) || 720));
+  const outputPath = path.join(tmpDir, "montage-browser-input.webm");
+  await runFfmpegCommand([
+    "-y", "-hide_banner", "-loglevel", "warning",
+    "-i", inputPath,
+    "-map", "0:v:0",
+    "-an",
+    "-vf", `scale=${width}:${height}:flags=bicubic,setsar=1,setpts=PTS-STARTPTS`,
+    "-c:v", "libvpx",
+    "-deadline", "realtime",
+    "-cpu-used", "5",
+    "-b:v", "4M",
+    "-pix_fmt", "yuv420p",
+    outputPath
+  ], {
+    stage: "montage_browser_visual_input_transcode",
+    timeoutMs: Math.max(180000, (Math.max(1000, Number(totalDurationMs || 1000) || 1000) * 4) + 60000),
+    shouldAbort,
+    registerAbortHandler
+  });
+  return outputPath;
+}
+
 async function renderMontageBrowserFinalVisualPass({
   input = {},
   finalOutPath = "",
@@ -11951,10 +11989,19 @@ async function renderMontageBrowserFinalVisualPass({
   const renderOutputDir = path.join(tmpDir, "montage-browser-recording");
   emitStage("boot_renderer", 0.8, "Iniciando renderer fiel al preview.");
   throwIfCancelled("boot_renderer");
+  const browserInputPath = await prepareMontageBrowserVisualInput({
+    sourcePath: finalOutPath,
+    tmpDir,
+    viewport,
+    totalDurationMs,
+    shouldAbort,
+    registerAbortHandler
+  });
+  throwIfCancelled("boot_renderer");
   const renderedVideoPath = await renderMontageBrowserOverlayVideo({
     publicRoot: PUBLIC_ROOT,
     payload: browserPayload,
-    baseVideoPath: finalOutPath,
+    baseVideoPath: browserInputPath,
     bootstrapHtmlPath,
     outputDir: renderOutputDir,
     viewport,
