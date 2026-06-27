@@ -202,6 +202,20 @@ async function readMontageBrowserRenderState(page) {
     ready: globalThis.__podcasterMontageRenderReady === true,
     done: globalThis.__podcasterMontageRenderDone === true,
     error: String(globalThis.__podcasterMontageRenderError || "").trim(),
+    video: (() => {
+      const video = document.querySelector("video");
+      if (!video) return null;
+      return {
+        currentTime: Number.isFinite(Number(video.currentTime)) ? Number(video.currentTime) : 0,
+        duration: Number.isFinite(Number(video.duration)) ? Number(video.duration) : 0,
+        ended: video.ended === true,
+        paused: video.paused === true,
+        readyState: Number(video.readyState || 0) || 0,
+        networkState: Number(video.networkState || 0) || 0,
+        playbackRate: Number.isFinite(Number(video.playbackRate)) ? Number(video.playbackRate) : 1,
+        src: String(video.currentSrc || video.src || "").slice(0, 500)
+      };
+    })(),
     href: String(location?.href || "").trim()
   })).catch(() => ({}));
 }

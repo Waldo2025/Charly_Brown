@@ -119,6 +119,7 @@ function createProcessMontageExportJob({
         jobId,
         code: String(error?.code || "").trim() || null,
         message: String(error?.message || error),
+        detail: error?.detail && typeof error.detail === "object" ? error.detail : null,
         stack: String(error?.stack || "").trim() || null
       });
       const sceneFailure = buildMontageSceneFailure(error, {

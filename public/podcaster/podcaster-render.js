@@ -422,13 +422,33 @@ async function boot() {
       globalThis.__podcasterMontageRenderDone = true;
       return;
     }
+    const expectedDurationMs = Math.max(
+      0,
+      Math.round(Number(config.expectedDurationMs || payload.expectedDurationMs || 0) || 0)
+    );
+    const resolveVideoDurationMs = () => {
+      const durationSec = Number(video.duration || 0) || 0;
+      return Number.isFinite(durationSec) && durationSec > 0
+        ? Math.round(durationSec * 1000)
+        : 0;
+    };
+    const resolveCurrentMs = () => Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
+    const shouldFinishAtCurrentTime = () => {
+      const targetDurationMs = Math.max(expectedDurationMs, resolveVideoDurationMs());
+      if (targetDurationMs <= 0) return video.ended === true;
+      return video.ended === true || resolveCurrentMs() >= Math.max(0, targetDurationMs - 80);
+    };
 
     const tick = () => {
       if (renderState.completed) return;
-      const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
+      const currentMs = resolveCurrentMs();
       updateCards(cardsLayer, payload.overlayCards?.segments || payload.overlayCards || [], currentMs);
       renderOnScreenText(textLayer, payload, currentMs, width, height);
       renderStylizedText(stylizedTextLayer, payload, currentMs);
+      if (shouldFinishAtCurrentTime()) {
+        finish();
+        return;
+      }
       if (!video.paused && !video.ended) requestAnimationFrame(tick);
     };
 
@@ -446,15 +466,26 @@ async function boot() {
       requestAnimationFrame(tick);
     });
     video.addEventListener("timeupdate", () => {
-      const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
+      const currentMs = resolveCurrentMs();
       renderOnScreenText(textLayer, payload, currentMs, width, height);
       renderStylizedText(stylizedTextLayer, payload, currentMs);
+      if (shouldFinishAtCurrentTime()) finish();
     });
     video.addEventListener("ended", finish);
     video.addEventListener("error", () => {
       globalThis.__podcasterMontageRenderError = "video_playback_error";
       finish();
     });
+    const finishWatchdog = window.setInterval(() => {
+      if (renderState.completed) {
+        window.clearInterval(finishWatchdog);
+        return;
+      }
+      if (shouldFinishAtCurrentTime()) {
+        finish();
+        window.clearInterval(finishWatchdog);
+      }
+    }, 250);
 
     try {
       await video.play();

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.268",
-  "build": "2026-1.0.10.268",
+  "version": "1.0.10.269",
+  "build": "2026-1.0.10.269",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El pass final browser del export MP4 de Podcaster amplía el margen de grabación en Render, cierra el render al alcanzar la duración esperada/real del video aunque Chromium no dispare ended y registra estado detallado del video cuando hay timeout.",
     "Corregido: El preflight y el render final browser del export MP4 de Podcaster ahora resuelven los assets públicos desde la raíz del repositorio y no desde process.cwd(), evitando que Render busque archivos en backend/public y falle con ERR_FILE_NOT_FOUND.",
     "Corregido: El export MP4 de Podcaster valida el renderer browser antes de renderizar escenas, reporta diagnósticos concretos de Chromium/recursos fallidos y evita el timeout page.waitForFunction causado por overlays de marca que no terminaban de cargar. Si falta el asset de marca, el export falla temprano con error claro.",
     "Corregido: El export MP4 de Podcaster elimina el modo ffmpeg-legacy/fallback de render, exige renderer browser para export normal de video y falla con error claro si Chromium no está disponible. También deja de omitir escenas fallidas: una escena sin fuente o con error detiene el export con escena/substage. Se incrementa podcaster-montage-export.js a la v2026-06-26.14.",
@@ -64,6 +65,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El export MP4 de Podcaster reduce los timeouts del pass visual final en Render cuando Chromium tarda en completar o no emite ended al final del video.",
     "Corregido: El export MP4 de Podcaster ya no falla en Render por buscar podcaster.css y los módulos del renderer dentro de backend/public.",
     "Corregido: El export de Podcaster ya no espera 30 segundos hasta fallar cuando el renderer del preview no puede arrancar; ahora hace preflight del navegador, valida el logo de marca y devuelve errores accionables antes de renderizar todas las escenas.",
     "Corregido: El audio de fondo con origen local vuelve a escucharse en el timeline y se exporta sin tratar `podcaster-local-media:` como URL remota; se rehidratan `localMediaCacheKey` y `localDataUrl` también en home.",

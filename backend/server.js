@@ -11936,6 +11936,7 @@ async function renderMontageBrowserFinalVisualPass({
       segments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments : []
     },
     renderMode: "browser",
+    expectedDurationMs: totalDurationMs,
     brandOverlay
   };
   const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
@@ -11957,7 +11958,7 @@ async function renderMontageBrowserFinalVisualPass({
     bootstrapHtmlPath,
     outputDir: renderOutputDir,
     viewport,
-    timeoutMs: Math.max(120000, totalDurationMs + 45000),
+    timeoutMs: Math.max(300000, (totalDurationMs * 5) + 60000),
     shouldAbort,
     registerAbortHandler
   });
