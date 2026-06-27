@@ -4345,11 +4345,17 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const rows = getSessionRows(activeSession);
   const cfg = getPodcastVideoConfig(activeSession);
   const settings = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
+  const geminiTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
   const sourceDims = getOnScreenTextSourceDimensions();
   const resolution = getOnScreenTextRenderResolution();
   const includeHidden = options?.includeHidden === true;
   const clipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
   const clips = Object.values(clipMap || {});
+  const geminiByRowId = new Map(
+    (Array.isArray(geminiTrack.segments) ? geminiTrack.segments : [])
+      .map((segment) => [String(segment?.rowId || "").trim(), segment])
+      .filter(([rowId]) => rowId)
+  );
   const trackVisible = settings.enabled !== false && settings.showTrack !== false;
   const allHidden = clips.length > 0 && clips.every((clip) => {
     if (clip?.hidden === true) return true;
@@ -4374,11 +4380,23 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
     if (!text) return null;
     const runtime = runtimeByRowId.get(rowId) || null;
     const clipVisibleTiming = resolveSharedOnScreenTextClipVisibleTiming(clip, runtime?.startMs ?? 0);
-    const startMs = Math.max(0, Math.round(Number(clipVisibleTiming?.startMs ?? runtime?.startMs ?? 0) || 0));
-    const durationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round(Number(clipVisibleTiming?.durationMs ?? getOnScreenTextClipEffectiveDurationMs(clip)) || getOnScreenTextClipEffectiveDurationMs(clip))
-    );
+    const geminiSegment = geminiByRowId.get(rowId) || null;
+    const playbackRate = Math.max(0.5, Math.min(10, Number(window.resolveDialogueAudioPlaybackRate?.(activeSession, rowId) || 1) || 1));
+    const geminiStartMs = Number.isFinite(Number(geminiSegment?.startMs))
+      ? Math.max(0, Math.round(Number(geminiSegment.startMs) || 0))
+      : NaN;
+    const geminiDurationMs = Number.isFinite(Number(geminiSegment?.durationMs))
+      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(geminiSegment.durationMs) || STUDIO_TIMELINE_MIN_CLIP_MS))
+      : NaN;
+    const startMs = Number.isFinite(geminiStartMs)
+      ? geminiStartMs
+      : Math.max(0, Math.round(Number(clipVisibleTiming?.startMs ?? runtime?.startMs ?? 0) || 0));
+    const durationMs = Number.isFinite(geminiDurationMs)
+      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(geminiDurationMs / playbackRate))
+      : Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Math.round(Number(clipVisibleTiming?.durationMs ?? getOnScreenTextClipEffectiveDurationMs(clip)) || getOnScreenTextClipEffectiveDurationMs(clip))
+      );
     const layout = layoutMap[rowId] || buildDefaultOnScreenTextLayoutForRow({ ...row, index: index + 1 }, settings);
     const expandedLayout = expandOnScreenTextLayoutToFitText(
       layout,
