@@ -417,9 +417,14 @@ function renderMontageExportRecentLogs() {
     container.appendChild(empty);
     return;
   }
-  for (const log of logs) {
+  logs.forEach((log, index) => {
     const row = document.createElement("div");
-    row.className = `montage-export-floating-log is-${String(log?.level || "info").trim() || "info"}`;
+    const isLatest = index === logs.length - 1;
+    row.className = `montage-export-floating-log${isLatest ? " is-latest" : ""} is-${String(log?.level || "info").trim() || "info"}`;
+    if (isLatest) {
+      row.dataset.latest = "true";
+      row.tabIndex = -1;
+    }
     const head = document.createElement("div");
     head.className = "montage-export-floating-log-head";
     head.textContent = `${String(log?.event || "event").trim()} · ${String(log?.at || "").trim().slice(11, 19)}`;
@@ -428,7 +433,15 @@ function renderMontageExportRecentLogs() {
     body.textContent = String(log?.summary || "").trim() || JSON.stringify(log?.payload || {}, null, 0);
     row.append(head, body);
     container.appendChild(row);
-  }
+  });
+  window.requestAnimationFrame(() => {
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    const latest = container.querySelector(".montage-export-floating-log.is-latest");
+    if (latest) {
+      latest.scrollIntoView({ block: "end", behavior: "auto" });
+    }
+  });
 }
 
 function syncMontageExportFloatingCardPosition() {

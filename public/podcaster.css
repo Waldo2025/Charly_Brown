@@ -2851,6 +2851,12 @@ body.is-resizing-podcast-stage {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.montage-export-floating-log.is-latest {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.1);
+}
+
 .montage-export-floating-log.is-warn,
 .montage-export-floating-log.is-warning {
   background: rgba(245, 158, 11, 0.08);
