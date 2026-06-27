@@ -7,6 +7,9 @@
     "node": "22"
   },
   "scripts": {
+    "postinstall": "node scripts/install-playwright-chromium.js --postinstall",
+    "install:chromium": "node scripts/install-playwright-chromium.js",
+    "verify:chromium": "node scripts/install-playwright-chromium.js --verify-only",
     "start": "node server.js",
     "worker:montage": "node workers/podcaster-montage-export-worker.js"
   },
