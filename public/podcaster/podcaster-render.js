@@ -293,7 +293,11 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     presetClass: previewSpec?.presetClass,
     bgClass: previewSpec?.bgClass,
     karaokeHighlightColor: settings?.karaokeHighlightColor,
-    karaokeHighlightStyle: settings?.karaokeHighlightStyle
+    karaokeHighlightStyle: settings?.karaokeHighlightStyle,
+    karaokeHighlightOpacity: settings?.karaokeHighlightOpacity,
+    karaokeHighlightPaddingXPx: settings?.karaokeHighlightPaddingXPx,
+    karaokeHighlightPaddingYPx: settings?.karaokeHighlightPaddingYPx,
+    karaokeHighlightRadiusPx: settings?.karaokeHighlightRadiusPx
   });
   if (signature === renderState.lastTextSignature) return;
   renderState.lastTextSignature = signature;
@@ -479,18 +483,6 @@ async function boot() {
       } else {
         renderState.lastVideoCurrentMs = currentMs;
         renderState.lastStagnantTickCount = 0;
-      }
-      if (renderState.lastVideoCurrentMs > 0 && renderState.lastStagnantTickCount >= 24 && video.readyState >= 2) {
-        try {
-          const fallbackMs = Math.max(0, fallbackDurationMs() - 10);
-          video.currentTime = Math.min(
-            (renderState.lastVideoCurrentMs + 80) / 1000,
-            fallbackMs / 1000
-          );
-          renderState.lastStagnantTickCount = 0;
-        } catch (_) {
-          // noop
-        }
       }
       requestAnimationFrame(tick);
     };

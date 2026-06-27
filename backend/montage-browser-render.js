@@ -309,12 +309,6 @@ async function forceBrowserRenderCompletion(page, diagnostics = {}) {
     const video = document.querySelector("video");
     if (video) {
       try {
-        const duration = Number.isFinite(Number(video.duration)) ? Number(video.duration) : 0;
-        const nextCurrentMs = Number.isFinite(Number(video.currentTime || 0)) ? Math.max(0, Number(video.currentTime || 0)) : 0;
-        if (duration > 0) {
-          video.currentTime = Math.min(duration, nextCurrentMs + 0.15);
-        }
-        video.currentTime = Math.max(0, nextCurrentMs);
         if (typeof video.pause === "function") video.pause();
       } catch (_) {}
     }

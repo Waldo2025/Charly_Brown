@@ -10543,6 +10543,36 @@ function createMontageReviewTextFileResolver(tmpDir = "", prefix = "review") {
   };
 }
 
+function resolveMontageStylizedTextTimelineSegments(input = {}) {
+  const timeline = input?.stylizedTextTimeline && typeof input.stylizedTextTimeline === "object"
+    ? input.stylizedTextTimeline
+    : null;
+  if (Array.isArray(timeline?.segments)) {
+    return timeline.segments.filter((segment) => segment && typeof segment === "object");
+  }
+  if (Array.isArray(input?.stylizedTextSegments)) {
+    return input.stylizedTextSegments.filter((segment) => segment && typeof segment === "object");
+  }
+  return [];
+}
+
+function resolveMontageStylizedTextPayload(input = {}) {
+  const timeline = input?.stylizedTextTimeline && typeof input.stylizedTextTimeline === "object"
+    ? input.stylizedTextTimeline
+    : {};
+  const segments = resolveMontageStylizedTextTimelineSegments(input);
+  return {
+    ...(timeline && typeof timeline === "object" ? timeline : {}),
+    enabled: timeline?.enabled !== false && Array.isArray(segments) && segments.length > 0,
+    segments
+  };
+}
+
+function hasMontageStylizedTextSegments(input = {}) {
+  const segments = resolveMontageStylizedTextPayload(input)?.segments;
+  return Array.isArray(segments) && segments.length > 0;
+}
+
 function normalizeMontageOnScreenTextExportLayout(options = {}) {
   const segment = options?.segment && typeof options.segment === "object" ? options.segment : {};
   const layout = segment?.layout && typeof segment.layout === "object" ? segment.layout : {};
@@ -11980,11 +12010,7 @@ async function renderMontageBrowserFinalVisualPass({
       settings: input.onScreenTextSettings,
       segments: input.onScreenTextSegments
     },
-    stylizedTextTimeline: {
-      ...(input.stylizedTextTimeline && typeof input.stylizedTextTimeline === "object" ? input.stylizedTextTimeline : {}),
-      enabled: Array.isArray(input.stylizedTextSegments) && input.stylizedTextSegments.length > 0,
-      segments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments : []
-    },
+    stylizedTextTimeline: resolveMontageStylizedTextPayload(input),
     renderMode: "browser",
     expectedDurationMs: totalDurationMs,
     brandOverlay
@@ -12342,12 +12368,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
     const stylizedKaraokeStyle = String(input?.onScreenTextSettings?.karaokeHighlightStyle || "").trim().toLowerCase();
     const canForceBrowserVisualPass = input.exportMode === "normal" && input.onlyAudio !== true;
+    const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const requiresBrowserKaraokePass = canForceBrowserVisualPass
       && isTextTrackVisible
       && Array.isArray(input.onScreenTextSegments)
       && input.onScreenTextSegments.length > 0
       && ["text", "pill", "rect", "underline"].includes(stylizedKaraokeStyle);
-    const hasStylizedTextSegments = canForceBrowserVisualPass && Array.isArray(input.stylizedTextSegments) && input.stylizedTextSegments.length > 0;
+    const hasStylizedTextSegments = canForceBrowserVisualPass && hasMontageStylizedTextSegments(input);
+    const browserRendererAvailability = (shouldAttemptBrowserRenderer || requiresBrowserKaraokePass || hasStylizedTextSegments)
+      ? getMontageBrowserRendererAvailability()
+      : { available: false };
+    // The browser visual pass is the preview-faithful renderer. When it is active,
+    // scene intermediates must stay clean or on-screen text is baked twice.
+    if (shouldAttemptBrowserRenderer || ((requiresBrowserKaraokePass || hasStylizedTextSegments) && browserRendererAvailability.available === true)) {
+      shouldBurnSceneOnScreenText = false;
+    }
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const exportedEntries = [];
@@ -12385,6 +12420,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     if (canForceBrowserVisualPass) {
       emitStage("boot_renderer", 0.12, "Verificando renderer fiel al preview.");
       const preflightBrandOverlay = resolveMontageBrowserBrandOverlay(input.brandOverlay);
+      const stylizedTextPayload = resolveMontageStylizedTextPayload(input);
       await preflightMontageBrowserRenderer({
         publicRoot: PUBLIC_ROOT,
         payload: {
@@ -12393,11 +12429,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             settings: input.onScreenTextSettings,
             segments: input.onScreenTextSegments
           },
-          stylizedTextTimeline: {
-            ...(input.stylizedTextTimeline && typeof input.stylizedTextTimeline === "object" ? input.stylizedTextTimeline : {}),
-            enabled: Array.isArray(input.stylizedTextSegments) && input.stylizedTextSegments.length > 0,
-            segments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments : []
-          },
+          stylizedTextTimeline: stylizedTextPayload,
           renderMode: "browser",
           preflightOnly: true,
           brandOverlay: preflightBrandOverlay
@@ -12975,11 +13007,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
     const resolvedBrandPath = resolvedInlineBrandOverlayPath;
     const hasBrandOverlay = Boolean(!shouldInlineSingleSceneBrandOverlay && resolvedBrandPath && fs.existsSync(resolvedBrandPath));
-    const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const isStylizedKaraokeRendererForced = (requiresBrowserKaraokePass || hasStylizedTextSegments) && !shouldAttemptBrowserRenderer;
-    const browserRendererAvailability = (shouldAttemptBrowserRenderer || requiresBrowserKaraokePass || hasStylizedTextSegments)
-      ? getMontageBrowserRendererAvailability()
-      : { available: false };
     let finalShouldAttemptBrowserRenderer = shouldAttemptBrowserRenderer;
     if ((requiresBrowserKaraokePass || hasStylizedTextSegments) && browserRendererAvailability.available === true) {
       shouldBurnSceneOnScreenText = false;
@@ -13040,6 +13068,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       normalOnScreenTextEnabled,
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
       hasStylizedTextSegments,
+      sceneOnScreenTextBurnEnabled: shouldBurnSceneOnScreenText,
       overlayCardCount: overlayCardSegments.length,
       exportMode: input.exportMode,
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
@@ -13643,7 +13672,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       nativeVideoAudioEntries: Array.isArray(input.entries) ? input.entries.filter((entry) => entry?.useNativeVideoAudio === true).length : 0,
       onScreenTextSegments: Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
-      stylizedTextSegments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments.length : 0,
+      stylizedTextSegments: resolveMontageStylizedTextTimelineSegments(input).length,
       overlayCardCount: Array.isArray(input.overlayCards?.segments) ? input.overlayCards.segments.length : (Array.isArray(input.overlayCards) ? input.overlayCards.length : 0),
       partyKaraoke: input.partyKaraoke !== false,
       onlyAudio: input.onlyAudio === true,
