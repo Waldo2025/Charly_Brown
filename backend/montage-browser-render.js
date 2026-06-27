@@ -389,10 +389,50 @@ async function renderMontageBrowserOverlayVideo({
     }
     await page.goto(pathToFileUrl(bootstrapHtmlPath), { waitUntil: "load", timeout: timeoutMs });
     await waitForMontageBrowserReady(page, diagnostics, timeoutMs, "browser_render_ready");
+    const renderStartAtMs = Date.now();
+    const expectedDurationMs = Math.max(
+      0,
+      Math.round(Number(payload?.expectedDurationMs || 0) || 0)
+    );
+    const forceDoneTimeoutMs = Math.max(30000, Math.max(10000, expectedDurationMs) + 12000);
     try {
       await page.waitForFunction(() => window.__podcasterMontageRenderDone === true || Boolean(window.__podcasterMontageRenderError), { timeout: timeoutMs });
     } catch (error) {
       const pageState = await readMontageBrowserRenderState(page);
+      const elapsedMs = Math.max(0, Date.now() - renderStartAtMs);
+      const videoDurationMs = Math.round(Number(pageState?.video?.duration || 0) * 1000);
+      const videoCurrentMs = Math.round(Number(pageState?.video?.currentTime || 0) * 1000);
+      const targetDurationMs = Math.max(
+        expectedDurationMs,
+        Number.isFinite(videoDurationMs) ? videoDurationMs : 0
+      );
+      const forceDoneByTime = targetDurationMs <= 0
+        ? elapsedMs >= forceDoneTimeoutMs
+        : elapsedMs >= Math.max(30000, targetDurationMs + 12000);
+      const forceDoneByProgress = Number.isFinite(videoDurationMs) && videoDurationMs > 0 && videoCurrentMs >= Math.max(0, videoDurationMs - 80);
+      if (forceDoneByTime || forceDoneByProgress) {
+        try {
+          await page.evaluate(() => {
+            globalThis.__podcasterMontageRenderDone = true;
+          });
+          const forcedPageState = await readMontageBrowserRenderState(page);
+          if (forcedPageState?.done === true) {
+            await page.waitForTimeout(200).catch(() => {});
+          } else {
+            const err = new Error("montage_browser_renderer_record_timeout");
+            err.code = "montage_browser_renderer_record_timeout";
+            err.stage = "browser_render_record";
+            err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
+            throw err;
+          }
+        } catch (_) {
+          const err = new Error("montage_browser_renderer_record_timeout");
+          err.code = "montage_browser_renderer_record_timeout";
+          err.stage = "browser_render_record";
+          err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, pageState);
+          throw err;
+        }
+      }
       const err = new Error("montage_browser_renderer_record_timeout");
       err.code = "montage_browser_renderer_record_timeout";
       err.stage = "browser_render_record";
