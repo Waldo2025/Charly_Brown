@@ -3269,22 +3269,46 @@ function stripMontageExportSubmissionPayload(payload = {}) {
   return next;
 }
 
-function buildMontageStylizedTextTimeline(activeSession = null, runtimeEntries = []) {
+function buildMontageStylizedTextTimeline(activeSession = null, runtimeEntries = [], onScreenSegments = []) {
   const stylizedTextMap = activeSession?.stylizedTextMap && typeof activeSession.stylizedTextMap === "object"
     ? activeSession.stylizedTextMap
     : {};
+  const onScreenSegmentByRowId = new Map(
+    Array.isArray(onScreenSegments)
+      ? onScreenSegments
+          .filter((segment) => segment && typeof segment === "object")
+          .map((segment) => [String(segment?.rowId || "").trim(), segment])
+          .filter(([rowId]) => rowId)
+      : []
+  );
   const entries = (Array.isArray(runtimeEntries) ? runtimeEntries : [])
     .slice()
     .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
+  const seenRowIds = new Set();
   const segments = entries.map((entry, index) => {
     const rowId = String(entry?.rowId || "").trim();
     const rawTextData = rowId ? String(stylizedTextMap?.[rowId] || "").trim() : "";
     if (!rowId || !rawTextData) return null;
-    const startMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
-    const durationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round(Number(entry?.effectiveDurationMs || entry?.durationMs || ((Number(entry?.endMs || 0) || 0) - startMs)) || STUDIO_TIMELINE_MIN_CLIP_MS)
+    if (seenRowIds.has(rowId)) return null;
+    seenRowIds.add(rowId);
+    const sourceSegment = onScreenSegmentByRowId.get(rowId) || null;
+    const sourceStartMs = Number(sourceSegment?.startMs ?? 0);
+    const sourceDurationMs = Number(sourceSegment?.durationMs ?? 0);
+    const runtimeStartMs = Number(entry?.startMs || 0);
+    const runtimeDurationMs = Number(
+      entry?.effectiveDurationMs
+      || entry?.durationMs
+      || ((Number(entry?.endMs || 0) || 0) - runtimeStartMs)
     );
+    const startMs = Number.isFinite(sourceStartMs) && sourceStartMs >= 0
+      ? Math.max(0, Math.round(sourceStartMs))
+      : Math.max(0, Math.round(runtimeStartMs || 0));
+    const durationMs = Number.isFinite(sourceDurationMs) && sourceDurationMs > 0
+      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(sourceDurationMs))
+      : Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Math.round(Number.isFinite(runtimeDurationMs) ? runtimeDurationMs : STUDIO_TIMELINE_MIN_CLIP_MS)
+      );
     return {
       id: `${rowId}-stylized-text`,
       rowId,
@@ -3958,7 +3982,11 @@ export function buildMontageExportPayload(session = null) {
   });
   const shouldSendOnScreenTextTimeline = effectiveOnScreenTextTimeline.segments.length
     || effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true;
-  const stylizedTextTimeline = buildMontageStylizedTextTimeline(activeSession, runtimeEntries);
+  const stylizedTextTimeline = buildMontageStylizedTextTimeline(
+    activeSession,
+    runtimeEntries,
+    effectiveOnScreenTextTimeline.segments
+  );
 
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
