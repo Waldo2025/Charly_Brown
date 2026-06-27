@@ -11,8 +11,20 @@ assert.match(
 
 assert.match(
   backendSource,
-  /const shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\);/,
+  /let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\);/,
   "El export normal debe decidir el texto en pantalla antes del render por escena."
+);
+
+assert.match(
+  backendSource,
+  /\["text", "pill", "rect", "underline"\]\.includes\(stylizedKaraokeStyle\)/,
+  "Los estilos karaoke no ASS deben forzar la pasada visual de navegador."
+);
+
+assert.match(
+  backendSource,
+  /normalOnScreenTextEnabled = input\.exportMode === "normal" && isTextTrackVisible && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/,
+  "Al forzar browser para karaoke/texto estilizado, el pass final debe reactivar el texto en pantalla."
 );
 
 assert.match(

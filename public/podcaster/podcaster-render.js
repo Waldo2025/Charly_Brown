@@ -7,7 +7,8 @@ const renderState = {
   started: false,
   completed: false,
   lastCardsSignature: "",
-  lastTextSignature: ""
+  lastTextSignature: "",
+  lastStylizedTextSignature: ""
 };
 
 function escapeHtml(value = "") {
@@ -65,6 +66,21 @@ function injectStyles() {
       position: absolute;
       inset: 0;
       pointer-events: none;
+    }
+    .montage-render-stylized-text-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 16;
+    }
+    .montage-render-stylized-text {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+      pointer-events: none;
+      transform: translate3d(0, 0, 0);
     }
     .montage-render-text-layer .podcast-onscreen-text-overlay {
       position: absolute;
@@ -304,6 +320,47 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
   }
 }
 
+function renderStylizedText(layer, payload = {}, currentMs = 0) {
+  const timeline = payload?.stylizedTextTimeline && typeof payload.stylizedTextTimeline === "object"
+    ? payload.stylizedTextTimeline
+    : null;
+  const segments = Array.isArray(timeline?.segments) && timeline?.enabled !== false
+    ? timeline.segments
+    : [];
+  const activeSegments = segments
+    .filter((segment) => {
+      const dataUrl = String(segment?.dataUrl || "").trim();
+      if (!dataUrl.startsWith("data:image/")) return false;
+      const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      const durationMs = Math.max(1, Number(segment?.durationMs || 0) || 1);
+      return currentMs >= startMs && currentMs < (startMs + durationMs);
+    })
+    .sort((a, b) => Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
+  const signature = activeSegments.map((segment) => [
+    segment.id || segment.rowId || "",
+    Math.round(Number(segment.startMs || 0) || 0),
+    Math.round(Number(segment.durationMs || 0) || 0),
+    Number(segment.zIndex || 0) || 0,
+    String(segment.dataUrl || "").slice(0, 96)
+  ].join(":")).join("|");
+  if (signature === renderState.lastStylizedTextSignature) return;
+  renderState.lastStylizedTextSignature = signature;
+  if (!activeSegments.length) {
+    layer.innerHTML = "";
+    return;
+  }
+  layer.innerHTML = activeSegments.map((segment) => `
+    <img
+      class="montage-render-stylized-text"
+      src="${escapeHtml(String(segment.dataUrl || "").trim())}"
+      alt=""
+      decoding="sync"
+      style="z-index:${Math.max(1, Math.round(Number(segment.zIndex || 20) || 20))}"
+      data-row-id="${escapeHtml(String(segment.rowId || "").trim())}"
+    >
+  `).join("");
+}
+
 async function boot() {
   try {
     const config = globalThis.__PODCASTER_MONTAGE_RENDER_CONFIG__ || {};
@@ -329,10 +386,12 @@ async function boot() {
     cardsLayer.className = "montage-render-cards";
     const textLayer = document.createElement("div");
     textLayer.className = "montage-render-text-layer";
+    const stylizedTextLayer = document.createElement("div");
+    stylizedTextLayer.className = "montage-render-stylized-text-layer";
     const brandImg = document.createElement("img");
     brandImg.className = "montage-render-brand";
     brandImg.hidden = true;
-    stage.append(video, subtitleCanvas, textLayer, cardsLayer, brandImg);
+    stage.append(video, subtitleCanvas, textLayer, stylizedTextLayer, cardsLayer, brandImg);
     document.body.append(stage);
 
     const width = Math.max(2, Math.round(Number(config.viewport?.width || config.width || 1280) || 1280));
@@ -351,6 +410,7 @@ async function boot() {
       const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
       updateCards(cardsLayer, payload.overlayCards?.segments || payload.overlayCards || [], currentMs);
       renderOnScreenText(textLayer, payload, currentMs, width, height);
+      renderStylizedText(stylizedTextLayer, payload, currentMs);
       if (!video.paused && !video.ended) requestAnimationFrame(tick);
     };
 
@@ -361,6 +421,7 @@ async function boot() {
 
     video.addEventListener("loadedmetadata", () => {
       renderOnScreenText(textLayer, payload, 0, width, height);
+      renderStylizedText(stylizedTextLayer, payload, 0);
     });
     video.addEventListener("play", () => {
       if (!renderState.started) renderState.started = true;
@@ -369,6 +430,7 @@ async function boot() {
     video.addEventListener("timeupdate", () => {
       const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
       renderOnScreenText(textLayer, payload, currentMs, width, height);
+      renderStylizedText(stylizedTextLayer, payload, currentMs);
     });
     video.addEventListener("ended", finish);
     video.addEventListener("error", () => {

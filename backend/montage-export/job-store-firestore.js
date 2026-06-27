@@ -159,6 +159,12 @@ function sanitizeMontageExportPersistedInput(input = null) {
   if (Object.prototype.hasOwnProperty.call(nextInput, "onScreenTextSegments")) {
     delete nextInput.onScreenTextSegments;
   }
+  if (Object.prototype.hasOwnProperty.call(nextInput, "stylizedTextSegments")) {
+    nextInput.persistedStylizedTextSegmentCount = Array.isArray(nextInput.stylizedTextSegments)
+      ? nextInput.stylizedTextSegments.length
+      : 0;
+    delete nextInput.stylizedTextSegments;
+  }
 
   if (Array.isArray(nextInput.onScreenTextRenderedSegments)) {
     const sanitized = sanitizePersistedRenderedSegments(nextInput.onScreenTextRenderedSegments);
@@ -176,6 +182,44 @@ function sanitizeMontageExportPersistedInput(input = null) {
       delete timelineRaw.renderedSegments;
     }
     nextInput.onScreenTextTimelineRaw = timelineRaw;
+  }
+
+  if (nextInput.stylizedTextTimelineRaw && typeof nextInput.stylizedTextTimelineRaw === "object") {
+    const timelineRaw = { ...nextInput.stylizedTextTimelineRaw };
+    const originalStylizedRawSegmentCount = Array.isArray(timelineRaw.segments) ? timelineRaw.segments.length : 0;
+    if (Array.isArray(timelineRaw.segments)) {
+      timelineRaw.segments = timelineRaw.segments.map((segment) => {
+        if (!segment || typeof segment !== "object") return segment;
+        return {
+          ...segment,
+          dataUrl: ""
+        };
+      });
+    }
+    nextInput.stylizedTextTimelineRaw = timelineRaw;
+    nextInput.persistedStylizedTextSegmentCount = Math.max(
+      Number(nextInput.persistedStylizedTextSegmentCount || 0) || 0,
+      originalStylizedRawSegmentCount
+    );
+  }
+
+  if (nextInput.stylizedTextTimeline && typeof nextInput.stylizedTextTimeline === "object") {
+    const timeline = { ...nextInput.stylizedTextTimeline };
+    const originalStylizedSegmentCount = Array.isArray(timeline.segments) ? timeline.segments.length : 0;
+    if (Array.isArray(timeline.segments)) {
+      timeline.segments = timeline.segments.map((segment) => {
+        if (!segment || typeof segment !== "object") return segment;
+        return {
+          ...segment,
+          dataUrl: ""
+        };
+      });
+    }
+    nextInput.stylizedTextTimeline = timeline;
+    nextInput.persistedStylizedTextSegmentCount = Math.max(
+      Number(nextInput.persistedStylizedTextSegmentCount || 0) || 0,
+      originalStylizedSegmentCount
+    );
   }
 
   if (redactedFrameCount > 0) {

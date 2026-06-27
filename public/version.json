@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.264",
-  "build": "2026-1.0.10.264",
+  "version": "1.0.10.266",
+  "build": "2026-1.0.10.266",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export MP4 de Podcaster elimina el modo ffmpeg-legacy/fallback de render, exige renderer browser para export normal de video y falla con error claro si Chromium no está disponible. También deja de omitir escenas fallidas: una escena sin fuente o con error detiene el export con escena/substage. Se incrementa podcaster-montage-export.js a la v2026-06-26.14.",
+    "Corregido: El export MP4 de Podcaster ahora incluye texto estilizado como timeline de bitmaps transparentes, fuerza renderer browser para estilos karaoke no-glow/texto estilizado, conserva timing de texto en pantalla alineado al audio Gemini y ajusta el compositor de transiciones para no prolongar frames congelados tras el overlap. Se incrementa podcaster-montage-export.js a la v2026-06-26.13.",
     "Corregido: La hidratación de medios del export de Podcaster ahora cae al downloadUrl directo cuando el proxy local /api/assets/proxy-media no existe o devuelve 404/403, evitando que el export falle en local mientras sigue funcionando en producción.",
     "Corregido: El texto en pantalla del export de Podcaster ahora toma el tiempo visible del segmento Gemini por escena (ajustado por playback rate) en vez de la duración del clip de escena, alineando la aparición con el audio gemini y evitando desfases en el karaoke exportado.",
     "Actualizado: El export final de Podcaster ahora se guarda en Firebase Storage con un path estable por sesión y reemplaza el archivo anterior; además, el último export queda rehidratado en la sesión para poder descargarlo después de reiniciar el sitio, sin auto-descarga al finalizar. Se incrementan los cache-busters de podcaster.html, podcaster.js, podcaster-timeline-model.js y podcaster-montage-export.js.",
@@ -227,5 +229,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.264"
+  "cache_version": "2026-1.0.10.266"
 }

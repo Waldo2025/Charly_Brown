@@ -8,20 +8,20 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /const renderModeDecision = resolveRuntimeMontageRenderMode\(normalizedInput\.renderMode \|\| "browser"\);/,
-  "El endpoint de export debe resolver el modo efectivo según la disponibilidad real del browser renderer."
+  /if \(shouldUseBrowserMontageRenderer\(input\)\) \{[\s\S]*const browserRendererAvailability = getMontageBrowserRendererAvailability\(\);/,
+  "El endpoint de export debe validar la disponibilidad real del browser renderer."
 );
 
 assert.match(
   source,
-  /const input = renderModeDecision\.downgraded[\s\S]*renderMode: renderModeDecision\.renderMode/,
-  "Cuando Chromium no exista, el backend debe degradar el request a ffmpeg-legacy antes de persistir o encolar el job."
+  /const err = new Error\("montage_browser_renderer_unavailable"\);[\s\S]*err\.status = 503;[\s\S]*throw err;/,
+  "Cuando Chromium no exista, el backend debe fallar explícitamente antes de persistir o encolar el job."
 );
 
-assert.match(
+assert.doesNotMatch(
   source,
-  /console\.warn\("\[backend\]\[montage-export\]\[render-mode-fallback\]"/,
-  "El backend debe dejar evidencia explícita cuando fuerza el fallback de browser a ffmpeg-legacy."
+  /render-mode-fallback|ffmpeg-legacy|resolveRuntimeMontageRenderMode/,
+  "El backend no debe degradar automáticamente el export a rutas legacy."
 );
 
-console.log("Backend montage render mode runtime fallback OK.");
+console.log("Backend montage render mode fails without browser OK.");

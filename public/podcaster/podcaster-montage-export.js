@@ -16,7 +16,7 @@ import {
   buildMontageRenderAssContent,
   normalizeMontageRenderMode,
   resolveMontageRenderEntryAtTime
-} from "./podcaster-montage-render-surface.js";
+} from "./podcaster-montage-render-surface.js?v=2026-06-26.2";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
@@ -304,8 +304,83 @@ let montageExportPreviewState = {
   debounceTimer: null,
   requestSeq: 0,
   lastJobPreviewRowId: "",
-  lastJobPreviewAt: 0
+  lastJobPreviewAt: 0,
+  lastReadyDataUrl: "",
+  lastReadyMediaType: ""
 };
+
+const MONTAGE_EXPORT_PREVIEW_SOURCE_PROBE_TTL_MS = 8_000;
+const montageExportPreviewSourceProbeCache = new Map();
+
+function readMontageExportPreviewSourceProbe(url = "", mediaType = "") {
+  const cacheKey = `${String(mediaType || "").startsWith("image/") ? "image" : "video"}::${String(url || "").trim()}`;
+  const cached = montageExportPreviewSourceProbeCache.get(cacheKey) || null;
+  if (!cached) return null;
+  if (Date.now() - Number(cached.at || 0) > MONTAGE_EXPORT_PREVIEW_SOURCE_PROBE_TTL_MS) {
+    montageExportPreviewSourceProbeCache.delete(cacheKey);
+    return null;
+  }
+  return Boolean(cached.ok);
+}
+
+function cacheMontageExportPreviewSourceProbe(url = "", mediaType = "", ok = false) {
+  const cleanUrl = String(url || "").trim();
+  const key = `${String(mediaType || "").startsWith("image/") ? "image" : "video"}::${cleanUrl}`;
+  if (!cleanUrl) return;
+  montageExportPreviewSourceProbeCache.set(key, { at: Date.now(), ok: Boolean(ok) });
+  if (montageExportPreviewSourceProbeCache.size > 300) {
+    const firstKey = montageExportPreviewSourceProbeCache.keys().next().value;
+    if (firstKey) montageExportPreviewSourceProbeCache.delete(firstKey);
+  }
+}
+
+async function probeMontageExportPreviewSource(url = "", mediaType = "video/mp4") {
+  const cleanUrl = String(url || "").trim();
+  if (!cleanUrl) return false;
+  if (cleanUrl.startsWith("data:") || cleanUrl.startsWith("blob:")) return true;
+  const isImage = String(mediaType || "").toLowerCase().startsWith("image/");
+  const cached = readMontageExportPreviewSourceProbe(cleanUrl, isImage ? "image" : "video");
+  if (cached !== null) return cached;
+
+  const result = await new Promise((resolve) => {
+    const timeoutMs = 2500;
+    let settled = false;
+    let probeEl = null;
+    const done = (ok = false) => {
+      if (settled) return;
+      settled = true;
+      try { clearTimeout(timeoutHandle); } catch (_) { }
+      if (probeEl) {
+        probeEl.removeAttribute("src");
+        probeEl.load?.();
+      }
+      resolve(Boolean(ok));
+    };
+    const timeoutHandle = setTimeout(() => {
+      done(false);
+    }, timeoutMs);
+    if (isImage) {
+      probeEl = new Image();
+      probeEl.onload = () => done(true);
+      probeEl.onerror = () => done(false);
+      probeEl.src = cleanUrl;
+      return;
+    }
+
+    probeEl = document.createElement("video");
+    probeEl.playsInline = true;
+    probeEl.muted = true;
+    probeEl.preload = "auto";
+    probeEl.addEventListener("loadeddata", () => done(true), { once: true });
+    probeEl.addEventListener("canplay", () => done(true), { once: true });
+    probeEl.addEventListener("error", () => done(false), { once: true });
+    probeEl.src = cleanUrl;
+    probeEl.load();
+  });
+
+  cacheMontageExportPreviewSourceProbe(cleanUrl, isImage ? "image" : "video", result);
+  return result;
+}
 
 let montageExportJassubState = {
   instance: null,
@@ -460,8 +535,10 @@ function updateMontageExportFloatingCardVisibility() {
   if (!card) return;
   const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
   const submissionInFlight = window.montageExportJobState?.submissionInFlight === true;
+  const isReady = String(window.montageExportJobState?.lastStage || "").trim() === "ready";
   const shouldShow = Boolean(
     window.els.montageExportModal?.hidden === true
+    && !isReady
     && (
       activeJobId
       || submissionInFlight
@@ -684,10 +761,12 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     });
   }
   if (stage === "render_scene_segments" && currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()) {
+    const progressivePreview = await resolveMontageExportStatusPreviewMedia(data);
     maybeRefreshMontageExportPreviewFromJob({
       rowId: currentRowId,
       sceneIndex: currentSceneIndex,
-      totalScenes
+      totalScenes,
+      progressiveMedia: progressivePreview
     });
   }
   if (String(data?.status || "").trim() === "ready") {
@@ -699,13 +778,8 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     clearMontageExportPolling();
     persistMontageExportActiveJob("");
     setMontageExportContinueButton({ visible: false });
-    const warningBlock = Array.isArray(data?.warnings) && data.warnings.length ? data.warnings[0] : null;
-    let statusText = "Tu video está listo.";
+    const statusText = "Tu video está listo.";
     let hintText = "";
-    if (warningBlock?.skippedEntries?.length) {
-      statusText = `Tu video está listo. Omitimos ${warningBlock.skippedEntries.length} escena(s).`;
-      hintText = formatMontageSkippedEntries(warningBlock.skippedEntries, 3);
-    }
     const url = String(data?.downloadUrl || data?.export?.downloadUrl || "").trim();
     const name = String(data?.export?.filename || window.montageExportState.filename || "montage").trim() || "montage";
     setMontageExportDownloadButton({
@@ -741,11 +815,14 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
         return true;
       }
     }
-    setMontageExportStatus(statusText, hintText, { tone: warningBlock?.skippedEntries?.length ? "warning" : "success" });
+    setMontageExportStatus(statusText, hintText, { tone: "success" });
     window.montageExportBusy = false;
     window.setTimelinePreviewsSuspended(false);
     setMontageExportPreviewPaused(false);
     setMontageExportBusy(false);
+    if (window.els.montageExportFloatingCard) {
+      window.els.montageExportFloatingCard.hidden = true;
+    }
     updateMontageExportFloatingCardVisibility();
     return true;
   }
@@ -763,7 +840,6 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     persistMontageExportActiveJob("");
     setMontageExportContinueButton({ visible: false });
     setMontageExportDownloadButton({ visible: false });
-    const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
     const cleanErrorCode = String(err?.code || err?.error || "").trim();
     const failedLabel = failedSubstage
       ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
@@ -775,9 +851,6 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
         ? "El backend se reinició durante el render de la escena. Inicia una nueva exportación."
         : cleanErrorCode === "montage_export_worker_stalled"
           ? "El worker dejó de reportar progreso. Inicia una nueva exportación."
-          :
-        skippedEntries.length
-          ? `Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`
           : [
             failedLabel ? `${failedLabel}` : "",
             failedSceneIndex > 0 ? `Fallo en la escena ${failedSceneIndex}.` : "",
@@ -1370,6 +1443,13 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
       ? `${baseMeta} Export reel 9:16.`
       : baseMeta;
   }
+
+  const hasStablePreview = Boolean(window.montageExportPreviewState.dataUrl && !window.montageExportPreviewState.loading && !window.montageExportPreviewState.error);
+  if (hasStablePreview) {
+    window.montageExportPreviewState.lastReadyDataUrl = window.montageExportPreviewState.dataUrl;
+    window.montageExportPreviewState.lastReadyMediaType = window.montageExportPreviewState.mediaType || "";
+  }
+
   const hasReadyPreview = Boolean(window.montageExportPreviewState.dataUrl && !window.montageExportPreviewState.loading && !window.montageExportPreviewState.error);
   const isVideoPreview = hasReadyPreview && window.montageExportPreviewState.mediaType.startsWith("video/");
   const preferAltTarget = Boolean(window.montageExportBusy && hasReadyPreview);
@@ -1458,7 +1538,9 @@ export function resetMontageExportPreviewState() {
     mediaLoadSeq: window.montageExportPreviewState.mediaLoadSeq || 0,
     lastJobPreviewRowId: "",
     lastJobPreviewSceneIndex: 0,
-    lastJobPreviewAt: 0
+    lastJobPreviewAt: 0,
+    lastReadyDataUrl: "",
+    lastReadyMediaType: ""
   };
   setMontageExportPreviewState({ mode: window.montageExportState.exportMode, meta: "Así se vería tu video exportado." });
 }
@@ -1938,7 +2020,12 @@ export function getMontagePreviewRowId() {
   return String(window.podcastVideoState.activeRowId || window.creativeVideoState.activeRowId || "").trim();
 }
 
-export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
+export function maybeRefreshMontageExportPreviewFromJob({
+  rowId = "",
+  sceneIndex = 0,
+  totalScenes = 0,
+  progressiveMedia = null
+} = {}) {
   const cleanRowId = String(rowId || "").trim();
   const cleanSceneIndex = Math.max(0, Math.round(Number(sceneIndex || 0) || 0));
   if (!cleanRowId && cleanSceneIndex <= 0) return;
@@ -1955,11 +2042,19 @@ export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex
   window.montageExportPreviewState.lastJobPreviewRowId = cleanRowId;
   window.montageExportPreviewState.lastJobPreviewSceneIndex = cleanSceneIndex;
   window.montageExportPreviewState.lastJobPreviewAt = now;
+  const progressiveDataUrl = String(progressiveMedia?.dataUrl || "").trim();
+  const progressiveMediaType = String(progressiveMedia?.mediaType || "").trim();
   refreshMontageExportPreviewNow({
     previewRowId: cleanRowId,
     previewSceneIndex: cleanSceneIndex,
     allowDuringExport: true,
     force: true,
+    progressiveDataUrl,
+    progressiveMediaType,
+    preserveProgressiveFrame: true,
+    progressiveMeta: progressiveDataUrl
+      ? `Mostrando fragmento renderizado parcial de la escena ${cleanSceneIndex}.`
+      : "Manteniendo el último frame renderizado en la escena anterior mientras avanza.",
     loadingMeta: totalScenes > 0 && cleanSceneIndex > 0
       ? `Actualizando preview con la escena ${cleanSceneIndex} de ${totalScenes}…`
       : "Actualizando preview de la escena en exportación…"
@@ -2030,6 +2125,64 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
 
 export async function refreshMontageExportPreviewNow(options = {}) {
   const allowDuringExport = options?.allowDuringExport === true;
+  const progressiveDataUrl = String(options?.progressiveDataUrl || "").trim();
+  const progressiveMediaType = String(options?.progressiveMediaType || "").trim().toLowerCase();
+  const preserveProgressiveFrame = options?.preserveProgressiveFrame === true;
+  const progressiveMeta = String(options?.progressiveMeta || options?.loadingMeta || "").trim();
+  const refreshRequestSeq = (window.montageExportPreviewState.requestSeq || 0) + 1;
+  window.montageExportPreviewState.requestSeq = refreshRequestSeq;
+  if (progressiveDataUrl) {
+    const inferredMediaType = progressiveMediaType || inferMontageExportMediaTypeFromUrl(progressiveDataUrl) || "video/mp4";
+    const canUseProgressiveSource = await probeMontageExportPreviewSource(progressiveDataUrl, inferredMediaType);
+    if (window.montageExportPreviewState.requestSeq !== refreshRequestSeq) return;
+    if (!canUseProgressiveSource) {
+      cacheMontageExportPreviewSourceProbe(progressiveDataUrl, inferredMediaType, false);
+      if (String(progressiveDataUrl).includes("/api/assets/proxy-media")) {
+        window.markStaleProxyMediaUrl?.(progressiveDataUrl, "proxy-media-unready", { kind: "export-preview-progressive" });
+      }
+      const fallbackDataUrl = String(
+        window.montageExportPreviewState.lastReadyDataUrl || window.montageExportPreviewState.dataUrl || ""
+      ).trim();
+      const fallbackMediaType = String(
+        window.montageExportPreviewState.lastReadyMediaType || window.montageExportPreviewState.mediaType || inferredMediaType
+      ).trim();
+      if (fallbackDataUrl) {
+        setMontageExportPreviewState({
+          loading: false,
+          error: "",
+          dataUrl: fallbackDataUrl,
+          mediaType: fallbackMediaType || inferredMediaType || "video/mp4",
+          mode: window.montageExportState.exportMode,
+          sceneIndex: Math.max(0, Number(options?.previewSceneIndex || 0) || 0),
+          meta: progressiveMeta || "Manteniendo el último frame renderizado."
+        });
+        return;
+      }
+      setMontageExportPreviewState({
+        loading: false,
+        error: "",
+        dataUrl: "",
+        mediaType: "",
+        mode: window.montageExportState.exportMode,
+        sceneIndex: Math.max(0, Number(options?.previewSceneIndex || 0) || 0),
+        meta: progressiveMeta || "Esperando render de la escena para mostrar el preview."
+      });
+      return;
+    }
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: progressiveDataUrl,
+      mediaType: inferredMediaType,
+      mode: window.montageExportState.exportMode,
+      sceneIndex: Math.max(0, Number(options?.previewSceneIndex || 0) || 0),
+      meta: progressiveMeta || "Mostrando avance de render de escena."
+    });
+    window.montageExportPreviewState.lastReadyDataUrl = progressiveDataUrl;
+    window.montageExportPreviewState.lastReadyMediaType = inferredMediaType || "video/mp4";
+    await destroyMontageExportPreviewJassub();
+    return;
+  }
   if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
   if (shouldSuspendMontagePreviewActivity() && !allowDuringExport) {
     if (isMontageExportPreviewJassubActive()) {
@@ -2058,6 +2211,20 @@ export async function refreshMontageExportPreviewNow(options = {}) {
   const prepared = await buildMontageExportPayloadForSubmission(window.getActiveSession());
   if (!prepared.ok) {
     await destroyMontageExportPreviewJassub();
+    const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
+    const currentMediaType = String(window.montageExportPreviewState.mediaType || "").trim();
+    if (preserveProgressiveFrame && allowDuringExport && currentDataUrl) {
+      setMontageExportPreviewState({
+        loading: false,
+        error: "",
+        dataUrl: currentDataUrl,
+        mediaType: currentMediaType,
+        mode: window.montageExportState.exportMode,
+        sceneIndex: Math.max(0, Number(options?.previewSceneIndex || 0) || 0),
+        meta: progressiveMeta || "Mostrando el último frame disponible."
+      });
+      return;
+    }
     setMontageExportPreviewState({
       error: prepared.error || "No hay suficiente material para generar preview.",
       mode: window.montageExportState.exportMode,
@@ -2116,6 +2283,21 @@ export async function refreshMontageExportPreviewNow(options = {}) {
       window.els.montageExportPreviewImage.className = className;
     }
     await syncMontageExportPreviewJassub(payload);
+    return;
+  }
+  const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
+  const currentMediaType = String(window.montageExportPreviewState.mediaType || "").trim();
+  if (preserveProgressiveFrame && allowDuringExport && currentDataUrl) {
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: currentDataUrl,
+      mediaType: currentMediaType,
+      mode: payload.exportMode,
+      sceneIndex: Math.max(0, Number(payload.previewSceneIndex || 0) || 0),
+      meta: progressiveMeta || String(options?.loadingMeta || "").trim() || "Manteniendo el último frame renderizado."
+    });
+    await destroyMontageExportPreviewJassub();
     return;
   }
   const signature = JSON.stringify({
@@ -2956,6 +3138,101 @@ function normalizeMontageSubmissionMediaUrl(value = "") {
   }
 }
 
+function inferMontageExportMediaTypeFromUrl(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("data:")) {
+    const match = /^data:([^;,]+);/i.exec(clean);
+    return String(match?.[1] || "").trim().toLowerCase();
+  }
+  const lower = clean.toLowerCase();
+  if (/\.(png|jpe?g|webp|gif|avif|bmp|svg|heic)(?:[?#].*)?$/.test(lower)) return "image/png";
+  return "video/mp4";
+}
+
+function normalizeMontageExportStoragePathCandidate(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  let candidate = clean;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (!/%[0-9a-fA-F]{2}/.test(candidate)) break;
+    try {
+      const decoded = decodeURIComponent(candidate);
+      if (decoded === candidate) break;
+      candidate = decoded;
+    } catch (_) {
+      break;
+    }
+  }
+  return candidate;
+}
+
+async function resolveMontageExportStatusPreviewMedia(data = null) {
+  const source = data && typeof data === "object" ? data : {};
+  const storageCandidates = [
+    String(source.currentStoragePath || "").trim(),
+    normalizeMontageExportStoragePathCandidate(source.currentStoragePath || ""),
+    normalizeMontageExportStoragePathCandidate(source.currentDownloadUrl || "")
+  ];
+  const seenStorageCandidates = new Set();
+  for (const storageCandidate of storageCandidates) {
+    const cleanStorageCandidate = String(storageCandidate || "").trim();
+    if (!cleanStorageCandidate || seenStorageCandidates.has(cleanStorageCandidate)) continue;
+    seenStorageCandidates.add(cleanStorageCandidate);
+    if (/^https?:\/\//i.test(cleanStorageCandidate)) {
+      const normalizedStorageUrl = normalizeMontageSubmissionMediaUrl(cleanStorageCandidate);
+      if (normalizedStorageUrl) {
+        return {
+          dataUrl: normalizedStorageUrl,
+          mediaType: inferMontageExportMediaTypeFromUrl(normalizedStorageUrl) || "video/mp4"
+        };
+      }
+      continue;
+    }
+
+    const firebaseCandidate = buildMontageStorageGsUrl(cleanStorageCandidate);
+    if (firebaseCandidate && typeof window.resolveFirebaseStorageUrl === "function") {
+      try {
+        const resolved = String(await window.resolveFirebaseStorageUrl(firebaseCandidate) || "").trim();
+        const normalizedResolved = normalizeMontageSubmissionMediaUrl(resolved);
+        if (normalizedResolved) {
+          return {
+            dataUrl: normalizedResolved,
+            mediaType: inferMontageExportMediaTypeFromUrl(normalizedResolved) || "video/mp4"
+          };
+        }
+      } catch (_) {
+        // fallback below
+      }
+    }
+
+    const fallbackUrl = typeof window.resolveStorageVideoUrl === "function"
+      ? String(window.resolveStorageVideoUrl(cleanStorageCandidate, cleanStorageCandidate) || "").trim()
+      : "";
+    const normalizedFallback = fallbackUrl ? normalizeMontageSubmissionMediaUrl(fallbackUrl) : "";
+    if (normalizedFallback) {
+      return {
+        dataUrl: normalizedFallback,
+        mediaType: inferMontageExportMediaTypeFromUrl(normalizedFallback) || "video/mp4"
+      };
+    }
+  }
+
+  const downloadCandidate = String(source.currentDownloadUrl || "").trim();
+  const resolvedDownloadCandidate = normalizeMontageExportStoragePathCandidate(downloadCandidate);
+  if (resolvedDownloadCandidate) {
+    const normalizedDownload = normalizeMontageSubmissionMediaUrl(resolvedDownloadCandidate);
+    if (normalizedDownload) {
+      return {
+        dataUrl: normalizedDownload,
+        mediaType: inferMontageExportMediaTypeFromUrl(normalizedDownload) || "video/mp4"
+      };
+    }
+  }
+
+  return null;
+}
+
 function stripMontageExportSubmissionPayload(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const next = { ...payload };
@@ -2990,6 +3267,80 @@ function stripMontageExportSubmissionPayload(payload = {}) {
     next.audioTimeline = nextAudioTimeline;
   }
   return next;
+}
+
+function buildMontageStylizedTextTimeline(activeSession = null, runtimeEntries = []) {
+  const stylizedTextMap = activeSession?.stylizedTextMap && typeof activeSession.stylizedTextMap === "object"
+    ? activeSession.stylizedTextMap
+    : {};
+  const entries = (Array.isArray(runtimeEntries) ? runtimeEntries : [])
+    .slice()
+    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
+  const segments = entries.map((entry, index) => {
+    const rowId = String(entry?.rowId || "").trim();
+    const rawTextData = rowId ? String(stylizedTextMap?.[rowId] || "").trim() : "";
+    if (!rowId || !rawTextData) return null;
+    const startMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+    const durationMs = Math.max(
+      STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.round(Number(entry?.effectiveDurationMs || entry?.durationMs || ((Number(entry?.endMs || 0) || 0) - startMs)) || STUDIO_TIMELINE_MIN_CLIP_MS)
+    );
+    return {
+      id: `${rowId}-stylized-text`,
+      rowId,
+      sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || index + 1) || index + 1)),
+      startMs,
+      durationMs,
+      zIndex: Math.max(20, Math.round(Number(entry?.zIndex || index + 1) || index + 1) + 20),
+      sourceWidth: 1280,
+      sourceHeight: 720,
+      dataUrl: ""
+    };
+  }).filter(Boolean);
+  return {
+    enabled: segments.length > 0,
+    sourceWidth: 1280,
+    sourceHeight: 720,
+    segments
+  };
+}
+
+async function hydrateMontageStylizedTextTimeline(payload = {}, activeSession = null) {
+  if (!payload || typeof payload !== "object") return payload;
+  const timeline = payload.stylizedTextTimeline && typeof payload.stylizedTextTimeline === "object"
+    ? payload.stylizedTextTimeline
+    : null;
+  if (!timeline || !Array.isArray(timeline.segments) || !timeline.segments.length) return payload;
+  const editor = window.PodcasterMediaEditor || null;
+  if (typeof editor?.prewarmStylizedText !== "function") return payload;
+  const hydratedSegments = [];
+  for (const segment of timeline.segments) {
+    const rowId = String(segment?.rowId || "").trim();
+    if (!rowId) continue;
+    let dataUrl = String(segment?.dataUrl || "").trim();
+    if (!dataUrl.startsWith("data:image/")) {
+      try {
+        dataUrl = String(await editor.prewarmStylizedText(rowId, activeSession) || "").trim();
+      } catch (error) {
+        console.warn("[podcaster][montage-export][stylized-text] prewarm_failed", {
+          rowId,
+          message: String(error?.message || error || "").trim()
+        });
+        dataUrl = "";
+      }
+    }
+    if (!dataUrl.startsWith("data:image/")) continue;
+    hydratedSegments.push({
+      ...segment,
+      dataUrl
+    });
+  }
+  payload.stylizedTextTimeline = {
+    ...timeline,
+    enabled: hydratedSegments.length > 0,
+    segments: hydratedSegments
+  };
+  return payload;
 }
 
 function buildMontageExportDialogueAudioMap(activeSession = null, rowIds = []) {
@@ -3196,6 +3547,7 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   if (!prepared?.ok || !prepared?.payload) return prepared;
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
+  await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession);
   const renderedSegments = Array.isArray(prepared.payload.onScreenTextRenderedSegments)
     ? prepared.payload.onScreenTextRenderedSegments.filter(Boolean)
     : [];
@@ -3576,14 +3928,20 @@ export function buildMontageExportPayload(session = null) {
     });
   const validEntries = entries.filter((item) => item.ok === true && item.entry).map((item) => item.entry);
   const skippedEntries = entries.filter((item) => item.ok !== true).map((item) => item.skippedEntry).filter(Boolean);
+  if (skippedEntries.length) {
+    return {
+      ok: false,
+      error: `Hay escenas sin fuente válida: ${formatMontageSkippedEntries(skippedEntries, 3)}. Corrige esas escenas antes de exportar.`,
+      payload: null,
+      warnings: null
+    };
+  }
   if (!validEntries.length) {
     return {
       ok: false,
-      error: skippedEntries.length
-        ? `No hay escenas válidas para exportar. ${formatMontageSkippedEntries(skippedEntries, 2)}`
-        : "No se pudo preparar exportación.",
+      error: "No se pudo preparar exportación.",
       payload: null,
-      warnings: { skippedEntries }
+      warnings: null
     };
   }
   const dialogueAudioMap = buildMontageExportDialogueAudioMap(
@@ -3600,6 +3958,7 @@ export function buildMontageExportPayload(session = null) {
   });
   const shouldSendOnScreenTextTimeline = effectiveOnScreenTextTimeline.segments.length
     || effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true;
+  const stylizedTextTimeline = buildMontageStylizedTextTimeline(activeSession, runtimeEntries);
 
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
@@ -3640,6 +3999,7 @@ export function buildMontageExportPayload(session = null) {
       suppressFallbackFromEntries: effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true
     } : null,
     onScreenTextRenderedSegments: [],
+    stylizedTextTimeline,
     dialogueAudioMap,
     overlayCards: window.buildMontageOverlayCardSegments?.(activeSession, runtimeEntries) || overlayCards,
     audioTimeline: useTimelineAudio ? {
@@ -3662,7 +4022,7 @@ export function buildMontageExportPayload(session = null) {
   return {
     ok: true,
     error: "",
-    warnings: { skippedEntries },
+    warnings: null,
     payload: {
       ...payload,
       entries: validEntries
@@ -3691,6 +4051,7 @@ export async function runMontageExport() {
       entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
       onScreenTextSegments: Array.isArray(prepared?.payload?.onScreenTextTimeline?.segments) ? prepared.payload.onScreenTextTimeline.segments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(prepared?.payload?.onScreenTextRenderedSegments) ? prepared.payload.onScreenTextRenderedSegments.length : 0,
+      stylizedTextSegments: Array.isArray(prepared?.payload?.stylizedTextTimeline?.segments) ? prepared.payload.stylizedTextTimeline.segments.length : 0,
       onScreenTextSuppressFallback: prepared?.payload?.onScreenTextTimeline?.suppressFallbackFromEntries === true,
       onScreenTextEnabled: prepared?.payload?.onScreenTextTimeline?.enabled === true,
       exportMode: String(window.montageExportState.exportMode || "").trim() || undefined,
@@ -3725,6 +4086,7 @@ export async function runMontageExport() {
     });
     refreshMontageExportPreviewNow({
       force: true,
+      preserveProgressiveFrame: true,
       loadingMeta: "Manteniendo el preview del montaje mientras inicia la exportación…"
     }).catch(() => { });
     const submissionPayload = stripMontageExportSubmissionPayload(prepared.payload);
@@ -3777,7 +4139,6 @@ export async function runMontageExport() {
     if (!window.montageExportBusy) return;
     const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
-    const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
     const activeJobId = String(detail?.activeJobId || apiPayload?.activeJobId || "").trim();
     const activeJobKind = String(detail?.kind || apiPayload?.kind || "").trim();
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
@@ -3798,14 +4159,10 @@ export async function runMontageExport() {
     }
     logMontageExportDevtools("submit_failed", {
       status: status || undefined,
-      code: code || undefined,
-      skippedEntries: skippedEntries.length
+      code: code || undefined
     }, "error");
     const hintParts = [];
-    if (skippedEntries.length) {
-      hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);
-      hintParts.push("Regenera esas escenas y vuelve a exportar.");
-    } else if (status === 429 || code === "backend_busy_with_export") {
+    if (status === 429 || code === "backend_busy_with_export") {
       if (activeJobId && activeJobKind === "montage_export") {
         window.montageExportJobState.jobId = activeJobId;
         window.montageExportJobState.recoverySource = "busy_handoff";

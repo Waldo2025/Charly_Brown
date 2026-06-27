@@ -88,7 +88,6 @@ const {
 } = require("./montage-export-video-params.js");
 const {
   normalizeMontageRenderMode,
-  resolveRuntimeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
   renderMontageBrowserOverlayVideo
@@ -9848,6 +9847,9 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextTimelineRaw = raw?.onScreenTextTimeline && typeof raw.onScreenTextTimeline === "object"
     ? raw.onScreenTextTimeline
     : null;
+  const stylizedTextTimelineRaw = raw?.stylizedTextTimeline && typeof raw.stylizedTextTimeline === "object"
+    ? raw.stylizedTextTimeline
+    : null;
   const overlayCards = normalizeMontageOverlayCards(raw?.overlayCards || null);
   const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
     ? raw.brandOverlay
@@ -10013,6 +10015,25 @@ function normalizeMontageExportRequestBody(body = {}) {
     };
   };
 
+  const normalizeStylizedTextSegment = (segment = {}, idx = 0) => {
+    if (!segment || typeof segment !== "object") return null;
+    const dataUrl = clampText(String(segment?.dataUrl || "").trim(), 16_000_000);
+    if (!dataUrl.startsWith("data:image/")) return null;
+    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
+    return {
+      id: clampText(segment?.id || `stylized-text-${idx + 1}`, 140) || `stylized-text-${idx + 1}`,
+      rowId: clampText(segment?.rowId || "", 140),
+      sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || idx + 1) || idx + 1)),
+      startMs,
+      durationMs,
+      zIndex: Math.max(1, Math.round(Number(segment?.zIndex || idx + 20) || idx + 20)),
+      sourceWidth: Math.max(1, Math.round(Number(segment?.sourceWidth || stylizedTextTimelineRaw?.sourceWidth || 1280) || 1280)),
+      sourceHeight: Math.max(1, Math.round(Number(segment?.sourceHeight || stylizedTextTimelineRaw?.sourceHeight || 720) || 720)),
+      dataUrl
+    };
+  };
+
   const isTimelineBackgroundAudioKind = (kind = "") => {
     const key = String(kind || "").trim().toLowerCase();
     return key === "uploaded" || key === "background-track" || key === "background" || key === "music";
@@ -10053,6 +10074,9 @@ function normalizeMontageExportRequestBody(body = {}) {
       const parsed = normalizeOnScreenTextSegment(segment, idx);
       return parsed && Array.isArray(parsed.renderedFrames) ? parsed : null;
     }).filter(Boolean);
+  const stylizedTextSegments = Array.isArray(stylizedTextTimelineRaw?.segments)
+    ? stylizedTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeStylizedTextSegment(segment, idx)).filter(Boolean)
+    : [];
   const brandOverlay = brandOverlayRaw ? (() => {
     const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
     const resolvedAssetPath = resolveBrandOverlayAssetPath(assetPathRaw);
@@ -10087,12 +10111,20 @@ function normalizeMontageExportRequestBody(body = {}) {
     entries,
     audioTimelineRaw,
     onScreenTextTimelineRaw,
+    stylizedTextTimelineRaw,
     timelineAudioSegments,
     normalizedGeminiTimelineSegments,
     useTimelineAudio,
     onScreenTextSegments,
     onScreenTextRenderedSegments,
     onScreenTextSettings: onScreenTextSettings,
+    stylizedTextSegments,
+    stylizedTextTimeline: {
+      enabled: stylizedTextSegments.length > 0 && stylizedTextTimelineRaw?.enabled !== false,
+      sourceWidth: Math.max(1, Math.round(Number(stylizedTextTimelineRaw?.sourceWidth || 1280) || 1280)),
+      sourceHeight: Math.max(1, Math.round(Number(stylizedTextTimelineRaw?.sourceHeight || 720) || 720)),
+      segments: stylizedTextSegments
+    },
     dialogueAudioMap,
     overlayCards,
     brandOverlay,
@@ -10141,7 +10173,7 @@ function validateMontageExportRequest(input = {}) {
     err.status = 400;
     throw err;
   }
-  if (!new Set(["browser", "ffmpeg-legacy"]).has(normalizeMontageRenderMode(input?.renderMode || "browser"))) {
+  if (normalizeMontageRenderMode(input?.renderMode || "browser") !== "browser") {
     const err = new Error("Render mode inválido.");
     err.status = 400;
     throw err;
@@ -10152,36 +10184,6 @@ function validateMontageExportRequest(input = {}) {
     err.status = 413;
     throw err;
   }
-}
-
-function buildMontageSkippedEntry(entry = {}, index = 0, reason = "scene_asset_unavailable", detail = {}) {
-  return {
-    sceneIndex: Math.max(1, Number(entry?.sceneIndex || index + 1) || index + 1),
-    rowId: clampText(entry?.rowId || "", 140),
-    speaker: clampText(entry?.speaker || "", 120),
-    sceneLabel: clampText(entry?.sceneLabel || "", 180),
-    kind: clampText(detail?.kind || "video", 40) || "video",
-    reason: clampText(reason || "scene_asset_unavailable", 120) || "scene_asset_unavailable",
-    storagePath: clampText(detail?.storagePath || "", 900),
-    url: detail?.url ? redactUrlForLogs(detail.url) : "",
-    code: clampText(detail?.code || "", 80),
-    index: Math.max(0, Number(detail?.index || index) || index),
-    lastError: clampText(detail?.lastError || detail?.message || "", 280)
-  };
-}
-
-function shouldSkipMontageEntryError(error) {
-  const code = String(error?.code || error?.message || "").trim();
-  return [
-    "storage_not_found",
-    "missing_download_source",
-    "scene_download_timeout",
-    "storage_download_idle_timeout",
-    "downloaded_asset_invalid",
-    "scene_probe_timeout",
-    "scene_render_timeout",
-    "ffmpeg_exit_code"
-  ].includes(code);
 }
 
 function createMontageAssetDownloader({ tmpDir = "", uid = "", sessionId = "", shouldAbort = null } = {}) {
@@ -11349,18 +11351,13 @@ async function renderMontageOverlapComposition({
       const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
       const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
       const previousEntry = index > 0 ? chunkPlan.entries[index - 1] : null;
-      const nextEntry = index < chunkPlan.entries.length - 1 ? chunkPlan.entries[index + 1] : null;
       const transition = resolveMontageOverlayTransition(entry, previousEntry);
-      const outgoingTransition = resolveMontageOverlayTransition(nextEntry, entry);
       const transitionType = String(transition?.type || "cut").trim().toLowerCase();
       const transitionSec = Math.max(0.02, Number(transition?.durationMs || 0) / 1000);
-      const outgoingTransitionSec = Math.max(0, Number(outgoingTransition?.durationMs || 0) / 1000);
-      const padTailSec = Math.max(0.12, Math.min(1.0, Math.max(transitionSec, outgoingTransitionSec) + 0.12));
-      const compositeDurSec = Math.max(durSec, durSec + padTailSec);
       const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
       const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
       const videoLabel = `v${index}`;
-      let videoChain = `[${index}:v]setpts=PTS-STARTPTS,trim=start=0:duration=${durSec.toFixed(3)},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${compositeDurSec.toFixed(3)},trim=start=0:duration=${compositeDurSec.toFixed(3)},scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+      let videoChain = `[${index}:v]setpts=PTS-STARTPTS,trim=start=0:duration=${durSec.toFixed(3)},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${durSec.toFixed(3)},trim=start=0:duration=${durSec.toFixed(3)},scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
       if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
         videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
       }
@@ -11389,7 +11386,7 @@ async function renderMontageOverlapComposition({
         overlayY = `(${canvas.height}-h)/2`;
       }
       const overlayOutLabel = `base${index + 1}`;
-      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=1:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
+      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
       baseLabel = overlayOutLabel;
       if (transitionType === "dip-black" || transitionType === "flash-white") {
         const pulseLabel = `transition_pulse_${index}`;
@@ -11397,7 +11394,7 @@ async function renderMontageOverlapComposition({
         const color = transitionType === "flash-white" ? "white" : "black";
         const halfTransitionSec = Math.max(0.01, transitionSec / 2);
         filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24,format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
-        filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=1:x=0:y=0:format=auto[${pulseOutLabel}]`);
+        filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[${pulseOutLabel}]`);
         baseLabel = pulseOutLabel;
       }
 
@@ -11911,6 +11908,11 @@ async function renderMontageBrowserFinalVisualPass({
       settings: input.onScreenTextSettings,
       segments: input.onScreenTextSegments
     },
+    stylizedTextTimeline: {
+      ...(input.stylizedTextTimeline && typeof input.stylizedTextTimeline === "object" ? input.stylizedTextTimeline : {}),
+      enabled: Array.isArray(input.stylizedTextSegments) && input.stylizedTextSegments.length > 0,
+      segments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments : []
+    },
     renderMode: "browser",
     brandOverlay
   };
@@ -12045,9 +12047,12 @@ async function finalizeMontageExportAudioTrack({
       console.warn("[backend][montage-export][timeline-audio-sources-missing]", {
         jobId,
         timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0,
-        hint: "useTimelineAudio=true pero ningún segmento pudo descargarse. El video se entregará sin mezcla de timeline audio."
+        hint: "useTimelineAudio=true pero ningún segmento pudo descargarse. Se cancela el export para no entregar un MP4 sin audio de timeline."
       });
-      return nextOutPath;
+      const err = new Error("montage_timeline_audio_sources_missing");
+      err.code = "montage_timeline_audio_sources_missing";
+      err.status = 422;
+      throw err;
     }
     if (segmentInputs.length) {
       console.info("[backend][montage-export][timeline-audio-inputs-ready]", {
@@ -12257,10 +12262,18 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
-    const shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input);
+    let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input);
+    const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
+    const stylizedKaraokeStyle = String(input?.onScreenTextSettings?.karaokeHighlightStyle || "").trim().toLowerCase();
+    const canForceBrowserVisualPass = input.exportMode === "normal" && input.onlyAudio !== true;
+    const requiresBrowserKaraokePass = canForceBrowserVisualPass
+      && isTextTrackVisible
+      && Array.isArray(input.onScreenTextSegments)
+      && input.onScreenTextSegments.length > 0
+      && ["text", "pill", "rect", "underline"].includes(stylizedKaraokeStyle);
+    const hasStylizedTextSegments = canForceBrowserVisualPass && Array.isArray(input.stylizedTextSegments) && input.stylizedTextSegments.length > 0;
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
-    const skippedEntries = [];
     const exportedEntries = [];
     let globalCanvas = null;
     const resolvedInlineBrandOverlayPath = input.brandOverlay?.enabled === true
@@ -12331,13 +12344,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         throw err;
       }
       if (!videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl && !hasCustomBg) {
-        skippedEntries.push(buildMontageSkippedEntry(entry, i, "missing_video_source", {
+        const err = new Error("missing_video_source");
+        err.status = 422;
+        err.code = "missing_video_source";
+        err.detail = {
           kind: isImageAsset ? "image" : "video",
           code: "missing_download_source",
           index: i,
-          lastError: `Escena ${sceneIndex} sin ${isImageAsset ? "imagen" : "video"} fuente para exportar.`
-        }));
-        continue;
+          failedSceneIndex: sceneIndex,
+          failedRowId: rowId,
+          failedSubstage: "scene_source_validation",
+          message: `Escena ${sceneIndex} sin ${isImageAsset ? "imagen" : "video"} fuente para exportar.`
+        };
+        throw err;
       }
 
       console.info("[backend][montage-export][scene-prepare]", {
@@ -12731,14 +12750,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           failedRowId: rowId,
           failedSubstage: String(error?.detail?.failedSubstage || currentSceneSubstage || error?.code || "").trim() || undefined
         };
-        if (!shouldSkipMontageEntryError(error)) throw error;
-        const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
-        skippedEntries.push(buildMontageSkippedEntry(entry, i, String(error?.code || error?.message || "scene_asset_unavailable"), {
-          ...detail,
-          code: String(error?.code || "").trim(),
-          index: Number(detail?.index || i) || i,
-          lastError: String(detail?.lastError || detail?.message || error?.message || "").trim()
-        }));
+        throw error;
       } finally {
         await removeMontageTempPaths([inputVisualPath, inputAudioPath]);
       }
@@ -12748,7 +12760,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const err = new Error("No hay escenas válidas para exportar.");
       err.status = 404;
       err.code = "montage_no_valid_entries";
-      err.detail = { skippedEntries };
       throw err;
     }
 
@@ -12856,56 +12867,59 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       : exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
     let finalOutPath = concatOutPath;
 
-    const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
     const reviewOnScreenTextEnabled = input.exportMode === "review" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    const normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText;
+    let normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText;
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
     const resolvedBrandPath = resolvedInlineBrandOverlayPath;
     const hasBrandOverlay = Boolean(!shouldInlineSingleSceneBrandOverlay && resolvedBrandPath && fs.existsSync(resolvedBrandPath));
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
-    const browserRendererAvailability = shouldAttemptBrowserRenderer ? getMontageBrowserRendererAvailability() : { available: false };
+    const isStylizedKaraokeRendererForced = (requiresBrowserKaraokePass || hasStylizedTextSegments) && !shouldAttemptBrowserRenderer;
+    const browserRendererAvailability = (shouldAttemptBrowserRenderer || requiresBrowserKaraokePass || hasStylizedTextSegments)
+      ? getMontageBrowserRendererAvailability()
+      : { available: false };
     let finalShouldAttemptBrowserRenderer = shouldAttemptBrowserRenderer;
-    if (shouldAttemptBrowserRenderer && browserRendererAvailability.available !== true) {
-      console.warn("[backend][montage-export][browser-renderer-unavailable-fallback]", {
+    if ((requiresBrowserKaraokePass || hasStylizedTextSegments) && browserRendererAvailability.available === true) {
+      shouldBurnSceneOnScreenText = false;
+      finalShouldAttemptBrowserRenderer = true;
+      normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
+    }
+    if (finalShouldAttemptBrowserRenderer && browserRendererAvailability.available !== true) {
+      const err = new Error("montage_browser_renderer_unavailable");
+      err.status = 503;
+      err.code = "montage_browser_renderer_unavailable";
+      err.detail = {
         jobId,
-        code: browserRendererAvailability.code || "playwright_unavailable",
-        message: browserRendererAvailability.message || "playwright_unavailable",
-        fallback: "ffmpeg-legacy"
-      });
-      finalShouldAttemptBrowserRenderer = false;
+        code: String(browserRendererAvailability.code || "playwright_unavailable").trim() || "playwright_unavailable",
+        message: String(browserRendererAvailability.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
+      };
+      throw err;
     }
     const hasTimelineOverlapOrGaps = overlapPlan.hasOverlap || overlapPlan.hasGaps;
-    if (finalShouldAttemptBrowserRenderer && hasTimelineOverlapOrGaps) {
-      console.info("[backend][montage-export][browser-renderer-overlap-fallback]", {
-        jobId,
-        hasOverlap: overlapPlan.hasOverlap,
-        hasGaps: overlapPlan.hasGaps,
-        fallback: "ffmpeg-legacy"
-      });
-      finalShouldAttemptBrowserRenderer = false;
-    }
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
       || normalOnScreenTextEnabled
+      || hasStylizedTextSegments
       || overlayCardSegments.length
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
     );
     const forcedKaraokeBrowserVisualPass = Boolean(
-      hasTimelineOverlapOrGaps
-      && shouldAttemptBrowserRenderer
+      (requiresBrowserKaraokePass || hasStylizedTextSegments)
       && browserRendererAvailability.available === true
-      && isTextTrackVisible
-      && Array.isArray(input.onScreenTextSegments)
-      && input.onScreenTextSegments.length > 0
-      && ["pill", "rect", "underline"].includes(
-        String(input?.onScreenTextSettings?.karaokeHighlightStyle || "").trim().toLowerCase()
+      && (
+        hasStylizedTextSegments
+        || (
+          isTextTrackVisible
+          && Array.isArray(input.onScreenTextSegments)
+          && input.onScreenTextSegments.length > 0
+          && ["text", "pill", "rect", "underline"].includes(stylizedKaraokeStyle)
+        )
       )
     );
     const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
-    const hasBrowserVisualPassFallback = hasBrowserVisualPass || (forcedKaraokeBrowserVisualPass && hasFinalVisualPass);
+    const hasBrowserVisualPassRequired = hasBrowserVisualPass || (forcedKaraokeBrowserVisualPass && hasFinalVisualPass);
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -12916,13 +12930,15 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasBrowserVisualPass,
       forcedKaraokeBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
-      browserVisualPassDisabled: shouldAttemptBrowserRenderer,
-      browserVisualPassOverlapFallback: hasTimelineOverlapOrGaps,
+      browserVisualPassDisabled: finalShouldAttemptBrowserRenderer !== true && shouldAttemptBrowserRenderer,
+      timelineHasOverlapOrGaps: hasTimelineOverlapOrGaps,
       browserRendererAvailable: browserRendererAvailability.available === true,
       browserRendererCode: browserRendererAvailability.available === true ? null : (browserRendererAvailability.code || null),
+      stylizedKaraokeRendererForced: isStylizedKaraokeRendererForced,
       reviewOnScreenTextEnabled,
       normalOnScreenTextEnabled,
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
+      hasStylizedTextSegments,
       overlayCardCount: overlayCardSegments.length,
       exportMode: input.exportMode,
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
@@ -12930,7 +12946,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       brandOverlayEnabled: input.brandOverlay?.enabled === true,
       brandOverlayAssetPath: String(input.brandOverlay?.assetPath || "").trim() || null
     });
-    if (hasBrowserVisualPassFallback) {
+    if (hasBrowserVisualPassRequired) {
       finalOutPath = await renderMontageBrowserFinalVisualPass({
         input: {
           ...input,
@@ -12945,7 +12961,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         registerAbortHandler: context?.registerAbortHandler
       });
     }
-    if (hasFinalVisualPass && !hasBrowserVisualPassFallback) {
+    if (hasFinalVisualPass && !hasBrowserVisualPassRequired) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
       const visualDims = input.exportMode === "review"
         ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
@@ -13183,7 +13199,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         console.info("[backend][montage-export][encode-delivery-start]", {
           jobId,
           stage: "montage_encode_delivery",
-          reason: "final_visual_fallback_no_filtergraph",
+          reason: "final_visual_no_filtergraph_encode",
           inputSnapshot: await buildMontageFileSnapshot(finalOutPath),
           outputPath: deliveryOutPath,
           deliveryParams
@@ -13363,11 +13379,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         exportId: stored.exportId
       },
       downloadUrl: stored.downloadUrl,
-      warnings: skippedEntries.length ? {
-        skippedEntries,
-        requestedSceneCount: input.entries.length,
-        exportedSceneCount: exportedEntries.length
-      } : undefined,
       exportedEntries
     };
   } finally {
@@ -13506,20 +13517,22 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         });
       }
     }
-    const renderModeDecision = resolveRuntimeMontageRenderMode(normalizedInput.renderMode || "browser");
-    const input = renderModeDecision.downgraded
-      ? {
-        ...audioIntentInput,
-        renderMode: renderModeDecision.renderMode
+    const input = {
+      ...audioIntentInput,
+      renderMode: "browser"
+    };
+    if (shouldUseBrowserMontageRenderer(input)) {
+      const browserRendererAvailability = getMontageBrowserRendererAvailability();
+      if (browserRendererAvailability.available !== true) {
+        const err = new Error("montage_browser_renderer_unavailable");
+        err.status = 503;
+        err.code = "montage_browser_renderer_unavailable";
+        err.detail = {
+          code: String(browserRendererAvailability.code || "playwright_unavailable").trim() || "playwright_unavailable",
+          message: String(browserRendererAvailability.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
+        };
+        throw err;
       }
-      : audioIntentInput;
-    if (renderModeDecision.downgraded) {
-      console.warn("[backend][montage-export][render-mode-fallback]", {
-        requestedMode: renderModeDecision.requestedMode,
-        effectiveMode: renderModeDecision.renderMode,
-        code: renderModeDecision.reasonCode,
-        message: renderModeDecision.reasonMessage
-      });
     }
     console.info("[backend][montage-export][request-body]", {
       sessionId: String(input.sessionId || "").trim(),
@@ -13529,6 +13542,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       nativeVideoAudioEntries: Array.isArray(input.entries) ? input.entries.filter((entry) => entry?.useNativeVideoAudio === true).length : 0,
       onScreenTextSegments: Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
+      stylizedTextSegments: Array.isArray(input.stylizedTextSegments) ? input.stylizedTextSegments.length : 0,
       overlayCardCount: Array.isArray(input.overlayCards?.segments) ? input.overlayCards.segments.length : (Array.isArray(input.overlayCards) ? input.overlayCards.length : 0),
       partyKaraoke: input.partyKaraoke !== false,
       onlyAudio: input.onlyAudio === true,

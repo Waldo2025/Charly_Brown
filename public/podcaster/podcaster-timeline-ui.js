@@ -1448,7 +1448,19 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const totalMs = options?.totalMs || Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
     const cursorMs = Math.max(0, Math.min(totalMs, Number(options?.currentMs ?? podcastVideoState.montageCursorMs ?? 0)));
     const entries = buildTimelineRuntimeEntries(activeSession);
-    const directEntry = entries.find((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs) || null;
+    const timelineLookupToleranceMs = 12;
+    const directEntry = (
+      entries.find((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs) || entries
+        .filter((entry) => {
+          const startMs = Math.max(0, Number(entry?.startMs || 0));
+          const endMs = Math.max(startMs, Number(entry?.endMs || 0));
+          return cursorMs >= (startMs - timelineLookupToleranceMs) && cursorMs <= (endMs + timelineLookupToleranceMs);
+        })
+        .sort((a, b) => (
+          Number(b?.startMs || 0) - Number(a?.startMs || 0)
+          || Number(b?.zIndex || 0) - Number(a?.zIndex || 0)
+        ))[0]
+    ) || null;
     const lastEntry = entries.length ? entries[entries.length - 1] : null;
     const focusEntry = directEntry || (cursorMs >= (Number(lastEntry?.endMs || 0) - 1) ? lastEntry : null);
     const playheadRowId = String(focusEntry?.rowId || "").trim();

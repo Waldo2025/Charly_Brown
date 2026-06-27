@@ -3083,6 +3083,8 @@ function normalizeHomePanelMusicTrack(track = null) {
     trimInMs,
     trimOutMs,
     localDataUrl: String(track.localDataUrl || "").trim(),
+    localMediaCacheKey: String(track.localMediaCacheKey || "").trim(),
+    dataUrl: String(track.dataUrl || track.localDataUrl || "").trim(),
     downloadUrl: String(track.downloadUrl || "").trim(),
     storagePath: String(track.storagePath || "").trim(),
     updatedAt: String(track.updatedAt || "").trim(),
@@ -3175,7 +3177,13 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
     const loopIndex = Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0));
     const track = uploadedTracks[trackIndex] || null;
     const sourceUrl = String(resolveAudio(item?.sourceUrl || item?.downloadUrl || "", item?.storagePath || "") || "").trim();
-    if (!sourceUrl) return null;
+    const localDataUrl = String(item?.localDataUrl || track?.localDataUrl || "").trim();
+    const localMediaCacheKey = String(item?.localMediaCacheKey || track?.localMediaCacheKey || "").trim();
+    const effectiveSourceUrl = sourceUrl
+      || (localDataUrl.startsWith("podcaster-local-media:") ? localDataUrl : "")
+      || (localMediaCacheKey ? `podcaster-local-media:${localMediaCacheKey}` : "")
+      || localDataUrl;
+    if (!effectiveSourceUrl && !localMediaCacheKey) return null;
     const startOffsetMs = Math.max(0, Math.round(Number(item?.startOffsetMs ?? item?.startMs ?? 0) || 0));
     const rawEndOffsetMs = Math.round(Number(item?.endOffsetMs ?? item?.endMs ?? 0) || 0);
     const rawDurationMs = Math.round(Number(item?.durationMs || 0) || 0);
@@ -3195,6 +3203,9 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
       trackIndex,
       loopIndex,
       muted: item?.muted === true || mutedLoopIndexes.has(loopIndex),
+      sourceUrl: effectiveSourceUrl,
+      localDataUrl,
+      localMediaCacheKey,
       volume: item?.volume !== undefined
         ? Math.max(0, Math.min(100, Number(item.volume) || 0))
         : (track?.montageVolume !== undefined ? track.montageVolume : panelVolume),
@@ -3405,9 +3416,18 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
       const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
       const track = uploadedTracks[trackIndex] || null;
       const mutedLoopIndexes = new Set(normalizeHomePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
+      const sourceUrl = String(resolveAudio(segment?.sourceUrl || segment?.downloadUrl || segment?.localDataUrl || segment?.dataUrl || "", segment?.storagePath || "") || "").trim();
+      const localDataUrl = String(segment?.localDataUrl || "").trim();
+      const localMediaCacheKey = String(segment?.localMediaCacheKey || track?.localMediaCacheKey || "").trim();
+      const effectiveSourceUrl = sourceUrl
+        || (localDataUrl.startsWith("podcaster-local-media:") ? localDataUrl : "")
+        || (localMediaCacheKey ? `podcaster-local-media:${localMediaCacheKey}` : "")
+        || localDataUrl;
       return {
         slotLabel: String(segment?.slotLabel || "").trim(),
-        sourceUrl: String(resolveAudio(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim(),
+        sourceUrl: effectiveSourceUrl,
+        localDataUrl,
+        localMediaCacheKey,
         startOffsetMs: Math.max(0, Number(segment?.startMs || 0) || 0),
         endOffsetMs: Math.max(0, Number(segment?.endMs || 0) || 0),
         loop: segment?.loop === true,
@@ -3423,10 +3443,19 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
         duckingWhenGeminiPct: track?.duckingWhenGeminiPct !== undefined ? track.duckingWhenGeminiPct : normalized.duckingWhenGeminiPct,
         stabilize: track?.stabilize !== undefined ? track.stabilize : normalized.stabilize
       };
-    }).filter((segment) => segment.sourceUrl);
+    }).filter((segment) => segment.sourceUrl || segment.localDataUrl || segment.localMediaCacheKey);
   const sourceUrl = (!uploadedMode && normalized.sourceType === "track")
-    ? String(resolveAudio(activeTrack?.downloadUrl || activeTrack?.localDataUrl || "", activeTrack?.storagePath || "") || "").trim()
+    ? (() => {
+      const trackSourceUrl = String(resolveAudio(activeTrack?.sourceUrl || activeTrack?.downloadUrl || "", activeTrack?.storagePath || "") || "").trim();
+      if (trackSourceUrl) return trackSourceUrl;
+      if (String(activeTrack?.localDataUrl || "").trim()) return String(activeTrack?.localDataUrl || "").trim();
+      const trackLocalMediaCacheKey = String(activeTrack?.localMediaCacheKey || "").trim();
+      if (trackLocalMediaCacheKey) return `podcaster-local-media:${trackLocalMediaCacheKey}`;
+      return "";
+    })()
     : "";
+  const localDataUrl = String(activeTrack?.localDataUrl || "").trim();
+  const localMediaCacheKey = String(activeTrack?.localMediaCacheKey || "").trim();
   const sourceType = uploadedMode
     ? (sourceItems.length ? "track" : "none")
     : (normalized.sourceType === "track" && sourceUrl ? "track" : "none");
@@ -3454,6 +3483,8 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
       }))
       : [],
     mutedLoopIndexes: normalizeHomePanelMusicMutedLoopIndexes(activeTrack?.mutedLoopIndexes || []),
+    localDataUrl,
+    localMediaCacheKey,
     enabled: sourceType !== "none" && (!!sourceUrl || sourceItems.length > 0)
   };
 }

@@ -20,7 +20,7 @@ assert.match(
 
 assert.match(
   source,
-  /if \(input\.useTimelineAudio && !segmentInputs\.length\) \{[\s\S]*throw new Error\("montage_timeline_audio_sources_missing"\)/,
+  /if \(input\.useTimelineAudio && !segmentInputs\.length\) \{[\s\S]*const err = new Error\("montage_timeline_audio_sources_missing"\);[\s\S]*err\.code = "montage_timeline_audio_sources_missing";[\s\S]*throw err;/,
   "Si el timeline esperaba audio y no encontró fuentes válidas, el export debe fallar explícitamente."
 );
 

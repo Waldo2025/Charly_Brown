@@ -934,9 +934,23 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     };
   }
 
-  function readAudioDurationSecFromSrc(src = "") {
+  async function resolvePanelMusicProbeSource(src = "") {
     const source = String(src || "").trim();
-    if (!source) return Promise.resolve({ durationSec: 0, method: "" });
+    if (!source) return "";
+    const localMediaPrefix = "podcaster-local-media:";
+    if (!source.startsWith(localMediaPrefix)) return source;
+    const localMediaKey = source.replace(localMediaPrefix, "").trim();
+    if (!localMediaKey) return "";
+    const controller = playbackController();
+    if (!controller || typeof controller.resolveLocalMediaObjectUrl !== "function") return "";
+    return (await controller.resolveLocalMediaObjectUrl(localMediaKey)) || "";
+  }
+
+  async function readAudioDurationSecFromSrc(src = "") {
+    const source = String(src || "").trim();
+    if (!source) return { durationSec: 0, method: "" };
+    const playableSource = await resolvePanelMusicProbeSource(source);
+    if (!playableSource) return { durationSec: 0, method: "missing" };
     return new Promise((resolve) => {
       const audio = new Audio();
       let finished = false;
@@ -1000,7 +1014,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       };
       audio.onerror = () => done(0, "");
       timeoutId = window.setTimeout(() => done(0, ""), 7000);
-      audio.src = source;
+      audio.src = playableSource;
       try { audio.load(); } catch (_) { done(0, ""); }
     });
   }
@@ -1008,24 +1022,26 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   async function measureAudioDurationInfoFromSrc(src = "") {
     const source = String(src || "").trim();
     if (!source) return { durationSec: 0, method: "" };
+    const playableSource = await resolvePanelMusicProbeSource(source);
+    if (!playableSource) return { durationSec: 0, method: "missing" };
     try {
-      const decoded = await decodeAudioDurationInfoFromSrc(source);
+      const decoded = await decodeAudioDurationInfoFromSrc(playableSource);
       if (Number(decoded?.durationSec || 0) > 0.05) {
         logPodcastRenderDebug("audio-track-duration-measured", {
           method: decoded.method,
           durationSec: decoded.durationSec,
-          srcKind: source.startsWith("data:") ? "data-url" : "remote"
+          srcKind: playableSource.startsWith("data:") ? "data-url" : "remote"
         });
         return decoded;
       }
     } catch (error) {
       if (isMissingAudioSourceError(error)) return { durationSec: 0, method: "missing" };
     }
-    const metadata = await readAudioDurationSecFromSrc(source);
+    const metadata = await readAudioDurationSecFromSrc(playableSource);
     logPodcastRenderDebug("audio-track-duration-measured", {
       method: metadata.method || "metadata_failed",
       durationSec: Number(metadata?.durationSec || 0) || 0,
-      srcKind: source.startsWith("data:") ? "data-url" : "remote"
+      srcKind: playableSource.startsWith("data:") ? "data-url" : "remote"
     });
     return metadata;
   }
@@ -1068,7 +1084,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const measuredWith = String(track.durationMeasuredWith || "").trim().toLowerCase();
     if (!options.force && measuredWith === "missing") return track;
     if (!options.force && getPanelMusicTrackDurationSec(track) > 0.05 && measuredWith === "decode") return track;
-    const src = String(track.localDataUrl || resolveStorageAudioUrl(track.downloadUrl || "", track.storagePath || "") || track.downloadUrl || "").trim();
+    const src = await resolvePanelMusicTrackPlayableSrc(track);
     if (!src || isProxyStoragePathMediaUrl(src)) return track;
     panelMusicDurationProbePendingKinds.add(trackKind);
     try {
@@ -1110,7 +1126,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const measuredWith = String(track.durationMeasuredWith || "").trim().toLowerCase();
       if (!options.force && measuredWith === "missing") continue;
       if (!options.force && getPanelMusicTrackDurationSec(track) > 0.05 && measuredWith === "decode") continue;
-      const src = String(track.localDataUrl || resolveStorageAudioUrl(track.downloadUrl || "", track.storagePath || "") || track.downloadUrl || "").trim();
+      const src = await resolvePanelMusicTrackPlayableSrc(track);
       if (!src || isProxyStoragePathMediaUrl(src)) continue;
       try {
         const durationInfo = await measureAudioDurationInfoFromSrc(src);

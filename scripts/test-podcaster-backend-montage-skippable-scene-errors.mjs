@@ -6,10 +6,16 @@ const source = fs.readFileSync(
   "utf8"
 );
 
-assert.match(
+assert.doesNotMatch(
   source,
-  /function shouldSkipMontageEntryError\(error\) \{[\s\S]*"scene_download_timeout"[\s\S]*"storage_download_idle_timeout"[\s\S]*"downloaded_asset_invalid"[\s\S]*"scene_probe_timeout"[\s\S]*"scene_render_timeout"[\s\S]*"ffmpeg_exit_code"[\s\S]*\}/m,
-  "Errores recuperables por escena deben omitirse para que el montage export continúe con las demás escenas."
+  /function shouldSkipMontageEntryError\(|buildMontageSkippedEntry\(/,
+  "El backend no debe conservar helpers para omitir escenas fallidas durante el export."
 );
 
-console.log("Podcaster backend montage skippable scene errors OK.");
+assert.match(
+  source,
+  /catch \(error\) \{[\s\S]*failedSceneIndex: sceneIndex,[\s\S]*failedRowId: rowId,[\s\S]*throw error;[\s\S]*\} finally \{/m,
+  "Los errores por escena deben propagarse con escena/substage en vez de continuar con un MP4 incompleto."
+);
+
+console.log("Podcaster backend montage strict scene errors OK.");

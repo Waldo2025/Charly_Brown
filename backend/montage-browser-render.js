@@ -45,7 +45,6 @@ function buildRendererUnavailableState({
 
 function normalizeMontageRenderMode(value = "", fallback = "browser") {
   const cleanValue = String(value || "").trim().toLowerCase();
-  if (cleanValue === "ffmpeg-legacy") return "ffmpeg-legacy";
   if (cleanValue === "browser") return "browser";
   return "browser";
 }
@@ -54,38 +53,6 @@ function shouldUseBrowserMontageRenderer(input = {}) {
   return normalizeMontageRenderMode(input?.renderMode || "browser") === "browser"
     && String(input?.exportMode || "normal").trim() === "normal"
     && input?.onlyAudio !== true;
-}
-
-function resolveRuntimeMontageRenderMode(requestedValue = "", availabilityOverride = null) {
-  const requestedMode = normalizeMontageRenderMode(requestedValue || "browser");
-  if (requestedMode !== "browser") {
-    return {
-      requestedMode,
-      renderMode: requestedMode,
-      downgraded: false,
-      reasonCode: "",
-      reasonMessage: ""
-    };
-  }
-  const availability = availabilityOverride && typeof availabilityOverride === "object"
-    ? availabilityOverride
-    : getMontageBrowserRendererAvailability();
-  if (availability?.available === true) {
-    return {
-      requestedMode,
-      renderMode: "browser",
-      downgraded: false,
-      reasonCode: "",
-      reasonMessage: ""
-    };
-  }
-  return {
-    requestedMode,
-    renderMode: "ffmpeg-legacy",
-    downgraded: true,
-    reasonCode: String(availability?.code || "playwright_unavailable").trim() || "playwright_unavailable",
-    reasonMessage: String(availability?.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
-  };
 }
 
 function pathToFileUrl(targetPath = "") {
@@ -305,7 +272,6 @@ async function renderMontageBrowserOverlayVideo({
 
 module.exports = {
   normalizeMontageRenderMode,
-  resolveRuntimeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
   isMontageBrowserRendererAvailable,

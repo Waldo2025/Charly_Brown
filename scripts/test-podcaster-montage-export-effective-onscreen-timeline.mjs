@@ -44,6 +44,7 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(`${extractFunction("buildMontageFallbackOnScreenTextTimeline")};`, context);
+vm.runInContext(`${extractFunction("clampMontageOnScreenTextSegmentsToGeminiTimeline")};`, context);
 vm.runInContext(`${extractFunction("resolveEffectiveMontageOnScreenTextTimeline")};`, context);
 
 const resolveFn = context.resolveEffectiveMontageOnScreenTextTimeline;
