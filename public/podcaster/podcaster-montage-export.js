@@ -446,7 +446,17 @@ function updateMontageExportFloatingCardVisibility() {
   const card = window.els.montageExportFloatingCard;
   if (!card) return;
   const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
-  const shouldShow = Boolean(activeJobId) && (window.els.montageExportModal?.hidden === true);
+  const submissionInFlight = window.montageExportJobState?.submissionInFlight === true;
+  const shouldShow = Boolean(
+    window.els.montageExportModal?.hidden === true
+    && (
+      activeJobId
+      || submissionInFlight
+      || window.montageExportBusy
+      || String(window.montageExportJobState?.lastStage || "").trim()
+      || String(window.montageExportJobState?.lastHint || "").trim()
+    )
+  );
   card.hidden = !shouldShow;
   if (shouldShow) {
     card.dataset.busy = String(Boolean(window.montageExportBusy));
@@ -1220,6 +1230,7 @@ export function resetMontageExportJobState() {
   montageExportSubmitLocked = false;
   window.montageExportJobState = {
     jobId: "",
+    submissionInFlight: false,
     pollTimer: null,
     resumeOnOnlineHandler: null,
     startedAtMs: 0,
@@ -1381,7 +1392,13 @@ export function resetMontageExportPreviewState() {
 
 export async function closeMontageExportModal({ cancelActiveJob = false } = {}) {
   const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
-  const keepJobVisible = Boolean(activeJobId) && (window.montageExportBusy || Boolean(window.montageExportJobState?.lastStage) || Boolean(window.montageExportJobState?.lastHint));
+  const keepJobVisible = Boolean(
+    activeJobId
+    || window.montageExportJobState?.submissionInFlight === true
+    || window.montageExportBusy
+    || String(window.montageExportJobState?.lastStage || "").trim()
+    || String(window.montageExportJobState?.lastHint || "").trim()
+  );
   if (cancelActiveJob && window.montageExportBusy && activeJobId) {
     void requestMontageExportCancel(activeJobId).catch((error) => {
       console.warn("[podcaster][montage-export] cancel request failed", formatMontageExportCancelError(error));
@@ -3558,6 +3575,7 @@ export async function runMontageExport() {
   setMontageExportBusy(true);
   const previousJobId = String(window.montageExportJobState.jobId || "").trim();
   try {
+    window.montageExportJobState.submissionInFlight = true;
     setConfirmMontageExportButtonState({
       disabled: true,
       loading: true,
@@ -3613,6 +3631,7 @@ export async function runMontageExport() {
       method: "POST",
       body: submissionPayload
     });
+    window.montageExportJobState.submissionInFlight = false;
     if (!window.montageExportBusy) {
       console.warn("[podcaster][montage-export] submit returned but export is no longer busy (cancelled)");
       const newJobId = String(data?.jobId || "").trim();
@@ -3653,6 +3672,7 @@ export async function runMontageExport() {
     window.montageExportJobState.startedAtMs = Date.now();
     pollMontageExportJob(jobId).catch(() => { });
   } catch (error) {
+    window.montageExportJobState.submissionInFlight = false;
     if (!window.montageExportBusy) return;
     const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
