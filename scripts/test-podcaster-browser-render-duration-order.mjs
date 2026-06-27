@@ -27,6 +27,12 @@ if (!source.includes('"montage-browser-input.webm"') || !source.includes('"-c:v"
   throw new Error("La entrada del browser pass debe transcodificarse a WebM/VP8 compatible con Chromium.");
 }
 
+for (const requiredSnippet of ['"-cpu-used", "8"', '"-lag-in-frames", "0"', '"-auto-alt-ref", "0"', "maxInputEdge = 960"]) {
+  if (!source.includes(requiredSnippet)) {
+    throw new Error(`La entrada WebM del browser pass debe conservar la optimizacion: ${requiredSnippet}`);
+  }
+}
+
 const browserInputUsageIndex = functionBody.indexOf("const browserInputPath = await prepareMontageBrowserVisualInput");
 const baseVideoUsageIndex = functionBody.indexOf("baseVideoPath: browserInputPath");
 if (browserInputUsageIndex < 0 || baseVideoUsageIndex < 0 || browserInputUsageIndex > baseVideoUsageIndex) {

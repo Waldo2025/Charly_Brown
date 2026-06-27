@@ -11916,22 +11916,31 @@ async function prepareMontageBrowserVisualInput({
   }
   const width = Math.max(2, Math.round(Number(viewport?.width || 1280) || 1280));
   const height = Math.max(2, Math.round(Number(viewport?.height || 720) || 720));
+  const maxInputEdge = 960;
+  const scaleRatio = Math.min(1, maxInputEdge / Math.max(width, height));
+  const browserInputWidth = Math.max(2, Math.round((width * scaleRatio) / 2) * 2);
+  const browserInputHeight = Math.max(2, Math.round((height * scaleRatio) / 2) * 2);
   const outputPath = path.join(tmpDir, "montage-browser-input.webm");
   await runFfmpegCommand([
     "-y", "-hide_banner", "-loglevel", "warning",
+    "-threads", "2",
     "-i", inputPath,
     "-map", "0:v:0",
     "-an",
-    "-vf", `scale=${width}:${height}:flags=bicubic,setsar=1,setpts=PTS-STARTPTS`,
+    "-vf", `scale=${browserInputWidth}:${browserInputHeight}:flags=fast_bilinear,setsar=1,fps=24,setpts=PTS-STARTPTS`,
     "-c:v", "libvpx",
     "-deadline", "realtime",
-    "-cpu-used", "5",
-    "-b:v", "4M",
+    "-cpu-used", "8",
+    "-lag-in-frames", "0",
+    "-auto-alt-ref", "0",
+    "-b:v", "900k",
+    "-maxrate", "1200k",
+    "-bufsize", "1800k",
     "-pix_fmt", "yuv420p",
     outputPath
   ], {
     stage: "montage_browser_visual_input_transcode",
-    timeoutMs: Math.max(180000, (Math.max(1000, Number(totalDurationMs || 1000) || 1000) * 4) + 60000),
+    timeoutMs: Math.max(600000, (Math.max(1000, Number(totalDurationMs || 1000) || 1000) * 4) + 120000),
     shouldAbort,
     registerAbortHandler
   });
