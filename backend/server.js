@@ -12004,11 +12004,12 @@ async function renderMontageBrowserFinalVisualPass({
     }, 0)) || 1000
   );
   const brandOverlay = resolveMontageBrowserBrandOverlay(input?.brandOverlay);
+  const browserOnScreenTextEnabled = input?.browserOnScreenTextEnabled !== false;
   const browserPayload = {
     ...input,
     onScreenTextTimeline: {
       settings: input.onScreenTextSettings,
-      segments: input.onScreenTextSegments
+      segments: browserOnScreenTextEnabled ? input.onScreenTextSegments : []
     },
     stylizedTextTimeline: resolveMontageStylizedTextPayload(input),
     renderMode: "browser",
@@ -12375,14 +12376,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       && input.onScreenTextSegments.length > 0
       && ["text", "pill", "rect", "underline"].includes(stylizedKaraokeStyle);
     const hasStylizedTextSegments = canForceBrowserVisualPass && hasMontageStylizedTextSegments(input);
+    const earlyOverlayCardSegments = Array.isArray(input.overlayCards?.segments)
+      ? input.overlayCards.segments
+      : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
+    const hasBrowserOnlyVisualLayers = Boolean(
+      hasStylizedTextSegments
+      || earlyOverlayCardSegments.length
+      || input.brandOverlay?.enabled === true
+    );
     const browserRendererAvailability = (shouldAttemptBrowserRenderer || requiresBrowserKaraokePass || hasStylizedTextSegments)
       ? getMontageBrowserRendererAvailability()
       : { available: false };
-    // The browser visual pass is the preview-faithful renderer. When it is active,
-    // scene intermediates must stay clean or on-screen text is baked twice.
-    if (shouldAttemptBrowserRenderer || ((requiresBrowserKaraokePass || hasStylizedTextSegments) && browserRendererAvailability.available === true)) {
-      shouldBurnSceneOnScreenText = false;
-    }
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const exportedEntries = [];
@@ -12417,7 +12421,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         lastHeartbeatAt: new Date().toISOString()
       });
     };
-    if (canForceBrowserVisualPass) {
+    if (canForceBrowserVisualPass && hasBrowserOnlyVisualLayers) {
       emitStage("boot_renderer", 0.12, "Verificando renderer fiel al preview.");
       const preflightBrandOverlay = resolveMontageBrowserBrandOverlay(input.brandOverlay);
       const stylizedTextPayload = resolveMontageStylizedTextPayload(input);
@@ -12427,8 +12431,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ...input,
           onScreenTextTimeline: {
             settings: input.onScreenTextSettings,
-            segments: input.onScreenTextSegments
+            segments: []
           },
+          browserOnScreenTextEnabled: false,
           stylizedTextTimeline: stylizedTextPayload,
           renderMode: "browser",
           preflightOnly: true,
@@ -13010,20 +13015,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const isStylizedKaraokeRendererForced = (requiresBrowserKaraokePass || hasStylizedTextSegments) && !shouldAttemptBrowserRenderer;
     let finalShouldAttemptBrowserRenderer = shouldAttemptBrowserRenderer;
     if ((requiresBrowserKaraokePass || hasStylizedTextSegments) && browserRendererAvailability.available === true) {
-      shouldBurnSceneOnScreenText = false;
       finalShouldAttemptBrowserRenderer = true;
-      normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    }
-    if (finalShouldAttemptBrowserRenderer && browserRendererAvailability.available !== true) {
-      const err = new Error("montage_browser_renderer_unavailable");
-      err.status = 503;
-      err.code = "montage_browser_renderer_unavailable";
-      err.detail = {
-        jobId,
-        code: String(browserRendererAvailability.code || "playwright_unavailable").trim() || "playwright_unavailable",
-        message: String(browserRendererAvailability.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
-      };
-      throw err;
+      normalOnScreenTextEnabled = false;
     }
     const hasTimelineOverlapOrGaps = overlapPlan.hasOverlap || overlapPlan.hasGaps;
     const hasFinalVisualPass = Boolean(
@@ -13049,6 +13042,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     );
     const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
     const hasBrowserVisualPassRequired = hasBrowserVisualPass || (forcedKaraokeBrowserVisualPass && hasFinalVisualPass);
+    if (hasBrowserVisualPassRequired && browserRendererAvailability.available !== true) {
+      const err = new Error("montage_browser_renderer_unavailable");
+      err.status = 503;
+      err.code = "montage_browser_renderer_unavailable";
+      err.detail = {
+        jobId,
+        code: String(browserRendererAvailability.code || "playwright_unavailable").trim() || "playwright_unavailable",
+        message: String(browserRendererAvailability.message || "Playwright Chromium no esta disponible en este runtime.").trim() || "Playwright Chromium no esta disponible en este runtime."
+      };
+      throw err;
+    }
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -13080,7 +13084,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       finalOutPath = await renderMontageBrowserFinalVisualPass({
         input: {
           ...input,
-          overlayCards: overlayCardSegments
+          overlayCards: overlayCardSegments,
+          browserOnScreenTextEnabled: false
         },
         finalOutPath,
         tmpDir,
