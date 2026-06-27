@@ -229,6 +229,81 @@ function buildMontageBrowserDiagnosticDetail(diagnostics = {}, pageState = {}) {
   };
 }
 
+async function resolveMontageBrowserRecordedVideo({ page = null, outputDir = "", maxAttempts = 20, waitMs = 250 } = {}) {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const resolveFromDirectory = async (cleanOutputDir) => {
+    const candidates = await fs.promises.readdir(cleanOutputDir, { withFileTypes: true }).catch(() => []);
+    const candidateStats = await Promise.all(
+      candidates
+        .filter((entry) => {
+          if (!entry.isFile()) return false;
+          const name = String(entry.name || "").toLowerCase();
+          return name.endsWith(".webm") || name.endsWith(".mp4");
+        })
+        .map((entry) => {
+          const fullPath = path.join(cleanOutputDir, entry.name);
+          return fs.promises.stat(fullPath)
+            .then((stats) => ({ fullPath, stats }))
+            .catch(() => null);
+        })
+    );
+    const best = candidateStats
+      .filter((entry) => entry && entry.stats && entry.stats.size > 0)
+      .sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs)
+      .shift();
+    if (best?.fullPath) return best.fullPath;
+    return "";
+  };
+
+  try {
+    if (page && !page.isClosed()) {
+      const videoHandle = await page.video().catch(() => null);
+      if (videoHandle?.path) {
+        const candidate = await videoHandle.path();
+        if (candidate && typeof candidate === "string" && candidate.trim()) {
+          const cleanCandidate = path.resolve(candidate.trim());
+          if (fs.existsSync(cleanCandidate)) {
+            const stats = await fs.promises.stat(cleanCandidate).catch(() => null);
+            if (stats && stats.size > 0) return cleanCandidate;
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  const cleanOutputDir = path.resolve(String(outputDir || "").trim());
+  if (!cleanOutputDir || !fs.existsSync(cleanOutputDir)) return "";
+
+  let lastCandidate = "";
+  let lastSize = -1;
+  let stableCount = 0;
+  for (let attempt = 0; attempt < Math.max(1, Number(maxAttempts || 0)); attempt += 1) {
+    const candidatePath = await resolveFromDirectory(cleanOutputDir);
+    if (candidatePath) {
+      const stat = await fs.promises.stat(candidatePath).catch(() => null);
+      const candidateSize = stat && Number.isFinite(stat.size) ? stat.size : 0;
+      if (candidateSize > 0) {
+        if (lastCandidate === candidatePath && candidateSize === lastSize) {
+          stableCount += 1;
+        } else {
+          stableCount = 0;
+        }
+        lastCandidate = candidatePath;
+        lastSize = candidateSize;
+        if (stableCount >= 1) {
+          return candidatePath;
+        }
+        if (attempt >= Math.max(1, Number(maxAttempts || 0)) - 1 && candidateSize > 0) {
+          return candidatePath;
+        }
+      }
+    }
+    await wait(Number(waitMs || 0));
+  }
+
+  return lastCandidate || "";
+}
+
 async function forceBrowserRenderCompletion(page, diagnostics = {}) {
   const forcedState = await page.evaluate(() => {
     const video = document.querySelector("video");
@@ -466,11 +541,23 @@ async function renderMontageBrowserOverlayVideo({
       err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, await readMontageBrowserRenderState(page));
       throw err;
     }
-    const videoHandle = await page.video();
+
     await page.close();
     await context.close();
     await browser.close();
-    return videoHandle ? await videoHandle.path() : "";
+    const renderedVideoPath = await resolveMontageBrowserRecordedVideo({
+      outputDir: videoDir,
+      maxAttempts: 24,
+      waitMs: 300
+    });
+    if (!renderedVideoPath) {
+      const err = new Error("browser_render_output_missing");
+      err.code = "browser_render_output_missing";
+      err.detail = buildMontageBrowserDiagnosticDetail(diagnostics, await readMontageBrowserRenderState(page));
+      throw err;
+    }
+
+    return renderedVideoPath;
   } finally {
     if (abortPollTimer) {
       clearInterval(abortPollTimer);
