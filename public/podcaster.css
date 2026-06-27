@@ -2820,6 +2820,22 @@ body.is-resizing-podcast-stage {
   flex: 0 0 auto;
 }
 
+#reopenMontageExportModalBtn {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+#reopenMontageExportModalBtn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+#reopenMontageExportModalBtn i {
+  color: inherit;
+}
+
 .montage-export-floating-card-body {
   display: grid;
   gap: 10px;
