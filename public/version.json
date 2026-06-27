@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.257",
-  "build": "2026-1.0.10.257",
+  "version": "1.0.10.258",
+  "build": "2026-1.0.10.258",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Actualizado: Se incrementan version.json y los cache-busters de podcaster.html, podcaster.js y podcaster-montage-export.js para forzar en producción la carga de la card flotante de exportación con logs, barra de avance y reabrir modal sin cancelar el job.",
     "Actualizado: Se incrementan version.json y los cache-busters de podcaster.html y podcaster.js para forzar en producción la carga del fix de audio de fondo entre escenas y del preview rehidratado.",
     "Corregido: El audio de fondo local en preview ya no corta al mover escenas: se mantiene segmentación tolerante y se evita reinicio de Audio durante pequeños huecos de tiempo/arrastre del timeline. También se protege la resolución de `podcaster-local-media:` en medición de duración.",
     "Corregido: El audio de fondo MP3 subido localmente se vuelve a reproducir en preview y export sin CORS cuando llega desde localMediaCacheKey/dataUrl en sesiones locales o de producción. Se prioriza la resolución local antes de pasar la URL a `new Audio`.",

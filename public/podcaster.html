@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.10.251">
+  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.10.252">
   <link rel="stylesheet" href="podcaster/podcaster-sidepanel-studio.css?v=2026-05-23-1">
   <link rel="stylesheet" href="podcaster/podcaster-overlay-card-studio.css?v=2026-05-28-2">
   <!-- FilePond -->
@@ -2278,6 +2278,29 @@
     </section>
   </div>
 
+  <div id="montageExportFloatingCard" class="montage-export-floating-card" hidden>
+    <div class="montage-export-floating-card-shell">
+      <div class="montage-export-floating-card-head" data-action="drag-montage-export-floating-card">
+        <div class="montage-export-floating-card-title">
+          <strong id="montageExportFloatingTitle">Exportación en curso</strong>
+          <span id="montageExportFloatingStatus">Seguimiento activo.</span>
+        </div>
+        <div class="montage-export-floating-card-actions">
+          <button id="reopenMontageExportModalBtn" class="row-icon-btn" type="button" title="Reabrir exportación" aria-label="Reabrir exportación">
+            <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+      <div class="montage-export-floating-card-body">
+        <div id="montageExportFloatingHint" class="montage-export-floating-card-hint">Puedes reabrir el modal para seguir la exportación.</div>
+        <div class="montage-export-floating-progress" aria-hidden="true">
+          <div id="montageExportFloatingProgress" class="montage-export-progress-bar"></div>
+        </div>
+        <div id="montageExportFloatingLogs" class="montage-export-floating-logs" aria-label="Logs de exportación"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Reemplazar Escena -->
   <div id="podcastSceneVideoSelectorModal" class="pme-modal-overlay" hidden>
     <div class="pme-modal-container">
@@ -2430,7 +2453,7 @@
   <script type="module" src="js/sidebar.js?v=2026-1.0.0.60"></script>
   <script type="module" src="podcaster/podcaster-timeline-model.js?v=2026-06-24.15"></script>
   <script type="module" src="podcaster/podcaster-script-editor.js?v=2026-05-17.2"></script>
-  <script type="module" src="podcaster/podcaster.js?v=2026-06-26.12"></script>
+  <script type="module" src="podcaster/podcaster.js?v=2026-06-26.13"></script>
   <script type="module" src="podcaster/podcaster-scene-media-position.js?v=2026-05-27.1"></script>
   <script type="module" src="podcaster/podcaster-overlay-card-studio.js?v=2026-05-28.1"></script>
   <script type="module" src="podcaster/podcaster-overlay-cards.js?v=2026-05-27.2"></script>
@@ -2439,7 +2462,7 @@
   <script type="module" src="podcaster/podcaster-chat-assistant.js?v=2026-05-17.1"></script>
   <script type="module" src="podcaster/podcaster-audioGemini-timeline.js?v=2026-06-22.6"></script>
   <script type="module" src="podcaster/podcaster-video-generator.js?v=2026-06-26.5"></script>
-  <script type="module" src="podcaster/podcaster-montage-export.js?v=2026-06-26.7"></script>
+  <script type="module" src="podcaster/podcaster-montage-export.js?v=2026-06-26.8"></script>
   <script type="module" src="podcaster/podcaster-podcast-script-domain.js?v=2026-05-19.1"></script>
   <script type="module" src="podcaster/podcaster-video-script-domain.js?v=2026-05-19.1"></script>
   <script type="module" src="podcaster/podcaster-script-generator.js?v=2026-05-17.3"></script>

@@ -341,14 +341,159 @@ let montageExportJobState = {
   reviewExcelPayload: null,
   reviewExcelFilename: "",
   readyDownloadUrl: "",
-  readyDownloadFilename: ""
+  readyDownloadFilename: "",
+  recentLogs: []
 };
+
+const MONTAGE_EXPORT_FLOATING_CARD_STORAGE_KEY = "cb_podcast_montage_export_floating_card_v1";
+const MONTAGE_EXPORT_FLOATING_CARD_MAX_LOGS = 14;
+
+function summarizeMontageExportLogPayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return "";
+  const parts = [];
+  const stage = String(payload.stage || "").trim();
+  const substage = String(payload.substage || payload.sceneSubstage || "").trim();
+  const progress = Number.isFinite(Number(payload.progress)) ? Math.round(Number(payload.progress) * 1000) / 10 : null;
+  const hint = String(payload.hint || "").trim();
+  if (stage) parts.push(stage);
+  if (substage) parts.push(substage);
+  if (progress !== null) parts.push(`${progress}%`);
+  if (hint) parts.push(hint);
+  return parts.join(" · ");
+}
+
+function readMontageExportFloatingCardPosition() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_FLOATING_CARD_STORAGE_KEY) || "{}");
+    const left = Math.max(8, Math.round(Number(parsed?.left || 0) || 0));
+    const top = Math.max(8, Math.round(Number(parsed?.top || 0) || 0));
+    return { left, top };
+  } catch (_) {
+    return { left: 24, top: 96 };
+  }
+}
+
+function persistMontageExportFloatingCardPosition(left = 0, top = 0) {
+  try {
+    localStorage.setItem(MONTAGE_EXPORT_FLOATING_CARD_STORAGE_KEY, JSON.stringify({
+      left: Math.max(0, Math.round(Number(left || 0) || 0)),
+      top: Math.max(0, Math.round(Number(top || 0) || 0))
+    }));
+  } catch (_) {
+    // noop
+  }
+}
+
+function ensureMontageExportRecentLogs() {
+  if (!Array.isArray(window.montageExportJobState.recentLogs)) {
+    window.montageExportJobState.recentLogs = [];
+  }
+  return window.montageExportJobState.recentLogs;
+}
+
+function pushMontageExportRecentLog(event = "", payload = {}, level = "info") {
+  const logs = ensureMontageExportRecentLogs();
+  const entry = {
+    at: new Date().toISOString(),
+    level: ["info", "warn", "error", "debug"].includes(String(level || "").trim()) ? String(level || "").trim() : "info",
+    event: String(event || "").trim() || "event",
+    summary: summarizeMontageExportLogPayload(payload),
+    payload: payload && typeof payload === "object" ? payload : {}
+  };
+  logs.push(entry);
+  while (logs.length > MONTAGE_EXPORT_FLOATING_CARD_MAX_LOGS) logs.shift();
+  return entry;
+}
+
+function renderMontageExportRecentLogs() {
+  const container = window.els.montageExportFloatingLogs;
+  if (!container) return;
+  const logs = Array.isArray(window.montageExportJobState.recentLogs) ? window.montageExportJobState.recentLogs : [];
+  container.innerHTML = "";
+  if (!logs.length) {
+    const empty = document.createElement("div");
+    empty.className = "montage-export-floating-log-empty";
+    empty.textContent = "Sin logs todavía.";
+    container.appendChild(empty);
+    return;
+  }
+  for (const log of logs) {
+    const row = document.createElement("div");
+    row.className = `montage-export-floating-log is-${String(log?.level || "info").trim() || "info"}`;
+    const head = document.createElement("div");
+    head.className = "montage-export-floating-log-head";
+    head.textContent = `${String(log?.event || "event").trim()} · ${String(log?.at || "").trim().slice(11, 19)}`;
+    const body = document.createElement("div");
+    body.className = "montage-export-floating-log-body";
+    body.textContent = String(log?.summary || "").trim() || JSON.stringify(log?.payload || {}, null, 0);
+    row.append(head, body);
+    container.appendChild(row);
+  }
+}
+
+function syncMontageExportFloatingCardPosition() {
+  const card = window.els.montageExportFloatingCard;
+  if (!card || card.hidden) return;
+  const next = readMontageExportFloatingCardPosition();
+  if (!card.dataset.positionApplied) {
+    card.style.left = `${next.left}px`;
+    card.style.top = `${next.top}px`;
+    card.dataset.positionApplied = "true";
+  }
+}
+
+function updateMontageExportFloatingCardVisibility() {
+  const card = window.els.montageExportFloatingCard;
+  if (!card) return;
+  const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
+  const shouldShow = Boolean(activeJobId) && (window.els.montageExportModal?.hidden === true);
+  card.hidden = !shouldShow;
+  if (shouldShow) {
+    card.dataset.busy = String(Boolean(window.montageExportBusy));
+    card.dataset.tone = window.montageExportJobState?.lastStage === "error" ? "error" : (window.montageExportJobState?.readyDownloadUrl ? "success" : (window.montageExportBusy ? "warning" : "neutral"));
+    const statusEl = window.els.montageExportFloatingStatus;
+    const hintEl = window.els.montageExportFloatingHint;
+    const titleEl = window.els.montageExportFloatingTitle;
+    if (titleEl) {
+      titleEl.textContent = window.montageExportBusy ? "Exportación en curso" : (window.montageExportJobState?.lastStage === "ready" ? "Exportación lista" : "Exportación guardada");
+    }
+    if (statusEl) {
+      statusEl.textContent = String(window.montageExportJobState?.lastStage || "").trim()
+        ? describeMontageExportStage(window.montageExportJobState.lastStage, window.montageExportState.exportMode)
+        : "Exportación en seguimiento.";
+    }
+    if (hintEl) {
+      hintEl.textContent = String(window.montageExportJobState?.lastHint || "").trim() || "Puedes reabrir el modal para recuperar los controles.";
+    }
+    renderMontageExportRecentLogs();
+    if (window.els.montageExportFloatingProgress) {
+      const progress = Number(window.montageExportJobState?.lastProgress);
+      if (Number.isFinite(progress) && progress >= 0) {
+        window.els.montageExportFloatingProgress.style.setProperty("--montage-export-progress", `${Math.round(Math.max(0, Math.min(1, progress)) * 1000) / 10}%`);
+      } else {
+        window.els.montageExportFloatingProgress.style.removeProperty("--montage-export-progress");
+      }
+    }
+    syncMontageExportFloatingCardPosition();
+  }
+}
+
+export function reopenMontageExportModalFromCard() {
+  setMontageExportOpen(true);
+  if (window.els.montageExportFloatingCard) {
+    window.els.montageExportFloatingCard.hidden = true;
+  }
+  if (window.els.montageExportModal) {
+    window.els.montageExportModal.dataset.restoreFromCard = "true";
+  }
+}
 
 function logMontageExportDevtools(event = "", payload = {}, level = "info") {
   const cleanEvent = String(event || "").trim() || "event";
   const cleanLevel = ["info", "warn", "error", "debug"].includes(String(level || "").trim())
     ? String(level || "").trim()
     : "info";
+  pushMontageExportRecentLog(cleanEvent, payload, cleanLevel);
   const prefix = `[podcaster][montage-export][${cleanEvent}]`;
   try {
     const logger = console[cleanLevel] || console.info;
@@ -577,6 +722,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     window.setTimelinePreviewsSuspended(false);
     setMontageExportPreviewPaused(false);
     setMontageExportBusy(false);
+    updateMontageExportFloatingCardVisibility();
     return true;
   }
   if (String(data?.status || "").trim() === "error") {
@@ -619,6 +765,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     window.setTimelinePreviewsSuspended(false);
     setMontageExportPreviewPaused(false);
     setMontageExportBusy(false);
+    updateMontageExportFloatingCardVisibility();
     return true;
   }
   if (data?.degraded === true && String(data?.status || "").trim() === "running") {
@@ -629,8 +776,10 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
       { tone: "warning" }
     );
     scheduleMontageExportPollRetry(cleanJobId, 0, { transient: false });
+    updateMontageExportFloatingCardVisibility();
     return true;
   }
+  updateMontageExportFloatingCardVisibility();
   return false;
 }
 
@@ -1091,10 +1240,12 @@ export function resetMontageExportJobState() {
     reviewExcelPayload: null,
     reviewExcelFilename: "",
     readyDownloadUrl: "",
-    readyDownloadFilename: ""
+    readyDownloadFilename: "",
+    recentLogs: []
   };
   setMontageExportContinueButton({ visible: false });
   setMontageExportDownloadButton({ visible: false });
+  updateMontageExportFloatingCardVisibility();
 }
 
 export function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = window.montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false, frontendPreview = null } = {}) {
@@ -1228,8 +1379,9 @@ export function resetMontageExportPreviewState() {
   setMontageExportPreviewState({ mode: window.montageExportState.exportMode, meta: "Así se vería tu video exportado." });
 }
 
-export async function closeMontageExportModal({ cancelActiveJob = true } = {}) {
+export async function closeMontageExportModal({ cancelActiveJob = false } = {}) {
   const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
+  const keepJobVisible = Boolean(activeJobId) && (window.montageExportBusy || Boolean(window.montageExportJobState?.lastStage) || Boolean(window.montageExportJobState?.lastHint));
   if (cancelActiveJob && window.montageExportBusy && activeJobId) {
     void requestMontageExportCancel(activeJobId).catch((error) => {
       console.warn("[podcaster][montage-export] cancel request failed", formatMontageExportCancelError(error));
@@ -1238,13 +1390,19 @@ export async function closeMontageExportModal({ cancelActiveJob = true } = {}) {
   if (typeof window.exportPreviewController?.stop === "function") {
     window.exportPreviewController.stop();
   }
-  resetMontageExportJobState();
-  resetMontageExportPreviewState();
-  setMontageExportPreviewPaused(false);
-  window.montageExportBusy = false;
-  window.setTimelinePreviewsSuspended(false);
-  setMontageExportBusy(false);
   setMontageExportOpen(false);
+  if (!keepJobVisible) {
+    resetMontageExportJobState();
+    resetMontageExportPreviewState();
+    setMontageExportPreviewPaused(false);
+    window.montageExportBusy = false;
+    window.setTimelinePreviewsSuspended(false);
+    setMontageExportBusy(false);
+  } else {
+    setMontageExportBusy(window.montageExportBusy);
+    updateMontageExportFloatingCardVisibility();
+  }
+  updateMontageExportFloatingCardVisibility();
 }
 
 async function requestMontageExportCancel(jobId = "") {
@@ -1311,6 +1469,7 @@ export function setMontageExportStatus(text = "", hint = "", options = {}) {
     const normalized = ["neutral", "success", "warning", "error"].includes(tone) ? tone : "neutral";
     box.dataset.tone = normalized;
   }
+  updateMontageExportFloatingCardVisibility();
 }
 
 function setConfirmMontageExportButtonState({
@@ -1351,6 +1510,7 @@ export function setMontageExportBusy(isBusy = false) {
     window.els.montageExportModal.classList.toggle("is-busy", Boolean(isBusy));
     if (!isBusy) window.els.montageExportModal.classList.remove("is-progress");
   }
+  updateMontageExportFloatingCardVisibility();
 }
 
 export function setMontageExportProgress(progress = null) {
@@ -1364,6 +1524,10 @@ export function setMontageExportProgress(progress = null) {
   const clamped = Math.max(0, Math.min(1, Number(progress)));
   bar.style.setProperty("--montage-export-progress", `${Math.round(clamped * 1000) / 10}%`);
   window.els.montageExportModal.classList.add("is-progress");
+  if (window.els.montageExportFloatingProgress) {
+    window.els.montageExportFloatingProgress.style.setProperty("--montage-export-progress", `${Math.round(clamped * 1000) / 10}%`);
+  }
+  updateMontageExportFloatingCardVisibility();
 }
 
 export function describeMontageExportStage(stage = "", mode = window.montageExportState.exportMode) {
@@ -2034,18 +2198,37 @@ export function openMontageExportModal() {
   if (isLegacyAutoMontageFilename(state.filename)) state.filename = "";
   if (!state.filename) state.filename = defaultMontageExportFilename(window.getActiveSession());
   setMontageExportOpen(true);
-  resetMontageExportJobState();
-  resetMontageExportPreviewState();
-  setMontageExportPreviewPaused(false);
-  setMontageExportBusy(false);
-  setMontageExportProgress(null);
-  syncMontageExportUi();
-  setConfirmMontageExportButtonState({
-    disabled: false,
-    loading: false,
-    label: "Exportar"
-  });
-  bindMontageExportPreviewJassub();
+  if (window.els.montageExportFloatingCard) {
+    window.els.montageExportFloatingCard.hidden = true;
+  }
+  const restoringActiveJob = Boolean(String(window.montageExportJobState?.jobId || "").trim()) || window.els.montageExportModal?.dataset?.restoreFromCard === "true";
+  if (!restoringActiveJob) {
+    resetMontageExportJobState();
+    resetMontageExportPreviewState();
+    setMontageExportPreviewPaused(false);
+    setMontageExportBusy(false);
+    setMontageExportProgress(null);
+    syncMontageExportUi();
+    setConfirmMontageExportButtonState({
+      disabled: false,
+      loading: false,
+      label: "Exportar"
+    });
+    bindMontageExportPreviewJassub();
+  } else {
+    delete window.els.montageExportModal.dataset.restoreFromCard;
+    setMontageExportPreviewPaused(false);
+    window.setTimelinePreviewsSuspended(false);
+    bindMontageExportPreviewJassub();
+    syncMontageExportUi();
+    updateMontageExportFloatingCardVisibility();
+    setMontageExportContinueButton({ visible: false });
+    setMontageExportDownloadButton({
+      visible: Boolean(window.montageExportJobState.readyDownloadUrl),
+      url: window.montageExportJobState.readyDownloadUrl,
+      filename: window.montageExportJobState.readyDownloadFilename
+    });
+  }
 
   const session = window.getActiveSession();
   if (session && typeof window.exportPreviewController?.init === "function") {

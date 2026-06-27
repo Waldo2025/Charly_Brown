@@ -39,8 +39,9 @@ import {
   downloadReadyMontageExport,
   setMontageExportProgress,
   setMontageExportStatus,
-  configureMontageExportRuntime
-} from "./podcaster-montage-export.js?v=2026-06-26.7";
+  configureMontageExportRuntime,
+  reopenMontageExportModalFromCard
+} from "./podcaster-montage-export.js?v=2026-06-26.8";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -583,6 +584,13 @@ const els = {
   podcastVideoZoomBtn: document.getElementById("podcastVideoZoomBtn"),
   exportMontageBtn: document.getElementById("exportMontageBtn"),
   montageExportModal: document.getElementById("montageExportModal"),
+  montageExportFloatingCard: document.getElementById("montageExportFloatingCard"),
+  montageExportFloatingTitle: document.getElementById("montageExportFloatingTitle"),
+  montageExportFloatingStatus: document.getElementById("montageExportFloatingStatus"),
+  montageExportFloatingHint: document.getElementById("montageExportFloatingHint"),
+  montageExportFloatingLogs: document.getElementById("montageExportFloatingLogs"),
+  montageExportFloatingProgress: document.getElementById("montageExportFloatingProgress"),
+  reopenMontageExportModalBtn: document.getElementById("reopenMontageExportModalBtn"),
   closeMontageExportBtn: document.getElementById("closeMontageExportBtn"),
   cancelMontageExportBtn: document.getElementById("cancelMontageExportBtn"),
   continueMontageExportBtn: document.getElementById("continueMontageExportBtn"),
@@ -776,6 +784,83 @@ const els = {
   audioTrackSourceInfo: document.getElementById("audioTrackSourceInfo"),
   panelMusicPreset: document.getElementById("panelMusicPreset")
 };
+
+const MONTAGE_EXPORT_FLOATING_CARD_POSITION_KEY = "cb_podcast_montage_export_floating_card_v1";
+let montageExportFloatingCardDrag = null;
+
+function readMontageExportFloatingCardPosition() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_FLOATING_CARD_POSITION_KEY) || "{}");
+    return {
+      left: Math.max(8, Math.round(Number(parsed?.left || 0) || 0)),
+      top: Math.max(8, Math.round(Number(parsed?.top || 0) || 0))
+    };
+  } catch (_) {
+    return { left: 24, top: 96 };
+  }
+}
+
+function persistMontageExportFloatingCardPosition(left = 0, top = 0) {
+  try {
+    localStorage.setItem(MONTAGE_EXPORT_FLOATING_CARD_POSITION_KEY, JSON.stringify({
+      left: Math.max(0, Math.round(Number(left || 0) || 0)),
+      top: Math.max(0, Math.round(Number(top || 0) || 0))
+    }));
+  } catch (_) {
+    // noop
+  }
+}
+
+function applyMontageExportFloatingCardPosition() {
+  if (!els.montageExportFloatingCard || els.montageExportFloatingCard.hidden) return;
+  const pos = readMontageExportFloatingCardPosition();
+  els.montageExportFloatingCard.style.left = `${pos.left}px`;
+  els.montageExportFloatingCard.style.top = `${pos.top}px`;
+}
+
+function beginMontageExportFloatingCardDrag(event = null) {
+  if (!event || !els.montageExportFloatingCard || els.montageExportFloatingCard.hidden) return;
+  if (event.target?.closest?.("button, input, select, textarea, a")) return;
+  const rect = els.montageExportFloatingCard.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return;
+  montageExportFloatingCardDrag = {
+    pointerId: Number(event.pointerId || 0),
+    startClientX: Number(event.clientX || 0),
+    startClientY: Number(event.clientY || 0),
+    startLeft: Number(rect.left || 0),
+    startTop: Number(rect.top || 0),
+    width: Number(rect.width || 0),
+    height: Number(rect.height || 0)
+  };
+  document.body.classList.add("is-dragging-montage-export-card");
+  try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch (_) { }
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function moveMontageExportFloatingCard(event = null) {
+  const drag = montageExportFloatingCardDrag;
+  if (!drag || !event || !els.montageExportFloatingCard) return;
+  if (Number(event.pointerId || 0) !== Number(drag.pointerId || 0)) return;
+  const deltaX = Number(event.clientX || 0) - Number(drag.startClientX || 0);
+  const deltaY = Number(event.clientY || 0) - Number(drag.startClientY || 0);
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  const nextLeft = Math.max(8, Math.min(viewportWidth - Math.min(drag.width, viewportWidth) - 8, Number(drag.startLeft || 0) + deltaX));
+  const nextTop = Math.max(8, Math.min(viewportHeight - Math.min(drag.height, viewportHeight) - 8, Number(drag.startTop || 0) + deltaY));
+  els.montageExportFloatingCard.style.left = `${Math.round(nextLeft)}px`;
+  els.montageExportFloatingCard.style.top = `${Math.round(nextTop)}px`;
+  persistMontageExportFloatingCardPosition(nextLeft, nextTop);
+  event.preventDefault();
+}
+
+function endMontageExportFloatingCardDrag(event = null) {
+  const drag = montageExportFloatingCardDrag;
+  if (!drag) return;
+  if (event && Number(event.pointerId || 0) !== Number(drag.pointerId || 0)) return;
+  montageExportFloatingCardDrag = null;
+  document.body.classList.remove("is-dragging-montage-export-card");
+}
 
 const demoPrompt = "Escribe un guión de video creativo sobre cómo una ciudad en ruinas descubre energía limpia, con tono cinematográfico, tres escenas y un cierre potente.";
 
@@ -17179,6 +17264,11 @@ function attachEvents() {
       openMontageExportModal();
     });
   }
+  if (els.reopenMontageExportModalBtn) {
+    els.reopenMontageExportModalBtn.addEventListener("click", () => {
+      reopenMontageExportModalFromCard();
+    });
+  }
   if (els.montageExportModal) {
     els.montageExportModal.addEventListener("click", (event) => {
       const closeBtn = event.target.closest("[data-action='close-montage-export-modal']");
@@ -17186,6 +17276,15 @@ function attachEvents() {
         closeMontageExportModal();
       }
     });
+  }
+  if (els.montageExportFloatingCard) {
+    const head = els.montageExportFloatingCard.querySelector("[data-action='drag-montage-export-floating-card']");
+    if (head) {
+      head.addEventListener("pointerdown", beginMontageExportFloatingCardDrag);
+    }
+    els.montageExportFloatingCard.addEventListener("pointermove", moveMontageExportFloatingCard);
+    els.montageExportFloatingCard.addEventListener("pointerup", endMontageExportFloatingCardDrag);
+    els.montageExportFloatingCard.addEventListener("pointercancel", endMontageExportFloatingCardDrag);
   }
   if (els.closeMontageExportBtn) {
     els.closeMontageExportBtn.addEventListener("click", () => {
