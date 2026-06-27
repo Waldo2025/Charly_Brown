@@ -8,7 +8,9 @@ const renderState = {
   completed: false,
   lastCardsSignature: "",
   lastTextSignature: "",
-  lastStylizedTextSignature: ""
+  lastStylizedTextSignature: "",
+  lastVideoCurrentMs: -1,
+  lastStagnantTickCount: 0
 };
 
 function escapeHtml(value = "") {
@@ -426,17 +428,36 @@ async function boot() {
       0,
       Math.round(Number(config.expectedDurationMs || payload.expectedDurationMs || 0) || 0)
     );
+    const renderStartWallMs = performance.now();
+    const hardStopExtraMs = 12000;
     const resolveVideoDurationMs = () => {
       const durationSec = Number(video.duration || 0) || 0;
       return Number.isFinite(durationSec) && durationSec > 0
         ? Math.round(durationSec * 1000)
         : 0;
     };
+    const fallbackDurationMs = () => Math.max(
+      1000,
+      Math.max(
+        Number.isFinite(resolveVideoDurationMs()) ? resolveVideoDurationMs() : 0,
+        expectedDurationMs
+      ) || 1000
+    );
     const resolveCurrentMs = () => Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
     const shouldFinishAtCurrentTime = () => {
       const targetDurationMs = Math.max(expectedDurationMs, resolveVideoDurationMs());
       if (targetDurationMs <= 0) return video.ended === true;
       return video.ended === true || resolveCurrentMs() >= Math.max(0, targetDurationMs - 80);
+    };
+    const shouldForceFinish = () => {
+      const elapsedMs = Math.max(0, performance.now() - renderStartWallMs);
+      return elapsedMs >= Math.max(30000, fallbackDurationMs() + hardStopExtraMs);
+    };
+    const ensurePlayback = () => {
+      if (renderState.completed || video.ended) return;
+      if (video.readyState >= 2 && video.paused) {
+        void video.play().catch(() => {});
+      }
     };
 
     const tick = () => {
@@ -449,11 +470,35 @@ async function boot() {
         finish();
         return;
       }
-      if (!video.paused && !video.ended) requestAnimationFrame(tick);
+      if (shouldForceFinish()) {
+        finish();
+        return;
+      }
+      if (renderState.lastVideoCurrentMs === currentMs) {
+        renderState.lastStagnantTickCount += 1;
+      } else {
+        renderState.lastVideoCurrentMs = currentMs;
+        renderState.lastStagnantTickCount = 0;
+      }
+      if (renderState.lastVideoCurrentMs > 0 && renderState.lastStagnantTickCount >= 24 && video.readyState >= 2) {
+        try {
+          const fallbackMs = Math.max(0, fallbackDurationMs() - 10);
+          video.currentTime = Math.min(
+            (renderState.lastVideoCurrentMs + 80) / 1000,
+            fallbackMs / 1000
+          );
+          renderState.lastStagnantTickCount = 0;
+        } catch (_) {
+          // noop
+        }
+      }
+      requestAnimationFrame(tick);
     };
 
+    let finishWatchdog = null;
     const finish = () => {
       renderState.completed = true;
+      if (finishWatchdog !== null) window.clearInterval(finishWatchdog);
       globalThis.__podcasterMontageRenderDone = true;
     };
 
@@ -465,6 +510,10 @@ async function boot() {
       if (!renderState.started) renderState.started = true;
       requestAnimationFrame(tick);
     });
+    video.addEventListener("playing", ensurePlayback);
+    video.addEventListener("pause", ensurePlayback);
+    video.addEventListener("waiting", ensurePlayback);
+    video.addEventListener("stalled", ensurePlayback);
     video.addEventListener("timeupdate", () => {
       const currentMs = resolveCurrentMs();
       renderOnScreenText(textLayer, payload, currentMs, width, height);
@@ -476,16 +525,18 @@ async function boot() {
       globalThis.__podcasterMontageRenderError = "video_playback_error";
       finish();
     });
-    const finishWatchdog = window.setInterval(() => {
+    finishWatchdog = window.setInterval(() => {
       if (renderState.completed) {
         window.clearInterval(finishWatchdog);
         return;
       }
       if (shouldFinishAtCurrentTime()) {
         finish();
-        window.clearInterval(finishWatchdog);
+      } else if (shouldForceFinish()) {
+        finish();
       }
     }, 250);
+    if (typeof finishWatchdog.unref === "function") finishWatchdog.unref();
 
     try {
       await video.play();
