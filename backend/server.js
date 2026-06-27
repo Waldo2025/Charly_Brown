@@ -12680,7 +12680,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const montageTotalDurationMs = reviewCursorMs;
 
     const overlapPlan = buildMontageOverlapCompositionPlan(exportedEntries);
-    const requiresSafeTimelineComposition = exportedEntries.some((entry) => entry?.syntheticVisualOnly === true);
+    // Escenas con fondo sólido/gradiente ya se materializan como clips completos
+    // en la fase anterior. No hace falta forzarlas por el compositor overlap,
+    // porque eso empeora el rendimiento y puede bloquear el ensamblado final.
+    const requiresSafeTimelineComposition = false;
     let concatOutPath = "";
     emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
