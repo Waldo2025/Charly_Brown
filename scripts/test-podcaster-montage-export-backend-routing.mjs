@@ -50,7 +50,7 @@ assert.match(
 
 assert.match(
   podcasterHtmlSource,
-  /podcaster\/podcaster-montage-export\.js\?v=2026-06-28\.8/,
+  /podcaster\/podcaster-montage-export\.js\?v=2026-06-28\.9/,
   "podcaster.html debe forzar la recarga del fix actual del export MP4."
 );
 
@@ -128,8 +128,8 @@ assert.match(
 
 assert.match(
   backendServerSource,
-  /const BACKEND_SERVICE_ROLE = String\(\s*process\.env\.BACKEND_SERVICE_ROLE \|\| process\.env\.CHARLY_BACKEND_ROLE \|\| "all"\s*\)\.trim\(\)\.toLowerCase\(\);/,
-  "El backend debe soportar un rol explícito para separar Gemini/VEO de export."
+  /function inferBackendServiceRole\(\) \{[\s\S]*snoopy-export[\s\S]*return "export";[\s\S]*\}[\s\S]*const BACKEND_SERVICE_ROLE = inferBackendServiceRole\(\);/,
+  "El backend debe soportar un rol explícito o inferido para separar Gemini/VEO de export."
 );
 
 assert.match(
@@ -160,6 +160,12 @@ assert.match(
   renderYamlSource,
   /type:\s+web\s+name:\s+snoopy-export[\s\S]*?startCommand:\s+node backend\/server\.js[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+export[\s\S]*?- key:\s+PUBLIC_BACKEND_BASE_URL\s+value:\s+https:\/\/snoopy-export\.onrender\.com[\s\S]*?- key:\s+RENDER_KEY_VALUE_CONNECTION_STRING\s+fromService:/,
   "Render debe declarar snoopy-export como backend web de export con rol export y cola Redis."
+);
+
+assert.match(
+  renderYamlSource,
+  /type:\s+web\s+name:\s+snoopy-export[\s\S]*?- key:\s+MONTAGE_EXPORT_REQUIRE_QUEUE\s+value:\s+true[\s\S]*?- key:\s+RENDER_KEY_VALUE_CONNECTION_STRING/,
+  "snoopy-export debe exigir cola antes de volver al fallback directo."
 );
 
 assert.match(

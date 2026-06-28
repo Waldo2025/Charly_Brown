@@ -257,9 +257,23 @@ loadLocalEnvFile();
 const app = express();
 const PORT = Number(process.env.API_PORT || process.env.PORT || 8787);
 const HOST = String(process.env.API_HOST || "0.0.0.0").trim() || "0.0.0.0";
-const BACKEND_SERVICE_ROLE = String(
-  process.env.BACKEND_SERVICE_ROLE || process.env.CHARLY_BACKEND_ROLE || "all"
+function inferBackendServiceRole() {
+  const configured = String(process.env.BACKEND_SERVICE_ROLE || process.env.CHARLY_BACKEND_ROLE || "").trim().toLowerCase();
+  if (["gemini", "gemini-veo", "export"].includes(configured)) return configured;
+  const signals = [
+    process.env.RENDER_SERVICE_NAME,
+    process.env.RENDER_EXTERNAL_HOSTNAME,
+    process.env.PUBLIC_BACKEND_BASE_URL
+  ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean).join(" ");
+  if (/(^|\b)(snoopy-export|charly-brown-podcaster-export-worker|podcaster-export-worker)(\b|\.|-)/.test(signals)) return "export";
+  if (/(^|\b)gemini-veo(\b|\.|-)/.test(signals)) return "gemini-veo";
+  if (/(^|\b)charly-brown-gemini-backend(\b|\.|-)/.test(signals)) return "gemini";
+  return configured || "all";
+}
+const BACKEND_SERVICE_ROLE_CONFIGURED = String(
+  process.env.BACKEND_SERVICE_ROLE || process.env.CHARLY_BACKEND_ROLE || ""
 ).trim().toLowerCase();
+const BACKEND_SERVICE_ROLE = inferBackendServiceRole();
 const GEMINI_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini";
 const GEMINI_VEO_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "gemini-veo";
 const EXPORT_SERVICE_ONLY = BACKEND_SERVICE_ROLE === "export";
@@ -1103,6 +1117,7 @@ function buildBackendHealthPayload() {
   return {
     ok: true,
     service: BACKEND_SERVICE_ROLE || "all",
+    configuredServiceRole: BACKEND_SERVICE_ROLE_CONFIGURED || null,
     port: PORT,
     geminiConfigured: hasGeminiKey(),
     moodleShareUsersRoute: true,

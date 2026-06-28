@@ -11,10 +11,10 @@ const changelog = Array.isArray(version.changelog) ? version.changelog : [];
 const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(changelog[0] || "").includes("Render Key Value")
-    && String(changelog[0] || "").includes("Firestore-first")
-    && String(changelog[0] || "").includes("v2026-06-28.8"),
-  "La nota más reciente debe reflejar el fix actual del export MP4 y la cola de Render."
+  String(changelog[0] || "").includes("infiere su rol export")
+    && String(changelog[0] || "").includes("MONTAGE_EXPORT_REQUIRE_QUEUE=true")
+    && String(changelog[0] || "").includes("v2026-06-28.9"),
+  "La nota más reciente debe reflejar el fix actual del rol efectivo y cola de export."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")),
