@@ -32,7 +32,7 @@ const MONTAGE_EXPORT_RECENT_POLL_GRACE_MS = 45 * 1000;
 const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 3;
 const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT = 90;
 const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL = 320;
-const MONTAGE_FRONTEND_EXPORT_FPS = 60;
+const MONTAGE_FRONTEND_EXPORT_FPS = 24;
 const MONTAGE_FRONTEND_EXPORT_MAX_DURATION_MS = 3 * 60 * 1000;
 const MONTAGE_FRONTEND_EXPORT_SCENE_SEEK_TIMEOUT_MS = 2200;
 const MONTAGE_FRONTEND_EXPORT_DRIFT_SEEK_THRESHOLD_SEC = 0.45;
@@ -3034,12 +3034,14 @@ async function prepareFrontendMontageDomSubtitleCapture(payload = {}) {
   if (window.montageExportJobState) {
     window.montageExportJobState.frontendExportCapturing = true;
     window.montageExportJobState.frontendDomOverlayDrawLogCount = 0;
+    window.montageExportJobState.frontendRenderedTextDrawLogCount = 0;
   }
   if (container) container.dataset.subtitleRenderer = "dom";
   if (wasJassubActive) {
     logMontageExportDevtools("frontend_export_jassub_disabled", {
-      reason: "dom_capture",
-      segmentCount: Array.isArray(payload?.onScreenTextTimeline?.segments) ? payload.onScreenTextTimeline.segments.length : 0
+      reason: getFrontendMontageRenderedTextSegments(payload).length ? "rendered_text_frames" : "dom_capture",
+      segmentCount: Array.isArray(payload?.onScreenTextTimeline?.segments) ? payload.onScreenTextTimeline.segments.length : 0,
+      renderedSegmentCount: getFrontendMontageRenderedTextSegments(payload).length
     });
     await destroyMontageExportPreviewJassub({ preserveFrame: false });
   }
@@ -3146,6 +3148,157 @@ async function drawFrontendMontageDomOverlay(ctx = null, overlay = null, contain
   } catch (_) {
     return false;
   }
+}
+
+function buildFrontendMontageRenderedTextSegmentKey(segment = {}) {
+  const id = String(segment?.id || "").trim();
+  if (id) return `id:${id}`;
+  const rowId = String(segment?.rowId || "").trim();
+  const sceneIndex = Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1));
+  const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+  if (rowId) return `row:${rowId}:scene:${sceneIndex}:start:${startMs}`;
+  return `scene:${sceneIndex}:start:${startMs}:text:${String(segment?.text || "").trim().slice(0, 180)}`;
+}
+
+function getFrontendMontageRenderedTextSegments(payload = {}) {
+  const directSegments = Array.isArray(payload?.onScreenTextRenderedSegments)
+    ? payload.onScreenTextRenderedSegments
+    : [];
+  const timelineSegments = Array.isArray(payload?.onScreenTextTimeline?.renderedSegments)
+    ? payload.onScreenTextTimeline.renderedSegments
+    : [];
+  const segmentsByKey = new Map();
+  [...directSegments, ...timelineSegments].forEach((segment) => {
+    if (!segment || typeof segment !== "object" || !Array.isArray(segment.renderedFrames) || !segment.renderedFrames.length) return;
+    const key = buildFrontendMontageRenderedTextSegmentKey(segment);
+    if (!segmentsByKey.has(key)) segmentsByKey.set(key, segment);
+  });
+  return Array.from(segmentsByKey.values());
+}
+
+function resolveFrontendMontageRenderedFrameSource(frame = {}) {
+  const direct = String(frame?.dataUrl || frame?.localDataUrl || frame?.downloadUrl || frame?.url || "").trim();
+  if (direct) return direct;
+  const storagePath = String(frame?.storagePath || "").trim();
+  if (storagePath) return buildMontageStorageGsUrl(storagePath);
+  return "";
+}
+
+async function loadFrontendMontageRenderedFrameImage(frame = {}, cache = null) {
+  const source = resolveFrontendMontageRenderedFrameSource(frame);
+  if (!source) return null;
+  const cacheKey = source;
+  const imageCache = cache || window.montageExportJobState?.frontendRenderedTextImageCache || null;
+  if (imageCache?.has(cacheKey)) return imageCache.get(cacheKey);
+  let resolvedSource = source;
+  if (/^gs:\/\//i.test(source) && typeof window.resolveFirebaseStorageUrl === "function") {
+    resolvedSource = String(await window.resolveFirebaseStorageUrl(source) || "").trim();
+  }
+  if (!resolvedSource) return null;
+  const imagePromise = new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = "async";
+    if (!resolvedSource.startsWith("data:")) img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = resolvedSource;
+  });
+  imageCache?.set(cacheKey, imagePromise);
+  const img = await imagePromise;
+  if (!img) imageCache?.delete(cacheKey);
+  return img;
+}
+
+function selectFrontendMontageRenderedTextFrameItems(payload = {}, currentMs = 0) {
+  const segments = getFrontendMontageRenderedTextSegments(payload);
+  const cleanCurrentMs = Math.max(0, Math.round(Number(currentMs || 0) || 0));
+  const items = [];
+  segments.forEach((segment) => {
+    const frames = Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.filter(Boolean) : [];
+    if (!frames.length) return;
+    const segmentStartMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const maxFrameEndMs = frames.reduce((max, frame) => Math.max(max, Math.round(Number(frame?.endMs || 0) || 0)), 0);
+    const segmentDurationMs = Math.max(1, Math.round(Number(segment?.durationMs || maxFrameEndMs || 1) || 1));
+    const segmentEndMs = segmentStartMs + segmentDurationMs;
+    if (cleanCurrentMs < segmentStartMs || cleanCurrentMs >= segmentEndMs) return;
+    const localMs = cleanCurrentMs - segmentStartMs;
+    const isFrameActive = (frame) => {
+      const startMs = Math.max(0, Math.round(Number(frame?.startMs || 0) || 0));
+      const endMs = Math.max(startMs + 1, Math.round(Number(frame?.endMs || 0) || 0));
+      return localMs >= startMs && localMs < endMs;
+    };
+    const baseFrame = frames.find((frame) => {
+      const kind = String(frame?.kind || "").trim();
+      const wordIndex = Math.round(Number(frame?.wordIndex ?? -1) || -1);
+      return (kind === "base" || wordIndex < 0 || frame?.activeOnly === false) && isFrameActive(frame);
+    }) || frames.find((frame) => String(frame?.kind || "").trim() === "base" || Math.round(Number(frame?.wordIndex ?? -1) || -1) < 0);
+    if (baseFrame) {
+      items.push({ segment, frame: baseFrame, localMs, layer: "base" });
+    }
+    frames.forEach((frame) => {
+      const kind = String(frame?.kind || "").trim();
+      const wordIndex = Math.round(Number(frame?.wordIndex ?? -1) || -1);
+      const isActiveWordFrame = frame?.activeOnly === true || kind === "karaoke-word" || wordIndex >= 0;
+      if (isActiveWordFrame && isFrameActive(frame)) {
+        items.push({ segment, frame, localMs, layer: "karaoke-word" });
+      }
+    });
+  });
+  return items;
+}
+
+async function drawFrontendMontageRenderedTextFrames(ctx = null, payload = {}, currentMs = 0, width = 0, height = 0) {
+  if (!ctx || !width || !height) return false;
+  const items = selectFrontendMontageRenderedTextFrameItems(payload, currentMs);
+  if (!items.length) return false;
+  const imageCache = window.montageExportJobState?.frontendRenderedTextImageCache || new Map();
+  if (window.montageExportJobState && !window.montageExportJobState.frontendRenderedTextImageCache) {
+    window.montageExportJobState.frontendRenderedTextImageCache = imageCache;
+  }
+  let drawnCount = 0;
+  for (const item of items) {
+    const frame = item.frame || {};
+    const img = await loadFrontendMontageRenderedFrameImage(frame, imageCache);
+    if (!img) continue;
+    const sourceWidth = Math.max(2, Math.round(Number(frame.sourceWidth || item.segment?.sourceWidth || 1280) || 1280));
+    const sourceHeight = Math.max(2, Math.round(Number(frame.sourceHeight || item.segment?.sourceHeight || 720) || 720));
+    const scaleX = Math.max(0.0001, width / sourceWidth);
+    const scaleY = Math.max(0.0001, height / sourceHeight);
+    const dx = Math.round(Number(frame.offsetXPx || 0) * scaleX);
+    const dy = Math.round(Number(frame.offsetYPx || 0) * scaleY);
+    const dw = Math.max(1, Math.round(Number(frame.widthPx || img.naturalWidth || 1) * scaleX));
+    const dh = Math.max(1, Math.round(Number(frame.heightPx || img.naturalHeight || 1) * scaleY));
+    try {
+      ctx.drawImage(img, dx, dy, dw, dh);
+      drawnCount += 1;
+      if (window.montageExportJobState?.frontendExportCapturing === true) {
+        const nextLogCount = Math.max(0, Number(window.montageExportJobState.frontendRenderedTextDrawLogCount || 0) || 0) + 1;
+        window.montageExportJobState.frontendRenderedTextDrawLogCount = nextLogCount;
+        if (nextLogCount <= 6) {
+          logMontageExportDevtools("frontend_export_rendered_text_frame_draw", {
+            currentMs,
+            rowId: String(item.segment?.rowId || "").trim() || undefined,
+            kind: String(frame.kind || item.layer || "").trim() || undefined,
+            wordIndex: Number.isFinite(Number(frame.wordIndex)) ? Number(frame.wordIndex) : undefined,
+            dx,
+            dy,
+            dw,
+            dh,
+            sourceWidth,
+            sourceHeight
+          }, "debug");
+        }
+      }
+    } catch (error) {
+      logMontageExportDevtools("frontend_export_rendered_text_frame_draw_failed", {
+        currentMs,
+        rowId: String(item.segment?.rowId || "").trim() || undefined,
+        kind: String(frame.kind || item.layer || "").trim() || undefined,
+        message: String(error?.message || error || "").trim() || undefined
+      }, "warn");
+    }
+  }
+  return drawnCount > 0;
 }
 
 async function resolveFrontendMontageAudioSource(segment = {}) {
@@ -3314,8 +3467,9 @@ async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 
   if (stylizedOverlay && stylizedOverlay.hidden !== true) {
     await drawFrontendMontageDomOverlay(ctx, stylizedOverlay, container, width, height);
   }
+  const renderedTextDrawn = await drawFrontendMontageRenderedTextFrames(ctx, payload, currentMs, width, height);
   const domOverlay = window.els?.montageExportPreviewOverlay || null;
-  if (domOverlay && domOverlay.hidden !== true && (container?.dataset?.subtitleRenderer !== "jassub" || window.montageExportJobState?.frontendExportCapturing === true)) {
+  if (!renderedTextDrawn && domOverlay && domOverlay.hidden !== true && (container?.dataset?.subtitleRenderer !== "jassub" || window.montageExportJobState?.frontendExportCapturing === true)) {
     await drawFrontendMontageDomOverlay(ctx, domOverlay, container, width, height);
   }
   const subtitleCanvas = getMontageExportPreviewSubtitleCanvas();
@@ -3399,6 +3553,7 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   pauseFrontendMontagePreviewVideos();
   if (window.montageExportJobState) {
     delete window.montageExportJobState.frontendVideoSceneKey;
+    window.montageExportJobState.frontendRenderedTextImageCache = new Map();
   }
   await drawFrontendMontageFrame({ ctx, payload, currentMs: 0, width, height });
   let startAudioAt = audioCtx ? audioCtx.currentTime + 0.25 : 0;
@@ -3473,6 +3628,7 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   restoreFrontendMontageDomSubtitleCapture(payload, subtitleCaptureState);
   if (window.montageExportJobState) {
     delete window.montageExportJobState.frontendSubtitleCaptureState;
+    delete window.montageExportJobState.frontendRenderedTextImageCache;
   }
   const blob = new Blob(chunks, { type: mimeType });
   if (!blob.size) throw new Error("frontend_export_empty_blob");

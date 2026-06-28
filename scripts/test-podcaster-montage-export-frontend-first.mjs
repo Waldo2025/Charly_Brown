@@ -24,8 +24,8 @@ assert.match(
 
 assert.match(
   exportSource,
-  /const MONTAGE_FRONTEND_EXPORT_FPS = 60;/,
-  "El export frontend de MP4 debe capturar a 60fps."
+  /const MONTAGE_FRONTEND_EXPORT_FPS = 24;/,
+  "El export frontend de MP4 debe capturar a 24fps para sostener tiempo real en navegador."
 );
 
 assert.match(
@@ -152,6 +152,36 @@ assert.match(
   exportSource,
   /ctx\.drawImage\(img, 0, 0, width, height\);/,
   "El overlay rasterizado en coordenadas del preview debe escalarse al canvas final."
+);
+
+assert.match(
+  exportSource,
+  /function getFrontendMontageRenderedTextSegments\(payload = \{\}\)/,
+  "El export frontend debe leer los renderedFrames del timeline/payload preparado."
+);
+
+assert.match(
+  exportSource,
+  /function selectFrontendMontageRenderedTextFrameItems\(payload = \{\}, currentMs = 0\)/,
+  "El export frontend debe seleccionar frames de texto por currentMs usando la lógica temporal del timeline."
+);
+
+assert.match(
+  exportSource,
+  /async function drawFrontendMontageRenderedTextFrames\(ctx = null, payload = \{\}, currentMs = 0, width = 0, height = 0\)/,
+  "El export frontend debe dibujar los PNG rasterizados de karaoke en vez de reconstruir el overlay desde DOM."
+);
+
+assert.match(
+  exportSource,
+  /const renderedTextDrawn = await drawFrontendMontageRenderedTextFrames\(ctx, payload, currentMs, width, height\);[\s\S]*if \(!renderedTextDrawn && domOverlay/,
+  "El overlay DOM debe quedar solo como fallback cuando no existan renderedFrames."
+);
+
+assert.match(
+  exportSource,
+  /buildFrontendMontageRenderedTextSegmentKey/,
+  "El export frontend debe deduplicar renderedSegments duplicados entre payload y timeline."
 );
 
 assert.match(
