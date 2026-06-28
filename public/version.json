@@ -1,9 +1,9 @@
 {
-  "version": "1.0.10.291",
-  "build": "2026-1.0.10.291",
+  "version": "1.0.10.292",
+  "build": "2026-1.0.10.292",
   "branch": "codex-bootstrap",
   "changelog": [
-    "Corregido: snoopy-export sube el límite de raster de karaoke para copiar los estilos del frontend en el export MP4 y evitar caer al fallback ASS cuando el estilo redondeado necesita más frames.",
+    "Corregido: snoopy-export evita que el preview del export MP4 use proxy-media de Render cuando el asset ya tiene storagePath directo en Firebase, para no provocar 502/CORS mientras el render sigue activo y conservar el raster/frontend/karaoke del export.",
     "Corregido: snoopy-export sube el límite de raster de karaoke a MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT=320 para copiar los estilos del frontend en el export MP4 y evitar caer al fallback ASS cuando el estilo redondeado necesita más frames.",
     "Corregido: snoopy-export ya no encola en BullMQ solo por tener RENDER_KEY_VALUE_CONNECTION_STRING configurado; ahora requiere MONTAGE_EXPORT_USE_QUEUE=true para usar worker, evitando que el export quede detenido en 'Export en cola' cuando solo existe el Key Value.",
     "Corregido: snoopy-export vuelve a aceptar exports MP4 con fallback directo cuando Render no inyecta RENDER_KEY_VALUE_CONNECTION_STRING; la cola BullMQ/Key Value sigue declarada y se usa automáticamente cuando esté disponible. Se evita el 503 montage_export_queue_unavailable causado por MONTAGE_EXPORT_REQUIRE_QUEUE=true sin Redis.",
@@ -264,5 +264,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.291"
+  "cache_version": "2026-1.0.10.292"
 }

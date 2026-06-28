@@ -2088,6 +2088,30 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     }
   }
   if (!src) src = directDownloadUrl || rawUrl;
+  if (
+    isMontageProxyMediaUrl(src)
+    && storagePath
+    && typeof window.resolveFirebaseStorageUrl === "function"
+  ) {
+    try {
+      const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app";
+      const gsUrl = storagePath.startsWith("gs://")
+        ? storagePath
+        : `gs://${bucket}/${storagePath}`;
+      const resolved = gsUrl ? String(await window.resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
+      if (resolved && /^https?:\/\//i.test(resolved) && !isMontageProxyMediaUrl(resolved)) {
+        console.info("[podcaster][montage-export][preview-media-source]", {
+          rowId: String(selected?.rowId || "").trim() || undefined,
+          sceneIndex: Math.max(1, Number(selected?.sceneIndex || 1) || 1),
+          source: "firebase_direct",
+          reason: "proxy_media_bypassed"
+        });
+        src = resolved;
+      }
+    } catch (_) {
+      // fallback below
+    }
+  }
   const shouldResolveDirectly = !src || src.startsWith("gs://");
   if (shouldResolveDirectly && typeof window.resolveFirebaseStorageUrl === "function") {
     try {
@@ -3287,6 +3311,16 @@ function normalizeMontageSubmissionMediaUrl(value = "") {
   } catch (_) {
     return cleanValue;
   }
+}
+
+function isMontageProxyMediaUrl(value = "") {
+  const cleanValue = String(value || "").trim();
+  if (!cleanValue) return false;
+  return /^https?:\/\/[^/]+\/api\/assets\/proxy-(?:media|image)\?/i.test(cleanValue)
+    || cleanValue.startsWith("/api/assets/proxy-media?")
+    || cleanValue.startsWith("/api/assets/proxy-image?")
+    || cleanValue.includes("/api/assets/proxy-media?")
+    || cleanValue.includes("/api/assets/proxy-image?");
 }
 
 function inferMontageExportMediaTypeFromUrl(value = "") {
