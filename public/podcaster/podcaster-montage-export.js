@@ -34,6 +34,8 @@ const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT = 90;
 const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL = 320;
 const MONTAGE_FRONTEND_EXPORT_FPS = 60;
 const MONTAGE_FRONTEND_EXPORT_MAX_DURATION_MS = 3 * 60 * 1000;
+const MONTAGE_FRONTEND_EXPORT_SCENE_SEEK_TIMEOUT_MS = 2200;
+const MONTAGE_FRONTEND_EXPORT_DRIFT_SEEK_THRESHOLD_SEC = 0.45;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
@@ -2803,11 +2805,31 @@ function resolveFrontendMontageActiveEntryAtMs(payload = {}, currentMs = 0) {
   });
 }
 
-function resolveFrontendMontageEntryLocalTimeSec(entry = {}, currentMs = 0, mediaEl = null) {
+function resolveFrontendMontageSourceState(entry = {}, currentMs = 0) {
+  const controller = window.exportPreviewController || null;
+  if (controller && typeof controller.resolveEntryTargetOffsetSec === "function") {
+    const resolved = controller.resolveEntryTargetOffsetSec(entry, currentMs);
+    if (resolved && Number.isFinite(Number(resolved.targetOffsetSec))) {
+      return {
+        targetOffsetSec: Math.max(0, Number(resolved.targetOffsetSec || 0) || 0),
+        isHoldActive: resolved.isHoldActive === true,
+        playbackRate: Math.max(0.25, Math.min(4, Number(resolved.playbackRate || 1) || 1))
+      };
+    }
+  }
   const startMs = Math.max(0, Number(entry?.timelineStartMs ?? entry?.startMs ?? 0) || 0);
-  const trimInMs = Math.max(0, Number(entry?.trimInMs || 0) || 0);
+  const trimInMs = Math.max(0, Number(entry?.clip?.trimInMs ?? entry?.trimInMs ?? 0) || 0);
   const elapsedMs = Math.max(0, Number(currentMs || 0) - startMs);
-  let localSec = Math.max(0, (trimInMs + elapsedMs) / 1000);
+  return {
+    targetOffsetSec: Math.max(0, (trimInMs + elapsedMs) / 1000),
+    isHoldActive: false,
+    playbackRate: 1
+  };
+}
+
+function resolveFrontendMontageEntryLocalTimeSec(entry = {}, currentMs = 0, mediaEl = null) {
+  const sourceState = resolveFrontendMontageSourceState(entry, currentMs);
+  let localSec = Math.max(0, Number(sourceState.targetOffsetSec || 0) || 0);
   const mediaDurationSec = Number(mediaEl?.duration || 0) || 0;
   const declaredDurationSec = Math.max(0, Number(entry?.sourceDurationMs || entry?.mediaDurationMs || 0) / 1000 || 0);
   const durationSec = Number.isFinite(mediaDurationSec) && mediaDurationSec > 0.05
@@ -2819,8 +2841,29 @@ function resolveFrontendMontageEntryLocalTimeSec(entry = {}, currentMs = 0, medi
   return localSec;
 }
 
-function waitFrontendMontageMediaEvent(mediaEl = null, timeoutMs = 900) {
+function resolveFrontendMontageEntryForVideo(payload = {}, currentMs = 0, mediaEl = null, fallbackEntry = null) {
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  const videoSrc = String(
+    mediaEl?.dataset?.src
+    || mediaEl?.dataset?.originalSrc
+    || mediaEl?.getAttribute?.("src")
+    || mediaEl?.currentSrc
+    || ""
+  ).trim();
+  if (videoSrc) {
+    const matched = entries.find((entry) => {
+      const entrySrc = String(entry?.videoSrc || entry?.src || entry?.downloadUrl || entry?.url || "").trim();
+      return entrySrc && (entrySrc === videoSrc || videoSrc.includes(encodeURIComponent(entrySrc)) || videoSrc.includes(entrySrc));
+    });
+    if (matched) return matched;
+  }
+  return fallbackEntry || resolveFrontendMontageActiveEntryAtMs(payload, currentMs);
+}
+
+function waitFrontendMontageMediaReadyState(mediaEl = null, minReadyState = 2, timeoutMs = 900) {
   if (!mediaEl) return Promise.resolve(false);
+  const targetReadyState = Math.max(0, Number(minReadyState || 0) || 0);
+  if (Number(mediaEl.readyState || 0) >= targetReadyState) return Promise.resolve(true);
   return new Promise((resolve) => {
     let done = false;
     const cleanup = (ok) => {
@@ -2831,34 +2874,67 @@ function waitFrontendMontageMediaEvent(mediaEl = null, timeoutMs = 900) {
       mediaEl.removeEventListener?.("loadedmetadata", onLoadedMetadata);
       mediaEl.removeEventListener?.("loadeddata", onLoadedData);
       mediaEl.removeEventListener?.("canplay", onCanPlay);
+      mediaEl.removeEventListener?.("playing", onPlaying);
+      mediaEl.removeEventListener?.("timeupdate", onTimeUpdate);
       resolve(ok === true);
     };
-    const onSeeked = () => cleanup(true);
-    const onLoadedMetadata = () => cleanup(true);
-    const onLoadedData = () => cleanup(true);
-    const onCanPlay = () => cleanup(true);
+    const checkReady = () => {
+      if (Number(mediaEl.readyState || 0) >= targetReadyState) cleanup(true);
+    };
+    const onSeeked = checkReady;
+    const onLoadedMetadata = checkReady;
+    const onLoadedData = checkReady;
+    const onCanPlay = checkReady;
+    const onPlaying = checkReady;
+    const onTimeUpdate = checkReady;
     const timeoutId = window.setTimeout(() => cleanup(false), Math.max(80, Number(timeoutMs || 0) || 900));
     mediaEl.addEventListener?.("seeked", onSeeked, { once: true });
     mediaEl.addEventListener?.("loadedmetadata", onLoadedMetadata, { once: true });
     mediaEl.addEventListener?.("loadeddata", onLoadedData, { once: true });
     mediaEl.addEventListener?.("canplay", onCanPlay, { once: true });
+    mediaEl.addEventListener?.("playing", onPlaying, { once: true });
+    mediaEl.addEventListener?.("timeupdate", onTimeUpdate, { once: true });
   });
 }
 
-async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeoutMs = 900) {
+async function playFrontendMontageVideoForExport(mediaEl = null, sourceState = {}) {
+  if (!mediaEl || String(mediaEl?.tagName || "").toUpperCase() !== "VIDEO") return false;
+  if (sourceState?.isHoldActive === true) {
+    try { mediaEl.pause?.(); } catch (_) { }
+    return mediaEl.readyState >= 2;
+  }
+  try {
+    mediaEl.playbackRate = Math.max(0.25, Math.min(4, Number(sourceState?.playbackRate || 1) || 1));
+  } catch (_) { }
+  if (!mediaEl.paused && mediaEl.readyState >= 2) return true;
+  try {
+    await mediaEl.play?.();
+    return true;
+  } catch (error) {
+    logMontageExportDevtools("frontend_export_video_play_blocked", {
+      readyState: mediaEl.readyState,
+      networkState: mediaEl.networkState,
+      message: String(error?.message || error || "").trim() || undefined,
+      src: String(mediaEl.currentSrc || mediaEl.getAttribute?.("src") || "").trim().slice(0, 160) || undefined
+    }, "warn");
+    return mediaEl.readyState >= 2;
+  }
+}
+
+async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeoutMs = 900, sourceState = {}) {
   if (!mediaEl || String(mediaEl?.tagName || "").toUpperCase() !== "VIDEO") return true;
   const cleanTargetSec = Math.max(0, Number(targetSec || 0) || 0);
   const currentSec = Math.max(0, Number(mediaEl.currentTime || 0) || 0);
   try { mediaEl.pause?.(); } catch (_) { }
   if (mediaEl.readyState >= 2 && Math.abs(currentSec - cleanTargetSec) <= (1 / MONTAGE_FRONTEND_EXPORT_FPS)) {
+    await playFrontendMontageVideoForExport(mediaEl, sourceState);
     return true;
   }
   if (mediaEl.readyState < 1) {
-    const metadataReady = waitFrontendMontageMediaEvent(mediaEl, timeoutMs);
+    const metadataReady = waitFrontendMontageMediaReadyState(mediaEl, 1, timeoutMs);
     try { mediaEl.load?.(); } catch (_) { }
     await metadataReady;
   }
-  const waitForFrame = waitFrontendMontageMediaEvent(mediaEl, timeoutMs);
   try {
     mediaEl.currentTime = cleanTargetSec;
   } catch (error) {
@@ -2869,7 +2945,8 @@ async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeo
     }, "warn");
     return false;
   }
-  const ok = await waitForFrame;
+  await playFrontendMontageVideoForExport(mediaEl, sourceState);
+  const ok = await waitFrontendMontageMediaReadyState(mediaEl, 2, timeoutMs);
   if (!ok && mediaEl.readyState < 2) {
     logMontageExportDevtools("frontend_export_video_seek_timeout", {
       targetSec: Math.round(cleanTargetSec * 1000) / 1000,
@@ -2889,7 +2966,8 @@ async function waitFrontendMontageVisibleMediaReady({ payload = {}, currentMs = 
   const sceneIndex = Math.max(1, Number(activeEntry?.sceneIndex || 0) || 1);
   const rowId = String(activeEntry?.rowId || "").trim();
   const sceneKey = `${sceneIndex}:${rowId || "scene"}`;
-  if (window.montageExportJobState && window.montageExportJobState.frontendVideoSceneKey !== sceneKey) {
+  const sceneChanged = window.montageExportJobState?.frontendVideoSceneKey !== sceneKey;
+  if (window.montageExportJobState && sceneChanged) {
     window.montageExportJobState.frontendVideoSceneKey = sceneKey;
     logMontageExportDevtools("frontend_export_video_scene_change", {
       currentMs,
@@ -2902,8 +2980,24 @@ async function waitFrontendMontageVisibleMediaReady({ payload = {}, currentMs = 
   }
   let synced = 0;
   for (const videoEl of videos) {
-    const targetSec = resolveFrontendMontageEntryLocalTimeSec(activeEntry, currentMs, videoEl);
-    const ok = await waitFrontendMontageMediaSeek(videoEl, targetSec);
+    const entry = resolveFrontendMontageEntryForVideo(payload, currentMs, videoEl, activeEntry);
+    const targetSec = resolveFrontendMontageEntryLocalTimeSec(entry, currentMs, videoEl);
+    const sourceState = resolveFrontendMontageSourceState(entry, currentMs);
+    const currentSec = Math.max(0, Number(videoEl.currentTime || 0) || 0);
+    const needsHardSync = sceneChanged
+      || videoEl.readyState < 2
+      || Math.abs(currentSec - targetSec) > MONTAGE_FRONTEND_EXPORT_DRIFT_SEEK_THRESHOLD_SEC;
+    let ok = true;
+    if (needsHardSync) {
+      ok = await waitFrontendMontageMediaSeek(
+        videoEl,
+        targetSec,
+        videoEl.readyState < 2 ? MONTAGE_FRONTEND_EXPORT_SCENE_SEEK_TIMEOUT_MS : 900,
+        sourceState
+      );
+    } else {
+      ok = await playFrontendMontageVideoForExport(videoEl, sourceState);
+    }
     if (ok) synced += 1;
   }
   if (currentMs === 0 || currentMs % 1000 < (1000 / MONTAGE_FRONTEND_EXPORT_FPS)) {

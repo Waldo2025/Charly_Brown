@@ -83,6 +83,18 @@ assert.match(
 );
 
 assert.match(
+  exportSource,
+  /async function playFrontendMontageVideoForExport\(/,
+  "El export frontend debe reproducir el video entre cambios de escena en vez de seekear cada frame."
+);
+
+assert.match(
+  exportSource,
+  /MONTAGE_FRONTEND_EXPORT_DRIFT_SEEK_THRESHOLD_SEC/,
+  "El export frontend debe limitar los seeks a cambios de escena o drift real."
+);
+
+assert.match(
   podcasterSource,
   /exportPreviewController,/,
   "El controlador de preview del montaje debe estar disponible en window para captura frame-by-frame."
