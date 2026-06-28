@@ -83,7 +83,9 @@ services:
       - key: NODE_VERSION
         value: 22.14.0
       - key: NODE_OPTIONS
-        value: --max-old-space-size=1024
+        value: --max-old-space-size=384
+      - key: MALLOC_ARENA_MAX
+        value: 2
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/project/src/backend/.playwright-browsers
       - key: API_HOST
@@ -125,7 +127,9 @@ services:
       - key: NODE_VERSION
         value: 22.14.0
       - key: NODE_OPTIONS
-        value: --max-old-space-size=1024
+        value: --max-old-space-size=384
+      - key: MALLOC_ARENA_MAX
+        value: 2
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/project/src/backend/.playwright-browsers
       - key: BACKEND_SERVICE_ROLE

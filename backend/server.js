@@ -217,6 +217,7 @@ function resolveFfmpegBinaryPath() {
 }
 
 let ffmpegStaticPath = resolveFfmpegBinaryPath();
+const MONTAGE_FFMPEG_LOW_MEMORY_ARGS = ["-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1"];
 
 function isFfmpegAvailable() {
   return !!ffmpegStaticPath;
@@ -4864,6 +4865,20 @@ function extractRenderedVideoFrameCount(stderrText = "") {
   return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
 }
 
+function removeFfmpegOptionPair(args = [], option = "") {
+  const cleanOption = String(option || "").trim();
+  if (!cleanOption) return Array.isArray(args) ? args.slice() : [];
+  const result = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (String(args[i] || "").trim() === cleanOption) {
+      i += 1;
+      continue;
+    }
+    result.push(args[i]);
+  }
+  return result;
+}
+
 function runFfmpegCommand(args = [], context = {}) {
   return new Promise((resolve, reject) => {
     if (!isFfmpegAvailable()) {
@@ -4882,10 +4897,11 @@ function runFfmpegCommand(args = [], context = {}) {
       previewArgs,
       outputPath: Array.isArray(args) ? String(args.at(-1) || "").trim() || undefined : undefined
     });
-    const ffmpegArgs = Array.isArray(args) ? args.slice() : [];
-    if (!ffmpegArgs.includes("-threads")) {
-      ffmpegArgs.unshift("-threads", "1");
+    let ffmpegArgs = Array.isArray(args) ? args.slice() : [];
+    for (let i = 0; i < MONTAGE_FFMPEG_LOW_MEMORY_ARGS.length; i += 2) {
+      ffmpegArgs = removeFfmpegOptionPair(ffmpegArgs, MONTAGE_FFMPEG_LOW_MEMORY_ARGS[i]);
     }
+    ffmpegArgs.unshift(...MONTAGE_FFMPEG_LOW_MEMORY_ARGS);
     const child = spawn(ffmpegStaticPath, ffmpegArgs, {
       stdio: ["ignore", "pipe", "pipe"]
     });

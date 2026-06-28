@@ -24,6 +24,7 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
   if (IS_RENDER_RUNTIME) {
     x264Preset = preset === "high" ? "veryfast" : preset === "small" ? "ultrafast" : "superfast";
   }
+  const x264Params = IS_RENDER_RUNTIME ? "threads=1:rc-lookahead=0:sync-lookahead=0:bframes=0:ref=1" : "";
   let maxRate = preset === "high" ? "8M" : (preset === "small" ? "2M" : "5M");
   let bufSize = preset === "high" ? "16M" : (preset === "small" ? "4M" : "10M");
   let isCbr = false;
@@ -48,6 +49,9 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
   } else {
     vArgs.push("-crf", String(crf), "-maxrate", maxRate, "-bufsize", bufSize);
   }
+  if (x264Params) {
+    vArgs.push("-x264-params", x264Params);
+  }
   vArgs.push("-movflags", "+faststart");
 
   return {
@@ -61,6 +65,9 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
 
 function resolveMontageIntermediateVideoParams(format = "mp4_h264") {
   const cleanFormat = String(format || "").trim().toLowerCase();
+  const x264Params = IS_RENDER_RUNTIME ? "threads=1:rc-lookahead=0:sync-lookahead=0:bframes=0:ref=1" : "";
+  const crf = IS_RENDER_RUNTIME ? "20" : "18";
+  const audioBitrate = IS_RENDER_RUNTIME ? "128k" : "192k";
   if (cleanFormat === "webm_vp9") {
     return {
       container: "webm",
@@ -73,9 +80,9 @@ function resolveMontageIntermediateVideoParams(format = "mp4_h264") {
   return {
     container: "mp4",
     vCodec: "libx264",
-    vArgs: ["-preset", "ultrafast", "-crf", "18"],
+    vArgs: ["-preset", "ultrafast", "-crf", crf, ...(x264Params ? ["-x264-params", x264Params] : [])],
     aCodec: "aac",
-    aArgs: ["-b:a", "192k"]
+    aArgs: ["-b:a", audioBitrate]
   };
 }
 
