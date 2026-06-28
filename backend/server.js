@@ -1859,6 +1859,13 @@ const MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS = Math.max(
 const IS_RENDER_RUNTIME = Boolean(
   String(process.env.RENDER_EXTERNAL_HOSTNAME || process.env.RENDER_SERVICE_ID || "").trim()
 );
+const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
+  0,
+  Math.round(Number(
+    process.env.MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT
+      || (IS_RENDER_RUNTIME ? 8 : 200)
+  ) || (IS_RENDER_RUNTIME ? 8 : 200))
+);
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
   Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
@@ -12131,6 +12138,26 @@ async function appendMontageSceneOnScreenTextRenderedFrameFilters({
       appliedOverlayCount: 0
     };
   }
+  const frameLimit = Math.max(0, Number(MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT || 0) || 0);
+  if (frameLimit > 0 && frameItems.length > frameLimit) {
+    console.warn("[backend][montage-export][scene-onscreen-rendered-frames-limit]", {
+      sceneIndex,
+      rowId: String(entry?.rowId || "").trim() || undefined,
+      requestedFrameCount: frameItems.length,
+      frameLimit,
+      renderRuntime: IS_RENDER_RUNTIME ? "render" : "local",
+      fallback: "ass_text"
+    });
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      nextInputIndex,
+      appliedOverlayCount: 0,
+      skippedByFrameLimit: true,
+      requestedFrameCount: frameItems.length,
+      frameLimit
+    };
+  }
 
   let graph = String(videoFilterGraph || "");
   let currentLabel = String(baseVideoMapLabel || "[vout]");
@@ -13111,7 +13138,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             videoFilterGraph = renderedTextOverlayResult.videoFilterGraph;
             finalVideoMapLabel = renderedTextOverlayResult.finalVideoMapLabel;
             nextOverlayInputIndex = renderedTextOverlayResult.nextInputIndex;
-          } else if (input.onScreenTextRenderedFrameAttempted !== true) {
+          } else if (input.onScreenTextRenderedFrameAttempted !== true || renderedTextOverlayResult.skippedByFrameLimit === true) {
+            if (renderedTextOverlayResult.skippedByFrameLimit === true) {
+              console.warn("[backend][montage-export][scene-onscreen-ass-fallback-after-frame-limit]", {
+                jobId,
+                sceneIndex,
+                rowId,
+                requestedFrameCount: renderedTextOverlayResult.requestedFrameCount || 0,
+                frameLimit: renderedTextOverlayResult.frameLimit || 0
+              });
+            }
             const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
               input,
               entry,
@@ -13180,6 +13216,31 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
         args.push("-r", "24", "-c:v", intermediateParams.vCodec);
         args.push(...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", intermediateParams.aCodec, "-ar", "48000", ...intermediateParams.aArgs, intermediatePath);
+        const sceneMemoryBeforeFfmpeg = process.memoryUsage();
+        console.info("[backend][montage-export][scene-ffmpeg-preflight]", {
+          jobId,
+          sceneIndex,
+          rowId,
+          durationSec: durSec,
+          canvas,
+          argCount: args.length,
+          inputCount: args.filter((arg) => arg === "-i").length,
+          filterCount: String(videoFilterGraph || "").split(";").filter(Boolean).length + String(audioFilterGraph || "").split(";").filter(Boolean).length,
+          finalVideoMapLabel,
+          audioMapLabel,
+          useNativeVideoAudio,
+          videoHasAudio,
+          hasInputAudio: Boolean(inputAudioPath),
+          renderedTextFrameLimit: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT,
+          overlayTempPathCount: sceneOverlayTempPaths.length,
+          ffmpegTimeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+          memory: {
+            rssMb: Math.round(Number(sceneMemoryBeforeFfmpeg.rss || 0) / 1024 / 1024 * 10) / 10,
+            heapUsedMb: Math.round(Number(sceneMemoryBeforeFfmpeg.heapUsed || 0) / 1024 / 1024 * 10) / 10,
+            heapTotalMb: Math.round(Number(sceneMemoryBeforeFfmpeg.heapTotal || 0) / 1024 / 1024 * 10) / 10,
+            externalMb: Math.round(Number(sceneMemoryBeforeFfmpeg.external || 0) / 1024 / 1024 * 10) / 10
+          }
+        });
         emitSceneSubstage({
           sceneIndex,
           rowId,
@@ -13288,6 +13349,24 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         });
         logMontageMemory("render_scene_after", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
       } catch (error) {
+        const sceneErrorMemory = process.memoryUsage();
+        console.error("[backend][montage-export][scene-error]", {
+          jobId,
+          sceneIndex,
+          rowId,
+          substage: String(currentSceneSubstage || error?.code || "").trim() || null,
+          code: String(error?.code || "").trim() || null,
+          status: Number(error?.status || 0) || undefined,
+          message: String(error?.message || error || "").trim(),
+          stderrPreview: buildMontageStderrPreview(error?.stderr || error?.detail?.stderrPreview || "", 12, 2200) || undefined,
+          stdoutPreview: buildMontageStderrPreview(error?.stdout || error?.detail?.stdoutPreview || "", 8, 1200) || undefined,
+          memory: {
+            rssMb: Math.round(Number(sceneErrorMemory.rss || 0) / 1024 / 1024 * 10) / 10,
+            heapUsedMb: Math.round(Number(sceneErrorMemory.heapUsed || 0) / 1024 / 1024 * 10) / 10,
+            heapTotalMb: Math.round(Number(sceneErrorMemory.heapTotal || 0) / 1024 / 1024 * 10) / 10,
+            externalMb: Math.round(Number(sceneErrorMemory.external || 0) / 1024 / 1024 * 10) / 10
+          }
+        });
         error.detail = {
           ...(error?.detail && typeof error.detail === "object" ? error.detail : {}),
           failedSceneIndex: sceneIndex,

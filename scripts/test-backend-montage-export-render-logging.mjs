@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const serverSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/backend/server.js",
+  "utf8"
+);
+const renderSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/render.yaml",
+  "utf8"
+);
+
+assert.match(
+  serverSource,
+  /const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math\.max\([\s\S]*IS_RENDER_RUNTIME \? 8 : 200/,
+  "backend debe limitar frames PNG de texto renderizado en Render."
+);
+
+assert.match(
+  serverSource,
+  /\[backend\]\[montage-export\]\[scene-onscreen-rendered-frames-limit\][\s\S]*fallback: "ass_text"/,
+  "backend debe loggear cuando cae a ASS por exceso de frames PNG."
+);
+
+assert.match(
+  serverSource,
+  /\[backend\]\[montage-export\]\[scene-ffmpeg-preflight\][\s\S]*argCount:[\s\S]*inputCount:[\s\S]*filterCount:[\s\S]*renderedTextFrameLimit:/,
+  "backend debe loggear preflight FFmpeg por escena con conteos concretos."
+);
+
+assert.match(
+  serverSource,
+  /\[backend\]\[montage-export\]\[scene-error\][\s\S]*stderrPreview:[\s\S]*memory:/,
+  "backend debe loggear errores de escena con stderr y memoria."
+);
+
+assert.match(
+  renderSource,
+  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT\s*\n\s*value:\s+8/,
+  "Render debe declarar limite de frames PNG para snoopy-export."
+);
+
+console.log("Backend montage export render logging OK.");

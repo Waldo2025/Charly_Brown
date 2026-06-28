@@ -11,10 +11,10 @@ const changelog = Array.isArray(version.changelog) ? version.changelog : [];
 const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(changelog[0] || "").includes("MONTAGE_EXPORT_USE_QUEUE=true")
-    && String(changelog[0] || "").includes("Export en cola")
-    && String(changelog[0] || "").includes("Key Value"),
-  "La nota más reciente debe reflejar el fix actual para no atascar exports en cola sin worker."
+  String(changelog[0] || "").includes("logs detallados")
+    && String(changelog[0] || "").includes("MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT=8")
+    && String(changelog[0] || "").includes("scene_ffmpeg_render"),
+  "La nota más reciente debe reflejar el fix actual de logging y limite de frames PNG en Render."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")),

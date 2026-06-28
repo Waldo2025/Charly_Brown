@@ -110,6 +110,8 @@ services:
         value: false
       - key: MONTAGE_EXPORT_USE_QUEUE
         value: false
+      - key: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT
+        value: 8
       - key: RENDER_KEY_VALUE_CONNECTION_STRING
         fromService:
           type: keyvalue
