@@ -622,6 +622,7 @@
     const layout = config.layout && typeof config.layout === "object" ? config.layout : {};
     const wordTimings = Array.isArray(config.wordTimings) ? config.wordTimings : [];
     const activeWordIndex = Number.isFinite(Number(config.activeWordIndex)) ? Number(config.activeWordIndex) : -1;
+    const activeOnly = config.activeOnly === true && activeWordIndex >= 0;
     const text = String(config.text || "").trim();
     const contentHtml = wordTimings.length
       ? buildKaraokeSubtitleMarkup(text, wordTimings, activeWordIndex, settings)
@@ -637,6 +638,7 @@
     const bgClass = previewSpec?.bgClass || getBgPresetClass(settings.bgPreset);
     const html = `
       <style>${buildOnScreenTextRasterStyleBlock()}</style>
+      ${activeOnly ? `<style>.podcaster-onscreen-text-raster-shell .podcast-karaoke-word:not(.is-active){visibility:hidden !important;}</style>` : ""}
       <div xmlns="http://www.w3.org/1999/xhtml" class="podcaster-onscreen-text-raster-shell" style="width:${widthPx}px;height:${heightPx}px;padding:${padPx}px;">
         <div class="podcast-on-screen-text-content ${presetClass} ${bgClass}" data-row-id="${escapeHtml(String(config.rowId || layout.rowId || "").trim())}" style="${inlineStyle};position:relative !important;left:auto !important;top:auto !important;transform:none !important;">
           ${contentHtml}
@@ -653,6 +655,8 @@
       presetClass,
       bgClass,
       inlineStyle,
+      offsetXPx: Math.max(0, Math.round(Number(metrics.rawXPx || 0) - padPx)),
+      offsetYPx: Math.max(0, Math.round(Number(metrics.yPx || 0) - padPx)),
       padPx,
       bubbleWidthPx,
       bubbleHeightPx,

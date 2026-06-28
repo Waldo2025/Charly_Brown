@@ -9999,7 +9999,9 @@ function normalizeMontageExportRequestBody(body = {}) {
         ? segment.renderedFrames.slice(0, 200).map((frame, frameIdx) => {
           if (!frame || typeof frame !== "object") return null;
           const dataUrl = clampText(frame?.dataUrl || "", 8_000_000);
-          if (!dataUrl.startsWith("data:image/")) return null;
+          const storagePath = clampText(frame?.storagePath || "", 900);
+          const downloadUrl = clampText(frame?.downloadUrl || frame?.url || "", 3000);
+          if (!dataUrl.startsWith("data:image/") && !storagePath && !downloadUrl) return null;
           return {
             kind: clampText(frame?.kind || "base", 40) || "base",
             text: clampText(frame?.text || "", 500),
@@ -10007,11 +10009,17 @@ function normalizeMontageExportRequestBody(body = {}) {
             startMs: Math.max(0, Math.round(Number(frame?.startMs || 0) || 0)),
             endMs: Math.max(0, Math.round(Number(frame?.endMs || 0) || 0)),
             dataUrl,
+            storagePath,
+            downloadUrl,
+            url: downloadUrl,
+            mimeType: clampText(frame?.mimeType || "image/png", 120) || "image/png",
             padPx: Math.max(0, Math.round(Number(frame?.padPx || 0) || 0)),
             widthPx: Math.max(1, Math.round(Number(frame?.widthPx || 0) || 1)),
             heightPx: Math.max(1, Math.round(Number(frame?.heightPx || 0) || 1)),
             offsetXPx: Math.max(0, Math.round(Number(frame?.offsetXPx || 0) || 0)),
-            offsetYPx: Math.max(0, Math.round(Number(frame?.offsetYPx || 0) || 0))
+            offsetYPx: Math.max(0, Math.round(Number(frame?.offsetYPx || 0) || 0)),
+            sourceWidth: Math.max(2, Math.round(Number(frame?.sourceWidth || 1280) || 1280)),
+            sourceHeight: Math.max(2, Math.round(Number(frame?.sourceHeight || 720) || 720))
           };
         }).filter(Boolean)
         : []
@@ -10641,18 +10649,19 @@ function shouldUseMontageSceneAssSubtitles(input = {}) {
 function doesMontageOnScreenTextSegmentBelongToScene(segment = {}, entry = {}, sceneIndex = 1, sceneStartMs = 0, sceneEndMs = 0) {
   const segmentRowId = String(segment?.rowId || "").trim();
   const entryRowId = String(entry?.rowId || "").trim();
-  if (segmentRowId && entryRowId && segmentRowId === entryRowId) return true;
+  const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+  const endMs = Math.max(startMs + 1, Math.round(startMs + Number(segment?.durationMs || 0) || 0));
+  const overlapsSceneWindow = endMs > sceneStartMs && startMs < sceneEndMs;
+  if (segmentRowId && entryRowId && segmentRowId === entryRowId) return overlapsSceneWindow;
   const normalizedSceneIndex = Math.max(1, Math.round(Number(sceneIndex || 1) || 1));
   const hasExplicitSceneIndex = segment?.sceneIndex !== null
     && segment?.sceneIndex !== undefined
     && segment?.sceneIndex !== "";
   if (hasExplicitSceneIndex) {
     const segmentSceneIndex = Math.max(1, Math.round(Number(segment.sceneIndex) || normalizedSceneIndex));
-    if (segmentSceneIndex === normalizedSceneIndex) return true;
+    if (segmentSceneIndex === normalizedSceneIndex) return overlapsSceneWindow;
   }
-  const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-  const endMs = Math.max(startMs + 1, Math.round(startMs + Number(segment?.durationMs || 0) || 0));
-  return endMs > sceneStartMs && startMs < sceneEndMs;
+  return overlapsSceneWindow;
 }
 
 function resolveMontageSceneOnScreenTextSegments({
@@ -11912,6 +11921,143 @@ async function appendMontageSceneOnScreenTextAssFilters({
   };
 }
 
+async function appendMontageSceneOnScreenTextRenderedFrameFilters({
+  input = {},
+  entry = {},
+  sceneIndex = 1,
+  sceneTimelineStartMs = 0,
+  sceneTimelineEndMs = 0,
+  canvas = { width: 1280, height: 720 },
+  videoFilterGraph = "",
+  baseVideoMapLabel = "[vout]",
+  tmpDir = "",
+  args = [],
+  nextInputIndex = 2,
+  tempPaths = [],
+  downloadInput = null
+} = {}) {
+  if (typeof downloadInput !== "function") {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      nextInputIndex,
+      appliedOverlayCount: 0
+    };
+  }
+  const renderedSegmentMap = buildMontageOnScreenTextRenderedSegmentMap(input.onScreenTextRenderedSegments || []);
+  if (!renderedSegmentMap.size) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      nextInputIndex,
+      appliedOverlayCount: 0
+    };
+  }
+  const sceneSegments = resolveMontageSceneOnScreenTextSegments({
+    input,
+    entry,
+    sceneIndex,
+    sceneStartMs: sceneTimelineStartMs,
+    sceneEndMs: sceneTimelineEndMs
+  });
+  const frameItems = [];
+  sceneSegments.forEach((segment) => {
+    const renderedSegment = renderedSegmentMap.get(buildMontageOnScreenTextSegmentLookupKey(segment)) || null;
+    const frames = Array.isArray(renderedSegment?.renderedFrames) ? renderedSegment.renderedFrames : [];
+    frames.forEach((frame, frameIdx) => {
+      if (!frame || typeof frame !== "object") return;
+      const frameStartMs = Math.max(0, Math.round(Number(frame.startMs || 0) || 0));
+      const frameEndMs = Math.max(frameStartMs, Math.round(Number(frame.endMs || 0) || 0));
+      if (frameEndMs <= frameStartMs) return;
+      const absoluteStartMs = Math.max(0, Math.round(Number(segment.startMs || 0) || 0)) + frameStartMs;
+      const absoluteEndMs = Math.max(absoluteStartMs + 1, Math.max(0, Math.round(Number(segment.startMs || 0) || 0)) + frameEndMs);
+      if (absoluteEndMs <= sceneTimelineStartMs || absoluteStartMs >= sceneTimelineEndMs) return;
+      frameItems.push({
+        segment,
+        frame,
+        frameIdx,
+        absoluteStartMs,
+        absoluteEndMs
+      });
+    });
+  });
+  if (!frameItems.length) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      nextInputIndex,
+      appliedOverlayCount: 0
+    };
+  }
+
+  let graph = String(videoFilterGraph || "");
+  let currentLabel = String(baseVideoMapLabel || "[vout]");
+  let inputIndex = Math.max(0, Math.round(Number(nextInputIndex || 0) || 0));
+  let appliedOverlayCount = 0;
+
+  for (let idx = 0; idx < frameItems.length; idx += 1) {
+    const item = frameItems[idx] || {};
+    const frame = item.frame || {};
+    const frameAsset = {
+      storagePath: String(frame.storagePath || "").trim(),
+      downloadUrl: String(frame.downloadUrl || frame.url || "").trim(),
+      url: String(frame.url || frame.downloadUrl || "").trim(),
+      dataUrl: String(frame.dataUrl || "").trim(),
+      localDataUrl: String(frame.dataUrl || "").trim(),
+      mimeType: String(frame.mimeType || "image/png").trim() || "image/png"
+    };
+    if (!frameAsset.storagePath && !frameAsset.downloadUrl && !frameAsset.url && !String(frameAsset.dataUrl || "").startsWith("data:image/")) continue;
+    let overlayPath = "";
+    try {
+      overlayPath = await downloadInput(frameAsset, "image", inputIndex);
+    } catch (error) {
+      console.warn("[backend][montage-export][scene-onscreen-rendered-frame-download-failed]", {
+        sceneIndex,
+        rowId: String(item.segment?.rowId || entry?.rowId || "").trim() || undefined,
+        frameIndex: idx,
+        storagePath: frameAsset.storagePath || undefined,
+        downloadUrl: frameAsset.downloadUrl ? redactUrlForLogs(frameAsset.downloadUrl) : undefined,
+        message: String(error?.message || error || "").trim()
+      });
+      continue;
+    }
+    if (!overlayPath) continue;
+    tempPaths.push(overlayPath);
+    args.push("-loop", "1", "-framerate", "24", "-i", overlayPath);
+    const sourceWidth = Math.max(2, Math.round(Number(frame.sourceWidth || 1280) || 1280));
+    const sourceHeight = Math.max(2, Math.round(Number(frame.sourceHeight || 720) || 720));
+    const scaleX = Math.max(0.0001, Math.max(2, Number(canvas.width || 1280) || 1280) / sourceWidth);
+    const scaleY = Math.max(0.0001, Math.max(2, Number(canvas.height || 720) || 720) / sourceHeight);
+    const overlayWidth = Math.max(1, Math.round(Number(frame.widthPx || 1) * scaleX));
+    const overlayHeight = Math.max(1, Math.round(Number(frame.heightPx || 1) * scaleY));
+    const overlayX = Math.round(Number(frame.offsetXPx || 0) * scaleX);
+    const overlayY = Math.round(Number(frame.offsetYPx || 0) * scaleY);
+    const startSec = Math.max(0, (Math.max(item.absoluteStartMs, sceneTimelineStartMs) - sceneTimelineStartMs) / 1000);
+    const endSec = Math.max(startSec + 0.001, (Math.min(item.absoluteEndMs, sceneTimelineEndMs) - sceneTimelineStartMs) / 1000);
+    const imageLabel = `onscreen_img_${sceneIndex}_${idx + 1}`;
+    const outLabel = `onscreen_out_${sceneIndex}_${idx + 1}`;
+    const filter = `[${inputIndex}:v]format=rgba,scale=${overlayWidth}:${overlayHeight}:flags=lanczos[${imageLabel}];${currentLabel}[${imageLabel}]overlay=x=${overlayX}:y=${overlayY}:format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
+    graph = graph ? `${graph};${filter}` : filter;
+    currentLabel = `[${outLabel}]`;
+    inputIndex += 1;
+    appliedOverlayCount += 1;
+  }
+
+  if (appliedOverlayCount > 0) {
+    console.info("[backend][montage-export][scene-onscreen-rendered-frames]", {
+      sceneIndex,
+      rowId: String(entry?.rowId || "").trim() || undefined,
+      frameCount: appliedOverlayCount
+    });
+  }
+  return {
+    videoFilterGraph: graph,
+    finalVideoMapLabel: currentLabel,
+    nextInputIndex: inputIndex,
+    appliedOverlayCount
+  };
+}
+
 function resolveBrandOverlayAssetPath(assetPathRaw = "") {
   const inputPath = String(assetPathRaw || "").trim();
   if (path.isAbsolute(inputPath) && fs.existsSync(inputPath)) {
@@ -12797,7 +12943,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         let finalVideoMapLabel = "[vout]";
         let nextOverlayInputIndex = (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2;
         if (shouldBurnSceneOnScreenText) {
-          const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
+          const renderedTextOverlayResult = await appendMontageSceneOnScreenTextRenderedFrameFilters({
             input,
             entry,
             sceneIndex,
@@ -12806,10 +12952,31 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             canvas,
             videoFilterGraph,
             baseVideoMapLabel: finalVideoMapLabel,
-            tmpDir
+            tmpDir,
+            args,
+            nextInputIndex: nextOverlayInputIndex,
+            tempPaths: sceneOverlayTempPaths,
+            downloadInput
           });
-          videoFilterGraph = textOverlayResult.videoFilterGraph;
-          finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
+          if (renderedTextOverlayResult.appliedOverlayCount > 0) {
+            videoFilterGraph = renderedTextOverlayResult.videoFilterGraph;
+            finalVideoMapLabel = renderedTextOverlayResult.finalVideoMapLabel;
+            nextOverlayInputIndex = renderedTextOverlayResult.nextInputIndex;
+          } else {
+            const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
+              input,
+              entry,
+              sceneIndex,
+              sceneTimelineStartMs,
+              sceneTimelineEndMs,
+              canvas,
+              videoFilterGraph,
+              baseVideoMapLabel: finalVideoMapLabel,
+              tmpDir
+            });
+            videoFilterGraph = textOverlayResult.videoFilterGraph;
+            finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
+          }
         }
         const stylizedOverlayResult = await appendMontageSceneStylizedTextFilters({
           input,

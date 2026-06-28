@@ -5,6 +5,8 @@
 
 import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js?v=2026-06-26.4";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import JASSUB from "../vendor/jassub/jassub.js";
 import {
   buildPodcasterLocalMediaKey,
@@ -28,6 +30,8 @@ const MONTAGE_EXPORT_BUSY_HANDOFF_RECOVERY_MAX_RETRIES = 1;
 const MONTAGE_EXPORT_TRANSIENT_SILENT_RETRIES = 2;
 const MONTAGE_EXPORT_RECENT_POLL_GRACE_MS = 45 * 1000;
 const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 3;
+const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT = 90;
+const MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL = 320;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
@@ -2666,6 +2670,121 @@ function buildMontageStorageGsUrl(storagePath = "") {
   return `gs://${bucket}/${cleanStoragePath}`;
 }
 
+function normalizeMontageStorageSegment(value = "", fallback = "item") {
+  const clean = String(value || "").trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 96);
+  return clean || String(fallback || "item").trim() || "item";
+}
+
+function resolveMontageExportCurrentUid() {
+  try {
+    return String(getAuth()?.currentUser?.uid || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function buildMontageOnScreenTextTempFramePath({
+  sessionId = "",
+  uid = "",
+  exportId = "",
+  rowId = "",
+  frameIndex = 0
+} = {}) {
+  return [
+    "podcaster",
+    "sessions",
+    normalizeMontageStorageSegment(sessionId, "session"),
+    "owners",
+    normalizeMontageStorageSegment(uid, "anon"),
+    "tmp",
+    "onscreen-text",
+    normalizeMontageStorageSegment(exportId, "export"),
+    `${normalizeMontageStorageSegment(rowId, "row")}-${String(Math.max(0, Math.round(Number(frameIndex || 0) || 0)).padStart(4, "0")}.png`
+  ].join("/");
+}
+
+function renderMontageOnScreenTextSnapshotBlob(plan = null) {
+  return new Promise((resolve, reject) => {
+    if (!plan || typeof plan !== "object") {
+      reject(new Error("snapshot_plan_missing"));
+      return;
+    }
+    const width = Math.max(1, Math.round(Number(plan.widthPx || 0) || 0));
+    const height = Math.max(1, Math.round(Number(plan.heightPx || 0) || 0));
+    const html = String(plan.html || "").trim();
+    if (!width || !height || !html) {
+      reject(new Error("snapshot_plan_invalid"));
+      return;
+    }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${html}</foreignObject></svg>`;
+    const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    const cleanup = () => {
+      try { URL.revokeObjectURL(url); } catch (_) { }
+    };
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("canvas_context_missing");
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          cleanup();
+          if (blob) resolve(blob);
+          else reject(new Error("snapshot_blob_failed"));
+        }, "image/png");
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+    img.onerror = () => {
+      cleanup();
+      reject(new Error("snapshot_image_decode_failed"));
+    };
+    img.src = url;
+  });
+}
+
+async function uploadMontageOnScreenTextSnapshotBlob({
+  blob = null,
+  storagePath = "",
+  sessionId = "",
+  rowId = "",
+  exportId = ""
+} = {}) {
+  if (!blob || !storagePath) return null;
+  const storage = getStorage();
+  const fileRef = storageRef(storage, storagePath);
+  await uploadBytes(fileRef, blob, {
+    contentType: "image/png",
+    customMetadata: {
+      temporary: "true",
+      purpose: "podcaster-onscreen-text-rendered-frame",
+      sessionId: String(sessionId || "").trim(),
+      rowId: String(rowId || "").trim(),
+      exportId: String(exportId || "").trim(),
+      createdAt: new Date().toISOString()
+    }
+  });
+  const downloadUrl = await getDownloadURL(fileRef);
+  return {
+    storagePath,
+    downloadUrl,
+    url: downloadUrl,
+    mimeType: "image/png"
+  };
+}
+
 async function readMontageCachedMediaDataUrl(cacheKey = "") {
   const cleanKey = String(cacheKey || "").trim();
   if (!cleanKey) return "";
@@ -3266,6 +3385,31 @@ function stripMontageExportSubmissionPayload(payload = {}) {
     }
     next.audioTimeline = nextAudioTimeline;
   }
+  const stripRenderedFrameInlineData = (segment) => {
+    if (!segment || typeof segment !== "object") return segment;
+    if (!Array.isArray(segment.renderedFrames)) return segment;
+    return {
+      ...segment,
+      renderedFrames: segment.renderedFrames.map((frame) => {
+        if (!frame || typeof frame !== "object") return frame;
+        const hasRemoteSource = Boolean(String(frame.storagePath || frame.downloadUrl || frame.url || "").trim());
+        if (!hasRemoteSource) return frame;
+        return {
+          ...frame,
+          dataUrl: ""
+        };
+      })
+    };
+  };
+  if (Array.isArray(next.onScreenTextRenderedSegments)) {
+    next.onScreenTextRenderedSegments = next.onScreenTextRenderedSegments.map((segment) => stripRenderedFrameInlineData(segment));
+  }
+  if (next.onScreenTextTimeline && typeof next.onScreenTextTimeline === "object" && Array.isArray(next.onScreenTextTimeline.renderedSegments)) {
+    next.onScreenTextTimeline = {
+      ...next.onScreenTextTimeline,
+      renderedSegments: next.onScreenTextTimeline.renderedSegments.map((segment) => stripRenderedFrameInlineData(segment))
+    };
+  }
   return next;
 }
 
@@ -3382,6 +3526,138 @@ function buildMontageExportDialogueAudioMap(activeSession = null, rowIds = []) {
     };
   });
   return nextDialogueAudioMap;
+}
+
+async function buildMontageOnScreenTextRenderedSegmentsForExport({
+  activeSession = null,
+  timeline = null,
+  dialogueAudioMap = {},
+  sessionId = "",
+  exportId = "",
+  resolution = "source",
+  sourceWidth = 1280,
+  sourceHeight = 720
+} = {}) {
+  const textRenderApi = window.PodcasterTextRenderSpec || window.PodcasterKaraokeRenderSpec || {};
+  const buildSnapshotPlan = typeof textRenderApi.buildOnScreenTextRasterSnapshotPlan === "function"
+    ? textRenderApi.buildOnScreenTextRasterSnapshotPlan
+    : (typeof window.buildOnScreenTextRasterSnapshotPlan === "function" ? window.buildOnScreenTextRasterSnapshotPlan : null);
+  const normalizeWordTimings = typeof textRenderApi.normalizeKaraokeWordTimings === "function"
+    ? textRenderApi.normalizeKaraokeWordTimings
+    : window.normalizeKaraokeWordTimings;
+  const scaleWordTimings = typeof textRenderApi.scaleKaraokeWordTimingsForPlaybackRate === "function"
+    ? textRenderApi.scaleKaraokeWordTimingsForPlaybackRate
+    : window.scaleKaraokeWordTimingsForPlaybackRate;
+  if (!buildSnapshotPlan || typeof normalizeWordTimings !== "function") return [];
+  const settings = timeline?.settings && typeof timeline.settings === "object" ? timeline.settings : {};
+  const sourceSegments = Array.isArray(timeline?.segments) ? timeline.segments.filter(Boolean) : [];
+  if (!sourceSegments.length || settings.enabled === false || settings.showTrack === false) return [];
+  const uid = resolveMontageExportCurrentUid();
+  const cleanSessionId = String(sessionId || activeSession?.id || "").trim() || "session";
+  const cleanExportId = String(exportId || `export-${Date.now()}`).trim();
+  const renderedSegments = [];
+  let frameTotal = 0;
+
+  for (const segment of sourceSegments) {
+    if (frameTotal >= MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL) break;
+    const rowId = String(segment?.rowId || "").trim();
+    const text = String(segment?.text || segment?.wrappedText || "").trim();
+    if (!rowId || !text) continue;
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+    const audioClip = dialogueAudioMap?.[rowId] || null;
+    const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || audioClip?.playbackRate || 1) || 1));
+    const rawWordTimings = normalizeWordTimings(audioClip, String(segment?.wrappedText || text).trim());
+    const wordTimings = typeof scaleWordTimings === "function"
+      ? scaleWordTimings(rawWordTimings, playbackRate)
+      : rawWordTimings;
+    const selectedWordTimings = Array.isArray(wordTimings)
+      ? wordTimings
+        .filter((word) => Math.max(0, Number(word?.endMs || 0) || 0) > Math.max(0, Number(word?.startMs || 0) || 0))
+        .slice(0, Math.max(0, MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT - 1))
+      : [];
+    const frameSpecs = [
+      { kind: "base", wordIndex: -1, startMs: 0, endMs: durationMs, activeOnly: false },
+      ...selectedWordTimings.map((word, index) => ({
+        kind: "karaoke-word",
+        wordIndex: index,
+        text: String(word?.text || "").trim(),
+        startMs: Math.max(0, Math.round(Number(word?.startMs || 0) || 0)),
+        endMs: Math.min(durationMs, Math.max(0, Math.round(Number(word?.endMs || 0) || 0))),
+        activeOnly: true
+      }))
+    ].filter((frame) => frame.endMs > frame.startMs && frameTotal < MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL);
+    if (!frameSpecs.length) continue;
+
+    const renderedFrames = [];
+    for (const frame of frameSpecs) {
+      if (frameTotal >= MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL) break;
+      let plan = null;
+      try {
+        plan = buildSnapshotPlan({
+          rowId,
+          settings,
+          layout: segment.layout || {},
+          text,
+          wrappedText: segment.wrappedText || "",
+          wordTimings,
+          activeWordIndex: frame.wordIndex,
+          activeOnly: frame.activeOnly,
+          sourceWidth,
+          sourceHeight,
+          resolution
+        });
+        const blob = await renderMontageOnScreenTextSnapshotBlob(plan);
+        const storagePath = buildMontageOnScreenTextTempFramePath({
+          sessionId: cleanSessionId,
+          uid,
+          exportId: cleanExportId,
+          rowId,
+          frameIndex: frameTotal + 1
+        });
+        const uploaded = await uploadMontageOnScreenTextSnapshotBlob({
+          blob,
+          storagePath,
+          sessionId: cleanSessionId,
+          rowId,
+          exportId: cleanExportId
+        });
+        if (!uploaded?.storagePath) continue;
+        renderedFrames.push({
+          kind: frame.kind,
+          text: frame.text || "",
+          wordIndex: frame.wordIndex,
+          startMs: frame.startMs,
+          endMs: frame.endMs,
+          storagePath: uploaded.storagePath,
+          downloadUrl: uploaded.downloadUrl,
+          url: uploaded.url,
+          mimeType: uploaded.mimeType,
+          padPx: Math.max(0, Math.round(Number(plan?.padPx || 0) || 0)),
+          widthPx: Math.max(1, Math.round(Number(plan?.widthPx || 1) || 1)),
+          heightPx: Math.max(1, Math.round(Number(plan?.heightPx || 1) || 1)),
+          offsetXPx: Math.max(0, Math.round(Number(plan?.offsetXPx || 0) || 0)),
+          offsetYPx: Math.max(0, Math.round(Number(plan?.offsetYPx || 0) || 0)),
+          sourceWidth: Math.max(2, Math.round(Number(sourceWidth || 1280) || 1280)),
+          sourceHeight: Math.max(2, Math.round(Number(sourceHeight || 720) || 720))
+        });
+        frameTotal += 1;
+      } catch (error) {
+        console.warn("[podcaster][montage-export][onscreen-text-frame] render_or_upload_failed", {
+          rowId,
+          kind: frame.kind,
+          wordIndex: frame.wordIndex,
+          message: String(error?.message || error || "").trim()
+        });
+      }
+    }
+    if (renderedFrames.length) {
+      renderedSegments.push({
+        ...segment,
+        renderedFrames
+      });
+    }
+  }
+  return renderedSegments;
 }
 
 function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, entries = [], geminiTimelineSegments = []) {
@@ -3608,6 +3884,20 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   }
   const prepared = buildMontageExportPayload(session);
   if (!prepared?.ok || !prepared?.payload) return prepared;
+  const timeline = prepared.payload.onScreenTextTimeline || null;
+  const onScreenTextFrameExportId = `onscreen-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  prepared.payload.onScreenTextRenderedSegments = timeline?.segments?.length
+    ? await buildMontageOnScreenTextRenderedSegmentsForExport({
+      activeSession,
+      timeline,
+      dialogueAudioMap: prepared.payload.dialogueAudioMap || {},
+      sessionId: prepared.payload.sessionId || "",
+      exportId: onScreenTextFrameExportId,
+      resolution: prepared.payload.resolution || "source",
+      sourceWidth: 1280,
+      sourceHeight: 720
+    })
+    : [];
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
   await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession);
@@ -4055,6 +4345,7 @@ export function buildMontageExportPayload(session = null) {
   const effectiveFormat = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
 
   const reelModeEnabled = videoCfg?.reelModeEnabled === true;
+  const effectiveResolution = resolveEffectiveExportResolution(window.montageExportState.resolution, reelModeEnabled);
   const payload = {
     sessionId,
     renderMode: normalizeMontageRenderMode(window.montageExportState.renderMode || "browser"),
@@ -4062,7 +4353,7 @@ export function buildMontageExportPayload(session = null) {
     onlyAudio: window.montageExportState.onlyAudio === true,
     format: effectiveFormat,
     qualityPreset: window.montageExportState.qualityPreset,
-    resolution: resolveEffectiveExportResolution(window.montageExportState.resolution, reelModeEnabled),
+    resolution: effectiveResolution,
     reelModeEnabled,
     includeBackgroundMusic,
     backgroundMusic,

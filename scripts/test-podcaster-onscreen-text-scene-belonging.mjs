@@ -10,6 +10,14 @@ if (!/const hasExplicitSceneIndex = segment\?\.sceneIndex !== null[\s\S]*?if \(h
   throw new Error("El backend no debe tratar un sceneIndex ausente como si perteneciera a la escena actual.");
 }
 
+if (!/const overlapsSceneWindow = endMs > sceneStartMs && startMs < sceneEndMs;[\s\S]*?segmentRowId && entryRowId && segmentRowId === entryRowId\) return overlapsSceneWindow;/.test(backendSource)) {
+  throw new Error("Los segmentos de texto en pantalla con rowId coincidente deben seguir recortados a la ventana temporal de la escena.");
+}
+
+if (!/segmentSceneIndex === normalizedSceneIndex\) return overlapsSceneWindow;/.test(backendSource)) {
+  throw new Error("Los segmentos de texto en pantalla con sceneIndex explícito deben seguir recortados a la ventana temporal de la escena.");
+}
+
 if (/const segmentSceneIndex = Math\.max\(1, Math\.round\(Number\(segment\?\.sceneIndex \|\| normalizedSceneIndex\)/.test(backendSource)) {
   throw new Error("Regresión: los segmentos sin sceneIndex se vuelven a asignar implícitamente a todas las escenas.");
 }
