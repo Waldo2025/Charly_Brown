@@ -5041,6 +5041,11 @@ function runFfmpegCommand(args = [], context = {}) {
         stderrPreview: buildMontageStderrPreview(stderr),
         stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
       };
+      if (Number(code || 0) === 0) {
+        console.info("[backend][ffmpeg][close]", summary);
+        finalizeResolve({ stdout, stderr, code: 0 });
+        return;
+      }
       if (didTimeout) {
         const err = new Error(`${String(context?.timeoutCode || "ffmpeg_timeout").trim() || "ffmpeg_timeout"}_${timeoutMs}`);
         err.code = String(context?.timeoutCode || "ffmpeg_timeout").trim() || "ffmpeg_timeout";
@@ -5071,11 +5076,6 @@ function runFfmpegCommand(args = [], context = {}) {
         };
         console.warn("[backend][ffmpeg][close]", summary);
         finalizeReject(err);
-        return;
-      }
-      if (Number(code || 0) === 0) {
-        console.info("[backend][ffmpeg][close]", summary);
-        finalizeResolve({ stdout, stderr, code: 0 });
         return;
       }
       const err = new Error(`ffmpeg_exit_code_${code}`);
