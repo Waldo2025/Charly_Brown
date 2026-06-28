@@ -1021,6 +1021,7 @@ function isMontageExportPreviewJassubActive() {
 }
 
 function shouldUseMontageExportPreviewJassub(payload = {}) {
+  if (window.montageExportJobState?.frontendExportCapturing === true) return false;
   if (payload?.onlyAudio === true) return false;
   if (String(payload?.exportMode || "").trim() === "review") return false;
   return Boolean(Array.isArray(payload?.onScreenTextTimeline?.segments) && payload.onScreenTextTimeline.segments.length);
@@ -3027,6 +3028,38 @@ function pauseFrontendMontagePreviewVideos() {
   });
 }
 
+async function prepareFrontendMontageDomSubtitleCapture(payload = {}) {
+  const container = getMontageExportPreviewContainer();
+  const wasJassubActive = isMontageExportPreviewJassubActive();
+  if (window.montageExportJobState) {
+    window.montageExportJobState.frontendExportCapturing = true;
+  }
+  if (container) container.dataset.subtitleRenderer = "dom";
+  if (wasJassubActive) {
+    logMontageExportDevtools("frontend_export_jassub_disabled", {
+      reason: "dom_capture",
+      segmentCount: Array.isArray(payload?.onScreenTextTimeline?.segments) ? payload.onScreenTextTimeline.segments.length : 0
+    });
+    await destroyMontageExportPreviewJassub({ preserveFrame: false });
+  }
+  return { wasJassubActive };
+}
+
+function restoreFrontendMontageDomSubtitleCapture(payload = {}, state = {}) {
+  if (window.montageExportJobState) {
+    delete window.montageExportJobState.frontendExportCapturing;
+  }
+  const container = getMontageExportPreviewContainer();
+  if (container) container.dataset.subtitleRenderer = "dom";
+  if (state?.wasJassubActive === true && shouldUseMontageExportPreviewJassub(payload)) {
+    void syncMontageExportPreviewJassub(payload).catch((error) => {
+      logMontageExportDevtools("frontend_export_jassub_restore_failed", {
+        message: String(error?.message || error || "").trim() || undefined
+      }, "warn");
+    });
+  }
+}
+
 function drawFrontendMontageElement(ctx = null, el = null, container = null, width = 0, height = 0) {
   if (!ctx || !el || !container || el.hidden === true) return false;
   const rect = el.getBoundingClientRect?.();
@@ -3261,7 +3294,7 @@ async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 
     await drawFrontendMontageDomOverlay(ctx, stylizedOverlay, container, width, height);
   }
   const domOverlay = window.els?.montageExportPreviewOverlay || null;
-  if (domOverlay && domOverlay.hidden !== true && container?.dataset?.subtitleRenderer !== "jassub") {
+  if (domOverlay && domOverlay.hidden !== true && (container?.dataset?.subtitleRenderer !== "jassub" || window.montageExportJobState?.frontendExportCapturing === true)) {
     await drawFrontendMontageDomOverlay(ctx, domOverlay, container, width, height);
   }
   const subtitleCanvas = getMontageExportPreviewSubtitleCanvas();
@@ -3298,6 +3331,10 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   }
   const container = getMontageExportPreviewContainer();
   if (!container) throw new Error("frontend_export_preview_missing");
+  const subtitleCaptureState = await prepareFrontendMontageDomSubtitleCapture(payload);
+  if (window.montageExportJobState) {
+    window.montageExportJobState.frontendSubtitleCaptureState = subtitleCaptureState;
+  }
   const { width, height } = resolveFrontendMontageExportFrameSize(payload);
   const fps = MONTAGE_FRONTEND_EXPORT_FPS;
   const frameIntervalMs = 1000 / fps;
@@ -3412,6 +3449,10 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   try { visualStream.getTracks().forEach((track) => track.stop()); } catch (_) { }
   try { audioDestination?.stream?.getTracks?.().forEach((track) => track.stop()); } catch (_) { }
   try { await audioCtx?.close?.(); } catch (_) { }
+  restoreFrontendMontageDomSubtitleCapture(payload, subtitleCaptureState);
+  if (window.montageExportJobState) {
+    delete window.montageExportJobState.frontendSubtitleCaptureState;
+  }
   const blob = new Blob(chunks, { type: mimeType });
   if (!blob.size) throw new Error("frontend_export_empty_blob");
   return {
@@ -3436,7 +3477,15 @@ async function runFrontendMontageExport({ payload = {}, session = null } = {}) {
     "Tomando el montaje visible del preview frame por frame.",
     { tone: "neutral" }
   );
-  const result = await recordFrontendMontageCanvas({ payload, session });
+  let result;
+  try {
+    result = await recordFrontendMontageCanvas({ payload, session });
+  } finally {
+    if (window.montageExportJobState?.frontendExportCapturing === true) {
+      restoreFrontendMontageDomSubtitleCapture(payload, window.montageExportJobState.frontendSubtitleCaptureState || {});
+      delete window.montageExportJobState.frontendSubtitleCaptureState;
+    }
+  }
   const isMp4 = String(result.mimeType || "").toLowerCase().includes("mp4");
   const extension = isMp4 ? "mp4" : "webm";
   const base = stripFileExtension(String(payload?.filename || window.montageExportState.filename || defaultMontageExportFilename(session)).trim() || "montage");

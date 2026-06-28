@@ -119,6 +119,24 @@ assert.match(
 );
 
 assert.match(
+  exportSource,
+  /window\.montageExportJobState\?\.frontendExportCapturing === true/,
+  "Durante el export frontend debe existir un flag que desactive JASSUB en la captura."
+);
+
+assert.match(
+  exportSource,
+  /await prepareFrontendMontageDomSubtitleCapture\(payload\)/,
+  "El export frontend debe preparar captura DOM de subtítulos antes de grabar."
+);
+
+assert.match(
+  exportSource,
+  /restoreFrontendMontageDomSubtitleCapture\(payload,/,
+  "El export frontend debe restaurar el renderer de subtítulos al terminar o fallar."
+);
+
+assert.match(
   podcasterSource,
   /exportPreviewController,/,
   "El controlador de preview del montaje debe estar disponible en window para captura frame-by-frame."
