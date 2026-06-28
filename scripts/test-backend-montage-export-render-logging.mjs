@@ -18,6 +18,12 @@ assert.match(
 
 assert.match(
   serverSource,
+  /const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process\.env\.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false"/,
+  "backend debe forzar ASS en Render por defecto."
+);
+
+assert.match(
+  serverSource,
   /\[backend\]\[montage-export\]\[scene-onscreen-rendered-frames-limit\][\s\S]*fallback: "ass_text"/,
   "backend debe loggear cuando cae a ASS por exceso de frames PNG."
 );
@@ -35,9 +41,21 @@ assert.match(
 );
 
 assert.match(
+  serverSource,
+  /sceneOnScreenTextMode: shouldBurnSceneOnScreenText \? "rendered_png" : "ass"/,
+  "backend debe reportar el modo de texto de escena en el visual-pass decision."
+);
+
+assert.match(
   renderSource,
   /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT\s*\n\s*value:\s+8/,
   "Render debe declarar limite de frames PNG para snoopy-export."
+);
+
+assert.match(
+  renderSource,
+  /MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER\s*\n\s*value:\s+true/,
+  "Render debe forzar ASS de texto en Render."
 );
 
 console.log("Backend montage export render logging OK.");

@@ -1866,6 +1866,7 @@ const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
       || (IS_RENDER_RUNTIME ? 8 : 200)
   ) || (IS_RENDER_RUNTIME ? 8 : 200))
 );
+const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
   Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
@@ -10790,6 +10791,7 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
 
 function shouldUseMontageSceneAssSubtitles(input = {}) {
   if (String(input?.exportMode || "").trim() === "review") return false;
+  if (MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER) return false;
   const isTextTrackVisible = input?.onScreenTextSettings?.enabled !== false && input?.onScreenTextSettings?.showTrack !== false;
   return Boolean(isTextTrackVisible && input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
 }
@@ -13232,6 +13234,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoHasAudio,
           hasInputAudio: Boolean(inputAudioPath),
           renderedTextFrameLimit: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT,
+          forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
           overlayTempPathCount: sceneOverlayTempPaths.length,
           ffmpegTimeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
           memory: {
@@ -13526,6 +13529,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       browserRendererAvailable: browserRendererAvailability.available === true,
       browserRendererCode: browserRendererAvailability.available === true ? null : (browserRendererAvailability.code || null),
       stylizedKaraokeRendererForced: isStylizedKaraokeRendererForced,
+      sceneOnScreenTextMode: shouldBurnSceneOnScreenText ? "rendered_png" : "ass",
+      forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
       reviewOnScreenTextEnabled,
       normalOnScreenTextEnabled,
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
