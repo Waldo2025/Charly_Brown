@@ -11,10 +11,10 @@ const changelog = Array.isArray(version.changelog) ? version.changelog : [];
 const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(changelog[0] || "").includes("fallback directo")
-    && String(changelog[0] || "").includes("RENDER_KEY_VALUE_CONNECTION_STRING")
-    && String(changelog[0] || "").includes("montage_export_queue_unavailable"),
-  "La nota más reciente debe reflejar el fix actual del fallback directo cuando Render no inyecta Key Value."
+  String(changelog[0] || "").includes("MONTAGE_EXPORT_USE_QUEUE=true")
+    && String(changelog[0] || "").includes("Export en cola")
+    && String(changelog[0] || "").includes("Key Value"),
+  "La nota más reciente debe reflejar el fix actual para no atascar exports en cola sin worker."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")),

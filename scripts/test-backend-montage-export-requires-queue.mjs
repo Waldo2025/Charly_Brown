@@ -40,14 +40,26 @@ assert.match(
 
 assert.match(
   serverSource,
+  /function isMontageExportQueueSubmissionEnabled\(\) \{[\s\S]*MONTAGE_EXPORT_USE_QUEUE[\s\S]*isMontageExportQueueRequired\(\)/,
+  "snoopy-export debe encolar en BullMQ solo si MONTAGE_EXPORT_USE_QUEUE esta activo o la cola es requerida."
+);
+
+assert.match(
+  serverSource,
+  /if \(montageExportQueue && isMontageExportQueueSubmissionEnabled\(\)\) \{[\s\S]*Enqueuing export job to BullMQ/,
+  "el POST de export no debe encolar automaticamente solo porque Redis exista."
+);
+
+assert.match(
+  serverSource,
   /isMontageExportQueueRequired\(\) && !montageExportQueue[\s\S]*montage_export_queue_unavailable[\s\S]*return res\.status\(503\)\.json/,
   "el endpoint de export debe poder fallar rapido si Render exige cola pero no la tiene disponible."
 );
 
 assert.match(
   renderSource,
-  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_REQUIRE_QUEUE\s*\n\s*value:\s+false[\s\S]*RENDER_KEY_VALUE_CONNECTION_STRING/,
-  "snoopy-export debe preferir cola en Render pero aceptar fallback directo si Render no inyecta Key Value."
+  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_REQUIRE_QUEUE\s*\n\s*value:\s+false[\s\S]*MONTAGE_EXPORT_USE_QUEUE\s*\n\s*value:\s+false[\s\S]*RENDER_KEY_VALUE_CONNECTION_STRING/,
+  "snoopy-export debe dejar la cola como opt-in hasta que exista un worker consumidor."
 );
 
 assert.match(

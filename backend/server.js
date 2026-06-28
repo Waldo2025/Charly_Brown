@@ -1114,6 +1114,7 @@ app.use(express.json({ limit: MAX_BODY }));
 function buildBackendHealthPayload() {
   const browserRenderer = getMontageBrowserRendererAvailability();
   const exportQueueRequired = isMontageExportQueueRequired();
+  const exportQueueSubmissionEnabled = isMontageExportQueueSubmissionEnabled();
   return {
     ok: true,
     service: BACKEND_SERVICE_ROLE || "all",
@@ -1127,6 +1128,7 @@ function buildBackendHealthPayload() {
     montageExportQueueAvailable: Boolean(montageExportQueue),
     montageExportQueueConfigured,
     montageExportQueueRequired: exportQueueRequired,
+    montageExportQueueSubmissionEnabled: exportQueueSubmissionEnabled,
     montageExportReady: !exportQueueRequired || Boolean(montageExportQueue),
     browserRendererAvailable: browserRenderer.available === true,
     browserRendererCode: browserRenderer.available === true ? null : (browserRenderer.code || null),
@@ -1245,9 +1247,14 @@ function isMontageExportQueueRequired() {
   return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_REQUIRE_QUEUE, IS_RENDER_RUNTIME);
 }
 
+function isMontageExportQueueSubmissionEnabled() {
+  if (!EXPORT_SERVICE_ONLY) return false;
+  return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_USE_QUEUE, isMontageExportQueueRequired());
+}
+
 function isDirectMontageExportFallbackMode() {
   if (!EXPORT_SERVICE_ONLY && EXPOSURE_IS_ROLE_BASED) return false;
-  return !montageExportQueueConfigured || !montageExportQueue;
+  return !isMontageExportQueueSubmissionEnabled() || !montageExportQueueConfigured || !montageExportQueue;
 }
 
 function ensureMontageExportServiceEnabled(res) {
@@ -14128,7 +14135,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
     });
     upsertMontageExportJob(jobId, initial);
 
-    if (montageExportQueue) {
+    if (montageExportQueue && isMontageExportQueueSubmissionEnabled()) {
       console.info("[backend][montage-export] Enqueuing export job to BullMQ:", jobId);
       logHeavyWorkSlots("montage_export", "enqueue_request", {
         jobId,
@@ -14146,6 +14153,12 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       } catch (enqueueErr) {
         console.error("[backend][montage-export] Failed to enqueue to BullMQ, falling back to direct run:", enqueueErr.message || enqueueErr);
       }
+    } else if (montageExportQueue) {
+      console.info("[backend][montage-export] Redis queue configured but direct export mode is active", {
+        jobId,
+        queueSubmissionEnabled: false,
+        requireQueue: isMontageExportQueueRequired() === true
+      });
     }
 
     if (isMontageExportQueueRequired() && !montageExportQueue) {

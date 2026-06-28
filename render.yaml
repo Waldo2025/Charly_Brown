@@ -108,6 +108,8 @@ services:
         value: 1
       - key: MONTAGE_EXPORT_REQUIRE_QUEUE
         value: false
+      - key: MONTAGE_EXPORT_USE_QUEUE
+        value: false
       - key: RENDER_KEY_VALUE_CONNECTION_STRING
         fromService:
           type: keyvalue
