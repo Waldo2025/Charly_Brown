@@ -2376,6 +2376,19 @@ function isMontageExportJobStale(job = null, nowMs = Date.now()) {
   return heartbeatAgeMs > MONTAGE_EXPORT_STALE_HEARTBEAT_MS;
 }
 
+function hasCompletedMontageExportResult(job = null) {
+  const source = job && typeof job === "object" ? job : {};
+  const exportBlock = source.export && typeof source.export === "object" ? source.export : null;
+  const resultBlock = source.result && typeof source.result === "object" ? source.result : null;
+  return Boolean(
+    source.downloadUrl
+    || exportBlock?.downloadUrl
+    || exportBlock?.storagePath
+    || resultBlock?.downloadUrl
+    || resultBlock?.storagePath
+  );
+}
+
 function buildStaleMontageExportJobPatch(job = null, nowMs = Date.now()) {
   const heartbeatAgeMs = getMontageExportJobHeartbeatAgeMs(job, nowMs);
   return {
@@ -14251,6 +14264,9 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
       return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
     }
     const hasActiveMontageWorkerForJob = hasActiveHeavyWorkJob("montage_export", jobId);
+    if (hasCompletedMontageExportResult(job)) {
+      return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
+    }
     if (isMontageExportJobInterruptedByBackendRestart(job) && !hasActiveMontageWorkerForJob) {
       if (canAutoResumeInterruptedMontageExportJob(job, { queueAvailable: Boolean(montageExportQueue) })) {
         const request = job.request && typeof job.request === "object" ? job.request : null;
