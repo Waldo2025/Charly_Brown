@@ -17,18 +17,6 @@ assert.match(
 
 assert.match(
   backendSource,
-  /\["text", "pill", "rect", "underline"\]\.includes\(stylizedKaraokeStyle\)/,
-  "Los estilos karaoke no ASS deben forzar la pasada visual de navegador."
-);
-
-assert.match(
-  backendSource,
-  /normalOnScreenTextEnabled = input\.exportMode === "normal" && isTextTrackVisible && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/,
-  "Al forzar browser para karaoke/texto estilizado, el pass final debe reactivar el texto en pantalla."
-);
-
-assert.match(
-  backendSource,
   /const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;/,
   "La entrega final debe determinar el browser visual pass dinámicamente."
 );
@@ -54,7 +42,19 @@ assert.match(
 assert.match(
   backendSource,
   /ass=filename='/,
-  "El render por escena debe quemar el karaoke con libass."
+  "El fallback legacy debe poder quemar karaoke con libass cuando no hay PNGs renderizados."
+);
+
+assert.match(
+  backendSource,
+  /if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?else if \(input\.onScreenTextRenderedFrameAttempted !== true\)[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
+  "El backend solo debe usar ASS cuando el frontend no intento generar snapshots PNG."
+);
+
+assert.match(
+  backendSource,
+  /Skipping ASS fallback because frontend attempted rendered PNG frames/,
+  "Si el frontend intento snapshots PNG, el backend no debe meter el karaoke amarillo legacy."
 );
 
 assert.doesNotMatch(

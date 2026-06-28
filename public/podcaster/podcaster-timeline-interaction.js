@@ -777,6 +777,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     ) {
       const rowId = String(dragClip.dataset.rowId || "").trim();
       if (!rowId) return;
+      if (event.shiftKey) return;
       selectTimelineSceneRow(rowId, { syncStage: false });
       podcastVideoState.timelineLastInteractedRowId = rowId;
       beginClipDrag("move", rowId, event);
@@ -787,6 +788,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     if (dragTextClip && !event.target.closest(".row-icon-btn")) {
       const rowId = String(dragTextClip.dataset.rowId || "").trim();
       if (!rowId) return;
+      if (event.shiftKey) return;
       selectTimelineSceneRow(rowId, { syncStage: false });
       podcastVideoState.timelineLastInteractedRowId = rowId;
       beginClipDrag("move", rowId, event, { kind: "on-screen-text" });

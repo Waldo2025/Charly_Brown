@@ -2212,7 +2212,9 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     });
     return;
   }
-  const prepared = await buildMontageExportPayloadForSubmission(window.getActiveSession());
+  const prepared = await buildMontageExportPayloadForSubmission(window.getActiveSession(), {
+    renderOnScreenTextFrames: false
+  });
   if (!prepared.ok) {
     await destroyMontageExportPreviewJassub();
     const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
@@ -2696,16 +2698,18 @@ function buildMontageOnScreenTextTempFramePath({
   frameIndex = 0
 } = {}) {
   const safeFrameIndex = Math.max(0, Math.round(Number(frameIndex || 0) || 0));
-  const frameFileName = `${normalizeMontageStorageSegment(rowId, "row")}-${String(safeFrameIndex).padStart(4, "0")}.png`;
+  const frameFileName = [
+    "onscreen-text",
+    normalizeMontageStorageSegment(uid, "anon"),
+    normalizeMontageStorageSegment(exportId, "export"),
+    normalizeMontageStorageSegment(rowId, "row"),
+    String(safeFrameIndex).padStart(4, "0")
+  ].join("-") + ".png";
   return [
     "podcaster",
     "sessions",
     normalizeMontageStorageSegment(sessionId, "session"),
-    "owners",
-    normalizeMontageStorageSegment(uid, "anon"),
     "tmp",
-    "onscreen-text",
-    normalizeMontageStorageSegment(exportId, "export"),
     frameFileName
   ].join("/");
 }
@@ -2723,12 +2727,23 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
       reject(new Error("snapshot_plan_invalid"));
       return;
     }
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${html}</foreignObject></svg>`;
-    const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
+    const fallbackSvg = String(plan.svg || "").trim();
+    const xhtml = html.includes("xmlns=\"http://www.w3.org/1999/xhtml\"")
+      ? html
+      : `<div xmlns="http://www.w3.org/1999/xhtml">${html}</div>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${xhtml}</foreignObject></svg>`;
+    const svgQueue = [svg, fallbackSvg].filter(Boolean);
+    let queueIndex = 0;
     const img = new Image();
-    const cleanup = () => {
-      try { URL.revokeObjectURL(url); } catch (_) { }
+    const cleanup = () => {};
+    const loadNext = () => {
+      const nextSvg = svgQueue[queueIndex] || "";
+      if (!nextSvg) {
+        reject(new Error("snapshot_image_decode_failed"));
+        return;
+      }
+      queueIndex += 1;
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(nextSvg)}`;
     };
     img.onload = () => {
       try {
@@ -2750,10 +2765,14 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
       }
     };
     img.onerror = () => {
+      if (queueIndex < svgQueue.length) {
+        loadNext();
+        return;
+      }
       cleanup();
       reject(new Error("snapshot_image_decode_failed"));
     };
-    img.src = url;
+    loadNext();
   });
 }
 
@@ -2837,7 +2856,7 @@ async function fetchMontageMediaBlob(sourceUrl = "") {
     }
     try {
       const parsed = new URL(cleanUrl, window.location.origin);
-      const originalUrl = parsed.searchParams.get("url") ? decodeURIComponent(parsed.searchParams.get("url")) : "";
+      const originalUrl = parsed.searchParams.get("url") || "";
       const cleanedOriginalUrl = String(originalUrl || "").trim();
       if (!cleanedOriginalUrl) throw error;
       return await tryFetch(cleanedOriginalUrl);
@@ -3872,7 +3891,8 @@ function resolveEffectiveMontageOnScreenTextTimeline({
   };
 }
 
-async function buildMontageExportPayloadForSubmission(session = null) {
+async function buildMontageExportPayloadForSubmission(session = null, options = {}) {
+  const shouldRenderOnScreenTextFrames = options?.renderOnScreenTextFrames === true;
   const activeSession = session || window.getActiveSession?.() || null;
   if (activeSession) {
     try {
@@ -3888,7 +3908,7 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   if (!prepared?.ok || !prepared?.payload) return prepared;
   const timeline = prepared.payload.onScreenTextTimeline || null;
   const onScreenTextFrameExportId = `onscreen-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  prepared.payload.onScreenTextRenderedSegments = timeline?.segments?.length
+  prepared.payload.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && timeline?.segments?.length
     ? await buildMontageOnScreenTextRenderedSegmentsForExport({
       activeSession,
       timeline,
@@ -3911,6 +3931,7 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   } else {
     prepared.payload.onScreenTextRenderedSegments = renderedSegments;
   }
+  prepared.payload.onScreenTextRenderedFrameAttempted = shouldRenderOnScreenTextFrames === true;
   return prepared;
 }
 
@@ -4412,7 +4433,9 @@ export async function runMontageExport() {
       label: "Preparando exportación…"
     });
     const session = window.getActiveSession?.() || null;
-    const prepared = await buildMontageExportPayloadForSubmission(session);
+    const prepared = await buildMontageExportPayloadForSubmission(session, {
+      renderOnScreenTextFrames: true
+    });
     if (!window.montageExportBusy) return;
     logMontageExportDevtools("submit_clicked", {
       hasSession: Boolean(session),

@@ -88,3 +88,14 @@ test("timeline interaction owns Gemini audio chip click and drag behavior", () =
   assert.doesNotMatch(podcasterSource, /const geminiChip = event\.target\.closest\("\[data-action='timeline-select-gemini-audio'\]\[data-row-id\]"\);/);
   assert.doesNotMatch(podcasterSource, /const montageAudioChip = event\.target\.closest\("\.podcast-montage-audio-chip\[data-row-id\]"\);/);
 });
+
+test("timeline clip mousedown preserves the transition anchor while Shift is pressed", () => {
+  assert.match(
+    interactionSource,
+    /const dragClip = event\.target\.closest\("\[data-action='timeline-drag-clip'\]\[data-row-id\]"\);[\s\S]*const rowId = String\(dragClip\.dataset\.rowId \|\| ""\)\.trim\(\);[\s\S]*if \(event\.shiftKey\) return;[\s\S]*podcastVideoState\.timelineLastInteractedRowId = rowId;/m
+  );
+  assert.match(
+    interactionSource,
+    /const dragTextClip = event\.target\.closest\("\[data-action='timeline-drag-onscreen-text-clip'\]\[data-row-id\]"\);[\s\S]*const rowId = String\(dragTextClip\.dataset\.rowId \|\| ""\)\.trim\(\);[\s\S]*if \(event\.shiftKey\) return;[\s\S]*podcastVideoState\.timelineLastInteractedRowId = rowId;/m
+  );
+});

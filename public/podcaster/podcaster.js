@@ -41,7 +41,7 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-06-28.3";
+} from "./podcaster-montage-export.js?v=2026-06-28.5";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -52,7 +52,7 @@ import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-05-30-1";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
-import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-26.7";
+import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-28.4";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
 import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-26.7";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";

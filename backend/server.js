@@ -10079,6 +10079,9 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextRenderedSegmentsRaw = Array.isArray(raw?.onScreenTextRenderedSegments)
     ? raw.onScreenTextRenderedSegments
     : (Array.isArray(onScreenTextTimelineRaw?.renderedSegments) ? onScreenTextTimelineRaw.renderedSegments : []);
+  const onScreenTextRenderedFrameAttempted = raw?.onScreenTextRenderedFrameAttempted === true
+    || onScreenTextTimelineRaw?.renderedFrameAttempted === true
+    || onScreenTextRenderedSegmentsRaw.length > 0;
   const onScreenTextRenderedSegments = onScreenTextRenderedSegmentsRaw
     .slice(0, 400)
     .map((segment, idx) => {
@@ -10128,6 +10131,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     useTimelineAudio,
     onScreenTextSegments,
     onScreenTextRenderedSegments,
+    onScreenTextRenderedFrameAttempted,
     onScreenTextSettings: onScreenTextSettings,
     stylizedTextSegments,
     stylizedTextTimeline: {
@@ -12963,7 +12967,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             videoFilterGraph = renderedTextOverlayResult.videoFilterGraph;
             finalVideoMapLabel = renderedTextOverlayResult.finalVideoMapLabel;
             nextOverlayInputIndex = renderedTextOverlayResult.nextInputIndex;
-          } else {
+          } else if (input.onScreenTextRenderedFrameAttempted !== true) {
             const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
               input,
               entry,
@@ -12977,6 +12981,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             });
             videoFilterGraph = textOverlayResult.videoFilterGraph;
             finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
+          } else {
+            console.warn("[backend][montage-export][scene-onscreen-rendered-frames-empty]", {
+              sceneIndex,
+              rowId: String(entry?.rowId || "").trim() || undefined,
+              message: "Skipping ASS fallback because frontend attempted rendered PNG frames."
+            });
           }
         }
         const stylizedOverlayResult = await appendMontageSceneStylizedTextFilters({

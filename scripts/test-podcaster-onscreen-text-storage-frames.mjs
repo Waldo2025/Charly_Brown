@@ -12,8 +12,20 @@ assert.match(
 
 assert.match(
   frontendSource,
-  /"tmp",\s*"onscreen-text"/,
-  "Los snapshots de texto en pantalla deben guardarse bajo una ruta temporal estable."
+  /"sessions",[\s\S]*?normalizeMontageStorageSegment\(sessionId, "session"\),[\s\S]*?"tmp",[\s\S]*?frameFileName/,
+  "Los snapshots de texto en pantalla deben guardarse en la ruta temporal permitida por storage.rules."
+);
+
+assert.doesNotMatch(
+  frontendSource,
+  /"owners",[\s\S]*?"tmp",[\s\S]*?"onscreen-text"/,
+  "Los snapshots temporales no deben usar rutas profundas que no matchean storage.rules."
+);
+
+assert.doesNotMatch(
+  frontendSource,
+  /decodeURIComponent\(parsed\.searchParams\.get\("url"\)\)/,
+  "El fallback local del proxy no debe decodificar dos veces URLs de Firebase Storage."
 );
 
 assert.match(
@@ -24,8 +36,20 @@ assert.match(
 
 assert.match(
   frontendSource,
-  /prepared\.payload\.onScreenTextRenderedSegments = timeline\?\.segments\?\.length[\s\S]*buildMontageOnScreenTextRenderedSegmentsForExport/,
+  /prepared\.payload\.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && timeline\?\.segments\?\.length[\s\S]*buildMontageOnScreenTextRenderedSegmentsForExport/,
   "El submit del export debe generar y adjuntar renderedFrames de texto en pantalla antes del POST."
+);
+
+assert.match(
+  frontendSource,
+  /buildMontageExportPayloadForSubmission\(window\.getActiveSession\(\), \{\s*renderOnScreenTextFrames: false\s*\}\)/,
+  "El preview/modal de export no debe generar snapshots PNG temporales."
+);
+
+assert.match(
+  frontendSource,
+  /buildMontageExportPayloadForSubmission\(session, \{\s*renderOnScreenTextFrames: true\s*\}\)/,
+  "Los snapshots PNG temporales deben generarse solo al confirmar/iniciar el export."
 );
 
 assert.match(
@@ -48,8 +72,14 @@ assert.match(
 
 assert.match(
   backendSource,
-  /appendMontageSceneOnScreenTextRenderedFrameFilters\([\s\S]*?if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
+  /appendMontageSceneOnScreenTextRenderedFrameFilters\([\s\S]*?if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?else if \(input\.onScreenTextRenderedFrameAttempted !== true\)[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
   "El backend debe usar PNGs renderizados antes de caer al fallback ASS."
+);
+
+assert.match(
+  backendSource,
+  /Skipping ASS fallback because frontend attempted rendered PNG frames/,
+  "El backend no debe volver al ASS amarillo legacy cuando el frontend ya intentó frames PNG."
 );
 
 console.log("Podcaster on-screen text storage-frame export contract OK.");
