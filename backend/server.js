@@ -2361,7 +2361,7 @@ function isMontageExportJobInterruptedByBackendRestart(job = null, bootMs = Date
   ).getTime() || 0) || 0;
   if (!heartbeatMs || !Number.isFinite(heartbeatMs)) return false;
   const cleanBootMs = Number(bootMs || Date.now()) || Date.now();
-  return heartbeatMs < (cleanBootMs - MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS);
+  return heartbeatMs <= (cleanBootMs + MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS);
 }
 
 function isMontageExportJobStale(job = null, nowMs = Date.now()) {

@@ -35,8 +35,8 @@ assert.match(
 
 assert.match(
   source,
-  /heartbeatMs < \(cleanBootMs - MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS\)/,
-  "El detector debe comparar el heartbeat contra el arranque actual del backend"
+  /heartbeatMs <= \(cleanBootMs \+ MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS\)/,
+  "El detector debe tolerar reinicios con heartbeat apenas anterior al arranque actual"
 );
 
 assert.match(
