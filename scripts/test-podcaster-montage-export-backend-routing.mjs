@@ -164,8 +164,8 @@ assert.match(
 
 assert.match(
   renderYamlSource,
-  /type:\s+web\s+name:\s+snoopy-export[\s\S]*?- key:\s+MONTAGE_EXPORT_REQUIRE_QUEUE\s+value:\s+true[\s\S]*?- key:\s+RENDER_KEY_VALUE_CONNECTION_STRING/,
-  "snoopy-export debe exigir cola antes de volver al fallback directo."
+  /type:\s+web\s+name:\s+snoopy-export[\s\S]*?- key:\s+MONTAGE_EXPORT_REQUIRE_QUEUE\s+value:\s+false[\s\S]*?- key:\s+RENDER_KEY_VALUE_CONNECTION_STRING/,
+  "snoopy-export debe preferir cola Redis pero permitir fallback directo si Render no inyecta Key Value."
 );
 
 assert.match(

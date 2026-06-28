@@ -29,7 +29,7 @@ assert.match(
 assert.match(
   serverSource,
   /function isMontageExportQueueRequired\(\) \{[\s\S]*if \(!EXPORT_SERVICE_ONLY\) return false;[\s\S]*MONTAGE_EXPORT_REQUIRE_QUEUE[\s\S]*IS_RENDER_RUNTIME/,
-  "snoopy-export debe exigir cola en Render salvo override explicito."
+  "snoopy-export debe poder exigir cola en Render cuando el flag explicito este activo."
 );
 
 assert.match(
@@ -41,13 +41,13 @@ assert.match(
 assert.match(
   serverSource,
   /isMontageExportQueueRequired\(\) && !montageExportQueue[\s\S]*montage_export_queue_unavailable[\s\S]*return res\.status\(503\)\.json/,
-  "el endpoint de export debe fallar rapido si Render no tiene cola disponible."
+  "el endpoint de export debe poder fallar rapido si Render exige cola pero no la tiene disponible."
 );
 
 assert.match(
   renderSource,
-  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_REQUIRE_QUEUE\s*\n\s*value:\s+true[\s\S]*RENDER_KEY_VALUE_CONNECTION_STRING/,
-  "snoopy-export debe exigir cola en Render antes de aceptar exports."
+  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_REQUIRE_QUEUE\s*\n\s*value:\s+false[\s\S]*RENDER_KEY_VALUE_CONNECTION_STRING/,
+  "snoopy-export debe preferir cola en Render pero aceptar fallback directo si Render no inyecta Key Value."
 );
 
 assert.match(

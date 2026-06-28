@@ -107,7 +107,7 @@ services:
       - key: MONTAGE_EXPORT_WORKER_CONCURRENCY
         value: 1
       - key: MONTAGE_EXPORT_REQUIRE_QUEUE
-        value: true
+        value: false
       - key: RENDER_KEY_VALUE_CONNECTION_STRING
         fromService:
           type: keyvalue
