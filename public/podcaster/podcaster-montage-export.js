@@ -1835,12 +1835,12 @@ export async function pollMontageExportJob(jobId = "") {
     if (await applyMontageExportPolledStatus(data, cleanJobId)) return;
   } catch (error) {
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    if (isMontageExportStatusRedirectFailure(error)) {
+      window.montageExportJobState.preferFirestorePolling = true;
+      window.montageExportJobState.firestorePreferredMissCount = 0;
+    }
     const firestoreFallback = await loadMontageExportJobStatusFallback(cleanJobId, error);
     if (firestoreFallback) {
-      if (isMontageExportStatusRedirectFailure(error)) {
-        window.montageExportJobState.preferFirestorePolling = true;
-        window.montageExportJobState.firestorePreferredMissCount = 0;
-      }
       if (await applyMontageExportPolledStatus(firestoreFallback, cleanJobId)) return;
       window.montageExportJobState.pollTimer = window.setTimeout(() => {
         pollMontageExportJob(cleanJobId).catch(() => { });

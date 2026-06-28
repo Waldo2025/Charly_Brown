@@ -158,4 +158,5 @@ services:
   - type: keyvalue
     name: charly-brown-podcaster-queue
     plan: starter
+    ipAllowList: []
     maxmemoryPolicy: noeviction

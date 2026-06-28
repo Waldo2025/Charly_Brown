@@ -20,8 +20,8 @@ assert.match(
 
 assert.match(
   source,
-  /if \(isMontageExportStatusRedirectFailure\(error\)\) \{[\s\S]*window\.montageExportJobState\.preferFirestorePolling = true;[\s\S]*window\.montageExportJobState\.firestorePreferredMissCount = 0;[\s\S]*\}/m,
-  "Después de un redirectFailure con fallback válido, el cliente debe dejar de insistir contra export-status remoto."
+  /catch \(error\) \{[\s\S]*if \(isMontageExportStatusRedirectFailure\(error\)\) \{[\s\S]*window\.montageExportJobState\.preferFirestorePolling = true;[\s\S]*window\.montageExportJobState\.firestorePreferredMissCount = 0;[\s\S]*\}[\s\S]*const firestoreFallback = await loadMontageExportJobStatusFallback\(cleanJobId, error\);/m,
+  "Después de un redirectFailure, incluso antes de tener fallback válido, el cliente debe dejar de insistir contra export-status remoto."
 );
 
 assert.match(

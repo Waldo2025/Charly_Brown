@@ -11,9 +11,10 @@ const changelog = Array.isArray(version.changelog) ? version.changelog : [];
 const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(changelog[0] || "").includes("texto estilizado")
-    && String(changelog[0] || "").includes("offset relativo"),
-  "La nota más reciente debe reflejar el fix actual de texto estilizado y estabilidad de trim."
+  String(changelog[0] || "").includes("Render Key Value")
+    && String(changelog[0] || "").includes("Firestore-first")
+    && String(changelog[0] || "").includes("v2026-06-28.8"),
+  "La nota más reciente debe reflejar el fix actual del export MP4 y la cola de Render."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")),

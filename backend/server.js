@@ -1099,6 +1099,7 @@ app.use(express.json({ limit: MAX_BODY }));
 
 function buildBackendHealthPayload() {
   const browserRenderer = getMontageBrowserRendererAvailability();
+  const exportQueueRequired = isMontageExportQueueRequired();
   return {
     ok: true,
     service: BACKEND_SERVICE_ROLE || "all",
@@ -1110,6 +1111,8 @@ function buildBackendHealthPayload() {
     podcasterMusicGenerateRoute: true,
     montageExportQueueAvailable: Boolean(montageExportQueue),
     montageExportQueueConfigured,
+    montageExportQueueRequired: exportQueueRequired,
+    montageExportReady: !exportQueueRequired || Boolean(montageExportQueue),
     browserRendererAvailable: browserRenderer.available === true,
     browserRendererCode: browserRenderer.available === true ? null : (browserRenderer.code || null),
     browserRendererMessage: browserRenderer.available === true ? null : (browserRenderer.message || null),
@@ -1213,6 +1216,19 @@ try {
   }
 } catch (err) {
   console.warn("[backend] Failed to initialize BullMQ queue, falling back to direct in-memory execution:", err.message || err);
+}
+
+function isEnvFlagEnabled(value = "", defaultValue = false) {
+  const clean = String(value ?? "").trim().toLowerCase();
+  if (!clean) return Boolean(defaultValue);
+  if (["1", "true", "yes", "on"].includes(clean)) return true;
+  if (["0", "false", "no", "off"].includes(clean)) return false;
+  return Boolean(defaultValue);
+}
+
+function isMontageExportQueueRequired() {
+  if (!EXPORT_SERVICE_ONLY) return false;
+  return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_REQUIRE_QUEUE, IS_RENDER_RUNTIME);
 }
 
 function isDirectMontageExportFallbackMode() {
@@ -14093,6 +14109,64 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       } catch (enqueueErr) {
         console.error("[backend][montage-export] Failed to enqueue to BullMQ, falling back to direct run:", enqueueErr.message || enqueueErr);
       }
+    }
+
+    if (isMontageExportQueueRequired() && !montageExportQueue) {
+      console.error("[backend][montage-export] queue required but unavailable; rejecting direct render fallback", {
+        jobId,
+        queueConfigured: montageExportQueueConfigured === true,
+        renderRuntime: IS_RENDER_RUNTIME === true,
+        serviceRole: BACKEND_SERVICE_ROLE || "all"
+      });
+      await montageExportJobStore.updateJob(jobId, {
+        status: "error",
+        stage: "queue_unavailable",
+        progress: 0,
+        hint: "La cola de export no esta configurada en el backend.",
+        error: {
+          code: "montage_export_queue_unavailable",
+          message: "Render no inyecto la conexion Key Value/Redis requerida para procesar exports MP4.",
+          detail: {
+            queueConfigured: montageExportQueueConfigured === true,
+            queueAvailable: false,
+            requireQueue: true
+          }
+        },
+        updatedAt: new Date().toISOString()
+      }).catch((persistError) => {
+        console.warn("[backend][montage-export] queue unavailable persistence failed", {
+          jobId,
+          message: String(persistError?.message || persistError)
+        });
+      });
+      upsertMontageExportJob(jobId, {
+        ...initial,
+        status: "error",
+        stage: "queue_unavailable",
+        progress: 0,
+        hint: "La cola de export no esta configurada en el backend.",
+        error: {
+          code: "montage_export_queue_unavailable",
+          message: "Render no inyecto la conexion Key Value/Redis requerida para procesar exports MP4.",
+          detail: {
+            queueConfigured: montageExportQueueConfigured === true,
+            queueAvailable: false,
+            requireQueue: true
+          }
+        },
+        updatedAt: new Date().toISOString()
+      });
+      return res.status(503).json({
+        error: "montage_export_queue_unavailable",
+        code: "montage_export_queue_unavailable",
+        message: "La cola de export MP4 no esta disponible en snoopy-export. Revisa Render Key Value y el worker antes de reintentar.",
+        detail: {
+          jobId,
+          queueConfigured: montageExportQueueConfigured === true,
+          queueAvailable: false,
+          requireQueue: true
+        }
+      });
     }
 
     if (isDirectMontageExportFallbackMode()) {

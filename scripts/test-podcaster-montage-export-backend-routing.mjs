@@ -49,6 +49,12 @@ assert.match(
 );
 
 assert.match(
+  podcasterHtmlSource,
+  /podcaster\/podcaster-montage-export\.js\?v=2026-06-28\.8/,
+  "podcaster.html debe forzar la recarga del fix actual del export MP4."
+);
+
+assert.match(
   apiClientSource,
   /const DEFAULT_EXPORT_API_BASE = "https:\/\/snoopy-export\.onrender\.com\/api";/,
   "El cliente API debe tener un backend por defecto para export."
@@ -154,6 +160,12 @@ assert.match(
   renderYamlSource,
   /type:\s+web\s+name:\s+snoopy-export[\s\S]*?startCommand:\s+node backend\/server\.js[\s\S]*?envVars:[\s\S]*?- key:\s+BACKEND_SERVICE_ROLE\s+value:\s+export[\s\S]*?- key:\s+PUBLIC_BACKEND_BASE_URL\s+value:\s+https:\/\/snoopy-export\.onrender\.com[\s\S]*?- key:\s+RENDER_KEY_VALUE_CONNECTION_STRING\s+fromService:/,
   "Render debe declarar snoopy-export como backend web de export con rol export y cola Redis."
+);
+
+assert.match(
+  renderYamlSource,
+  /type:\s+keyvalue\s+name:\s+charly-brown-podcaster-queue[\s\S]*?ipAllowList:\s*\[\]/,
+  "Render Key Value debe declarar ipAllowList para que el blueprint sea valido y la cola se cree/sincronice."
 );
 
 assert.match(
