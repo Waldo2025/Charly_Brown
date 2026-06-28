@@ -212,8 +212,11 @@ test("buildMontageOnScreenTextAss preserves selected karaoke highlight shape", (
     ]
   });
 
-  assert.match(ass, /\\1c&H5EC522&/);
+  assert.match(ass, /Style: KaraokeActiveBox,/);
+  assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.18,KaraokeActiveBox,/);
+  assert.match(ass, /\\1c&H170602&/);
   assert.match(ass, /\\4c&H5EC522&/);
-  assert.match(ass, /\\1a&HFF&/);
-  assert.match(ass, /\\bord1\\shad0/);
+  assert.match(ass, /\\3c&H5EC522&/);
+  assert.match(ass, /\\1a&HFF&\\2a&HFF&\\3a&HFF&\\4a&HFF&\\bord0\\shad0/);
+  assert.match(ass, /\\bord8\\shad0/);
 });

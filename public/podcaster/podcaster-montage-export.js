@@ -3475,6 +3475,59 @@ function clampMontageOnScreenTextSegmentsToGeminiTimeline(segments = [], geminiT
       const startMs = Math.max(textStartMs, gemini.startMs);
       const endMs = Math.min(textEndMs, gemini.endMs);
       if (endMs <= startMs) return null;
+      if ((endMs - startMs) < STUDIO_TIMELINE_MIN_CLIP_MS) return null;
+      return {
+        ...segment,
+        startMs,
+        durationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, endMs - startMs)
+      };
+    })
+    .filter(Boolean);
+}
+
+function clampMontageOnScreenTextSegmentsToSceneWindows(segments = [], entries = []) {
+  const sourceSegments = Array.isArray(segments) ? segments : [];
+  const validEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  if (!validEntries.length) return sourceSegments;
+  const entryByRowId = new Map(
+    validEntries
+      .map((entry) => {
+        const rowId = String(entry?.rowId || "").trim();
+        return rowId ? [rowId, entry] : null;
+      })
+      .filter(Boolean)
+  );
+  const entryBySceneIndex = new Map(
+    validEntries
+      .map((entry) => {
+        const sceneIndex = Math.max(1, Math.round(Number(entry?.sceneIndex || 0) || 0));
+        return sceneIndex ? [sceneIndex, entry] : null;
+      })
+      .filter(Boolean)
+  );
+  return sourceSegments
+    .map((segment) => {
+      if (!segment || typeof segment !== "object") return null;
+      const rowId = String(segment?.rowId || "").trim();
+      const sceneIndex = Math.max(1, Math.round(Number(segment?.sceneIndex || 0) || 0));
+      const entry = (rowId ? entryByRowId.get(rowId) : null) || entryBySceneIndex.get(sceneIndex) || null;
+      if (!entry) return segment;
+      const textStartMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+      const textDurationMs = Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Math.round(Number(segment?.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS)
+      );
+      const textEndMs = textStartMs + textDurationMs;
+      const sceneStartMs = Math.max(0, Math.round(Number(entry?.timelineStartMs ?? entry?.startMs ?? 0) || 0));
+      const sceneEndMs = Math.max(
+        sceneStartMs,
+        Math.round(Number(entry?.timelineEndMs ?? entry?.endMs ?? (sceneStartMs + Number(entry?.durationMs || 0))) || sceneStartMs)
+      );
+      if (sceneEndMs <= sceneStartMs) return segment;
+      const startMs = Math.max(textStartMs, sceneStartMs);
+      const endMs = Math.min(textEndMs, sceneEndMs);
+      if (endMs <= startMs) return null;
+      if ((endMs - startMs) < STUDIO_TIMELINE_MIN_CLIP_MS) return null;
       return {
         ...segment,
         startMs,
@@ -3527,7 +3580,8 @@ function resolveEffectiveMontageOnScreenTextTimeline({
       suppressFallbackFromEntries: false
     }
     : buildMontageFallbackOnScreenTextTimeline(baseTimeline, validEntries, geminiTimelineSegments);
-  const boundedSegments = clampMontageOnScreenTextSegmentsToGeminiTimeline(nextTimeline.segments, geminiTimelineSegments);
+  const sceneBoundedSegments = clampMontageOnScreenTextSegmentsToSceneWindows(nextTimeline.segments, validEntries);
+  const boundedSegments = clampMontageOnScreenTextSegmentsToGeminiTimeline(sceneBoundedSegments, geminiTimelineSegments);
 
   return {
     ...nextTimeline,
@@ -3622,6 +3676,22 @@ export function buildMontageExportPayload(session = null) {
     }).filter(Boolean);
   };
 
+  const resolveGeminiSegmentTimelineDurationMs = (segment = null, rowId = "", runtime = null) => {
+    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const playbackRate = Math.max(0.5, Math.min(10, Number(window.resolveDialogueAudioPlaybackRate?.(activeSession, rowId) || 1) || 1));
+    const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
+    const trimOutMs = Math.max(0, Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0));
+    const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
+    const declaredDurationMs = Math.max(
+      STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS)
+    );
+    return Math.max(
+      STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.round((trimmedVisibleMs || declaredDurationMs) / playbackRate)
+    );
+  };
+
   const buildGeminiTimelineSegments = () => {
     const track = window.normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
     if (!(track.enabled === true) || !Array.isArray(track.segments) || !track.segments.length) return [];
@@ -3663,10 +3733,7 @@ export function buildMontageExportPayload(session = null) {
         const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
         if (!effectiveSrc) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-        const durationMs = Math.max(
-          STUDIO_TIMELINE_MIN_CLIP_MS,
-          Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS)
-        );
+        const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime);
         const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
         const trimOutMsRaw = Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0);
         // En export, el segmento debe durar `durationMs` dentro del timeline.

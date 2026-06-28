@@ -4340,6 +4340,24 @@ function getOnScreenTextClipEffectiveDurationMs(clip = null) {
   return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
 }
 
+function resolveGeminiDialogueSegmentTimelineDurationMs(segment = null, playbackRate = 1) {
+  const safeRate = Math.max(0.5, Math.min(10, Number(playbackRate || 1) || 1));
+  const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+  const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
+  const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
+  const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
+  const declaredDurationMs = Math.max(
+    STUDIO_TIMELINE_MIN_CLIP_MS,
+    Number(segment?.durationMs || 0)
+    || (Number(segment?.endMs || 0) - startMs)
+    || STUDIO_TIMELINE_MIN_CLIP_MS
+  );
+  return Math.max(
+    STUDIO_TIMELINE_MIN_CLIP_MS,
+    Math.round((trimmedVisibleMs || declaredDurationMs) / safeRate)
+  );
+}
+
 function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], options = {}) {
   const activeSession = session || getActiveSession();
   const rows = getSessionRows(activeSession);
@@ -4385,14 +4403,14 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
     const geminiStartMs = Number.isFinite(Number(geminiSegment?.startMs))
       ? Math.max(0, Math.round(Number(geminiSegment.startMs) || 0))
       : NaN;
-    const geminiDurationMs = Number.isFinite(Number(geminiSegment?.durationMs))
-      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(geminiSegment.durationMs) || STUDIO_TIMELINE_MIN_CLIP_MS))
+    const geminiDurationMs = geminiSegment
+      ? resolveGeminiDialogueSegmentTimelineDurationMs(geminiSegment, playbackRate)
       : NaN;
     const startMs = Number.isFinite(geminiStartMs)
       ? geminiStartMs
       : Math.max(0, Math.round(Number(clipVisibleTiming?.startMs ?? runtime?.startMs ?? 0) || 0));
     const durationMs = Number.isFinite(geminiDurationMs)
-      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(geminiDurationMs / playbackRate))
+      ? geminiDurationMs
       : Math.max(
         STUDIO_TIMELINE_MIN_CLIP_MS,
         Math.round(Number(clipVisibleTiming?.durationMs ?? getOnScreenTextClipEffectiveDurationMs(clip)) || getOnScreenTextClipEffectiveDurationMs(clip))
