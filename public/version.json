@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.294",
-  "build": "2026-1.0.10.294",
+  "version": "1.0.10.295",
+  "build": "2026-1.0.10.295",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export frontend frame-by-frame de Podcaster captura a 60fps y sincroniza los videos visibles con seek deterministico por frame, evitando que el MP4 quede pegado a pocos frames de la primera escena mientras conserva audio, raster/frontend/karaoke y logs de cambio de escena. Se incrementan podcaster.js y podcaster-montage-export.js a la v2026-06-28.13.",
     "Corregido: El export frontend frame-by-frame de Podcaster decodifica audios data: localmente sin fetch para no violar CSP connect-src, conservando raster/frontend/karaoke y evitando fallback backend por frontend_export_audio_unavailable. Se incrementan podcaster.js y podcaster-montage-export.js a la v2026-06-28.12.",
     "Mejorado: El export MP4 de Podcaster ahora intenta primero una ruta frontend frame-by-frame desde el preview del montaje con MediaRecorder, conservando raster/frontend/karaoke, logs detallados de capacidades/frame/audio/fallo y fallback backend si el navegador no puede completar la captura. Se incrementan podcaster.js y podcaster-montage-export.js a la v2026-06-28.11.",
     "Corregido: snoopy-export evita que el preview del export MP4 use proxy-media de Render cuando el asset ya tiene storagePath directo en Firebase, para no provocar 502/CORS mientras el render sigue activo y conservar el raster/frontend/karaoke del export.",
@@ -266,5 +267,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.294"
+  "cache_version": "2026-1.0.10.295"
 }

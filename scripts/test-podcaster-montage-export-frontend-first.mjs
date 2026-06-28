@@ -24,6 +24,12 @@ assert.match(
 
 assert.match(
   exportSource,
+  /const MONTAGE_FRONTEND_EXPORT_FPS = 60;/,
+  "El export frontend de MP4 debe capturar a 60fps."
+);
+
+assert.match(
+  exportSource,
   /new MediaRecorder\(combinedStream,\s*\{\s*mimeType/,
   "La ruta frontend debe usar MediaRecorder con MIME detectado en runtime."
 );
@@ -56,6 +62,24 @@ assert.match(
   exportSource,
   /if \(cleanSrc\.startsWith\("data:"\)\) \{\s*const arrayBuffer = decodeFrontendMontageDataUrlToArrayBuffer\(cleanSrc\);/s,
   "decodeFrontendMontageAudioBuffer debe evitar fetch(data:) porque CSP bloquea data: en connect-src."
+);
+
+assert.match(
+  exportSource,
+  /async function waitFrontendMontageVisibleMediaReady\(\{/,
+  "Cada frame debe sincronizar los videos visibles antes de dibujar el canvas."
+);
+
+assert.match(
+  exportSource,
+  /await waitFrontendMontageVisibleMediaReady\(\{\s*payload,\s*currentMs\s*\}\);/,
+  "drawFrontendMontageFrame debe esperar el seek del video visible por frame."
+);
+
+assert.match(
+  exportSource,
+  /frontend_export_video_scene_change/,
+  "El export frontend debe registrar cambios de escena para diagnosticar capturas pegadas."
 );
 
 assert.match(
