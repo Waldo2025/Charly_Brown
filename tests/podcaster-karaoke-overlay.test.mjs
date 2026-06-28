@@ -145,6 +145,67 @@ test("syncOverlay renders karaoke spans when the selected row has word timings",
   assert.match(overlay.innerHTML, /podcast-karaoke-word is-active[^>]*>mundo</);
 });
 
+test("syncOverlay passes selected karaoke highlight style into preview markup", () => {
+  globalThis.window = globalThis.window || {};
+  const controller = new PodcasterPlaybackController();
+  const overlay = createOverlay();
+  controller.els = {
+    podcastOnScreenTextOverlay: overlay
+  };
+  controller.state.session = {
+    script: {
+      rows: [{ id: "row-style", onScreenText: "Hola mundo" }]
+    }
+  };
+  controller.state.activeRowId = "row-style";
+  controller.deps = {
+    getActiveSession: () => controller.state.session,
+    getPodcastVideoConfig: () => ({
+      onScreenTextTrack: {
+        enabled: true,
+        showTrack: true,
+        karaokeHighlightStyle: "pill",
+        karaokeHighlightColor: "#22c55e",
+        karaokeHighlightOpacity: 0.72
+      },
+      timelineOnScreenTextClipsByRowId: {
+        "row-style": { rowId: "row-style", startMs: 0, trimInMs: 0, trimOutMs: 1000 }
+      }
+    }),
+    normalizeOnScreenTextTrackSettings: (value) => value,
+    ensureOnScreenTextClipsByRowId: () => ({
+      "row-style": { rowId: "row-style", startMs: 0, trimInMs: 0, trimOutMs: 1000 }
+    }),
+    getOnScreenTextClipEffectiveDurationMs: () => 1000,
+    getOnScreenTextClipText: (row) => row.onScreenText,
+    getOnScreenTextLayoutForRow: () => ({ rowId: "row-style", widthPct: 0.58, heightPct: 0.14, xPct: 0.2, yPct: 0.7 }),
+    resolveOnScreenTextPreviewLayoutSpec: () => ({
+      presetClass: "is-style-3d",
+      bgClass: "is-bg-none",
+      inlineStyle: "--pod-onscreen-text-x:20%;--pod-onscreen-text-y:70%;"
+    }),
+    buildOnScreenTextBubbleInlineStyle: () => "",
+    getOnScreenTextStylePresetClass: () => "is-style-3d",
+    getOnScreenTextBgPresetClass: () => "is-bg-none",
+    escapeHtml: (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;"),
+    podcastVideoState: { montageActive: false },
+    resolveDialogueAudioForRow: () => ({
+      rowId: "row-style",
+      targetSpeechLine: "Hola mundo",
+      wordTimings: [
+        { text: "Hola", startMs: 0, endMs: 180, tokenIndex: 0 },
+        { text: "mundo", startMs: 181, endMs: 420, tokenIndex: 1 }
+      ]
+    })
+  };
+
+  controller.syncOverlay(240, { rowId: "row-style", forceRow: true });
+
+  assert.match(overlay.innerHTML, /is-highlight-pill/);
+  assert.doesNotMatch(overlay.innerHTML, /is-highlight-glow/);
+  assert.match(overlay.innerHTML, /--pod-karaoke-highlight-color:#22c55e/);
+});
+
 test("syncOverlay treats editor-preview local time as scene-local when the clip starts later in the timeline", () => {
   globalThis.window = globalThis.window || {};
   const controller = new PodcasterPlaybackController();

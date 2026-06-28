@@ -146,3 +146,74 @@ test("buildMontageOnScreenTextAss scales karaoke word events using playbackRate"
   assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.10,KaraokeActive,/);
   assert.match(ass, /Dialogue: 2,0:00:00\.10,0:00:00\.20,KaraokeActive,/);
 });
+
+test("buildMontageOnScreenTextAss preserves selected karaoke highlight shape", () => {
+  const wordTimings = normalizeKaraokeWordTimings({
+    wordTimings: [
+      { text: "Hola", startMs: 0, endMs: 180 },
+      { text: "mundo", startMs: 180, endMs: 420 }
+    ]
+  }, "Hola mundo");
+
+  const ass = buildMontageOnScreenTextAss({
+    width: 1280,
+    height: 720,
+    settings: {
+      fontFamily: "Unbounded",
+      stylePreset: "3d",
+      bgPreset: "none",
+      textColor: "#f8fafc",
+      strokeColor: "#0f172a",
+      textOpacity: 1,
+      karaokeHighlightColor: "#22c55e",
+      karaokeHighlightStyle: "pill",
+      karaokeHighlightOpacity: 0.72,
+      karaokeHighlightPaddingXPx: 14,
+      karaokeHighlightPaddingYPx: 5,
+      karaokeHighlightRadiusPx: 10
+    },
+    segments: [
+      {
+        startSec: 0,
+        endSec: 1,
+        wordTimings,
+        settings: {
+          fontFamily: "Unbounded",
+          stylePreset: "3d",
+          bgPreset: "none",
+          textColor: "#f8fafc",
+          strokeColor: "#0f172a",
+          textOpacity: 1,
+          karaokeHighlightColor: "#22c55e",
+          karaokeHighlightStyle: "pill",
+          karaokeHighlightOpacity: 0.72,
+          karaokeHighlightPaddingXPx: 14,
+          karaokeHighlightPaddingYPx: 5,
+          karaokeHighlightRadiusPx: 10
+        },
+        spec: {
+          text: "Hola mundo",
+          wrappedText: "Hola mundo",
+          fontFamily: "Unbounded",
+          fontSizePx: 44,
+          lineSpacingPx: 6,
+          strokeEnabled: true,
+          strokeWidthPx: 2,
+          shadowEnabled: true,
+          shadowX: 0,
+          shadowY: 4,
+          textAlign: "center",
+          rawXPx: 256,
+          boxWidthPx: 768,
+          yPx: 520,
+          boxEnabled: false
+        }
+      }
+    ]
+  });
+
+  assert.match(ass, /\\1c&H5EC522&/);
+  assert.match(ass, /\\4c&H5EC522&/);
+  assert.match(ass, /\\1a&HFF&/);
+  assert.match(ass, /\\bord1\\shad0/);
+});

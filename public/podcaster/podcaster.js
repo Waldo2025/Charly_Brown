@@ -13418,10 +13418,23 @@ function syncMontageExportPreviewOverlayFromMedia(mediaEl = null) {
   const previewState = window.montageExportPreviewState || {};
   const frontendPreview = previewState.frontendPreview || null;
   const previewRowId = String(frontendPreview?.rowId || previewState?.lastJobPreviewRowId || "").trim();
+  const timelineStartMs = Math.max(0, Number(frontendPreview?.timelineStartMs || 0) || 0);
   const currentMs = Math.max(
     0,
-    Math.round(Number(mediaEl?.currentTime || 0) * 1000) || Number(frontendPreview?.timelineStartMs || 0) || 0
+    timelineStartMs + (Math.round(Number(mediaEl?.currentTime || 0) * 1000) || 0)
   );
+  const totalMs = Math.max(
+    currentMs,
+    Number(exportPreviewController?.state?.totalDurationMs || 0) || 0,
+    Number(els.montageExportPreviewSeekbar?.max || 0) || 0
+  );
+  if (els.montageExportPreviewSeekbar) {
+    els.montageExportPreviewSeekbar.max = String(totalMs);
+    els.montageExportPreviewSeekbar.value = String(currentMs);
+  }
+  if (els.montageExportPreviewTimer) {
+    els.montageExportPreviewTimer.textContent = `${secondsToClock(currentMs / 1000)} / ${secondsToClock(totalMs / 1000)}`;
+  }
   controller.syncOverlay(currentMs, {
     rowId: previewRowId,
     preferredRowId: previewRowId,
@@ -13444,24 +13457,82 @@ function bindMontageExportPreviewMediaOverlaySync(mediaEl = null) {
 bindMontageExportPreviewMediaOverlaySync(els.montageExportPreviewVideo);
 bindMontageExportPreviewMediaOverlaySync(els.montageExportPreviewVideoAlt);
 
+function getVisibleMontageExportPreviewMediaEl() {
+  const candidates = [
+    els.montageExportPreviewVideo,
+    els.montageExportPreviewVideoAlt,
+    els.montageExportPreviewImage,
+    els.montageExportPreviewImageAlt
+  ];
+  return candidates.find((el) => el && el.hidden !== true && String(el.getAttribute?.("src") || "").trim()) || null;
+}
+
+function setMontageExportPreviewTransportPlaying(isPlaying = false) {
+  if (els.montageExportPreviewPlayBtn) els.montageExportPreviewPlayBtn.hidden = Boolean(isPlaying);
+  if (els.montageExportPreviewPauseBtn) els.montageExportPreviewPauseBtn.hidden = !Boolean(isPlaying);
+}
+
+function playMontageExportPreviewMedia() {
+  const mediaEl = getVisibleMontageExportPreviewMediaEl();
+  if (!mediaEl) return;
+  if (mediaEl.tagName === "VIDEO") {
+    try {
+      mediaEl.muted = true;
+      const playPromise = mediaEl.play?.();
+      if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => { });
+      setMontageExportPreviewTransportPlaying(true);
+    } catch (_) { }
+    return;
+  }
+  setMontageExportPreviewTransportPlaying(true);
+}
+
+function pauseMontageExportPreviewMedia() {
+  [els.montageExportPreviewVideo, els.montageExportPreviewVideoAlt].forEach((video) => {
+    try { video?.pause?.(); } catch (_) { }
+  });
+  setMontageExportPreviewTransportPlaying(false);
+}
+
+function stopMontageExportPreviewMedia() {
+  pauseMontageExportPreviewMedia();
+  [els.montageExportPreviewVideo, els.montageExportPreviewVideoAlt].forEach((video) => {
+    try { if (video) video.currentTime = 0; } catch (_) { }
+  });
+  if (els.montageExportPreviewSeekbar) els.montageExportPreviewSeekbar.value = "0";
+  syncMontageExportPreviewOverlayFromMedia(getVisibleMontageExportPreviewMediaEl());
+}
+
+function seekMontageExportPreviewMedia(targetMs = 0) {
+  const mediaEl = getVisibleMontageExportPreviewMediaEl();
+  const ms = Math.max(0, Number(targetMs || 0) || 0);
+  if (mediaEl?.tagName === "VIDEO") {
+    const frontendPreview = window.montageExportPreviewState?.frontendPreview || {};
+    const timelineStartMs = Math.max(0, Number(frontendPreview?.timelineStartMs || 0) || 0);
+    const localMs = Math.max(0, ms - timelineStartMs);
+    try { mediaEl.currentTime = localMs / 1000; } catch (_) { }
+  }
+  syncMontageExportPreviewOverlayFromMedia(mediaEl);
+}
+
 // Eventos del preview de exportación
 if (els.montageExportPreviewPlayBtn) {
-  els.montageExportPreviewPlayBtn.addEventListener("click", () => exportPreviewController.play());
+  els.montageExportPreviewPlayBtn.addEventListener("click", () => playMontageExportPreviewMedia());
 }
 if (els.montageExportPreviewPauseBtn) {
-  els.montageExportPreviewPauseBtn.addEventListener("click", () => exportPreviewController.pause());
+  els.montageExportPreviewPauseBtn.addEventListener("click", () => pauseMontageExportPreviewMedia());
 }
 if (els.montageExportPreviewStopBtn) {
-  els.montageExportPreviewStopBtn.addEventListener("click", () => exportPreviewController.stop());
+  els.montageExportPreviewStopBtn.addEventListener("click", () => stopMontageExportPreviewMedia());
 }
 if (els.montageExportPreviewSeekbar) {
   els.montageExportPreviewSeekbar.addEventListener("input", () => {
-    exportPreviewController.seek(Number(els.montageExportPreviewSeekbar.value));
+    seekMontageExportPreviewMedia(Number(els.montageExportPreviewSeekbar.value));
   });
 }
 if (els.montageExportRefreshPreviewBtn) {
   els.montageExportRefreshPreviewBtn.addEventListener("click", () => {
-    exportPreviewController.stop();
+    stopMontageExportPreviewMedia();
     refreshMontageExportPreviewNow().catch(() => { });
   });
 }

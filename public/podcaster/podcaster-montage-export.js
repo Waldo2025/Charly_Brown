@@ -760,7 +760,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
       tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
     });
   }
-  if (stage === "render_scene_segments" && currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()) {
+  if (stage === "render_scene_segments" && currentSceneIndex > 0) {
     const progressivePreview = await resolveMontageExportStatusPreviewMedia(data);
     maybeRefreshMontageExportPreviewFromJob({
       rowId: currentRowId,

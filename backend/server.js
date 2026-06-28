@@ -10643,8 +10643,13 @@ function doesMontageOnScreenTextSegmentBelongToScene(segment = {}, entry = {}, s
   const entryRowId = String(entry?.rowId || "").trim();
   if (segmentRowId && entryRowId && segmentRowId === entryRowId) return true;
   const normalizedSceneIndex = Math.max(1, Math.round(Number(sceneIndex || 1) || 1));
-  const segmentSceneIndex = Math.max(1, Math.round(Number(segment?.sceneIndex || normalizedSceneIndex) || normalizedSceneIndex));
-  if (segmentSceneIndex === normalizedSceneIndex) return true;
+  const hasExplicitSceneIndex = segment?.sceneIndex !== null
+    && segment?.sceneIndex !== undefined
+    && segment?.sceneIndex !== "";
+  if (hasExplicitSceneIndex) {
+    const segmentSceneIndex = Math.max(1, Math.round(Number(segment.sceneIndex) || normalizedSceneIndex));
+    if (segmentSceneIndex === normalizedSceneIndex) return true;
+  }
   const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
   const endMs = Math.max(startMs + 1, Math.round(startMs + Number(segment?.durationMs || 0) || 0));
   return endMs > sceneStartMs && startMs < sceneEndMs;
@@ -10669,8 +10674,13 @@ function doesMontageStylizedTextSegmentBelongToScene(segment = {}, entry = {}, s
   const entryRowId = String(entry?.rowId || "").trim();
   if (segmentRowId && entryRowId && segmentRowId === entryRowId) return true;
   const normalizedSceneIndex = Math.max(1, Math.round(Number(sceneIndex || 1) || 1));
-  const segmentSceneIndex = Math.max(1, Math.round(Number(segment?.sceneIndex || normalizedSceneIndex) || normalizedSceneIndex));
-  if (segmentSceneIndex === normalizedSceneIndex) return true;
+  const hasExplicitSceneIndex = segment?.sceneIndex !== null
+    && segment?.sceneIndex !== undefined
+    && segment?.sceneIndex !== "";
+  if (hasExplicitSceneIndex) {
+    const segmentSceneIndex = Math.max(1, Math.round(Number(segment.sceneIndex) || normalizedSceneIndex));
+    if (segmentSceneIndex === normalizedSceneIndex) return true;
+  }
   const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
   const durationMs = Math.max(1, Math.round(Number(segment?.durationMs || 0) || 0));
   const endMs = startMs + durationMs;
