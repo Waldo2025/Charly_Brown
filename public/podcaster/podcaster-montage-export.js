@@ -2735,7 +2735,8 @@ function selectFrontendMontageExportMimeType() {
 
 function resolveFrontendMontageExportFrameSize(payload = {}) {
   const reel = payload?.reelModeEnabled === true;
-  const resolution = String(payload?.resolution || window.montageExportState?.resolution || "source").trim();
+  const requestedResolution = String(payload?.resolution || window.montageExportState?.resolution || "source").trim();
+  const resolution = resolveEffectiveExportResolution(requestedResolution, reel);
   const map = reel
     ? {
       "1080p": { width: 1080, height: 1920 },
@@ -2748,11 +2749,7 @@ function resolveFrontendMontageExportFrameSize(payload = {}) {
       "480p": { width: 854, height: 480 }
     };
   if (map[resolution]) return map[resolution];
-  const container = getMontageExportPreviewContainer();
-  const rect = container?.getBoundingClientRect?.();
-  const width = Math.max(2, Math.round(Number(rect?.width || container?.clientWidth || 0) || (reel ? 720 : 1280)));
-  const height = Math.max(2, Math.round(Number(rect?.height || container?.clientHeight || 0) || (reel ? 1280 : 720)));
-  return { width, height };
+  return reel ? { width: 720, height: 1280 } : { width: 1280, height: 720 };
 }
 
 function resolveFrontendMontageExportDurationMs(payload = {}) {
@@ -2803,6 +2800,18 @@ function resolveFrontendMontageActiveEntryAtMs(payload = {}, currentMs = 0) {
     previewRowId: "",
     previewSceneIndex: 0
   });
+}
+
+function resolveFrontendMontageSceneKey(payload = {}, currentMs = 0) {
+  const activeEntry = resolveFrontendMontageActiveEntryAtMs(payload, currentMs);
+  const sceneIndex = Math.max(1, Number(activeEntry?.sceneIndex || 0) || 1);
+  const rowId = String(activeEntry?.rowId || "").trim();
+  return {
+    key: `${sceneIndex}:${rowId || "scene"}`,
+    activeEntry,
+    sceneIndex,
+    rowId
+  };
 }
 
 function resolveFrontendMontageSourceState(entry = {}, currentMs = 0) {
@@ -2962,10 +2971,7 @@ async function waitFrontendMontageMediaSeek(mediaEl = null, targetSec = 0, timeo
 async function waitFrontendMontageVisibleMediaReady({ payload = {}, currentMs = 0 } = {}) {
   const videos = getVisibleFrontendMontageVideoElements();
   if (!videos.length) return { synced: 0, activeEntry: null };
-  const activeEntry = resolveFrontendMontageActiveEntryAtMs(payload, currentMs);
-  const sceneIndex = Math.max(1, Number(activeEntry?.sceneIndex || 0) || 1);
-  const rowId = String(activeEntry?.rowId || "").trim();
-  const sceneKey = `${sceneIndex}:${rowId || "scene"}`;
+  const { key: sceneKey, activeEntry, sceneIndex, rowId } = resolveFrontendMontageSceneKey(payload, currentMs);
   const sceneChanged = window.montageExportJobState?.frontendVideoSceneKey !== sceneKey;
   if (window.montageExportJobState && sceneChanged) {
     window.montageExportJobState.frontendVideoSceneKey = sceneKey;
@@ -3215,14 +3221,16 @@ async function scheduleFrontendMontageAudioTracks({
   return { expected, scheduled, startAt: effectiveStartAt };
 }
 
-async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 0, width = 0, height = 0 } = {}) {
+async function drawFrontendMontageFrame({ ctx = null, payload = {}, currentMs = 0, width = 0, height = 0, syncMedia = true } = {}) {
   const container = getMontageExportPreviewContainer();
   if (!ctx || !container) throw new Error("frontend_export_preview_missing");
   const controller = window.exportPreviewController || null;
   if (controller && typeof controller.tick === "function") {
     await controller.tick(currentMs, { lightweight: false, suppressAutoScroll: true });
   }
-  await waitFrontendMontageVisibleMediaReady({ payload, currentMs });
+  if (syncMedia !== false) {
+    await waitFrontendMontageVisibleMediaReady({ payload, currentMs });
+  }
   if (shouldUseMontageExportPreviewJassub(payload)) {
     await renderMontageExportPreviewJassub(true);
   }
@@ -3367,9 +3375,13 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
   }
   const startedAt = performance.now();
   const frameCount = Math.max(1, Math.ceil(durationMs / frameIntervalMs));
-  for (let frameIndex = 0; frameIndex <= frameCount; frameIndex += 1) {
-    const currentMs = Math.min(durationMs, Math.round(frameIndex * frameIntervalMs));
-    await drawFrontendMontageFrame({ ctx, payload, currentMs, width, height });
+  let frameIndex = 0;
+  while (true) {
+    const elapsedMs = Math.max(0, performance.now() - startedAt);
+    const currentMs = Math.min(durationMs, Math.round(elapsedMs));
+    const { key: sceneKey } = resolveFrontendMontageSceneKey(payload, currentMs);
+    const syncMedia = frameIndex === 0 || window.montageExportJobState?.frontendVideoSceneKey !== sceneKey;
+    await drawFrontendMontageFrame({ ctx, payload, currentMs, width, height, syncMedia });
     if (typeof visualTrack?.requestFrame === "function") visualTrack.requestFrame();
     const progress = 0.08 + (0.86 * Math.min(1, currentMs / Math.max(1, durationMs)));
     setMontageExportProgress(progress);
@@ -3385,12 +3397,15 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
         currentMs,
         durationMs,
         mimeType,
-        fps
+        fps,
+        realtimeElapsedMs: Math.round(elapsedMs)
       }, "debug");
     }
-    const nextTargetAt = startedAt + ((frameIndex + 1) * frameIntervalMs);
+    if (currentMs >= durationMs) break;
+    frameIndex += 1;
+    const nextTargetAt = startedAt + (frameIndex * frameIntervalMs);
     const sleepMs = nextTargetAt - performance.now();
-    if (sleepMs > 1 && currentMs < durationMs) await waitFrontendMontageExportMs(sleepMs);
+    if (sleepMs > 1) await waitFrontendMontageExportMs(sleepMs);
   }
   recorder.stop();
   await stopped;

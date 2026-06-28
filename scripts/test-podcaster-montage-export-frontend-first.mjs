@@ -95,6 +95,30 @@ assert.match(
 );
 
 assert.match(
+  exportSource,
+  /const resolution = resolveEffectiveExportResolution\(requestedResolution, reel\);/,
+  "El export frontend debe resolver source a una resolución de export real, no al tamaño del modal."
+);
+
+assert.doesNotMatch(
+  exportSource,
+  /getBoundingClientRect\?\.\(\)[\s\S]{0,260}return \{\s*width,\s*height\s*\};/,
+  "El tamaño de salida frontend no debe salir del rect DOM del preview."
+);
+
+assert.match(
+  exportSource,
+  /const elapsedMs = Math\.max\(0, performance\.now\(\) - startedAt\);[\s\S]*const currentMs = Math\.min\(durationMs, Math\.round\(elapsedMs\)\);/,
+  "El loop de captura debe usar tiempo real para que el video no quede lento respecto al audio."
+);
+
+assert.match(
+  exportSource,
+  /syncMedia = frameIndex === 0 \|\| window\.montageExportJobState\?\.frontendVideoSceneKey !== sceneKey/,
+  "El export frontend no debe hacer sync/seek bloqueante en cada frame."
+);
+
+assert.match(
   podcasterSource,
   /exportPreviewController,/,
   "El controlador de preview del montaje debe estar disponible en window para captura frame-by-frame."
