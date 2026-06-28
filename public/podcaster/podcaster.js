@@ -41,7 +41,7 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-06-26.11";
+} from "./podcaster-montage-export.js?v=2026-06-28.1";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
