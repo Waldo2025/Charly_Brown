@@ -13,7 +13,7 @@ const {
 
 const workerConcurrency = Math.max(
   1,
-  Number(process.env.MONTAGE_EXPORT_WORKER_CONCURRENCY || process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 2) || 2
+  Number(process.env.MONTAGE_EXPORT_WORKER_CONCURRENCY || process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 1) || 1
 );
 
 const processor = createProcessMontageExportJob({

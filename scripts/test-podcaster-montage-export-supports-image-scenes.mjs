@@ -12,7 +12,7 @@ if (!/const isImageAsset = String\(videoAsset\?\.mediaKind \|\| videoAsset\?\.ty
   throw new Error("El backend debe inferir explícitamente cuándo una escena del montaje es imagen.");
 }
 
-if (!/const inputVisualPath = await downloadInput\(videoAsset, isImageAsset \? "image" : "video", i\);/.test(back)) {
+if (!/inputVisualPath = await downloadInput\(videoAsset, isImageAsset \? "image" : "video", i\);/.test(back)) {
   throw new Error("El backend debe descargar escenas imagen con un kind explícito distinto de video.");
 }
 
@@ -57,11 +57,11 @@ if (/return `\$\{inputLabel\}scale=\$\{width\}:\$\{height\},setsar=1\[\$\{output
   throw new Error("Las escenas imagen no deben escalarse directo al canvas porque eso deforma la proporción.");
 }
 
-if (!/return \{ width: even\(safeWidth\), height: even\(safeHeight\) \};/.test(back)) {
+if (!/result = \{ width: even\(safeWidth\), height: even\(safeHeight\) \};/.test(back)) {
   throw new Error("La exportación source debe preservar el aspect ratio fuente para no estirar videos verticales.");
 }
 
-if (!/if \(key === "1080p"\) \{[\s\S]*return \{ width: 1920, height: 1080 \};[\s\S]*if \(key === "720p"\) \{[\s\S]*return \{ width: 1280, height: 720 \};/.test(back)) {
+if (!/if \(key === "1080p"\) \{[\s\S]*result = \{ width: 1920, height: 1080 \};[\s\S]*if \(key === "720p"\) \{[\s\S]*result = \{ width: 1280, height: 720 \};/.test(back)) {
   throw new Error("Las resoluciones explícitas deben exportar canvas fijo 1080p/720p, no reducirse al tamaño fuente de la imagen.");
 }
 
@@ -69,7 +69,7 @@ if (!/if \(!isImageAsset && visualLayoutMode === "blur-backdrop"\) \{/.test(back
   throw new Error("Las escenas imagen no deben usar blur-backdrop/pad como layout de export porque produce marco negro o imagen chica.");
 }
 
-if (!/let videoChain = `\[\$\{index\}:v\]scale=\$\{canvas\.width\}:\$\{canvas\.height\},setsar=1,format=rgba`/.test(back)) {
+if (!/let videoChain = `\[\$\{index\}:v\]setpts=PTS-STARTPTS,trim=start=0:duration=\$\{durSec\.toFixed\(3\)\},setpts=PTS-STARTPTS,scale=\$\{canvas\.width\}:\$\{canvas\.height\},setsar=1,format=rgba`/.test(back)) {
   throw new Error("La composición overlap/gaps debe reutilizar las escenas ya transformadas, sin re-cropear el encuadre.");
 }
 

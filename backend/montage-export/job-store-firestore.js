@@ -107,8 +107,19 @@ function summarizePersistedMontageEntry(entry = null) {
   if (!source) return source;
   return stripUndefinedDeep({
     rowId: String(source.rowId || "").trim(),
+    sceneIndex: Number.isFinite(Number(source.sceneIndex)) ? Math.max(1, Math.round(Number(source.sceneIndex) || 1)) : undefined,
     startMs: Math.max(0, Number(source.startMs || 0) || 0),
+    timelineStartMs: Number.isFinite(Number(source.timelineStartMs)) ? Math.max(0, Math.round(Number(source.timelineStartMs) || 0)) : undefined,
+    timelineEndMs: Number.isFinite(Number(source.timelineEndMs)) ? Math.max(0, Math.round(Number(source.timelineEndMs) || 0)) : undefined,
+    trimInMs: Number.isFinite(Number(source.trimInMs)) ? Math.max(0, Math.round(Number(source.trimInMs) || 0)) : undefined,
     durationMs: Math.max(0, Number(source.durationMs || 0) || 0),
+    backgroundColor: String(source.backgroundColor || "").trim(),
+    visualLayoutMode: String(source.visualLayoutMode || "").trim(),
+    mediaScale: Number.isFinite(Number(source.mediaScale)) ? Number(source.mediaScale) : undefined,
+    mediaOffsetXPct: Number.isFinite(Number(source.mediaOffsetXPct)) ? Number(source.mediaOffsetXPct) : undefined,
+    mediaOffsetYPct: Number.isFinite(Number(source.mediaOffsetYPct)) ? Number(source.mediaOffsetYPct) : undefined,
+    mediaMotionPreset: String(source.mediaMotionPreset || "").trim(),
+    visualEffects: source.visualEffects && typeof source.visualEffects === "object" ? stripUndefinedDeep(source.visualEffects) : undefined,
     useNativeVideoAudio: source.useNativeVideoAudio === true,
     veoVolumeOverridePct: Number.isFinite(Number(source.veoVolumeOverridePct))
       ? Math.max(0, Math.min(200, Math.round(Number(source.veoVolumeOverridePct) || 0)))
@@ -470,6 +481,23 @@ function createMontageExportJobStore({
       const nowMs = Number(new Date(nextNow()).getTime() || 0) || 0;
       if (expiresAtMs && nowMs && expiresAtMs < nowMs) return null;
       return job;
+    },
+
+    async listActiveJobs({ limit = 10 } = {}) {
+      const maxDocs = Math.max(1, Math.min(25, Math.round(Number(limit || 10) || 10)));
+      const snap = await collection()
+        .where("status", "in", ["queued", "running"])
+        .limit(maxDocs)
+        .get();
+      const nowMs = Number(new Date(nextNow()).getTime() || 0) || 0;
+      return snap.docs
+        .map((doc) => doc.data() || null)
+        .filter(Boolean)
+        .filter((job) => !job.type || String(job.type || "").trim() === "montage_export")
+        .filter((job) => {
+          const expiresAtMs = Number(new Date(job.expiresAt || 0).getTime() || 0) || 0;
+          return !expiresAtMs || !nowMs || expiresAtMs >= nowMs;
+        });
     }
   };
 }

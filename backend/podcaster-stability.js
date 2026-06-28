@@ -4,7 +4,7 @@ const DIALOGUE_VIDEO_MAX_CONTINUITY_FRAME_COUNT = 1;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
 
 function createHeavyWorkCoordinator({
-  montageExportMaxConcurrent = Number(process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 2) || 2,
+  montageExportMaxConcurrent = Number(process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 1) || 1,
   dialogueVideoMaxConcurrent = Number(process.env.DIALOGUE_VIDEO_MAX_CONCURRENT || 1) || 1
 } = {}) {
   const safeMontageExportMaxConcurrent = Math.max(1, Number(montageExportMaxConcurrent) || 2);

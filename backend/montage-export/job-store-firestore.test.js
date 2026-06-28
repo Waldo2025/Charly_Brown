@@ -221,6 +221,59 @@ test("createJob strips inline audio and media payloads from persisted request in
   assert.equal(created.request.input.persistedRequestCompacted, true);
 });
 
+test("createJob preserves visual-only background scenes for restart recovery", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T15:00:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-background-scene",
+    sessionId: "session-background",
+    ownerId: "user-background",
+    request: {
+      baseUrl: "https://example.com",
+      input: {
+        sessionId: "session-background",
+        entries: [{
+          rowId: "row-background",
+          sceneIndex: 3,
+          startMs: 2000,
+          timelineStartMs: 2000,
+          timelineEndMs: 7000,
+          trimInMs: 0,
+          durationMs: 5000,
+          backgroundColor: "linear-gradient(135deg, #0f172a, #38bdf8)",
+          visualLayoutMode: "default",
+          mediaScale: 1.15,
+          mediaOffsetXPct: 4,
+          mediaOffsetYPct: -3,
+          mediaMotionPreset: "zoom-in",
+          visualEffects: {
+            brightness: 1.05
+          },
+          video: null,
+          audio: null
+        }]
+      }
+    },
+    totalScenes: 1
+  });
+
+  const entry = created.request.input.entries[0];
+  assert.equal(entry.rowId, "row-background");
+  assert.equal(entry.sceneIndex, 3);
+  assert.equal(entry.backgroundColor, "linear-gradient(135deg, #0f172a, #38bdf8)");
+  assert.equal(entry.timelineStartMs, 2000);
+  assert.equal(entry.timelineEndMs, 7000);
+  assert.equal(entry.mediaScale, 1.15);
+  assert.equal(entry.mediaOffsetXPct, 4);
+  assert.equal(entry.mediaOffsetYPct, -3);
+  assert.equal(entry.mediaMotionPreset, "zoom-in");
+  assert.deepEqual(entry.visualEffects, { brightness: 1.05 });
+});
+
 test("createJob tolerates null media records while sanitizing persisted request input", async () => {
   const fakeDb = createFakeDocStore();
   const store = createMontageExportJobStore({
