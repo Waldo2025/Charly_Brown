@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createPodcasterSceneTransitionApi,
   getTransitionEdgeKey,
   getTransitionForEdge,
   getTransitionOverlapWindow,
@@ -58,4 +59,65 @@ test("resolveTransitionPlaybackState marks both scenes active during overlap", (
 
 test("getTransitionEdgeKey builds stable keys", () => {
   assert.equal(getTransitionEdgeKey(" a ", " b "), "a__b");
+});
+
+test("shift transition range uses the same adjacent edge regardless of click order", () => {
+  const state = {
+    activeRowId: "b",
+    timelineLastInteractedRowId: "b",
+    transitionPickerOpen: false,
+    transitionFromRowId: "",
+    transitionToRowId: ""
+  };
+  const session = {
+    script: {
+      rows: [{ id: "a" }, { id: "b" }, { id: "c" }]
+    },
+    podcastVideoConfig: {
+      transitionsByEdge: {}
+    }
+  };
+  const opened = [];
+  const api = createPodcasterSceneTransitionApi({
+    els: {
+      podcastTransitionPickerGrid: { querySelectorAll: () => [] },
+      podcastTransitionPickerEdgeLabel: { textContent: "" },
+      podcastTransitionPickerModal: { hidden: true }
+    },
+    podcastVideoState: state,
+    getActiveSession: () => session,
+    getSessionRows: () => session.script.rows,
+    getTransitionTimelineRowOrder: () => ["a", "b", "c"],
+    resolveSceneNumberByRowId: (rowId) => ({ a: "1", b: "2", c: "3" }[rowId] || "?"),
+    upsertPodcastVideoConfig: (mutator) => {
+      session.podcastVideoConfig = mutator(session.podcastVideoConfig);
+    },
+    scheduleSessionLocalPersist: () => {},
+    persistReorderedTimelinePatchToCloud: () => {},
+    persistCompactedTimelineTrackFromRow: () => {},
+    renderPodcastVideoTimeline: () => {},
+    renderPodcastTransitionTimeline: () => {},
+    syncPodcastStudioInspector: () => {},
+    selectTimelineSceneRow: (rowId) => {
+      opened.push(rowId);
+      state.activeRowId = rowId;
+      state.timelineLastInteractedRowId = rowId;
+    }
+  });
+
+  assert.equal(api.selectTimelineTransitionRange("c", { anchorRowId: "b" }), true);
+  assert.deepEqual(api.getActiveTransitionSelection(session).edges, [{ fromRowId: "b", toRowId: "c" }]);
+  api.setTransitionForActiveEdge("crossfade", 320);
+  assert.deepEqual(session.podcastVideoConfig.transitionsByEdge, {
+    b__c: { type: "crossfade", durationMs: 320 }
+  });
+
+  state.transitionPickerOpen = false;
+  state.transitionFromRowId = "";
+  state.transitionToRowId = "";
+  assert.equal(api.selectTimelineTransitionRange("b", { anchorRowId: "c" }), true);
+  assert.deepEqual(api.getActiveTransitionSelection(session).edges, [{ fromRowId: "b", toRowId: "c" }]);
+  assert.deepEqual(session.podcastVideoConfig.transitionsByEdge, {
+    b__c: { type: "crossfade", durationMs: 320 }
+  });
 });

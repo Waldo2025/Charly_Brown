@@ -11506,8 +11506,9 @@ async function renderMontageOverlapComposition({
       const transitionSec = Math.max(0.02, Number(transition?.durationMs || 0) / 1000);
       const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
       const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
+      const endSec = startSec + durSec;
       const videoLabel = `v${index}`;
-      let videoChain = `[${index}:v]setpts=PTS-STARTPTS,trim=start=0:duration=${durSec.toFixed(3)},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${durSec.toFixed(3)},trim=start=0:duration=${durSec.toFixed(3)},scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+      let videoChain = `[${index}:v]setpts=PTS-STARTPTS,trim=start=0:duration=${durSec.toFixed(3)},setpts=PTS-STARTPTS,scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
       if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
         videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
       }
@@ -11536,7 +11537,7 @@ async function renderMontageOverlapComposition({
         overlayY = `(${canvas.height}-h)/2`;
       }
       const overlayOutLabel = `base${index + 1}`;
-      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
+      filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${overlayOutLabel}]`);
       baseLabel = overlayOutLabel;
       if (transitionType === "dip-black" || transitionType === "flash-white") {
         const pulseLabel = `transition_pulse_${index}`;

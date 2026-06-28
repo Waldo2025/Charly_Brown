@@ -56,7 +56,7 @@ import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-inte
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
 import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-26.7";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
-import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
+import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js?v=2026-06-28.3";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
 import { replaceHostTokensWithNames as replaceHostTokensWithNamesShared } from "./podcaster-speaker-text.js";
 import { toMarkdownTableCell } from "./podcaster-markdown-table.js";
@@ -13039,6 +13039,7 @@ podcasterSceneTransitionApi = createPodcasterSceneTransitionApi({
   upsertPodcastVideoConfig,
   scheduleSessionLocalPersist,
   persistReorderedTimelinePatchToCloud,
+  persistCompactedTimelineTrackFromRow,
   renderPodcastVideoTimeline,
   renderPodcastTransitionTimeline,
   syncPodcastStudioInspector,

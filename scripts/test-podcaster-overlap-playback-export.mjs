@@ -32,12 +32,15 @@ if (!/function buildMontageOverlapCompositionPlan\(exportedEntries = \[\]\) \{/.
   || !/visualLayoutMode = String\(entry\?\.visualLayoutMode \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "blur-backdrop"/.test(backendSource)
   || !/boxblur=24:8/.test(backendSource)
   || !/Number\(a\?\.zIndex \|\| 0\) - Number\(b\?\.zIndex \|\| 0\)/.test(backendSource)
-  || !/renderMontageOverlapComposition\(\{/.test(backendSource)
-  || !/const outgoingTransition = resolveMontageOverlayTransition\(nextEntry, entry\);/.test(backendSource)
-  || !/const padTailSec = Math\.max\(0\.12, Math\.min\(1\.0, Math\.max\(transitionSec, outgoingTransitionSec\) \+ 0\.12\)\);/.test(backendSource)
-  || !/const compositeDurSec = Math\.max\(durSec, durSec \+ padTailSec\);/.test(backendSource)
-  || !/setpts=PTS-STARTPTS,trim=start=0:duration=\$\{durSec\.toFixed\(3\)\},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=\$\{compositeDurSec\.toFixed\(3\)\},trim=start=0:duration=\$\{compositeDurSec\.toFixed\(3\)\}/.test(backendSource)) {
+  || !/renderMontageOverlapComposition\(\{/.test(backendSource)) {
   throw new Error("El export backend debe priorizar la capa superior en overlaps y soportar blur backdrop por escena.");
+}
+
+if (!/const endSec = startSec \+ durSec;/.test(backendSource)
+  || !/setpts=PTS-STARTPTS,trim=start=0:duration=\$\{durSec\.toFixed\(3\)\},setpts=PTS-STARTPTS,scale=\$\{canvas\.width\}:\$\{canvas\.height\}/.test(backendSource)
+  || /tpad=stop_mode=clone:stop_duration=\$\{durSec\.toFixed\(3\)\}/.test(backendSource)
+  || !/overlay=eof_action=pass:shortest=0:x='\$\{overlayX\}':y='\$\{overlayY\}':format=auto:enable='between\(t,\$\{startSec\.toFixed\(3\)\},\$\{endSec\.toFixed\(3\)\}\)'/.test(backendSource)) {
+  throw new Error("El compositor overlap no debe congelar el último frame; cada escena debe estar habilitada solo durante su ventana real.");
 }
 
 console.log("Podcast overlap playback/export OK.");

@@ -113,6 +113,28 @@ export function getAllTransitionTypes() {
   return [...TRANSITION_TYPES];
 }
 
+function normalizeAdjacentTransitionSelection(rowIds = [], firstRowId = "", secondRowId = "") {
+  const orderedRowIds = Array.isArray(rowIds) ? rowIds.map((id) => String(id || "").trim()).filter(Boolean) : [];
+  const first = String(firstRowId || "").trim();
+  const second = String(secondRowId || "").trim();
+  const firstIdx = orderedRowIds.findIndex((id) => id === first);
+  const secondIdx = orderedRowIds.findIndex((id) => id === second);
+  if (firstIdx < 0 || secondIdx < 0 || firstIdx === secondIdx) {
+    return { fromRowId: "", toRowId: "", fromIdx: -1, toIdx: -1 };
+  }
+  const fromIdx = Math.min(firstIdx, secondIdx);
+  const toIdx = Math.max(firstIdx, secondIdx);
+  if (toIdx !== fromIdx + 1) {
+    return { fromRowId: "", toRowId: "", fromIdx: -1, toIdx: -1 };
+  }
+  return {
+    fromRowId: orderedRowIds[fromIdx],
+    toRowId: orderedRowIds[toIdx],
+    fromIdx,
+    toIdx
+  };
+}
+
 export function createPodcasterSceneTransitionApi(deps = {}) {
   const {
     els,
@@ -124,6 +146,7 @@ export function createPodcasterSceneTransitionApi(deps = {}) {
     upsertPodcastVideoConfig,
     scheduleSessionLocalPersist,
     persistReorderedTimelinePatchToCloud,
+    persistCompactedTimelineTrackFromRow,
     renderPodcastVideoTimeline,
     renderPodcastTransitionTimeline,
     syncPodcastStudioInspector,
@@ -140,9 +163,9 @@ export function createPodcasterSceneTransitionApi(deps = {}) {
     const explicitFrom = String(podcastVideoState.transitionFromRowId || "").trim();
     const explicitTo = String(podcastVideoState.transitionToRowId || "").trim();
     const explicitFromIdx = indexOf(explicitFrom);
-    const explicitToIdx = indexOf(explicitTo);
-    if (explicitFromIdx >= 0 && explicitToIdx === explicitFromIdx + 1) {
-      return { fromRowId: explicitFrom, toRowId: explicitTo };
+    const normalizedExplicit = normalizeAdjacentTransitionSelection(rowIds, explicitFrom, explicitTo);
+    if (normalizedExplicit.fromRowId && normalizedExplicit.toRowId) {
+      return { fromRowId: normalizedExplicit.fromRowId, toRowId: normalizedExplicit.toRowId };
     }
     if (explicitFromIdx >= 0) {
       const toIdx = Math.min(rowIds.length - 1, explicitFromIdx + 1);
@@ -169,20 +192,18 @@ export function createPodcasterSceneTransitionApi(deps = {}) {
       return { fromRowId: "", toRowId: "", rowIds: [], edges: [] };
     }
     const indexOf = (value = "") => rowIds.findIndex((id) => id === String(value || "").trim());
-    let fromIdx = indexOf(String(podcastVideoState.transitionFromRowId || "").trim());
-    let toIdx = indexOf(String(podcastVideoState.transitionToRowId || "").trim());
-    if (fromIdx < 0) {
+    const explicitFrom = String(podcastVideoState.transitionFromRowId || "").trim();
+    const explicitTo = String(podcastVideoState.transitionToRowId || "").trim();
+    const normalizedExplicit = normalizeAdjacentTransitionSelection(rowIds, explicitFrom, explicitTo);
+    let fromIdx = normalizedExplicit.fromIdx;
+    let toIdx = normalizedExplicit.toIdx;
+    if (fromIdx < 0 || toIdx < 0) {
       const fallback = getActiveTransitionEdge(activeSession);
       fromIdx = indexOf(fallback.fromRowId);
       toIdx = indexOf(fallback.toRowId);
     }
     if (fromIdx < 0) fromIdx = 0;
     if (toIdx < 0) toIdx = Math.min(rowIds.length - 1, fromIdx + 1);
-    if (toIdx < fromIdx) {
-      const tmp = fromIdx;
-      fromIdx = toIdx;
-      toIdx = tmp;
-    }
     if (toIdx === fromIdx) {
       toIdx = Math.min(rowIds.length - 1, fromIdx + 1);
     }
@@ -272,6 +293,10 @@ export function createPodcasterSceneTransitionApi(deps = {}) {
       };
     });
     scheduleSessionLocalPersist("inspector");
+    persistCompactedTimelineTrackFromRow?.(from, {
+      autosave: true,
+      render: false
+    });
     const refreshedSession = getActiveSession();
     const refreshedConfig = refreshedSession?.podcastVideoConfig || {};
     renderPodcastVideoTimeline(refreshedSession);
@@ -311,10 +336,9 @@ export function createPodcasterSceneTransitionApi(deps = {}) {
       targetIdx = Math.min(rowIds.length - 1, targetIdx + 1);
       if (targetIdx === anchorIdx) return false;
     }
-    const fromIdx = Math.min(anchorIdx, targetIdx);
-    const toIdx = Math.max(anchorIdx, targetIdx);
-    const fromRowId = String(rowIds[fromIdx] || "").trim();
-    const toRowId = String(rowIds[toIdx] || "").trim();
+    const normalized = normalizeAdjacentTransitionSelection(rowIds, rowIds[anchorIdx], rowIds[targetIdx]);
+    const fromRowId = normalized.fromRowId;
+    const toRowId = normalized.toRowId;
     if (!fromRowId || !toRowId || fromRowId === toRowId) return false;
     selectTimelineSceneRow(key, {
       syncStage: options.syncStage === true
