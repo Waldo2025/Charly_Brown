@@ -11,10 +11,10 @@ const changelog = Array.isArray(version.changelog) ? version.changelog : [];
 const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(changelog[0] || "").includes("ASS")
-    && String(changelog[0] || "").includes("browser")
-    && String(changelog[0] || "").includes("desaline"),
-  "La nota más reciente debe reflejar el revert del browser pass y el regreso al flujo ASS estable."
+  String(changelog[0] || "").includes("raster")
+    && String(changelog[0] || "").includes("frontend")
+    && String(changelog[0] || "").includes("karaoke"),
+  "La nota más reciente debe reflejar que el export copia el estilo del frontend con raster de karaoke."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")),

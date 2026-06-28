@@ -12,8 +12,8 @@ const renderSource = fs.readFileSync(
 
 assert.match(
   serverSource,
-  /const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math\.max\([\s\S]*IS_RENDER_RUNTIME \? 8 : 200/,
-  "backend debe limitar frames PNG de texto renderizado en Render."
+  /const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math\.max\([\s\S]*320/,
+  "backend debe permitir suficientes frames PNG para copiar el estilo del frontend."
 );
 
 assert.match(
@@ -48,8 +48,8 @@ assert.match(
 
 assert.match(
   renderSource,
-  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT\s*\n\s*value:\s+8/,
-  "Render debe declarar limite de frames PNG para snoopy-export."
+  /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT\s*\n\s*value:\s+320/,
+  "Render debe declarar un limite de frames PNG suficientemente alto para mantener el estilo del frontend."
 );
 
 assert.match(
