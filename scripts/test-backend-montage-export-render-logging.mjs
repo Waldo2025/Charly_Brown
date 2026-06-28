@@ -24,8 +24,8 @@ assert.match(
 
 assert.match(
   serverSource,
-  /\[backend\]\[montage-export\]\[scene-onscreen-rendered-frames-limit\][\s\S]*fallback: "ass_text"/,
-  "backend debe loggear cuando cae a ASS por exceso de frames PNG."
+  /\[backend\]\[montage-export\]\[scene-onscreen-rendered-frames-limit\][\s\S]*fallback: "rendered_png_sampled"/,
+  "backend debe loggear cuando recorta frames PNG sin degradar a ASS."
 );
 
 assert.match(

@@ -10789,6 +10789,37 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
   return map;
 }
 
+function selectMontageOnScreenTextRenderedFrameItems(frameItems = [], frameLimit = 0) {
+  const list = Array.isArray(frameItems) ? frameItems.filter(Boolean) : [];
+  const cleanLimit = Math.max(0, Math.round(Number(frameLimit || 0) || 0));
+  if (!cleanLimit || list.length <= cleanLimit) {
+    return {
+      frameItems: list,
+      truncated: false
+    };
+  }
+  const selectedIndices = [];
+  const seen = new Set();
+  for (let index = 0; index < cleanLimit; index += 1) {
+    const sampledIndex = cleanLimit === 1
+      ? 0
+      : Math.round((index * (list.length - 1)) / Math.max(1, cleanLimit - 1));
+    if (seen.has(sampledIndex)) continue;
+    seen.add(sampledIndex);
+    selectedIndices.push(sampledIndex);
+  }
+  for (let index = 0; selectedIndices.length < cleanLimit && index < list.length; index += 1) {
+    if (seen.has(index)) continue;
+    seen.add(index);
+    selectedIndices.push(index);
+  }
+  selectedIndices.sort((a, b) => a - b);
+  return {
+    frameItems: selectedIndices.map((index) => list[index]).filter(Boolean),
+    truncated: true
+  };
+}
+
 function shouldUseMontageSceneAssSubtitles(input = {}) {
   if (String(input?.exportMode || "").trim() === "review") return false;
   const isTextTrackVisible = input?.onScreenTextSettings?.enabled !== false && input?.onScreenTextSettings?.showTrack !== false;
@@ -12140,33 +12171,27 @@ async function appendMontageSceneOnScreenTextRenderedFrameFilters({
     };
   }
   const frameLimit = Math.max(0, Number(MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT || 0) || 0);
-  if (frameLimit > 0 && frameItems.length > frameLimit) {
+  const selectedFrameItems = selectMontageOnScreenTextRenderedFrameItems(frameItems, frameLimit);
+  if (selectedFrameItems.truncated) {
     console.warn("[backend][montage-export][scene-onscreen-rendered-frames-limit]", {
       sceneIndex,
       rowId: String(entry?.rowId || "").trim() || undefined,
       requestedFrameCount: frameItems.length,
       frameLimit,
       renderRuntime: IS_RENDER_RUNTIME ? "render" : "local",
-      fallback: "ass_text"
+      selectedFrameCount: selectedFrameItems.frameItems.length,
+      fallback: "rendered_png_sampled"
     });
-    return {
-      videoFilterGraph,
-      finalVideoMapLabel: baseVideoMapLabel,
-      nextInputIndex,
-      appliedOverlayCount: 0,
-      skippedByFrameLimit: true,
-      requestedFrameCount: frameItems.length,
-      frameLimit
-    };
   }
+  const workingFrameItems = selectedFrameItems.frameItems;
 
   let graph = String(videoFilterGraph || "");
   let currentLabel = String(baseVideoMapLabel || "[vout]");
   let inputIndex = Math.max(0, Math.round(Number(nextInputIndex || 0) || 0));
   let appliedOverlayCount = 0;
 
-  for (let idx = 0; idx < frameItems.length; idx += 1) {
-    const item = frameItems[idx] || {};
+  for (let idx = 0; idx < workingFrameItems.length; idx += 1) {
+    const item = workingFrameItems[idx] || {};
     const frame = item.frame || {};
     const frameAsset = {
       storagePath: String(frame.storagePath || "").trim(),
@@ -12224,7 +12249,8 @@ async function appendMontageSceneOnScreenTextRenderedFrameFilters({
     videoFilterGraph: graph,
     finalVideoMapLabel: currentLabel,
     nextInputIndex: inputIndex,
-    appliedOverlayCount
+    appliedOverlayCount,
+    truncatedByFrameLimit: selectedFrameItems.truncated === true
   };
 }
 
@@ -13141,16 +13167,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             videoFilterGraph = renderedTextOverlayResult.videoFilterGraph;
             finalVideoMapLabel = renderedTextOverlayResult.finalVideoMapLabel;
             nextOverlayInputIndex = renderedTextOverlayResult.nextInputIndex;
-          } else if (input.onScreenTextRenderedFrameAttempted !== true || renderedTextOverlayResult.skippedByFrameLimit === true) {
-            if (renderedTextOverlayResult.skippedByFrameLimit === true) {
-              console.warn("[backend][montage-export][scene-onscreen-ass-fallback-after-frame-limit]", {
-                jobId,
-                sceneIndex,
-                rowId,
-                requestedFrameCount: renderedTextOverlayResult.requestedFrameCount || 0,
-                frameLimit: renderedTextOverlayResult.frameLimit || 0
-              });
-            }
+          } else if (input.onScreenTextRenderedFrameAttempted !== true) {
             const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
               input,
               entry,
@@ -13168,6 +13185,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             console.warn("[backend][montage-export][scene-onscreen-rendered-frames-empty]", {
               sceneIndex,
               rowId: String(entry?.rowId || "").trim() || undefined,
+              truncatedByFrameLimit: renderedTextOverlayResult.truncatedByFrameLimit === true,
               message: "Skipping ASS fallback because frontend attempted rendered PNG frames."
             });
           }
