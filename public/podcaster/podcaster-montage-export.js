@@ -3033,6 +3033,7 @@ async function prepareFrontendMontageDomSubtitleCapture(payload = {}) {
   const wasJassubActive = isMontageExportPreviewJassubActive();
   if (window.montageExportJobState) {
     window.montageExportJobState.frontendExportCapturing = true;
+    window.montageExportJobState.frontendDomOverlayDrawLogCount = 0;
   }
   if (container) container.dataset.subtitleRenderer = "dom";
   if (wasJassubActive) {
@@ -3083,11 +3084,11 @@ function inlineFrontendMontageComputedStyles(source = null, clone = null) {
     const computed = window.getComputedStyle(source);
     const keep = [
       "align-items", "background", "background-color", "border", "border-radius", "box-shadow",
-      "color", "display", "filter", "font", "font-family", "font-size", "font-style",
+      "box-sizing", "color", "display", "filter", "font", "font-family", "font-size", "font-style",
       "font-weight", "height", "justify-content", "left", "letter-spacing", "line-height",
-      "margin", "max-width", "min-height", "opacity", "padding", "position", "text-align",
-      "text-shadow", "text-transform", "top", "transform", "transform-origin", "white-space",
-      "width", "z-index"
+      "margin", "max-width", "min-height", "opacity", "overflow", "padding", "position", "text-align",
+      "text-shadow", "text-transform", "top", "transform", "transform-origin", "white-space", "word-break",
+      "width", "z-index", "-webkit-text-stroke", "-webkit-text-stroke-color", "-webkit-text-stroke-width"
     ];
     keep.forEach((prop) => {
       const value = computed.getPropertyValue(prop);
@@ -3106,11 +3107,18 @@ async function drawFrontendMontageDomOverlay(ctx = null, overlay = null, contain
   const rect = overlay.getBoundingClientRect?.();
   const containerRect = container.getBoundingClientRect?.();
   if (!rect || !containerRect || rect.width <= 0 || rect.height <= 0) return false;
+  const sourceWidth = Math.max(2, Math.round(Number(containerRect.width || 0) || width));
+  const sourceHeight = Math.max(2, Math.round(Number(containerRect.height || 0) || height));
   const clone = overlay.cloneNode(true);
   inlineFrontendMontageComputedStyles(overlay, clone);
+  clone.style.position = "absolute";
+  clone.style.left = `${Math.max(0, rect.left - containerRect.left)}px`;
+  clone.style.top = `${Math.max(0, rect.top - containerRect.top)}px`;
+  clone.style.width = `${Math.max(1, rect.width)}px`;
+  clone.style.height = `${Math.max(1, rect.height)}px`;
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   const html = new XMLSerializer().serializeToString(clone);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${html}</foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sourceWidth}" height="${sourceHeight}" viewBox="0 0 ${sourceWidth} ${sourceHeight}"><foreignObject x="0" y="0" width="${sourceWidth}" height="${sourceHeight}">${html}</foreignObject></svg>`;
   const img = new Image();
   img.decoding = "async";
   const ok = await new Promise((resolve) => {
@@ -3121,6 +3129,19 @@ async function drawFrontendMontageDomOverlay(ctx = null, overlay = null, contain
   if (!ok) return false;
   try {
     ctx.drawImage(img, 0, 0, width, height);
+    if (window.montageExportJobState?.frontendExportCapturing === true) {
+      const nextLogCount = Math.max(0, Number(window.montageExportJobState.frontendDomOverlayDrawLogCount || 0) || 0) + 1;
+      window.montageExportJobState.frontendDomOverlayDrawLogCount = nextLogCount;
+      if (nextLogCount <= 3) {
+        logMontageExportDevtools("frontend_export_dom_overlay_draw", {
+          sourceWidth,
+          sourceHeight,
+          outputWidth: width,
+          outputHeight: height,
+          overlayClass: String(overlay.className || "").trim() || undefined
+        }, "debug");
+      }
+    }
     return true;
   } catch (_) {
     return false;

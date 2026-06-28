@@ -137,6 +137,24 @@ assert.match(
 );
 
 assert.match(
+  exportSource,
+  /const sourceWidth = Math\.max\(2, Math\.round\(Number\(containerRect\.width/,
+  "La capa DOM de texto debe rasterizarse primero en coordenadas del stage real del preview."
+);
+
+assert.match(
+  exportSource,
+  /viewBox="0 0 \$\{sourceWidth\} \$\{sourceHeight\}"/,
+  "El SVG intermedio del overlay debe usar el tamaño fuente del preview, no el tamaño final del MP4."
+);
+
+assert.match(
+  exportSource,
+  /ctx\.drawImage\(img, 0, 0, width, height\);/,
+  "El overlay rasterizado en coordenadas del preview debe escalarse al canvas final."
+);
+
+assert.match(
   podcasterSource,
   /exportPreviewController,/,
   "El controlador de preview del montaje debe estar disponible en window para captura frame-by-frame."
