@@ -30,6 +30,12 @@ assert.match(
   "Si ya entró a modo Firestore, un miss aislado no debe reactivar export-status remoto; debe reintentar por Firestore."
 );
 
+assert.doesNotMatch(
+  source,
+  /firestorePollCount[\s\S]{0,240}preferFirestorePolling = false;/m,
+  "Una vez que el polling cae a Firestore por CORS/502, no debe volver periódicamente al endpoint export-status."
+);
+
 assert.match(
   source,
   /window\.montageExportJobState\.preferFirestorePolling = false;[\s\S]*window\.montageExportJobState\.firestorePreferredMissCount = 0;/m,

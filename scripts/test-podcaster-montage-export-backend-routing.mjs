@@ -44,7 +44,7 @@ assert.match(
 
 assert.match(
   podcasterHtmlSource,
-  /<script src="js\/runtime-config-loader\.js\?v=2026-06-26\.4" defer><\/script>/,
+  /<script src="js\/runtime-config-loader\.js\?v=2026-06-26\.5" defer><\/script>/,
   "podcaster.html debe forzar la recarga del runtime-config-loader alineado con el split de backends."
 );
 

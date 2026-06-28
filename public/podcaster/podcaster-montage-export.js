@@ -1777,41 +1777,39 @@ export async function pollMontageExportJob(jobId = "") {
     if (window.montageExportJobState.preferFirestorePolling === true) {
       const pollCount = Math.max(0, Number(window.montageExportJobState.firestorePollCount || 0)) + 1;
       window.montageExportJobState.firestorePollCount = pollCount;
-      if (pollCount % 5 === 0) {
-        window.montageExportJobState.preferFirestorePolling = false;
-      } else {
-        const firestoreOnly = await loadMontageExportJobStatusFromFirestore(cleanJobId);
-        if (firestoreOnly) {
-          window.montageExportJobState.firestorePreferredMissCount = 0;
-          logMontageExportDevtools("poll_firestore_preferred", {
-            jobId: cleanJobId,
-            status: String(firestoreOnly?.status || "").trim() || undefined,
-            stage: String(firestoreOnly?.stage || "").trim() || undefined,
-            substage: String(firestoreOnly?.sceneSubstage || "").trim() || undefined,
-            progress: Number.isFinite(Number(firestoreOnly?.progress)) ? Number(firestoreOnly.progress) : undefined
-          }, "debug");
-          if (await applyMontageExportPolledStatus(firestoreOnly, cleanJobId)) return;
-          window.montageExportJobState.pollTimer = window.setTimeout(() => {
-            pollMontageExportJob(cleanJobId).catch(() => { });
-          }, 2000);
-          return;
-        }
-        window.montageExportJobState.firestorePreferredMissCount = Math.max(0, Number(window.montageExportJobState.firestorePreferredMissCount || 0) || 0) + 1;
-        const missCount = window.montageExportJobState.firestorePreferredMissCount;
-        logMontageExportDevtools("poll_firestore_preferred_miss", {
+      const firestoreOnly = await loadMontageExportJobStatusFromFirestore(cleanJobId);
+      if (firestoreOnly) {
+        window.montageExportJobState.firestorePreferredMissCount = 0;
+        logMontageExportDevtools("poll_firestore_preferred", {
           jobId: cleanJobId,
-          missCount
-        }, "warn");
-        setMontageExportStatus(
-          describeMontageExportStage(String(window.montageExportJobState.lastStage || "").trim(), window.montageExportState.exportMode),
-          missCount > 1
-            ? `Seguimos consultando el export por Firestore. No llegó estado en el intento ${missCount}; reintentando…`
-            : "Seguimos consultando el export por Firestore. No llegó estado en este intento; reintentando…",
-          { tone: "warning" }
-        );
-        schedulePreferredFirestorePollRetry(cleanJobId, missCount);
+          pollCount,
+          status: String(firestoreOnly?.status || "").trim() || undefined,
+          stage: String(firestoreOnly?.stage || "").trim() || undefined,
+          substage: String(firestoreOnly?.sceneSubstage || "").trim() || undefined,
+          progress: Number.isFinite(Number(firestoreOnly?.progress)) ? Number(firestoreOnly.progress) : undefined
+        }, "debug");
+        if (await applyMontageExportPolledStatus(firestoreOnly, cleanJobId)) return;
+        window.montageExportJobState.pollTimer = window.setTimeout(() => {
+          pollMontageExportJob(cleanJobId).catch(() => { });
+        }, 2000);
         return;
       }
+      window.montageExportJobState.firestorePreferredMissCount = Math.max(0, Number(window.montageExportJobState.firestorePreferredMissCount || 0) || 0) + 1;
+      const missCount = window.montageExportJobState.firestorePreferredMissCount;
+      logMontageExportDevtools("poll_firestore_preferred_miss", {
+        jobId: cleanJobId,
+        missCount,
+        pollCount
+      }, "warn");
+      setMontageExportStatus(
+        describeMontageExportStage(String(window.montageExportJobState.lastStage || "").trim(), window.montageExportState.exportMode),
+        missCount > 1
+          ? `Seguimos consultando el export por Firestore. No llegó estado en el intento ${missCount}; reintentando…`
+          : "Seguimos consultando el export por Firestore. No llegó estado en este intento; reintentando…",
+        { tone: "warning" }
+      );
+      schedulePreferredFirestorePollRetry(cleanJobId, missCount);
+      return;
     }
     // IMPORTANTE: aquí usamos /api para respetar la configuración activa del runtime.
     // En Hosting esto hoy termina en un redirect 302 hacia Render, no en un reverse proxy real.
