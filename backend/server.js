@@ -1174,9 +1174,8 @@ if (!admin.apps.length) {
     process.env.FIREBASE_STORAGE_BUCKET
     || process.env.STORAGE_BUCKET
     // Firebase/Cloud Storage default bucket is typically <projectId>.appspot.com.
-    // Using <projectId>.firebasestorage.app here can break Admin SDK downloads
-    // ("The specified bucket does not exist") on many projects.
-    || (projectId === "charly-brown" ? "charly-brown.firebasestorage.app" : `${projectId}.appspot.com`)
+    // Newer *.firebasestorage.app buckets are still tried explicitly below.
+    || (projectId ? `${projectId}.appspot.com` : "")
   ).trim();
 
   admin.initializeApp({
@@ -1474,6 +1473,27 @@ function getStorageBucketCandidates() {
   return STORAGE_BUCKET_CANDIDATES.filter(Boolean);
 }
 
+function getStorageBucketCandidatesForOptions(options = {}) {
+  const existingBuckets = getStorageBucketCandidates();
+  const bucketNames = Array.from(new Set([
+    ...(Array.isArray(options?.bucketNames) ? options.bucketNames : []),
+    ...(options?.bucketFromUrl ? [String(options.bucketFromUrl || "").trim()] : []),
+    ...existingBuckets.map((bucket) => String(bucket?.name || "").trim())
+  ].map((item) => String(item || "").trim()).filter(Boolean)));
+  return bucketNames
+    .map((name) => {
+      const existing = existingBuckets
+        .find((bucket) => String(bucket?.name || "").trim() === name);
+      if (existing) return existing;
+      try {
+        return admin.storage().bucket(name);
+      } catch (_) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 let resolvedWritableStorageBucket = null;
 let resolvedWritableStorageBucketPromise = null;
 
@@ -1529,14 +1549,14 @@ async function resolveWritableStorageBucket() {
   }
 }
 
-async function downloadStorageObjectToBuffer(storagePath = "") {
+async function downloadStorageObjectToBuffer(storagePath = "", options = {}) {
   const cleanStoragePath = normalizeStorageFilePath(storagePath);
   if (!cleanStoragePath) {
     const err = new Error("missing_storage_path");
     err.code = "missing_storage_path";
     throw err;
   }
-  const buckets = getStorageBucketCandidates();
+  const buckets = getStorageBucketCandidatesForOptions(options);
   let lastError = null;
   for (const bucket of buckets) {
     if (!bucket) continue;
@@ -1607,7 +1627,7 @@ async function openStorageObjectReadStream(storagePath = "", options = {}) {
     err.code = "missing_storage_path";
     throw err;
   }
-  const buckets = getStorageBucketCandidates();
+  const buckets = getStorageBucketCandidatesForOptions(options);
   let lastError = null;
   for (const bucket of buckets) {
     if (!bucket) continue;
@@ -1663,19 +1683,7 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
       detail: { storagePath: "" }
     };
   }
-  const candidateBuckets = Array.from(new Set([
-    ...(Array.isArray(options?.bucketNames) ? options.bucketNames : []),
-    ...(options?.bucketFromUrl ? [String(options.bucketFromUrl || "").trim()] : []),
-    ...getStorageBucketCandidates().map((bucket) => String(bucket?.name || "").trim())
-  ].filter(Boolean)))
-    .map((name) => {
-      try {
-        return admin.storage().bucket(name);
-      } catch (_) {
-        return null;
-      }
-    })
-    .filter(Boolean);
+  const candidateBuckets = getStorageBucketCandidatesForOptions(options);
 
   let lastError = null;
   let lastAuthError = null;
@@ -9427,10 +9435,21 @@ function isAllowedRemoteMediaUrl(url = "") {
   try {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
-    return host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com" || host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+    const isLocalHost = host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+    const allowLocalMedia = String(process.env.ALLOW_LOCAL_MEDIA_URLS || "").trim() === "1"
+      || String(process.env.ALLOW_LOCAL_MEDIA_URLS || "").trim().toLowerCase() === "true"
+      || !String(process.env.RENDER || process.env.RENDER_SERVICE_NAME || "").trim();
+    return isAllowedStorageProxyHost(host) || (isLocalHost && allowLocalMedia);
   } catch (_) {
     return false;
   }
+}
+
+function isAllowedStorageProxyHost(host = "") {
+  const cleanHost = String(host || "").trim().toLowerCase();
+  return cleanHost.endsWith("googleapis.com")
+    || cleanHost.endsWith("firebasestorage.app")
+    || cleanHost === "storage.googleapis.com";
 }
 
 function isAllowedMoodleInstructionImageImportUrl(url = "") {
@@ -9787,7 +9806,10 @@ async function downloadUrlToFile(url = "", outPath = "", options = {}) {
         bucket: String(firebaseObject.bucket || "").trim(),
         objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
       });
-      await downloadStoragePathToFile(firebaseObject.objectPath, targetPath, { shouldAbort });
+      await downloadStoragePathToFile(firebaseObject.objectPath, targetPath, {
+        shouldAbort,
+        bucketFromUrl: firebaseObject.bucket
+      });
       console.info("[backend][download] admin download ok", {
         objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
       });
@@ -15704,8 +15726,7 @@ app.get("/api/assets/proxy-image", async (req, res) => {
       return res.status(400).json({ error: "Solo se permiten URLs http/https." });
     }
     const host = String(parsed.hostname || "").toLowerCase();
-    const allowedHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com";
-    if (!allowedHost) {
+    if (!isAllowedStorageProxyHost(host)) {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
 
@@ -15724,7 +15745,7 @@ app.get("/api/assets/proxy-image", async (req, res) => {
     const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
     if (isPodcasterAsset && objectPath) {
       try {
-        const downloaded = await downloadStorageObjectToBuffer(objectPath);
+        const downloaded = await downloadStorageObjectToBuffer(objectPath, { bucketFromUrl });
         if (downloaded && downloaded.buffer) {
           const mimeType = String(downloaded?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
           res.setHeader("Content-Type", mimeType);
@@ -15970,8 +15991,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       return res.status(400).json({ error: "Solo se permiten URLs http/https." });
     }
     const host = String(parsed.hostname || "").toLowerCase();
-    const allowedHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-    if (!allowedHost) {
+    if (!isAllowedStorageProxyHost(host)) {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
     let finalRequestUrl = normalizedUrl;
