@@ -3600,8 +3600,8 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
     setMontageExportProgress(progress);
     if (frameIndex % fps === 0 || currentMs >= durationMs) {
       setMontageExportStatus(
-        "Renderizando MP4 en este navegador…",
-        `Capturando frame ${Math.min(frameIndex + 1, frameCount)} de ${frameCount}.`,
+        "Export local desactivado.",
+        `El MP4 se genera en backend/FFmpeg; frame local ${Math.min(frameIndex + 1, frameCount)} de ${frameCount} no se usa en el flujo principal.`,
         { tone: "neutral" }
       );
       logMontageExportDevtools("frontend_export_frame", {
@@ -3644,65 +3644,14 @@ async function recordFrontendMontageCanvas({ payload = {}, session = null } = {}
 }
 
 async function runFrontendMontageExport({ payload = {}, session = null } = {}) {
-  logMontageExportDevtools("frontend_export_start", {
+  logMontageExportDevtools("frontend_full_video_export_disabled", {
+    reason: "backend_ffmpeg_required",
     durationMs: resolveFrontendMontageExportDurationMs(payload),
     format: String(payload?.format || window.montageExportState?.format || "").trim() || undefined,
-    exportMode: String(payload?.exportMode || "").trim() || undefined
-  });
-  setMontageExportStatus(
-    "Renderizando MP4 en este navegador…",
-    "Tomando el montaje visible del preview frame por frame.",
-    { tone: "neutral" }
-  );
-  let result;
-  try {
-    result = await recordFrontendMontageCanvas({ payload, session });
-  } finally {
-    if (window.montageExportJobState?.frontendExportCapturing === true) {
-      restoreFrontendMontageDomSubtitleCapture(payload, window.montageExportJobState.frontendSubtitleCaptureState || {});
-      delete window.montageExportJobState.frontendSubtitleCaptureState;
-    }
-  }
-  const isMp4 = String(result.mimeType || "").toLowerCase().includes("mp4");
-  const extension = isMp4 ? "mp4" : "webm";
-  const base = stripFileExtension(String(payload?.filename || window.montageExportState.filename || defaultMontageExportFilename(session)).trim() || "montage");
-  const filename = `${base}.${extension}`;
-  const url = URL.createObjectURL(result.blob);
-  window.montageExportJobState.lastStage = "ready";
-  window.montageExportJobState.lastProgress = 1;
-  setMontageExportProgress(1);
-  setMontageExportDownloadButton({
-    visible: true,
-    url,
-    filename
-  });
-  if (window.montageExportState.exportMode === "review" && window.montageExportState.includeReviewExcel !== false) {
-    await downloadMontageReviewExcel(payload, filename);
-  }
-  logMontageExportDevtools("frontend_export_ready", {
-    filename,
-    mimeType: result.mimeType,
-    bytes: result.blob.size,
-    durationMs: result.durationMs,
-    width: result.width,
-    height: result.height,
-    fps: result.fps,
-    audioExpected: result.audioSchedule?.expected || 0,
-    audioScheduled: result.audioSchedule?.scheduled || 0
-  });
-  setMontageExportStatus(
-    isMp4 ? "Tu MP4 está listo." : "Tu video está listo.",
-    isMp4
-      ? "El archivo se generó directamente desde el preview del navegador."
-      : "Tu navegador no ofreció grabación MP4; generamos WebM directamente desde el preview.",
-    { tone: "success" }
-  );
-  return {
-    ok: true,
-    url,
-    filename,
-    mimeType: result.mimeType
-  };
+    exportMode: String(payload?.exportMode || "").trim() || undefined,
+    hasSession: Boolean(session)
+  }, "warn");
+  throw new Error("frontend_full_video_export_disabled");
 }
 
 function normalizeMontageStorageSegment(value = "", fallback = "item") {
@@ -5737,6 +5686,5 @@ Object.assign(window, {
   validateMontageExportLinearTimeline,
   formatMontageSkippedEntries,
   buildMontageExportPayload,
-  runFrontendMontageExport,
   runMontageExport
 });

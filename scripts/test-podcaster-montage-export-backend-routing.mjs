@@ -50,7 +50,7 @@ assert.match(
 
 assert.match(
   podcasterHtmlSource,
-  /podcaster\/podcaster-montage-export\.js\?v=2026-06-28\.19/,
+  /podcaster\/podcaster-montage-export\.js\?v=2026-06-28\.20/,
   "podcaster.html debe forzar la recarga del fix actual del export MP4."
 );
 
