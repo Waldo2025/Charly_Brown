@@ -12,9 +12,9 @@ const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes 
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
   String(changelog[0] || "").includes("logs detallados")
-    && String(changelog[0] || "").includes("fuerza ASS por defecto")
-    && String(changelog[0] || "").includes("scene_ffmpeg_render"),
-  "La nota más reciente debe reflejar el fix actual de ASS forzado en Render y logging."
+    && String(changelog[0] || "").includes("browser")
+    && String(changelog[0] || "").includes("karaoke"),
+  "La nota más reciente debe reflejar el fix actual del browser pass en Render y logging."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")),

@@ -112,7 +112,7 @@ services:
         value: false
       - key: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT
         value: 8
-      - key: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER
+      - key: MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER
         value: true
       - key: RENDER_KEY_VALUE_CONNECTION_STRING
         fromService:

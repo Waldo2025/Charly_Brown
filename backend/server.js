@@ -1866,7 +1866,7 @@ const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
       || (IS_RENDER_RUNTIME ? 8 : 200)
   ) || (IS_RENDER_RUNTIME ? 8 : 200))
 );
-const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
+const MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER !== "false";
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
   Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
@@ -10791,7 +10791,6 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
 
 function shouldUseMontageSceneAssSubtitles(input = {}) {
   if (String(input?.exportMode || "").trim() === "review") return false;
-  if (MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER) return false;
   const isTextTrackVisible = input?.onScreenTextSettings?.enabled !== false && input?.onScreenTextSettings?.showTrack !== false;
   return Boolean(isTextTrackVisible && input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
 }
@@ -12790,9 +12789,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
-    let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input);
     const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
     const hasStylizedTextSegments = input.exportMode === "normal" && input.onlyAudio !== true && hasMontageStylizedTextSegments(input);
+    const browserRendererAvailability = getMontageBrowserRendererAvailability();
+    const shouldPreferBrowserTextFinalPass = Boolean(
+      MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER
+      && browserRendererAvailability.available === true
+      && shouldUseBrowserMontageRenderer(input)
+      && (
+        (input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length))
+        || hasStylizedTextSegments
+      )
+    );
+    let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input) && !shouldPreferBrowserTextFinalPass;
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const exportedEntries = [];
@@ -13234,7 +13243,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoHasAudio,
           hasInputAudio: Boolean(inputAudioPath),
           renderedTextFrameLimit: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT,
-          forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
+          forceBrowserTextOnRender: MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER,
           overlayTempPathCount: sceneOverlayTempPaths.length,
           ffmpegTimeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
           memory: {
@@ -13494,15 +13503,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     let finalOutPath = concatOutPath;
 
     const reviewOnScreenTextEnabled = input.exportMode === "review" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    let normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText;
+    let normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText && !shouldPreferBrowserTextFinalPass;
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
     const resolvedBrandPath = resolvedInlineBrandOverlayPath;
     const hasBrandOverlay = Boolean(!shouldInlineSceneBrandOverlay && resolvedBrandPath && fs.existsSync(resolvedBrandPath));
-    const browserRendererAvailability = { available: false };
     const isStylizedKaraokeRendererForced = false;
-    const finalShouldAttemptBrowserRenderer = false;
     const hasTimelineOverlapOrGaps = overlapPlan.hasOverlap || overlapPlan.hasGaps;
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
@@ -13511,9 +13518,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
     );
-    const forcedKaraokeBrowserVisualPass = false;
-    const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
-    const hasBrowserVisualPassRequired = hasBrowserVisualPass || (forcedKaraokeBrowserVisualPass && hasFinalVisualPass);
+    const forcedKaraokeBrowserVisualPass = shouldPreferBrowserTextFinalPass;
+    const finalShouldAttemptBrowserRenderer = shouldPreferBrowserTextFinalPass && browserRendererAvailability.available === true;
+    const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer;
+    const hasBrowserVisualPassRequired = finalShouldAttemptBrowserRenderer;
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -13524,13 +13532,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasBrowserVisualPass,
       forcedKaraokeBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
-      browserVisualPassDisabled: true,
+      browserVisualPassDisabled: !finalShouldAttemptBrowserRenderer,
       timelineHasOverlapOrGaps: hasTimelineOverlapOrGaps,
       browserRendererAvailable: browserRendererAvailability.available === true,
       browserRendererCode: browserRendererAvailability.available === true ? null : (browserRendererAvailability.code || null),
       stylizedKaraokeRendererForced: isStylizedKaraokeRendererForced,
-      sceneOnScreenTextMode: shouldBurnSceneOnScreenText ? "rendered_png" : "ass",
-      forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
+      sceneOnScreenTextMode: shouldPreferBrowserTextFinalPass ? "browser" : (shouldBurnSceneOnScreenText ? "rendered_png" : "ass"),
+      forceBrowserTextOnRender: MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER,
+      browserTextFinalPassEnabled: finalShouldAttemptBrowserRenderer,
       reviewOnScreenTextEnabled,
       normalOnScreenTextEnabled,
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
@@ -13548,7 +13557,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         input: {
           ...input,
           overlayCards: overlayCardSegments,
-          browserOnScreenTextEnabled: false
+          browserOnScreenTextEnabled: true
         },
         finalOutPath,
         tmpDir,

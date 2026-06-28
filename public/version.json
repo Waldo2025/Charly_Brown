@@ -1,9 +1,9 @@
 {
-  "version": "1.0.10.288",
-  "build": "2026-1.0.10.288",
+  "version": "1.0.10.289",
+  "build": "2026-1.0.10.289",
   "branch": "codex-bootstrap",
   "changelog": [
-    "Corregido: snoopy-export deja de intentar la ruta pesada de PNGs para texto en pantalla en Render, fuerza ASS por defecto y agrega logs detallados de preflight/error FFmpeg por escena; mantiene el límite de frames como respaldo local para reducir reinicios durante scene_ffmpeg_render.",
+    "Corregido: snoopy-export vuelve a usar el pass browser para el texto en pantalla/karaoke en Render cuando Chromium está disponible, preservando tipografía, estilo preset y karaoke del modal; mantiene ASS y PNG como respaldos y agrega logs detallados de preflight/error FFmpeg por escena.",
     "Corregido: snoopy-export agrega logs detallados de preflight/error FFmpeg por escena y limita los PNGs renderizados de texto en pantalla en Render con MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT=8, usando fallback ASS cuando hay demasiados frames para evitar reinicios en scene_ffmpeg_render.",
     "Corregido: snoopy-export ya no encola en BullMQ solo por tener RENDER_KEY_VALUE_CONNECTION_STRING configurado; ahora requiere MONTAGE_EXPORT_USE_QUEUE=true para usar worker, evitando que el export quede detenido en 'Export en cola' cuando solo existe el Key Value.",
     "Corregido: snoopy-export vuelve a aceptar exports MP4 con fallback directo cuando Render no inyecta RENDER_KEY_VALUE_CONNECTION_STRING; la cola BullMQ/Key Value sigue declarada y se usa automáticamente cuando esté disponible. Se evita el 503 montage_export_queue_unavailable causado por MONTAGE_EXPORT_REQUIRE_QUEUE=true sin Redis.",
@@ -264,5 +264,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.288"
+  "cache_version": "2026-1.0.10.289"
 }
