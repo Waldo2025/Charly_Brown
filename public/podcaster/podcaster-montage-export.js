@@ -2612,6 +2612,19 @@ export function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
   return preview.join("; ") + suffix;
 }
 
+function formatMontageExportPreflightIssues(issues = [], maxItems = 3) {
+  const list = Array.isArray(issues) ? issues.filter(Boolean) : [];
+  if (!list.length) return "";
+  const preview = list.slice(0, Math.max(1, maxItems)).map((issue, index) => {
+    const sceneIndex = Math.max(1, Number(issue?.sceneIndex || issue?.index + 1 || index + 1) || index + 1);
+    const rowId = String(issue?.rowId || "").trim();
+    const message = String(issue?.message || issue?.code || "dato incompleto").trim();
+    return [`Escena ${sceneIndex}`, rowId, message].filter(Boolean).join(" · ");
+  });
+  const suffix = list.length > preview.length ? ` y ${list.length - preview.length} más` : "";
+  return preview.join("; ") + suffix;
+}
+
 const MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES = 2_500_000;
 const MONTAGE_EXPORT_INLINE_AUDIO_MAX_BYTES = 12_000_000;
 const MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES = 18_000_000;
@@ -4421,9 +4434,9 @@ export function buildMontageExportPayload(session = null) {
 export async function runMontageExport() {
   if (window.montageExportBusy || montageExportSubmitLocked) return;
   montageExportSubmitLocked = true;
-  setMontageExportBusy(true);
   const previousJobId = String(window.montageExportJobState.jobId || "").trim();
   try {
+    setMontageExportBusy(true);
     window.montageExportJobState.submissionInFlight = true;
     setConfirmMontageExportButtonState({
       disabled: true,
@@ -4587,6 +4600,11 @@ export async function runMontageExport() {
     } else if (status === 503 && String(apiPayload?.code || "").trim() === "backend_busy") {
       hintParts.push("El backend está ocupado con otra exportación o generación de video.");
       hintParts.push("Reintenta en unos segundos.");
+    } else if (status === 422 && String(apiPayload?.code || code || "").trim() === "montage_export_preflight_failed") {
+      const preflightMessage = String(detail?.message || "Hay datos incompletos en la sesión.").trim();
+      const issueSummary = formatMontageExportPreflightIssues(detail?.issues || []);
+      hintParts.push(preflightMessage);
+      if (issueSummary) hintParts.push(issueSummary);
     } else if (String(code).includes("storage_not_found")) {
       hintParts.push("Hay escenas que ya no tienen su archivo de video/audio.");
       hintParts.push("Regenera esas escenas y vuelve a exportar.");

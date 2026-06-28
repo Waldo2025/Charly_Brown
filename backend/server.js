@@ -31,6 +31,10 @@ const {
   buildAutoResumeInterruptedMontageExportJobPatch
 } = require("./montage-export/restart-recovery.js");
 const {
+  validateMontageExportPreflight,
+  createMontageExportPreflightError
+} = require("./montage-export/preflight-validation.js");
+const {
   reconcileMontageExportAudioIntent
 } = require("./montage-export-audio-intent-reconcile.js");
 const {
@@ -12727,10 +12731,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         return isImageAsset;
       })();
       const hasCustomBg = entry?.backgroundColor && String(entry.backgroundColor).trim() !== "";
+      const hasVideoAssetSource = Boolean(
+        videoAsset?.storagePath
+        || videoAsset?.downloadUrl
+        || videoAsset?.url
+        || videoAsset?.dataUrl
+        || videoAsset?.localDataUrl
+      );
       let isImageAsset = isImageAssetOriginal
         || /\.(jpg|jpeg|png|webp|gif|avif)(?:[?#&]|$)/i.test(videoAsset?.storagePath || videoAsset?.url || "")
         || /\/api\/assets\/proxy-image\?/i.test(videoAsset?.storagePath || videoAsset?.url || "");
-      if (hasCustomBg && !videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl) {
+      if (hasCustomBg && !hasVideoAssetSource) {
         isImageAsset = true;
       }
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
@@ -12740,7 +12751,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         err.status = 400;
         throw err;
       }
-      if (!videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl && !hasCustomBg) {
+      if (!hasVideoAssetSource && !hasCustomBg) {
         const err = new Error("missing_video_source");
         err.status = 422;
         err.code = "missing_video_source";
@@ -12807,7 +12818,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           downloadUrl: videoDownloadUrl,
           substage: currentSceneSubstage
         }));
-        if (hasCustomBg && !videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl) {
+        if (hasCustomBg && !hasVideoAssetSource) {
           const grad = parseBackgroundGradient(entry.backgroundColor);
           let ppmContent = "";
           if (grad) {
@@ -13155,7 +13166,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           sceneIndex,
           rowId,
           intermediatePath,
-          syntheticVisualOnly: hasCustomBg && !videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl,
+          syntheticVisualOnly: hasCustomBg && !hasVideoAssetSource,
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
           durationSec: durSec,
           durationMs,
@@ -13888,6 +13899,34 @@ async function renderMontagePreviewMedia(rawInput = {}, context = {}) {
   }
 }
 
+app.post("/api/podcaster/montage/validate-export", async (req, res) => {
+  if (!ensureMontageExportServiceEnabled(res)) return;
+  try {
+    const input = {
+      ...normalizeMontageExportRequestBody(req.body || {}),
+      renderMode: "browser"
+    };
+    const preflight = validateMontageExportPreflight(input, {
+      maxScenes: MAX_MONTAGE_EXPORT_SCENES,
+      maxTotalSec: MAX_MONTAGE_EXPORT_TOTAL_SEC
+    });
+    return res.status(preflight.ok ? 200 : 422).json({
+      ok: preflight.ok,
+      code: preflight.ok ? "montage_export_preflight_ok" : "montage_export_preflight_failed",
+      issueCount: preflight.issueCount,
+      issues: preflight.issues
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500) || 500;
+    return res.status(status).json({
+      ok: false,
+      error: String(error?.code || error?.message || "montage_export_preflight_failed").trim(),
+      code: String(error?.code || "").trim() || undefined,
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
+  }
+});
+
 app.post("/api/podcaster/montage/export", async (req, res) => {
   if (!ensureMontageExportServiceEnabled(res)) return;
   try {
@@ -13935,6 +13974,18 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       ...audioIntentInput,
       renderMode: "browser"
     };
+    const preflight = validateMontageExportPreflight(input, {
+      maxScenes: MAX_MONTAGE_EXPORT_SCENES,
+      maxTotalSec: MAX_MONTAGE_EXPORT_TOTAL_SEC
+    });
+    if (!preflight.ok) {
+      console.warn("[backend][montage-export][preflight-failed]", {
+        sessionId: String(input.sessionId || "").trim(),
+        issueCount: preflight.issueCount,
+        codes: preflight.issues.slice(0, 8).map((issue) => String(issue?.code || "").trim()).filter(Boolean)
+      });
+      throw createMontageExportPreflightError(preflight);
+    }
     if (shouldUseBrowserMontageRenderer(input)) {
       const browserRendererAvailability = getMontageBrowserRendererAvailability();
       if (browserRendererAvailability.available !== true) {
