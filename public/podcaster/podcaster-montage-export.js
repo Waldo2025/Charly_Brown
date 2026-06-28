@@ -2695,6 +2695,8 @@ function buildMontageOnScreenTextTempFramePath({
   rowId = "",
   frameIndex = 0
 } = {}) {
+  const safeFrameIndex = Math.max(0, Math.round(Number(frameIndex || 0) || 0));
+  const frameFileName = `${normalizeMontageStorageSegment(rowId, "row")}-${String(safeFrameIndex).padStart(4, "0")}.png`;
   return [
     "podcaster",
     "sessions",
@@ -2704,7 +2706,7 @@ function buildMontageOnScreenTextTempFramePath({
     "tmp",
     "onscreen-text",
     normalizeMontageStorageSegment(exportId, "export"),
-    `${normalizeMontageStorageSegment(rowId, "row")}-${String(Math.max(0, Math.round(Number(frameIndex || 0) || 0)).padStart(4, "0")}.png`
+    frameFileName
   ].join("/");
 }
 

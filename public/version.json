@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.277",
-  "build": "2026-1.0.10.277",
+  "version": "1.0.10.278",
+  "build": "2026-1.0.10.278",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Podcaster elimina la expresión anidada del nombre de snapshots PNG temporales en podcaster-montage-export.js para evitar que un bundle cacheado rompa la carga con SyntaxError y bloquee los runtimes de librería pública/generación. Se incrementa podcaster-montage-export.js a la v2026-06-28.3.",
     "Corregido: Las transiciones entre escenas de Podcaster ahora usan la misma unión aunque se seleccione primero la escena anterior o la siguiente; aplicar crossfade compacta el timeline hacia la izquierda y el export MP4 compone overlaps con ventanas reales para evitar frames congelados. Se incrementa podcaster.js a la v2026-06-28.3.",
     "Corregido: El export MP4 de Podcaster ahora genera snapshots PNG temporales en Storage para el texto en pantalla/karaoke usando los mismos estilos del preview, los compone en backend antes del fallback ASS y evita base64 largos en el payload. Se incrementan podcaster.js, podcaster-text-render.js y podcaster-montage-export.js a la v2026-06-28.2.",
     "Corregido: El export MP4 de Podcaster alinea el timing del texto en pantalla con el audio Gemini y la escena activa, evita que subtítulos anteriores se sobrepongan sobre escenas con fondo de color y actualiza el render ASS del highlight karaoke pill/rect. Se incrementan podcaster.js, podcaster-text-render.js y podcaster-montage-export.js a la v2026-06-28.1.",
@@ -73,6 +74,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: Podcaster vuelve a cargar correctamente al eliminar una expresión ambigua en podcaster-montage-export.js y subir su cache-buster.",
     "Corregido: Las transiciones del timeline de Podcaster son independientes del orden de selección y el export MP4 evita congelar el último frame durante overlaps.",
     "Corregido: El export MP4 de Podcaster usa snapshots PNG temporales en Storage para el texto en pantalla/karaoke y evita enviar esos frames como base64 en el payload.",
     "Corregido: El export MP4 de Podcaster evita el timeout del transcode VP8 previo al pass browser usando un MP4/H.264 ultrafast de entrada para Chromium.",
@@ -249,5 +251,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.277"
+  "cache_version": "2026-1.0.10.278"
 }
