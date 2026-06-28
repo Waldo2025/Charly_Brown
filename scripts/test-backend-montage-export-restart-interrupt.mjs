@@ -41,6 +41,18 @@ assert.match(
 
 assert.match(
   source,
+  /const isRestartError = status === "error" && restartCode === "montage_export_worker_restarted";/,
+  "El detector debe reconocer jobs ya marcados como restart para permitir recuperacion"
+);
+
+assert.match(
+  source,
+  /source\?\.error\?\.detail\?\.lastHeartbeatAt/,
+  "La recuperacion de restart debe usar el heartbeat original guardado en error.detail"
+);
+
+assert.match(
+  source,
   /code: "montage_export_worker_restarted"/,
   "El error publico debe distinguir restart de worker stalled"
 );

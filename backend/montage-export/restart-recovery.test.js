@@ -36,6 +36,40 @@ test("canAutoResumeInterruptedMontageExportJob returns false when the restart wa
   assert.equal(result, false);
 });
 
+test("canAutoResumeInterruptedMontageExportJob returns true for direct-mode scene render restarts after scene 1", () => {
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "running",
+    stage: "render_scene_segments",
+    progress: 0.32,
+    currentSceneIndex: 2,
+    request: {
+      input: { sessionId: "session-1", entries: [{ rowId: "row-1" }, { rowId: "row-2" }, { rowId: "row-3" }] }
+    }
+  }, {
+    queueAvailable: false
+  });
+
+  assert.equal(result, true);
+});
+
+test("canAutoResumeInterruptedMontageExportJob returns true for jobs already marked as worker restarted", () => {
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "error",
+    stage: "error",
+    progress: 0.32,
+    error: {
+      code: "montage_export_worker_restarted"
+    },
+    request: {
+      input: { sessionId: "session-1", entries: [{ rowId: "row-1" }, { rowId: "row-2" }] }
+    }
+  }, {
+    queueAvailable: false
+  });
+
+  assert.equal(result, true);
+});
+
 test("canAutoResumeInterruptedMontageExportJob returns false for other late-stage restarted jobs", () => {
   const result = canAutoResumeInterruptedMontageExportJob({
     status: "running",

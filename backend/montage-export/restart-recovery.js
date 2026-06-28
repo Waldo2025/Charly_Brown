@@ -28,7 +28,6 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   ].includes(stage)) {
     return stage === "concat_timeline";
   }
-  if (stage === "render_scene_segments" && currentSceneIndex > 1) return false;
   return true;
 }
 

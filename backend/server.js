@@ -2311,10 +2311,20 @@ function isMontageExportJobInterruptedByBackendRestart(job = null, bootMs = Date
   const source = job && typeof job === "object" ? job : null;
   if (!source) return false;
   const status = String(source.status || "").trim().toLowerCase();
-  if (!["queued", "running"].includes(status)) return false;
-  const stage = String(source.stage || "").trim().toLowerCase();
+  const restartCode = String(source?.error?.code || source?.error?.error || "").trim();
+  const isRestartError = status === "error" && restartCode === "montage_export_worker_restarted";
+  if (!["queued", "running"].includes(status) && !isRestartError) return false;
+  const stage = String(
+    isRestartError
+      ? (source?.error?.detail?.stage || source.stage || "")
+      : source.stage || ""
+  ).trim().toLowerCase();
   if (!stage || stage === "queued") return false;
-  const heartbeatMs = Number(new Date(source.heartbeatAt || source.lastHeartbeatAt || source.updatedAt || 0).getTime() || 0) || 0;
+  const heartbeatMs = Number(new Date(
+    isRestartError
+      ? (source?.error?.detail?.lastHeartbeatAt || source.heartbeatAt || source.lastHeartbeatAt || source.updatedAt || 0)
+      : (source.heartbeatAt || source.lastHeartbeatAt || source.updatedAt || 0)
+  ).getTime() || 0) || 0;
   if (!heartbeatMs || !Number.isFinite(heartbeatMs)) return false;
   const cleanBootMs = Number(bootMs || Date.now()) || Date.now();
   return heartbeatMs < (cleanBootMs - MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS);
