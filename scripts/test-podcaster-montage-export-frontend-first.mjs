@@ -13,7 +13,7 @@ const podcasterSource = readFileSync(
 assert.match(
   exportSource,
   /async function runFrontendMontageExport\(/,
-  "Debe existir una ruta de export frontend frame-by-frame antes de enviar al backend."
+  "La ruta experimental frontend puede existir para diagnóstico, pero no debe ser el flujo principal."
 );
 
 assert.match(
@@ -40,16 +40,28 @@ assert.match(
   "La ruta frontend debe preferir MP4 cuando el navegador lo soporte."
 );
 
-assert.match(
+assert.doesNotMatch(
   exportSource,
   /await runFrontendMontageExport\(\{\s*payload: prepared\.payload/,
-  "runMontageExport debe intentar primero la exportación frontend con el payload preparado."
+  "runMontageExport no debe intentar exportar el video completo en frontend; debe enviar el montaje a backend/FFmpeg."
 );
 
 assert.match(
   exportSource,
-  /frontend_export_fallback_backend/,
-  "Si falla la captura frontend, el flujo debe registrar fallback al backend."
+  /backend_ffmpeg_export_selected/,
+  "runMontageExport debe registrar que el video completo usa backend FFmpeg."
+);
+
+assert.match(
+  exportSource,
+  /full_video_backend_ffmpeg_text_frames_frontend/,
+  "El flujo debe dejar claro que frontend solo genera capturas PNG de texto/karaoke."
+);
+
+assert.match(
+  exportSource,
+  /const submissionPayload = stripMontageExportSubmissionPayload\(prepared\.payload\);[\s\S]*authFetchJson\(buildMontageExportEndpoint\("\/api\/podcaster\/montage\/export"\)/,
+  "runMontageExport debe mandar el payload preparado al endpoint backend de FFmpeg."
 );
 
 assert.match(

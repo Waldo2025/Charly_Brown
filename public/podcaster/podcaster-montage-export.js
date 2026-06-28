@@ -5476,6 +5476,11 @@ export async function runMontageExport() {
       label: "Preparando exportación…"
     });
     const session = window.getActiveSession?.() || null;
+    setMontageExportStatus(
+      "Preparando exportación…",
+      "Generando capturas PNG del texto en pantalla para componerlas con FFmpeg.",
+      { tone: "neutral" }
+    );
     const prepared = await buildMontageExportPayloadForSubmission(session, {
       renderOnScreenTextFrames: true
     });
@@ -5511,43 +5516,28 @@ export async function runMontageExport() {
     resetMontageExportJobState();
     setMontageExportContinueButton({ visible: false });
     setMontageExportProgress(0.08);
-    setMontageExportStatus("Preparando exportación…", "Preparando captura local del montaje.", { tone: "neutral" });
+    setMontageExportStatus("Preparando exportación…", "Generando capturas PNG del texto en pantalla para FFmpeg.", { tone: "neutral" });
     setConfirmMontageExportButtonState({
       disabled: true,
       loading: true,
-      label: "Renderizando…"
+      label: "Preparando backend…"
     });
-    await refreshMontageExportPreviewNow({
-      force: true,
-      preserveProgressiveFrame: true,
-      loadingMeta: "Preparando el preview para capturarlo frame por frame…"
-    }).catch(() => { });
-    try {
-      await runFrontendMontageExport({ payload: prepared.payload, session });
-      window.montageExportJobState.submissionInFlight = false;
-      window.montageExportBusy = false;
-      window.setTimelinePreviewsSuspended?.(false);
-      setMontageExportPreviewPaused(false);
-      setMontageExportBusy(false);
-      updateMontageExportFloatingCardVisibility();
-      return;
-    } catch (frontendError) {
-      logMontageExportDevtools("frontend_export_fallback_backend", {
-        name: String(frontendError?.name || "").trim() || undefined,
-        message: String(frontendError?.message || frontendError || "").trim() || undefined,
-        stack: String(frontendError?.stack || "").trim().split("\n").slice(0, 4).join("\n") || undefined,
-        durationMs: resolveFrontendMontageExportDurationMs(prepared.payload),
-        entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
-        hasPreviewController: Boolean(window.exportPreviewController),
-        previewDataUrl: Boolean(String(window.montageExportPreviewState?.dataUrl || "").trim()),
-        previewMediaType: String(window.montageExportPreviewState?.mediaType || "").trim() || undefined
-      }, "warn");
-      setMontageExportStatus(
-        "El export local no pudo completarse.",
-        "Usando fallback backend para terminar el video.",
-        { tone: "warning" }
-      );
-    }
+    const renderedTextSegments = Array.isArray(prepared?.payload?.onScreenTextRenderedSegments)
+      ? prepared.payload.onScreenTextRenderedSegments
+      : [];
+    const renderedTextFrames = renderedTextSegments.reduce((total, segment) => {
+      return total + (Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0);
+    }, 0);
+    logMontageExportDevtools("backend_ffmpeg_export_selected", {
+      reason: "full_video_backend_ffmpeg_text_frames_frontend",
+      entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
+      onScreenTextRenderedSegments: renderedTextSegments.length,
+      onScreenTextRenderedFrames: renderedTextFrames,
+      onScreenTextSegments: Array.isArray(prepared?.payload?.onScreenTextTimeline?.segments) ? prepared.payload.onScreenTextTimeline.segments.length : 0,
+      exportMode: String(prepared?.payload?.exportMode || "").trim() || undefined,
+      format: String(prepared?.payload?.format || "").trim() || undefined,
+      renderMode: String(prepared?.payload?.renderMode || "").trim() || undefined
+    });
     setMontageExportPreviewPaused(true);
     window.setTimelinePreviewsSuspended(true);
     setConfirmMontageExportButtonState({
@@ -5555,6 +5545,11 @@ export async function runMontageExport() {
       loading: true,
       label: "Iniciando backend…"
     });
+    setMontageExportStatus(
+      "Iniciando exportación con FFmpeg…",
+      "El backend compondrá video/audio; el frontend solo aportó capturas PNG del karaoke.",
+      { tone: "neutral" }
+    );
     const submissionPayload = stripMontageExportSubmissionPayload(prepared.payload);
     const data = await authFetchJson(buildMontageExportEndpoint("/api/podcaster/montage/export"), {
       method: "POST",
