@@ -18,8 +18,8 @@ assert.match(
 
 assert.match(
   serverSource,
-  /const MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process\.env\.MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER !== "false"/,
-  "backend debe forzar el browser text pass en Render por defecto."
+  /const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process\.env\.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false"/,
+  "backend debe forzar ASS en Render por defecto."
 );
 
 assert.match(
@@ -42,7 +42,7 @@ assert.match(
 
 assert.match(
   serverSource,
-  /sceneOnScreenTextMode: shouldPreferBrowserTextFinalPass \? "browser" : \(shouldBurnSceneOnScreenText \? "rendered_png" : "ass"\)/,
+  /sceneOnScreenTextMode: shouldBurnSceneOnScreenText \? "rendered_png" : "ass"/,
   "backend debe reportar el modo de texto de escena en el visual-pass decision."
 );
 
@@ -54,8 +54,8 @@ assert.match(
 
 assert.match(
   renderSource,
-  /MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER\s*\n\s*value:\s+true/,
-  "Render debe forzar el browser text pass en Render."
+  /MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER\s*\n\s*value:\s+true/,
+  "Render debe forzar ASS de texto en Render."
 );
 
 console.log("Backend montage export render logging OK.");

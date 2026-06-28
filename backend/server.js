@@ -1866,7 +1866,7 @@ const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
       || (IS_RENDER_RUNTIME ? 8 : 200)
   ) || (IS_RENDER_RUNTIME ? 8 : 200))
 );
-const MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER !== "false";
+const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
   Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
@@ -12442,7 +12442,7 @@ async function renderMontageBrowserFinalVisualPass({
   };
   const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
   const renderOutputDir = path.join(tmpDir, "montage-browser-recording");
-  emitStage("boot_renderer", 0.8, "Iniciando renderer fiel al preview.");
+  emitStage("boot_renderer", 0.8, "Iniciando render final.");
   throwIfCancelled("boot_renderer");
   const browserInputPath = await prepareMontageBrowserVisualInput({
     sourcePath: finalOutPath,
@@ -12791,16 +12791,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
     const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
     const hasStylizedTextSegments = input.exportMode === "normal" && input.onlyAudio !== true && hasMontageStylizedTextSegments(input);
-    const browserRendererAvailability = getMontageBrowserRendererAvailability();
-    const shouldPreferBrowserTextFinalPass = Boolean(
-      MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER
-      && browserRendererAvailability.available === true
-      && shouldUseBrowserMontageRenderer(input)
-      && (
-        (input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length))
-        || hasStylizedTextSegments
-      )
-    );
+    const browserRendererAvailability = { available: false };
+    const shouldPreferBrowserTextFinalPass = false;
     let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input) && !shouldPreferBrowserTextFinalPass;
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
@@ -13243,7 +13235,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoHasAudio,
           hasInputAudio: Boolean(inputAudioPath),
           renderedTextFrameLimit: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT,
-          forceBrowserTextOnRender: MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER,
+          forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
           overlayTempPathCount: sceneOverlayTempPaths.length,
           ffmpegTimeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
           memory: {
@@ -13518,10 +13510,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
     );
-    const forcedKaraokeBrowserVisualPass = shouldPreferBrowserTextFinalPass;
-    const finalShouldAttemptBrowserRenderer = shouldPreferBrowserTextFinalPass && browserRendererAvailability.available === true;
-    const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer;
-    const hasBrowserVisualPassRequired = finalShouldAttemptBrowserRenderer;
+    const forcedKaraokeBrowserVisualPass = false;
+    const finalShouldAttemptBrowserRenderer = false;
+    const hasBrowserVisualPass = false;
+    const hasBrowserVisualPassRequired = false;
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -13532,13 +13524,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasBrowserVisualPass,
       forcedKaraokeBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
-      browserVisualPassDisabled: !finalShouldAttemptBrowserRenderer,
+      browserVisualPassDisabled: true,
       timelineHasOverlapOrGaps: hasTimelineOverlapOrGaps,
       browserRendererAvailable: browserRendererAvailability.available === true,
       browserRendererCode: browserRendererAvailability.available === true ? null : (browserRendererAvailability.code || null),
       stylizedKaraokeRendererForced: isStylizedKaraokeRendererForced,
-      sceneOnScreenTextMode: shouldPreferBrowserTextFinalPass ? "browser" : (shouldBurnSceneOnScreenText ? "rendered_png" : "ass"),
-      forceBrowserTextOnRender: MONTAGE_EXPORT_FORCE_BROWSER_TEXT_ON_RENDER,
+      sceneOnScreenTextMode: shouldBurnSceneOnScreenText ? "rendered_png" : "ass",
+      forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
       browserTextFinalPassEnabled: finalShouldAttemptBrowserRenderer,
       reviewOnScreenTextEnabled,
       normalOnScreenTextEnabled,
