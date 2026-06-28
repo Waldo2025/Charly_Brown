@@ -41,7 +41,7 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-06-28.10";
+} from "./podcaster-montage-export.js?v=2026-06-28.11";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -20237,7 +20237,8 @@ Object.assign(window, {
   escapeHtml,
   logVideoCreateDebug,
   clearAllActivityNotifications, getRowReferenceVideoMap,
-  setSidepanelOpen
+  setSidepanelOpen,
+  exportPreviewController,
 });
 
 // Regression test patterns for test-podcaster-modular-runtime-and-spinner-regressions.mjs
