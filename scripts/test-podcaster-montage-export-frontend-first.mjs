@@ -47,6 +47,18 @@ assert.match(
 );
 
 assert.match(
+  exportSource,
+  /function decodeFrontendMontageDataUrlToArrayBuffer\(/,
+  "Los audios data: del timeline deben decodificarse localmente sin pasar por fetch."
+);
+
+assert.match(
+  exportSource,
+  /if \(cleanSrc\.startsWith\("data:"\)\) \{\s*const arrayBuffer = decodeFrontendMontageDataUrlToArrayBuffer\(cleanSrc\);/s,
+  "decodeFrontendMontageAudioBuffer debe evitar fetch(data:) porque CSP bloquea data: en connect-src."
+);
+
+assert.match(
   podcasterSource,
   /exportPreviewController,/,
   "El controlador de preview del montaje debe estar disponible en window para captura frame-by-frame."

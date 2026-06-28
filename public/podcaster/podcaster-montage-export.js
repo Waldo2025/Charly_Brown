@@ -2873,10 +2873,35 @@ async function resolveFrontendMontageAudioSource(segment = {}) {
   return "";
 }
 
+function decodeFrontendMontageDataUrlToArrayBuffer(dataUrl = "") {
+  const cleanDataUrl = String(dataUrl || "").trim();
+  if (!cleanDataUrl.startsWith("data:")) throw new Error("frontend_export_data_url_invalid");
+  const commaIndex = cleanDataUrl.indexOf(",");
+  if (commaIndex < 0) throw new Error("frontend_export_data_url_invalid");
+  const meta = cleanDataUrl.slice(0, commaIndex);
+  const payload = cleanDataUrl.slice(commaIndex + 1);
+  if (/;base64/i.test(meta)) {
+    const binary = atob(payload.replace(/\s+/g, ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes.buffer;
+  }
+  const decoded = decodeURIComponent(payload.replace(/\+/g, "%20"));
+  return new TextEncoder().encode(decoded).buffer;
+}
+
 async function decodeFrontendMontageAudioBuffer(audioCtx = null, src = "", cache = new Map()) {
   const cleanSrc = String(src || "").trim();
   if (!audioCtx || !cleanSrc) return null;
   if (cache.has(cleanSrc)) return cache.get(cleanSrc);
+  if (cleanSrc.startsWith("data:")) {
+    const arrayBuffer = decodeFrontendMontageDataUrlToArrayBuffer(cleanSrc);
+    const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    cache.set(cleanSrc, decoded);
+    return decoded;
+  }
   const response = await fetch(cleanSrc);
   if (!response.ok) throw new Error(`audio_fetch_failed_${response.status}`);
   const arrayBuffer = await response.arrayBuffer();
@@ -2943,6 +2968,7 @@ async function scheduleFrontendMontageAudioTracks({
     } catch (error) {
       logMontageExportDevtools("frontend_export_audio_segment_skipped", {
         id: String(segment?.id || segment?.rowId || "").trim() || undefined,
+        sourceKind: String(segment?.dataUrl || segment?.localDataUrl || "").trim().startsWith("data:") ? "data_url" : "remote",
         message: String(error?.message || error || "").trim() || undefined
       }, "warn");
     }
