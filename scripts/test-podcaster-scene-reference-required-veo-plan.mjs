@@ -18,6 +18,12 @@ assert.match(
 
 assert.match(
   backendSource,
+  /requestRequiresSceneReference[\s\S]*\? videoModels\.filter\(\(modelName\) => filterVeoVariantsForModel\(effectiveRequestVariants, modelName\)\.some/,
+  "Cuando hay referencia de escena, el backend debe conservar todos los modelos compatibles con referenceImages, no solo el limite inicial."
+);
+
+assert.match(
+  backendSource,
   /filterVeoVariantsForModel\(effectiveRequestVariants, videoModel\)[\s\S]*filter\(\(variant\) => !requestRequiresSceneReference \|\| \/reference-\/i\.test/,
   "Cuando hay referencia de escena, el backend no debe continuar con variantes text-only."
 );

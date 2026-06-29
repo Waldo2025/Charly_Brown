@@ -304,6 +304,8 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
 const PODCASTER_VIDEO_MODEL_CANDIDATES = Object.freeze([
   "veo-3.1-generate-preview",
   "veo-3.1-fast-generate-preview",
+  "veo-3.1-generate-001",
+  "veo-3.1-fast-generate-001",
   "veo-3.1-lite-generate-preview",
   "veo-3.0-generate-001",
   "veo-3.0-fast-generate-001",
@@ -8831,7 +8833,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
     ));
     const effectiveVideoModels = requestRequiresSceneReference
-      ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || "")))).slice(0, requestedModelLimit)
+      ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || ""))))
       : videoModels.slice(0, requestedModelLimit);
     const modelExecutionPlan = requestRequiresSceneReference
       ? (effectiveVideoModels.length ? effectiveVideoModels : [DEFAULT_PODCASTER_VIDEO_MODEL])

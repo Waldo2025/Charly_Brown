@@ -33,9 +33,11 @@ test("stops current model fallback when no variants remain", () => {
   assert.equal(decision.remainingVariants, 0);
 });
 
-test("recognizes only the Veo 3.1 standard preview model as supporting referenceImages", () => {
+test("recognizes Veo 3.1 preview models that support referenceImages", () => {
   assert.equal(veoModelSupportsReferenceImages("veo-3.1-generate-preview"), true);
-  assert.equal(veoModelSupportsReferenceImages("veo-3.1-fast-generate-preview"), false);
+  assert.equal(veoModelSupportsReferenceImages("veo-3.1-fast-generate-preview"), true);
+  assert.equal(veoModelSupportsReferenceImages("veo-3.1-generate-001"), true);
+  assert.equal(veoModelSupportsReferenceImages("veo-3.1-fast-generate-001"), true);
   assert.equal(veoModelSupportsReferenceImages("veo-3.1-lite-generate-preview"), false);
   assert.equal(veoModelSupportsReferenceImages("veo-2.0-generate-001"), false);
 });
@@ -65,6 +67,14 @@ test("detects and filters referenceImages variants for unsupported models", () =
   );
   assert.deepEqual(
     filterVeoVariantsForModel([referenceVariant, textVariant], "veo-3.1-generate-preview"),
+    [referenceVariant, textVariant]
+  );
+  assert.deepEqual(
+    filterVeoVariantsForModel([referenceVariant, textVariant], "veo-3.1-fast-generate-preview"),
+    [referenceVariant, textVariant]
+  );
+  assert.deepEqual(
+    filterVeoVariantsForModel([referenceVariant, textVariant], "veo-3.1-generate-001"),
     [referenceVariant, textVariant]
   );
 });

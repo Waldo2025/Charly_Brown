@@ -9,7 +9,7 @@ if (!/const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3\.1-generate-preview";/.test(s
   throw new Error("El backend debe usar veo-3.1-generate-preview como modelo Veo por defecto en Gemini API.");
 }
 
-if (!/const PODCASTER_VIDEO_MODEL_CANDIDATES = Object\.freeze\(\[\s*"veo-3\.1-generate-preview",\s*"veo-3\.1-fast-generate-preview",\s*"veo-3\.1-lite-generate-preview",\s*"veo-3\.0-generate-001",\s*"veo-3\.0-fast-generate-001",\s*"veo-2\.0-generate-001"\s*\]\);/m.test(source)) {
+if (!/const PODCASTER_VIDEO_MODEL_CANDIDATES = Object\.freeze\(\[\s*"veo-3\.1-generate-preview",\s*"veo-3\.1-fast-generate-preview",\s*"veo-3\.1-generate-001",\s*"veo-3\.1-fast-generate-001",\s*"veo-3\.1-lite-generate-preview",\s*"veo-3\.0-generate-001",\s*"veo-3\.0-fast-generate-001",\s*"veo-2\.0-generate-001"\s*\]\);/m.test(source)) {
   throw new Error("El backend debe exponer todos los modelos Veo compatibles con esta integración.");
 }
 
