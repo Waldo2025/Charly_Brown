@@ -170,7 +170,7 @@
   function resolveKaraokeHighlightSettings(settings = {}) {
     const source = settings && typeof settings === "object" ? settings : {};
     const styleRaw = String(source.karaokeHighlightStyle || "").trim().toLowerCase();
-    const style = ["glow", "text", "pill", "rect", "underline"].includes(styleRaw) ? styleRaw : "glow";
+    const style = ["glow", "text", "pill", "rect", "underline"].includes(styleRaw) ? styleRaw : "pill";
     const color = String(source.karaokeHighlightColor || "").trim() || "#facc15";
     const clamp01 = (value, fallback) => {
       const numeric = Number(value);
@@ -364,6 +364,10 @@
       }
       .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active {
         color: var(--pod-karaoke-highlight-color, #facc15);
+        filter: none;
+        text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-glow {
         filter: brightness(1.08);
         text-shadow:
           0 0 0.2em var(--pod-karaoke-highlight-color, #facc15),
@@ -405,9 +409,17 @@
   function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false, textColor = "currentColor", settings = {}) {
     const safeToken = escapeSvgText(token);
     const highlight = resolveKaraokeHighlightSettings(settings);
-    return isActive
-      ? `<tspan fill="${escapeSvgText(highlight.color)}" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
-      : `<tspan fill="${escapeSvgText(textColor)}">${safeToken}</tspan>`;
+    if (!isActive) {
+      return `<tspan fill="${escapeSvgText(textColor)}">${safeToken}</tspan>`;
+    }
+    const style = String(highlight?.style || "pill").trim().toLowerCase();
+    if (style === "glow") {
+      return `<tspan fill="${escapeSvgText(highlight.color)}" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`;
+    }
+    if (style === "pill" || style === "rect") {
+      return `<tspan fill="#020617">${safeToken}</tspan>`;
+    }
+    return `<tspan fill="${escapeSvgText(highlight.color)}">${safeToken}</tspan>`;
   }
 
   function buildOnScreenTextRasterLineMarkup(line = "", options = {}) {
@@ -428,6 +440,84 @@
       markup: parts.join(""),
       wordIndex
     };
+  }
+
+  function measureSvgTextWidth(text = "", font = "", fontSizePx = 44) {
+    const value = String(text || "");
+    if (!value) return 0;
+    try {
+      const doc = root?.document;
+      const canvas = doc && typeof doc.createElement === "function" ? doc.createElement("canvas") : null;
+      const ctx = canvas?.getContext?.("2d");
+      if (ctx) {
+        ctx.font = font;
+        const metrics = ctx.measureText(value);
+        const width = Number(metrics?.width || 0);
+        if (Number.isFinite(width) && width > 0) return width;
+      }
+    } catch (_) {}
+    const cleanFontSize = Math.max(1, Number(fontSizePx || 44) || 44);
+    return Array.from(value).reduce((sum, char) => {
+      if (/\s/.test(char)) return sum + (cleanFontSize * 0.32);
+      if (/[ilI.,:;!|]/.test(char)) return sum + (cleanFontSize * 0.28);
+      if (/[mwMWÁÉÍÓÚÜÑáéíóúüñ]/.test(char)) return sum + (cleanFontSize * 0.72);
+      return sum + (cleanFontSize * 0.56);
+    }, 0);
+  }
+
+  function buildOnScreenTextRasterActiveHighlightRects({
+    lines = [],
+    activeWordIndex = -1,
+    fontFamily = "system-ui, sans-serif",
+    fontSizePx = 44,
+    fontWeight = "500",
+    fontStyle = "normal",
+    textAlign = "center",
+    innerLeft = 0,
+    innerRight = 0,
+    centerX = 0,
+    lineStartY = 0,
+    lineStepY = 54,
+    textOffsetYPx = 0,
+    highlight = {}
+  } = {}) {
+    const style = String(highlight?.style || "pill").trim().toLowerCase();
+    if (!(style === "pill" || style === "rect") || activeWordIndex < 0) return "";
+    const font = `${fontStyle === "italic" ? "italic " : ""}${fontWeight || "500"} ${Math.max(1, Math.round(Number(fontSizePx || 44) || 44))}px ${fontFamily}`;
+    const padX = Math.max(0, Number(highlight?.paddingX ?? 10) || 0);
+    const padY = Math.max(0, Number(highlight?.paddingY ?? 4) || 0);
+    const rx = style === "rect"
+      ? Math.min(4, Math.max(0, Number(highlight?.radius ?? 4) || 0))
+      : Math.max(0, Number(highlight?.radius ?? 12) || 0);
+    let wordIndex = 0;
+    const rects = [];
+    (Array.isArray(lines) ? lines : []).forEach((line, lineIndex) => {
+      const tokens = tokenizeSubtitleText(line);
+      let cursor = 0;
+      const lineText = tokens.join("");
+      const lineWidth = measureSvgTextWidth(lineText, font, fontSizePx);
+      const lineStartX = textAlign === "left"
+        ? innerLeft
+        : textAlign === "right"
+          ? innerRight - lineWidth
+          : centerX - (lineWidth / 2);
+      tokens.forEach((token) => {
+        const tokenWidth = measureSvgTextWidth(token, font, fontSizePx);
+        if (!/^\s+$/.test(token)) {
+          if (wordIndex === activeWordIndex) {
+            const textY = lineStartY + (lineIndex * lineStepY) + textOffsetYPx;
+            const rectX = Math.max(0, lineStartX + cursor - padX);
+            const rectY = Math.max(0, textY - (fontSizePx * 0.92) - padY);
+            const rectWidth = Math.max(1, tokenWidth + (padX * 2));
+            const rectHeight = Math.max(1, (fontSizePx * 1.08) + (padY * 2));
+            rects.push(`<rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${rectWidth.toFixed(2)}" height="${rectHeight.toFixed(2)}" rx="${rx}" ry="${rx}" fill="${escapeSvgText(highlight.color || "#facc15")}" fill-opacity="${Math.max(0, Math.min(1, Number(highlight.opacity ?? 0.92) || 0)).toFixed(3)}" />`);
+          }
+          wordIndex += 1;
+        }
+        cursor += tokenWidth;
+      });
+    });
+    return rects.join("\n");
   }
 
   function buildOnScreenTextRasterSvgMarkup(input = {}) {
@@ -466,6 +556,8 @@
     const textColor = String(settings.textColor || "#f8fafc").trim() || "#f8fafc";
     const strokeColor = String(settings.strokeColor || "#0f172a").trim() || "#0f172a";
     const highlight = resolveKaraokeHighlightSettings(settings);
+    const highlightStyle = String(highlight?.style || "pill").trim().toLowerCase();
+    const includeKaraokeGlowFilter = highlightStyle === "glow";
     const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
     const contentPadXPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
     const contentPadYPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
@@ -491,6 +583,22 @@
         : "0.000";
     const shadowOpacityValue = Math.max(0, Math.min(1, shadowOpacity)).toFixed(3);
     const activeWordIndex = Number.isFinite(Number(config.activeWordIndex)) ? Number(config.activeWordIndex) : -1;
+    const activeHighlightRectMarkup = buildOnScreenTextRasterActiveHighlightRects({
+      lines,
+      activeWordIndex,
+      fontFamily,
+      fontSizePx,
+      fontWeight: settings.fontWeight === "bold" ? "700" : "500",
+      fontStyle: settings.fontStyle === "italic" ? "italic" : "normal",
+      textAlign,
+      innerLeft,
+      innerRight,
+      centerX,
+      lineStartY,
+      lineStepY,
+      textOffsetYPx,
+      highlight
+    });
     let wordIndex = 0;
     const lineMarkup = lines.map((line, index) => {
       const current = buildOnScreenTextRasterLineMarkup(line, {
@@ -560,13 +668,14 @@
           <filter id="pod-text-shadow" x="-20%" y="-20%" width="160%" height="160%">
             <feDropShadow dx="${Math.round(shadowX)}" dy="${Math.round(shadowY)}" stdDeviation="${Math.max(0.4, shadowBlurPx / 3).toFixed(2)}" flood-color="rgb(2, 6, 23)" flood-opacity="${shadowOpacityValue}" />
           </filter>
-          <filter id="pod-karaoke-active" x="-20%" y="-20%" width="160%" height="160%">
+          ${includeKaraokeGlowFilter ? `<filter id="pod-karaoke-active" x="-20%" y="-20%" width="160%" height="160%">
             <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="${escapeSvgText(highlight.color)}" flood-opacity="${Math.max(0, Math.min(1, highlight.opacity)).toFixed(3)}" />
-          </filter>
+          </filter>` : ""}
         </defs>
         ${resolvedBgPreset === "none" || !boxFillRgb ? "" : `<rect ${bgAttrs} />`}
         <g transform="translate(0,0)">
           ${shadowLineMarkup}
+          ${activeHighlightRectMarkup}
           ${lineMarkup}
         </g>
       </svg>
@@ -983,7 +1092,7 @@
     const opacityRaw = Number(highlight.opacity ?? highlight.karaokeHighlightOpacity);
     return {
       color: String(highlight.color || highlight.karaokeHighlightColor || "").trim() || "#facc15",
-      style: ["glow", "text", "pill", "rect", "underline"].includes(styleRaw) ? styleRaw : "glow",
+      style: ["glow", "text", "pill", "rect", "underline"].includes(styleRaw) ? styleRaw : "pill",
       opacity: Number.isFinite(opacityRaw)
         ? Math.max(0, Math.min(1, opacityRaw > 1 ? opacityRaw / 100 : opacityRaw))
         : resolveKaraokeHighlightSettings(highlight).opacity,
@@ -995,7 +1104,7 @@
 
   function buildAssKaraokeActiveWordStyleTag(highlight = {}, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8", baseOutlineColor = "&H000F172A") {
     const normalized = normalizeKaraokeHighlightInput(highlight);
-    const style = String(normalized?.style || "glow").trim().toLowerCase();
+    const style = String(normalized?.style || "pill").trim().toLowerCase();
     const activePrimary = formatAssOverrideColor(activeColor, "1");
     const activeSecondary = formatAssOverrideColor(activeColor, "2");
     const baseBorder = formatAssOverrideColor(baseColor, "3");
@@ -1016,7 +1125,7 @@
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
     const normalizedHighlight = normalizeKaraokeHighlightInput(highlight);
-    const highlightStyle = String(normalizedHighlight?.style || "glow").trim().toLowerCase();
+    const highlightStyle = String(normalizedHighlight?.style || "pill").trim().toLowerCase();
     const usesIsolatedActiveLayer = highlightStyle === "pill" || highlightStyle === "rect";
     const transparentOverride = "\\1a&HFF&\\2a&HFF&\\3a&HFF&\\4a&HFF&\\bord0\\shad0";
     let wordIndex = 0;
@@ -1094,7 +1203,7 @@
       const textOpacity = Math.max(0, Math.min(1, Number(settings?.textOpacity ?? spec.textOpacity ?? 1) || 0));
       const baseColor = toAssColor(settings?.textColor || "#F8FAFC", textOpacity, "F8FAFC");
       const highlight = resolveKaraokeHighlightSettings(settings);
-      const highlightStyle = String(highlight?.style || "glow").trim().toLowerCase();
+      const highlightStyle = String(highlight?.style || "pill").trim().toLowerCase();
       const usesBoxHighlight = highlightStyle === "pill" || highlightStyle === "rect";
       const activeColor = toAssColor(highlight.color, Math.max(0, Math.min(1, highlight.opacity)), "FACC15");
       const outlineColor = toAssColor(settings?.strokeColor || spec.strokeColor || "#0F172A", 1, "0F172A");

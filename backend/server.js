@@ -3574,7 +3574,7 @@ function sanitizePodcasterSession(raw = {}) {
     karaokeHighlightColor: clampText(trackRaw?.karaokeHighlightColor || "#facc15", 24) || "#facc15",
     karaokeHighlightStyle: ["glow", "text", "pill", "rect", "underline"].includes(String(trackRaw?.karaokeHighlightStyle || "").trim().toLowerCase())
       ? String(trackRaw.karaokeHighlightStyle).trim().toLowerCase()
-      : "glow",
+      : "pill",
     karaokeHighlightOpacity: clampNumber(trackRaw?.karaokeHighlightOpacity, 0, 1, 0.92),
     karaokeHighlightPaddingXPx: clampNumber(trackRaw?.karaokeHighlightPaddingXPx, 0, 40, 10),
     karaokeHighlightPaddingYPx: clampNumber(trackRaw?.karaokeHighlightPaddingYPx, 0, 28, 4),

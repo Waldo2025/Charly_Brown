@@ -275,7 +275,7 @@
     const karaokeHighlightStyleRaw = String(source.karaokeHighlightStyle || "").trim().toLowerCase();
     const karaokeHighlightStyle = ["glow", "text", "pill", "rect", "underline"].includes(karaokeHighlightStyleRaw)
       ? karaokeHighlightStyleRaw
-      : "glow";
+      : "pill";
     const karaokeHighlightOpacity = clamp01(source.karaokeHighlightOpacity, 0.92);
     const karaokeHighlightPaddingXPx = Math.max(0, Math.min(40, Math.round(toFiniteNumber(source.karaokeHighlightPaddingXPx, 10))));
     const karaokeHighlightPaddingYPx = Math.max(0, Math.min(28, Math.round(toFiniteNumber(source.karaokeHighlightPaddingYPx, 4))));
