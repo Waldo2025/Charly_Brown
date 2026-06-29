@@ -11389,6 +11389,13 @@ function normalizeMontageExportV2RequestBody(body = {}) {
   });
 }
 
+function normalizeMontageExportResumeRequestBody(body = {}) {
+  const renderPipeline = String(body?.renderPipeline || body?.previewRuntime?.pipeline || "").trim();
+  return renderPipeline === "ffmpeg-preview-runtime-v2"
+    ? normalizeMontageExportV2RequestBody(body)
+    : normalizeMontageExportRequestBody(body);
+}
+
 function buildMontageMediaPositionFilter({
   width = 1280,
   height = 720,
@@ -14745,7 +14752,7 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
       if (canAutoResumeInterruptedMontageExportJob(job, { queueAvailable: Boolean(montageExportQueue) })) {
         const request = job.request && typeof job.request === "object" ? job.request : null;
         const input = request?.input && typeof request.input === "object"
-          ? normalizeMontageExportRequestBody(request.input)
+          ? normalizeMontageExportResumeRequestBody(request.input)
           : null;
         const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
         if (slot.ok && input) {

@@ -9,12 +9,14 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   const input = request?.input && typeof request.input === "object" ? request.input : null;
   if (!input) return false;
   if (input.persistedInlineRastersRedacted === true) return false;
+  const renderPipeline = String(input.renderPipeline || input.previewRuntime?.pipeline || "").trim();
+  const isPreviewRuntimeV2 = renderPipeline === "ffmpeg-preview-runtime-v2";
   const restartResumeCount = Math.max(0, Math.round(Number(source.restartResumeCount || 0) || 0));
   if (restartResumeCount >= 1) return false;
   const stage = String(source.stage || "").trim().toLowerCase();
   const progress = Math.max(0, Math.min(1, Number(source.progress || 0) || 0));
   const currentSceneIndex = Math.max(0, Math.round(Number(source.currentSceneIndex || 0) || 0));
-  if (queueAvailable && stage !== "concat_timeline") return false;
+  if (queueAvailable && !isPreviewRuntimeV2 && stage !== "concat_timeline") return false;
   if (progress >= 0.48 && stage !== "concat_timeline") return false;
   if ([
     "concat_timeline",

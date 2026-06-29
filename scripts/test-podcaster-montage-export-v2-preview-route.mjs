@@ -16,6 +16,7 @@ const podcasterSource = readSource("../public/podcaster/podcaster.js");
 const legacyExportSource = readSource("../public/podcaster/podcaster-montage-export.js");
 const exportV2Source = readSource("../public/podcaster/podcaster-montage-export-v2.js");
 const backendSource = readSource("../backend/server.js");
+const restartRecoverySource = readSource("../backend/montage-export/restart-recovery.js");
 
 test("podcaster loads the preview-faithful montage export v2 module", () => {
   assert.match(htmlSource, /podcaster\/podcaster-montage-export-v2\.js\?v=/);
@@ -57,4 +58,12 @@ test("backend exposes export-v2 as an FFmpeg preview-runtime pipeline", () => {
   assert.match(backendSource, /normalizeMontageExportV2RequestBody/);
   assert.match(backendSource, /applyMontageExportV2PreviewRuntime/);
   assert.match(backendSource, /ffmpeg_preview_runtime/);
+});
+
+test("export-status resumes v2 jobs with the preview-runtime payload intact", () => {
+  assert.match(backendSource, /function normalizeMontageExportResumeRequestBody/);
+  assert.match(backendSource, /normalizeMontageExportV2RequestBody\(body\)/);
+  assert.match(backendSource, /normalizeMontageExportResumeRequestBody\(request\.input\)/);
+  assert.match(restartRecoverySource, /isPreviewRuntimeV2/);
+  assert.match(restartRecoverySource, /queueAvailable && !isPreviewRuntimeV2/);
 });
