@@ -482,6 +482,15 @@
   function measureSvgTextWidth(text = "", font = "", fontSizePx = 44) {
     const value = String(text || "");
     if (!value) return 0;
+    const fallbackWidth = () => {
+      const cleanFontSize = Math.max(1, Number(fontSizePx || 44) || 44);
+      return Array.from(value).reduce((sum, char) => {
+        if (/\s/.test(char)) return sum + (cleanFontSize * 0.32);
+        if (/[ilI.,:;!|]/.test(char)) return sum + (cleanFontSize * 0.28);
+        if (/[mwMWÁÉÍÓÚÜÑáéíóúüñ]/.test(char)) return sum + (cleanFontSize * 0.72);
+        return sum + (cleanFontSize * 0.56);
+      }, 0);
+    };
     try {
       const doc = root?.document;
       const canvas = doc && typeof doc.createElement === "function" ? doc.createElement("canvas") : null;
@@ -493,13 +502,41 @@
         if (Number.isFinite(width) && width > 0) return width;
       }
     } catch (_) {}
-    const cleanFontSize = Math.max(1, Number(fontSizePx || 44) || 44);
-    return Array.from(value).reduce((sum, char) => {
-      if (/\s/.test(char)) return sum + (cleanFontSize * 0.32);
-      if (/[ilI.,:;!|]/.test(char)) return sum + (cleanFontSize * 0.28);
-      if (/[mwMWÁÉÍÓÚÜÑáéíóúüñ]/.test(char)) return sum + (cleanFontSize * 0.72);
-      return sum + (cleanFontSize * 0.56);
-    }, 0);
+    return fallbackWidth();
+  }
+
+  function measureSvgTextMetrics(text = "", font = "", fontSizePx = 44) {
+    const value = String(text || "");
+    const fallbackWidth = measureSvgTextWidth(value, font, fontSizePx);
+    if (!value) return { advanceWidth: 0, visualLeft: 0, visualRight: 0, visualWidth: 0 };
+    try {
+      const doc = root?.document;
+      const canvas = doc && typeof doc.createElement === "function" ? doc.createElement("canvas") : null;
+      const ctx = canvas?.getContext?.("2d");
+      if (ctx) {
+        ctx.font = font;
+        const metrics = ctx.measureText(value);
+        const advanceWidth = Number(metrics?.width || 0);
+        const left = Number(metrics?.actualBoundingBoxLeft || 0);
+        const right = Number(metrics?.actualBoundingBoxRight || 0);
+        if (Number.isFinite(advanceWidth) && advanceWidth > 0) {
+          const visualLeft = Number.isFinite(left) ? Math.max(0, left) : 0;
+          const visualRight = Number.isFinite(right) && right > 0 ? right : advanceWidth;
+          return {
+            advanceWidth,
+            visualLeft,
+            visualRight,
+            visualWidth: Math.max(1, visualRight + visualLeft)
+          };
+        }
+      }
+    } catch (_) {}
+    return {
+      advanceWidth: fallbackWidth,
+      visualLeft: 0,
+      visualRight: fallbackWidth,
+      visualWidth: fallbackWidth
+    };
   }
 
   function buildOnScreenTextRasterActiveHighlightRects({
@@ -538,16 +575,19 @@
           ? innerRight - lineWidth
           : centerX - (lineWidth / 2);
       tokens.forEach((token) => {
-        const tokenWidth = measureSvgTextWidth(token, font, fontSizePx);
+        const tokenMetrics = measureSvgTextMetrics(token, font, fontSizePx);
+        const tokenWidth = tokenMetrics.advanceWidth;
         if (!/^\s+$/.test(token)) {
           if (wordIndex === activeWordIndex) {
             const tokenPadding = resolveKaraokeTokenHighlightPadding(highlight, token);
             const padX = tokenPadding.paddingX;
             const padY = Math.min(basePadY, tokenPadding.paddingY);
             const textY = lineStartY + (lineIndex * lineStepY) + textOffsetYPx;
-            const rectX = Math.max(0, lineStartX + cursor - padX);
+            const visualStartX = lineStartX + cursor - Math.max(0, Number(tokenMetrics.visualLeft || 0) || 0);
+            const visualWidth = Math.max(1, Number(tokenMetrics.visualWidth || tokenWidth) || tokenWidth);
+            const rectX = Math.max(0, visualStartX - padX);
             const rectY = Math.max(0, textY - (fontSizePx * 0.92) - padY);
-            const rectWidth = Math.max(1, tokenWidth + (padX * 2));
+            const rectWidth = Math.max(1, visualWidth + (padX * 2));
             const rectHeight = Math.max(1, (fontSizePx * 1.08) + (padY * 2));
             rects.push(`<rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${rectWidth.toFixed(2)}" height="${rectHeight.toFixed(2)}" rx="${rx}" ry="${rx}" fill="${escapeSvgText(highlight.color || "#facc15")}" fill-opacity="${Math.max(0, Math.min(1, Number(highlight.opacity ?? 0.92) || 0)).toFixed(3)}" />`);
           }

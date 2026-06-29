@@ -4587,6 +4587,11 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
   const settings = timeline?.settings && typeof timeline.settings === "object" ? timeline.settings : {};
   const sourceSegments = Array.isArray(timeline?.segments) ? timeline.segments.filter(Boolean) : [];
   if (!sourceSegments.length || settings.enabled === false || settings.showTrack === false) return [];
+  try {
+    if (document?.fonts && typeof document.fonts.ready?.then === "function") {
+      await document.fonts.ready;
+    }
+  } catch (_) {}
   const uid = resolveMontageExportCurrentUid();
   const cleanSessionId = String(sessionId || activeSession?.id || "").trim() || "session";
   const cleanExportId = String(exportId || `export-${Date.now()}`).trim();
