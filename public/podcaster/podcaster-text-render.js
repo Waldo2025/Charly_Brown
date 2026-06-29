@@ -840,6 +840,8 @@
       metrics,
       text,
       contentHtml,
+      activeOnly,
+      activeWordIndex,
       presetClass,
       bgClass,
       inlineStyle,

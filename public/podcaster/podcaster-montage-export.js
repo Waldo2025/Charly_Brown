@@ -3709,6 +3709,77 @@ function buildMontageOnScreenTextTempFramePath({
   ].join("/");
 }
 
+function escapeMontageSnapshotSvg(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function parseMontageSnapshotCssPx(value = "", fallback = 0) {
+  const numeric = Number.parseFloat(String(value || "").trim());
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function buildMeasuredMontageKaraokeSnapshotSvg(plan = null, width = 0, height = 0, html = "") {
+  if (!plan || plan.activeOnly !== true || Math.round(Number(plan.activeWordIndex ?? -1) || -1) < 0) return "";
+  if (typeof document === "undefined" || !document?.body || !width || !height || !html) return "";
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText = [
+    "position:fixed",
+    "left:-100000px",
+    "top:0",
+    `width:${width}px`,
+    `height:${height}px`,
+    "overflow:visible",
+    "opacity:0",
+    "pointer-events:none",
+    "z-index:-1"
+  ].join(";");
+  try {
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    const shell = host.querySelector(".podcaster-onscreen-text-raster-shell") || host;
+    const active = host.querySelector(".podcast-karaoke-word.is-active");
+    if (!active || !(active.classList.contains("is-highlight-pill") || active.classList.contains("is-highlight-rect"))) return "";
+    const shellRect = shell.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    if (!activeRect.width || !activeRect.height) return "";
+    const style = window.getComputedStyle(active);
+    const padX = Math.max(0, Math.min(12, parseMontageSnapshotCssPx(style.getPropertyValue("--pod-karaoke-highlight-pad-x"), 4)));
+    const padY = Math.max(0, Math.min(8, parseMontageSnapshotCssPx(style.getPropertyValue("--pod-karaoke-highlight-pad-y"), 3)));
+    const radiusRaw = parseMontageSnapshotCssPx(style.getPropertyValue("--pod-karaoke-highlight-radius"), 10);
+    const isRect = active.classList.contains("is-highlight-rect");
+    const radius = isRect ? Math.min(4, Math.max(0, radiusRaw)) : Math.max(0, Math.min(18, radiusRaw));
+    const fill = String(style.getPropertyValue("--pod-karaoke-highlight-color") || "#facc15").trim() || "#facc15";
+    const opacity = Math.max(0, Math.min(1, Number.parseFloat(String(style.getPropertyValue("--pod-karaoke-highlight-opacity") || "0.92")) || 0.92));
+    const rectX = Math.max(0, activeRect.left - shellRect.left - padX);
+    const rectY = Math.max(0, activeRect.top - shellRect.top - padY);
+    const rectW = Math.min(width - rectX, activeRect.width + (padX * 2));
+    const rectH = Math.min(height - rectY, activeRect.height + (padY * 2));
+    const fontSize = parseMontageSnapshotCssPx(style.fontSize, 44);
+    const fontFamily = String(style.fontFamily || "system-ui, sans-serif").trim() || "system-ui, sans-serif";
+    const fontWeight = String(style.fontWeight || "700").trim() || "700";
+    const fontStyle = String(style.fontStyle || "normal").trim() || "normal";
+    const text = String(active.textContent || "").trim();
+    if (!text) return "";
+    const textX = activeRect.left - shellRect.left + (activeRect.width / 2);
+    const textY = activeRect.top - shellRect.top + (activeRect.height / 2);
+    return `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${Math.max(1, rectW).toFixed(2)}" height="${Math.max(1, rectH).toFixed(2)}" rx="${radius}" ry="${radius}" fill="${escapeMontageSnapshotSvg(fill)}" fill-opacity="${opacity.toFixed(3)}" />
+        <text x="${textX.toFixed(2)}" y="${textY.toFixed(2)}" text-anchor="middle" dominant-baseline="central" font-family="${escapeMontageSnapshotSvg(fontFamily)}" font-size="${fontSize}" font-weight="${escapeMontageSnapshotSvg(fontWeight)}" font-style="${escapeMontageSnapshotSvg(fontStyle)}" fill="#020617">${escapeMontageSnapshotSvg(text)}</text>
+      </svg>
+    `.trim();
+  } catch (_) {
+    return "";
+  } finally {
+    try { host.remove(); } catch (_) {}
+  }
+}
+
 function renderMontageOnScreenTextSnapshotBlob(plan = null) {
   return new Promise((resolve, reject) => {
     if (!plan || typeof plan !== "object") {
@@ -3727,7 +3798,8 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
       ? html
       : `<div xmlns="http://www.w3.org/1999/xhtml">${html}</div>`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${xhtml}</foreignObject></svg>`;
-    const svgQueue = [svg, fallbackSvg].filter(Boolean);
+    const measuredKaraokeSvg = buildMeasuredMontageKaraokeSnapshotSvg(plan, width, height, html);
+    const svgQueue = [measuredKaraokeSvg, svg, fallbackSvg].filter(Boolean);
     let queueIndex = 0;
     const img = new Image();
     const cleanup = () => {};

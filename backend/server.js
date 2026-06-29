@@ -13345,12 +13345,18 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           substage: currentSceneSubstage
         }));
         if (hasCustomBg && !hasVideoAssetSource) {
+          const bgCanvas = resolveMontageCanvasSize(
+            1280,
+            720,
+            input?.resolution || "source",
+            input?.reelModeEnabled === true
+          );
           const grad = parseBackgroundGradient(entry.backgroundColor);
           let ppmContent = "";
           if (grad) {
-            ppmContent = generateGradientPpm(grad.color1, grad.color2, 256, 144);
+            ppmContent = generateGradientPpm(grad.color1, grad.color2, bgCanvas.width, bgCanvas.height);
           } else {
-            ppmContent = generateSolidPpm(entry.backgroundColor, 1, 1);
+            ppmContent = generateSolidPpm(entry.backgroundColor, bgCanvas.width, bgCanvas.height);
           }
           inputVisualPath = path.join(tmpDir, `scene-bg-${sceneIndex}-${Date.now()}.ppm`);
           fs.writeFileSync(inputVisualPath, ppmContent, "utf8");
