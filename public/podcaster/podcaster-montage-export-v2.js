@@ -166,7 +166,7 @@ export async function runMontageExportV2() {
       { tone: "neutral" }
     );
 
-    const prepared = await buildMontageExportPayloadForSubmission(session, { renderOnScreenTextFrames: true });
+    const prepared = await buildMontageExportPayloadForSubmission(session, { renderOnScreenTextFrames: false });
     if (!prepared?.ok || !prepared?.payload) {
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
       return;
@@ -186,7 +186,8 @@ export async function runMontageExportV2() {
       timingEntries: previewRuntime.entries.length,
       timingSegments: previewRuntime.entries.reduce((acc, entry) => acc + (Array.isArray(entry.timingSegments) ? entry.timingSegments.length : 0), 0),
       onScreenTextSegments: Array.isArray(payload.onScreenTextTimeline?.segments) ? payload.onScreenTextTimeline.segments.length : 0,
-      renderedTextSegments: Array.isArray(payload.onScreenTextRenderedSegments) ? payload.onScreenTextRenderedSegments.length : 0
+      renderedTextSegments: 0,
+      onScreenTextMode: "ass"
     });
 
     const exportV2Endpoint = buildMontageExportV2Endpoint("/api/podcaster/montage/export-v2");

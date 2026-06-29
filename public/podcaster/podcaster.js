@@ -43,7 +43,7 @@ import {
 import {
   handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick,
   runMontageExportV2 as runMontageExport
-} from "./podcaster-montage-export-v2.js?v=2026-06-28.1";
+} from "./podcaster-montage-export-v2.js?v=2026-06-29.2";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
