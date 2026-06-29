@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.315",
-  "build": "2026-1.0.10.315",
+  "version": "1.0.10.316",
+  "build": "2026-1.0.10.316",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El build de charly-brown-gemini-backend y gemini-veo omite la instalación/verificación de Playwright browsers, evitando la descarga de Playwright FFmpeg; solo snoopy-export y el worker de export mantienen Chromium/FFmpeg para render MP4.",
     "Corregido: charly-brown-gemini-backend ya no inicializa FFmpeg ni la cola BullMQ de export al arrancar; FFmpeg queda lazy y solo habilitado para el rol export/all, manteniendo el export MP4 exclusivamente en snoopy-export/worker.",
     "Corregido: api-client fuerza /api para /api/podcaster/* en producción sin depender de allowSameOriginApi, evitando que sessions/list siga saliendo a charly-brown-gemini-backend.onrender.com si runtime-config llega tarde o heredado. Se incrementa api-client.js a la v2026-06-26.7 y podcaster.js a la v2026-06-29.11.",
     "Corregido: El endpoint export-v2 de Podcaster vuelve a encolar en BullMQ siempre que la cola exista, aunque MONTAGE_EXPORT_USE_QUEUE llegue falso en un deploy viejo, para impedir que snoopy-export ejecute FFmpeg en el web service y sea reiniciado por Render durante scene_ffmpeg_render.",

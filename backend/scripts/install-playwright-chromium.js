@@ -6,11 +6,13 @@ const { spawnSync } = require("node:child_process");
 
 const args = new Set(process.argv.slice(2));
 const verifyOnly = args.has("--verify-only");
+const isPostinstall = args.has("--postinstall");
 const backendRoot = path.resolve(__dirname, "..");
 const browserPath = path.resolve(
   String(process.env.PLAYWRIGHT_BROWSERS_PATH || "").trim()
   || path.join(backendRoot, ".playwright-browsers")
 );
+const backendServiceRole = String(process.env.BACKEND_SERVICE_ROLE || process.env.CHARLY_BACKEND_ROLE || "").trim().toLowerCase();
 
 function findChromiumExecutable(baseDir = "") {
   const cleanBase = path.resolve(String(baseDir || "").trim());
@@ -51,6 +53,11 @@ if (!verifyOnly && (
   || String(process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD || "").trim() === "1"
 )) {
   log("skipped", "SKIP_PLAYWRIGHT_BROWSER_INSTALL/PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD is set.");
+  process.exit(0);
+}
+
+if (isPostinstall && backendServiceRole && backendServiceRole !== "export" && backendServiceRole !== "all") {
+  log("skipped", `service role ${backendServiceRole} does not need Playwright browsers.`);
   process.exit(0);
 }
 

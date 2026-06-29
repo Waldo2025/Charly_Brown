@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     rootDir: .
-    buildCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm install --prefix backend && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm run verify:chromium --prefix backend
+    buildCommand: BACKEND_SERVICE_ROLE=gemini SKIP_PLAYWRIGHT_BROWSER_INSTALL=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --prefix backend
     startCommand: node backend/server.js
     healthCheckPath: /api/health
     autoDeploy: true
@@ -13,8 +13,6 @@ services:
         value: 22.14.0
       - key: NODE_OPTIONS
         value: --max-old-space-size=1024
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/project/src/backend/.playwright-browsers
       - key: API_HOST
         value: 0.0.0.0
       - key: BACKEND_SERVICE_ROLE
@@ -43,7 +41,7 @@ services:
     runtime: node
     plan: starter
     rootDir: .
-    buildCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm install --prefix backend && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm run verify:chromium --prefix backend
+    buildCommand: BACKEND_SERVICE_ROLE=gemini-veo SKIP_PLAYWRIGHT_BROWSER_INSTALL=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --prefix backend
     startCommand: node backend/server.js
     healthCheckPath: /api/health
     autoDeploy: true
@@ -52,8 +50,6 @@ services:
         value: 22.14.0
       - key: NODE_OPTIONS
         value: --max-old-space-size=1024
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/project/src/backend/.playwright-browsers
       - key: API_HOST
         value: 0.0.0.0
       - key: BACKEND_SERVICE_ROLE
