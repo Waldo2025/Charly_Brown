@@ -5,7 +5,7 @@ import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-17
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.3";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-26.8";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
   collection,
   deleteDoc,
@@ -46,7 +46,7 @@ import {
 } from "./podcaster-montage-export-v2.js?v=2026-06-29.20";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
-import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
+import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-06-29.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-29.1";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-26.8";
@@ -1373,11 +1373,51 @@ const {
   isStaleDialogueVideoSource
 } = podcasterMediaRuntimeApi;
 
+function normalizePodcasterStorageSegment(value = "", fallback = "item") {
+  const clean = String(value || "").trim().toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return clean || fallback;
+}
+
+function normalizePodcasterStoragePathSegment(value = "", fallback = "item") {
+  const clean = String(value || "").trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return clean || fallback;
+}
+
+async function uploadReferenceImageToStorage(reference = null, options = {}) {
+  const activeSession = getActiveSession();
+  const sessionId = String(activeSession?.id || "").trim();
+  const uid = String(resolveCurrentUid() || "").trim();
+  const dataUrl = String(reference?.dataUrl || "").trim();
+  if (!sessionId || !uid || !dataUrl.startsWith("data:image/")) return null;
+  const mimeType = String(reference?.mimeType || dataUrl.match(/^data:([^;,]+)/i)?.[1] || "image/jpeg").trim().toLowerCase() || "image/jpeg";
+  const extension = mimeType.includes("png")
+    ? "png"
+    : (mimeType.includes("webp") ? "webp" : (mimeType.includes("gif") ? "gif" : "jpg"));
+  const scope = normalizePodcasterStorageSegment(options.scope || "reference", "reference");
+  const id = normalizePodcasterStorageSegment(options.id || reference?.name || reference?.localMediaCacheKey || `${Date.now()}`, "item");
+  const storagePath = `podcaster/sessions/${normalizePodcasterStoragePathSegment(sessionId, "session")}/owners/${normalizePodcasterStoragePathSegment(uid, "uid")}/references/${scope}/${id}-${Date.now()}.${extension}`;
+  const storageRef = ref(getStorage(), storagePath);
+  await uploadString(storageRef, dataUrl, "data_url", { contentType: mimeType });
+  const downloadUrl = await getDownloadURL(storageRef);
+  return {
+    downloadUrl,
+    storagePath,
+    mimeType
+  };
+}
+
 const podcasterMediaReferenceApi = createPodcasterMediaReferenceApi({
   getElements: () => els,
   getActiveSession,
   nowIso,
   readDataUrlFromFile: window.readDataUrlFromFile,
+  uploadReferenceImageToStorage,
   buildImageReferenceRecordFromMedia,
   normalizeMediaReferenceFromRecord,
   MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS,
@@ -17128,6 +17168,7 @@ function attachEvents() {
       }
       if (!isLiveInput) {
         renderCreativeVideoShell(getActiveSession());
+        scheduleSessionLocalPersist(field === "durationSec" ? "structure" : "script-edit");
       }
       if (els.montageExportModal && !els.montageExportModal.hidden) {
         scheduleMontageExportPreviewRefresh(isLiveInput ? 320 : 120);

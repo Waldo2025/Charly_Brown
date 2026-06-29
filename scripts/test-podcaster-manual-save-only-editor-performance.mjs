@@ -19,8 +19,8 @@ assert.match(
 
 assert.match(
   source,
-  /function scheduleSessionLocalPersist\(reason = ""\) \{\n\s+if \(PODCAST_SESSION_MANUAL_SAVE_ONLY === true\) return;/,
-  "El autosave local diferido debe desactivarse en modo guardado manual."
+  /function scheduleSessionLocalPersist\(reason = ""\) \{[\s\S]*persistSessions\(\);[\s\S]*sessionStore\.markDirty\(/m,
+  "El autosave local diferido debe persistir localStorage y marcar dirty sin guardar automáticamente en Firebase."
 );
 
 assert.match(
@@ -49,14 +49,20 @@ assert.match(
 
 assert.doesNotMatch(
   scriptFieldHandlerMatch[1],
-  /scheduleSessionLocalPersist\(/,
-  "La edición de campos de escena ya no debe programar autosave local."
+  /if \(isLiveInput\) \{\s*[^}]*scheduleSessionLocalPersist\(/,
+  "La edición por tecla no debe programar persistencia local en cada input."
+);
+
+assert.match(
+  scriptFieldHandlerMatch[1],
+  /const scheduleConfirmedLocalPersist = \(\) => \{[\s\S]*if \(isLiveInput\) return;[\s\S]*window\.scheduleSessionLocalPersist\(sessionUpdateReason\);[\s\S]*\};/m,
+  "La edición confirmada de campos de escena debe persistir localmente para sobrevivir reloads."
 );
 
 assert.match(
   source,
-  /const handleCreativeField = \(event\) => \{[\s\S]*const isLiveInput = String\(event\?\.type \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "input";[\s\S]*persist: false,[\s\S]*recordHistory: !isLiveInput,[\s\S]*if \(!isLiveInput\) \{\n\s+renderCreativeVideoShell\(getActiveSession\(\)\);\n\s+\}/m,
-  "El inspector creativo no debe reconstruir el shell completo por cada tecla."
+  /const handleCreativeField = \(event\) => \{[\s\S]*const isLiveInput = String\(event\?\.type \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "input";[\s\S]*persist: false,[\s\S]*recordHistory: !isLiveInput,[\s\S]*if \(!isLiveInput\) \{\n\s+renderCreativeVideoShell\(getActiveSession\(\)\);\n\s+scheduleSessionLocalPersist\(field === "durationSec" \? "structure" : "script-edit"\);[\s\S]*\}/m,
+  "El inspector creativo debe evitar reconstruir por tecla y persistir localmente al confirmar cambios."
 );
 
 console.log("Podcaster manual-save-only editor performance OK.");

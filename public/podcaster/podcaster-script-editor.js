@@ -726,6 +726,12 @@ function handleScriptFieldUpdate(event) {
     recordHistory: !isLiveInput,
     autosaveReason: sessionUpdateReason
   };
+  const scheduleConfirmedLocalPersist = () => {
+    if (isLiveInput) return;
+    if (typeof window.scheduleSessionLocalPersist === "function") {
+      window.scheduleSessionLocalPersist(sessionUpdateReason);
+    }
+  };
   const rawValue = field === "durationSec"
     ? Number(target.value || 0)
     : field === "disfluencyEnabled" || field === "stutterEnabled" || field === "relateWithPreviousScene"
@@ -780,6 +786,7 @@ function handleScriptFieldUpdate(event) {
     if (typeof window.syncRowDisfluencyModal === "function") {
       window.syncRowDisfluencyModal(window.getActiveSession());
     }
+    scheduleConfirmedLocalPersist();
     return;
   }
   const value = field === "speaker" ? window.normalizeSpeakerLabel(rawValue, "Host A") : rawValue;
@@ -813,6 +820,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { ...baseSessionUpdateOptions, render: false });
+    scheduleConfirmedLocalPersist();
     return;
   }
 
@@ -845,6 +853,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
+    scheduleConfirmedLocalPersist();
     return;
   }
   if (field === "videoDirective") {
@@ -864,6 +873,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
+    scheduleConfirmedLocalPersist();
     return;
   }
   if (field === "imagePrompts") {
@@ -887,6 +897,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
+    scheduleConfirmedLocalPersist();
     return;
   }
   if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec")) {
@@ -950,6 +961,7 @@ function handleScriptFieldUpdate(event) {
         window.scheduleMontageExportPreviewRefresh(isLiveInput ? 320 : 120);
       }
     }
+    scheduleConfirmedLocalPersist();
     return;
   }
   window.upsertActiveSession((current) => ({
@@ -1010,6 +1022,7 @@ function handleScriptFieldUpdate(event) {
       window.scheduleMontageExportPreviewRefresh(isLiveInput ? 320 : 120);
     }
   }
+  scheduleConfirmedLocalPersist();
 }
 
 // --- Module Exports & API ---

@@ -233,6 +233,21 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       normalized.localMediaCacheKey
       || buildReferenceMediaCacheKey(options.scope, options.id || normalized.name, options.kind || "image")
     ).trim();
+    let uploaded = null;
+    if (options.kind !== "video" && typeof deps.uploadReferenceImageToStorage === "function") {
+      try {
+        uploaded = await deps.uploadReferenceImageToStorage({
+          ...normalized,
+          dataUrl,
+          localMediaCacheKey: cacheKey
+        }, {
+          scope: options.scope,
+          id: options.id || normalized.name
+        });
+      } catch (_) {
+        uploaded = null;
+      }
+    }
     try {
       await putPodcasterLocalMediaDataUrl(cacheKey, dataUrl, {
         mimeType: normalized.mimeType,
@@ -240,10 +255,21 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       });
       return {
         ...normalized,
+        ...(uploaded && typeof uploaded === "object" ? {
+          downloadUrl: String(uploaded.downloadUrl || normalized.downloadUrl || "").trim(),
+          storagePath: String(uploaded.storagePath || normalized.storagePath || "").trim()
+        } : {}),
         localMediaCacheKey: cacheKey
       };
     } catch (_) {
-      return normalized;
+      return {
+        ...normalized,
+        ...(uploaded && typeof uploaded === "object" ? {
+          downloadUrl: String(uploaded.downloadUrl || normalized.downloadUrl || "").trim(),
+          storagePath: String(uploaded.storagePath || normalized.storagePath || "").trim()
+        } : {}),
+        localMediaCacheKey: cacheKey
+      };
     }
   }
 
@@ -796,4 +822,3 @@ Object.assign(window, {
 // setRowReferenceVideo(rowId = "", reference = null)
 // renderPodcastVideoShell?.(refreshed);
 // void persistRowReferencesToCloud(refreshed);
-

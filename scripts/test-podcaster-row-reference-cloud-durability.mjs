@@ -7,11 +7,27 @@ const mediaReferenceSource = readFileSync(
   new URL("../public/podcaster/podcaster-media-reference.js", import.meta.url),
   "utf8"
 );
+const podcasterSource = readFileSync(
+  new URL("../public/podcaster/podcaster.js", import.meta.url),
+  "utf8"
+);
 
 assert.match(
   mediaReferenceSource,
   /saveSessionToCloud/,
   "Las referencias de escena deben tener fallback a guardado cloud completo cuando el patch no basta."
+);
+
+assert.match(
+  podcasterSource,
+  /uploadString\(storageRef,\s*dataUrl,\s*"data_url"/,
+  "Las referencias de imagen por escena deben subirse a Firebase Storage cuando vienen como dataUrl local."
+);
+
+assert.match(
+  mediaReferenceSource,
+  /uploadReferenceImageToStorage/,
+  "El módulo de referencias debe invocar la subida a Storage antes de persistir referencias de imagen."
 );
 
 const makeChat = (count = 0, size = 0) => Array.from({ length: count }, (_, index) => ({
