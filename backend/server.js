@@ -8443,11 +8443,16 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
 
     const pollUntilDone = async (operationName = "", options = {}) => {
       const maxAttempts = Math.max(12, Math.min(54, Math.floor(Number(options?.maxAttempts || 54) || 54)));
-      const delayMs = 5000;
+      const baseDelayMs = 10000;
+      const computePollDelayMs = (attempt = 0) => {
+        const attemptGroup = Math.max(0, Math.floor(Number(attempt) || 0));
+        const multiplier = Math.min(6, 1 + Math.floor(attemptGroup / 4));
+        return Math.min(30000, baseDelayMs * multiplier);
+      };
       const requireResolvedMedia = options?.requireResolvedMedia === true;
       const resolveResult = typeof options?.resolveResult === "function" ? options.resolveResult : null;
       const postDoneGraceAttempts = Math.max(0, Math.floor(Number(options?.postDoneGraceAttempts || 0) || 0));
-      const postDoneGraceDelayMs = Math.max(250, Number(options?.postDoneGraceDelayMs || delayMs) || delayMs);
+      const postDoneGraceDelayMs = Math.max(250, Number(options?.postDoneGraceDelayMs || baseDelayMs) || baseDelayMs);
       const onPoll = typeof options?.onPoll === "function" ? options.onPoll : null;
       let latest = null;
       let doneWithoutMediaAttempts = 0;
@@ -8485,7 +8490,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           continue;
         }
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await new Promise((resolve) => setTimeout(resolve, computePollDelayMs(attempt)));
       }
       const err = new Error("Tiempo de espera agotado al generar video de diálogo.");
       err.status = 504;
