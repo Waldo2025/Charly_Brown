@@ -3221,6 +3221,14 @@ function sanitizePodcasterSession(raw = {}) {
     nextRow.onScreenText = clampText(row?.onScreenText || row?.["Texto en pantalla"] || row?.["Texto en Pantalla"] || "", 1600);
     nextRow.visualNotes = clampText(row?.visualNotes || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "", 5000);
     nextRow.visualNotesProposal = clampText(row?.visualNotesProposal || "", 5000);
+    nextRow.publicSceneLibraryId = clampText(row?.publicSceneLibraryId || "", 140);
+    nextRow.publicScenePublishedAt = clampText(row?.publicScenePublishedAt || "", 64);
+    nextRow.publicSceneTitle = clampText(row?.publicSceneTitle || "", 220);
+    nextRow.publicSceneThumbUrl = clampText(row?.publicSceneThumbUrl || "", 3000);
+    nextRow.publicSceneVideoUrl = clampText(row?.publicSceneVideoUrl || "", 3000);
+    nextRow.publicSceneVideoStoragePath = clampText(row?.publicSceneVideoStoragePath || "", 700);
+    nextRow.publicSceneThumbStoragePath = clampText(row?.publicSceneThumbStoragePath || "", 700);
+    nextRow.sourcePublicSceneLibraryId = clampText(row?.sourcePublicSceneLibraryId || "", 140);
     nextRow.visualNotesProposals = normalizeProposalList(row?.visualNotesProposals);
     nextRow.visualNotesResolvedProposals = normalizeProposalList(row?.visualNotesResolvedProposals);
     
@@ -8837,16 +8845,16 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         aspectRatio: isReel ? "9:16" : "16:9"
       };
     }
+    const requestRequiresSceneReference = referenceMode === "image" && sceneReferenceAssets.length > 0 && !strictIdentity;
     const requestedMaxVariantAttempts = Math.max(1, Math.min(
       requestVariants.length || 1,
       Math.floor(clampNumber(req.body?.maxVariantAttempts, 1, requestVariants.length || 1, requestVariants.length || 1))
     ));
-    const effectiveRequestVariants = requestVariants.slice(0, requestedMaxVariantAttempts);
+    const effectiveRequestVariants = requestVariants.slice(0, requestRequiresSceneReference ? 1 : requestedMaxVariantAttempts);
     const requestedMaxOperationPollAttempts = Math.max(12, Math.min(
       54,
       Math.floor(clampNumber(req.body?.maxOperationPollAttempts, 12, 54, 54))
     ));
-    const requestRequiresSceneReference = referenceMode === "image" && sceneReferenceAssets.length > 0 && !strictIdentity;
     const sceneReferenceCompatibleModels = requestRequiresSceneReference
       ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || ""))))
       : [];
@@ -15796,7 +15804,8 @@ async function uploadSceneLibraryVideo({
   mimeType = "video/mp4",
   libraryId = ""
 }) {
-  const sourceStoragePath = String(storagePath || "").trim();
+  const inferredStoragePath = normalizeStorageFilePath(downloadUrl);
+  const sourceStoragePath = String(storagePath || inferredStoragePath || "").trim();
   const sourceDownloadUrl = String(downloadUrl || "").trim();
   if (!sourceStoragePath && !sourceDownloadUrl) {
     throw new Error("Falta video de origen para publicar la escena.");
