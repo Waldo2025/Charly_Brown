@@ -19,6 +19,24 @@ function shouldContinueVariantFallback(options = {}) {
   };
 }
 
+function veoModelSupportsReferenceImages(modelName = "") {
+  return String(modelName || "").trim() === "veo-3.1-generate-preview";
+}
+
+function veoVariantUsesReferenceImages(variant = {}) {
+  const instances = Array.isArray(variant?.body?.instances) ? variant.body.instances : [];
+  return instances.some((instance) => Array.isArray(instance?.referenceImages) && instance.referenceImages.length > 0);
+}
+
+function filterVeoVariantsForModel(variants = [], modelName = "") {
+  const list = Array.isArray(variants) ? variants : [];
+  if (veoModelSupportsReferenceImages(modelName)) return list;
+  return list.filter((variant) => !veoVariantUsesReferenceImages(variant));
+}
+
 module.exports = {
-  shouldContinueVariantFallback
+  filterVeoVariantsForModel,
+  shouldContinueVariantFallback,
+  veoModelSupportsReferenceImages,
+  veoVariantUsesReferenceImages
 };

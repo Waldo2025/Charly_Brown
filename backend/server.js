@@ -44,6 +44,7 @@ const {
   createMontageExportCancelController
 } = require("./montage-export/cancel-controller.js");
 const {
+  filterVeoVariantsForModel,
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 const {
@@ -8819,18 +8820,26 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     });
 
     for (const videoModel of effectiveVideoModels) {
+      const modelRequestVariants = filterVeoVariantsForModel(effectiveRequestVariants, videoModel);
+      if (!modelRequestVariants.length) {
+        traceReferenceVideo("model-skipped-no-compatible-variants", {
+          model: videoModel,
+          requestedVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim()).filter(Boolean)
+        });
+        continue;
+      }
       let modelReturnedDoneWithoutMedia = false;
-      for (const [variantIndex, variant] of effectiveRequestVariants.entries()) {
+      for (const [variantIndex, variant] of modelRequestVariants.entries()) {
         traceReferenceVideo("variant-start", {
           model: videoModel,
           variant: String(variant?.label || "").trim(),
           variantIndex: variantIndex + 1,
-          variantCount: effectiveRequestVariants.length
+          variantCount: modelRequestVariants.length
         });
         updateDialogueVideoJob({
           status: "running",
           stage: "request_variant",
-          progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, effectiveRequestVariants.length)) * 0.2))),
+          progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, modelRequestVariants.length)) * 0.2))),
           hint: `Probando ${videoModel} · ${String(variant?.label || "").trim() || "variant"}.`,
           model: videoModel,
           variant: String(variant?.label || "").trim(),
@@ -8972,7 +8981,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             status: lastStatus,
             reason: "done_without_media",
             variantIndex,
-            variantCount: effectiveRequestVariants.length
+            variantCount: modelRequestVariants.length
           });
           traceReferenceVideo("variant-finished-without-media", {
             model: videoModel,
@@ -9041,6 +9050,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           failedModel: videoModel,
           nextCandidates: effectiveVideoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
           attemptedVariants: effectiveRequestVariants.length,
+          compatibleVariants: modelRequestVariants.length,
           lastErrorDetail
         });
         updateDialogueVideoJob({

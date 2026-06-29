@@ -2,6 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  filterVeoVariantsForModel,
+  veoModelSupportsReferenceImages,
+  veoVariantUsesReferenceImages,
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 
@@ -28,4 +31,40 @@ test("stops current model fallback when no variants remain", () => {
 
   assert.equal(decision.continueCurrentModel, false);
   assert.equal(decision.remainingVariants, 0);
+});
+
+test("recognizes only the Veo 3.1 standard preview model as supporting referenceImages", () => {
+  assert.equal(veoModelSupportsReferenceImages("veo-3.1-generate-preview"), true);
+  assert.equal(veoModelSupportsReferenceImages("veo-3.1-fast-generate-preview"), false);
+  assert.equal(veoModelSupportsReferenceImages("veo-3.1-lite-generate-preview"), false);
+  assert.equal(veoModelSupportsReferenceImages("veo-2.0-generate-001"), false);
+});
+
+test("detects and filters referenceImages variants for unsupported models", () => {
+  const referenceVariant = {
+    label: "reference-scene+aspect+duration",
+    body: {
+      instances: [{
+        prompt: "Generate a short scene.",
+        referenceImages: [{ referenceType: "asset", image: { bytesBase64Encoded: "abc", mimeType: "image/png" } }]
+      }]
+    }
+  };
+  const textVariant = {
+    label: "text-only+aspect+duration",
+    body: {
+      instances: [{ prompt: "Generate a short scene." }]
+    }
+  };
+
+  assert.equal(veoVariantUsesReferenceImages(referenceVariant), true);
+  assert.equal(veoVariantUsesReferenceImages(textVariant), false);
+  assert.deepEqual(
+    filterVeoVariantsForModel([referenceVariant, textVariant], "veo-2.0-generate-001"),
+    [textVariant]
+  );
+  assert.deepEqual(
+    filterVeoVariantsForModel([referenceVariant, textVariant], "veo-3.1-generate-preview"),
+    [referenceVariant, textVariant]
+  );
 });
