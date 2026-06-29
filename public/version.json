@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.309",
-  "build": "2026-1.0.10.309",
+  "version": "1.0.10.310",
+  "build": "2026-1.0.10.310",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Podcaster vuelve a consultar sesiones autenticadas por el proxy same-origin /api en vez de preferir Render/Gemini directo, evitando CORS cuando el backend remoto responde 502; además export-v2 reporta queue_unavailable si Redis rechaza el enqueue. Se incrementan podcaster.js, podcaster-montage-export.js y podcaster-montage-export-v2.js a la v2026-06-29.8.",
     "Corregido: La cola BullMQ del export MP4 de Podcaster ahora encola solo jobId/sessionId/ownerId/baseUrl y el worker carga el request persistido desde Firestore, evitando OOM/maxmemory en Render Key Value/Redis por serializar el montaje completo.",
     "Corregido: La preparación del export MP4 de Podcaster ya no descarga desde el frontend audios/videos remotos que ya tienen storagePath, evitando 502/CORS de proxy-media al abrir el modal mientras el worker backend puede resolver esos assets server-side. Se incrementan podcaster.js, podcaster-montage-export.js y podcaster-montage-export-v2.js a la v2026-06-29.7.",
     "Corregido: El export MP4 FFmpeg v2 se encola siempre que BullMQ/Redis esté disponible para aislar el render pesado en el worker de Render y evitar que snoopy-export reinicie el web service con 502 durante scene_ffmpeg_render.",

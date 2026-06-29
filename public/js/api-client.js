@@ -222,7 +222,7 @@ export async function authFetch(url, options = {}) {
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, preferRemote = auth, ...requestOptions } = options || {};
+  const { auth = true, preferRemote = false, ...requestOptions } = options || {};
   const finalUrl = auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url);
   const baseHeaders = { ...(requestOptions.headers || {}) };
   const buildRequestInit = async (forceRefresh = false) => {
@@ -250,7 +250,7 @@ export async function authFetchJson(url, options = {}) {
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, preferRemote = auth, ...requestOptions } = options || {};
+  const { auth = true, preferRemote = false, ...requestOptions } = options || {};
   const finalUrl = auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url);
   const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};

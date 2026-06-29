@@ -14308,22 +14308,52 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
     });
     upsertMontageExportJob(jobId, initial);
 
-    if (montageExportQueue) {
+    if (montageExportQueue && isMontageExportQueueSubmissionEnabled()) {
       console.info("[backend][montage-export-v2][enqueue]", {
         jobId,
         mode: "queue",
         renderPipeline: "ffmpeg-preview-runtime-v2",
         reason: "v2_requires_worker_isolation"
       });
-      await montageExportQueue.enqueueExportJob({
+      try {
+        await montageExportQueue.enqueueExportJob({
+          jobId,
+          sessionId: input.sessionId,
+          ownerId: uid,
+          baseUrl
+        });
+        return res.status(202).json({
+          ...sanitizeMontageExportJobPublicPayload(initial),
+          renderPipeline: "ffmpeg-preview-runtime-v2"
+        });
+      } catch (enqueueErr) {
+        console.error("[backend][montage-export-v2][enqueue-failed]", {
+          jobId,
+          code: String(enqueueErr?.code || "").trim() || null,
+          message: String(enqueueErr?.message || enqueueErr || "montage_export_queue_enqueue_failed").trim()
+        });
+        await montageExportJobStore.updateJob(jobId, {
+          status: "error",
+          stage: "queue_unavailable",
+          progress: 0,
+          hint: "No se pudo conectar con la cola Redis de export.",
+          error: {
+            code: "montage_export_queue_enqueue_failed",
+            message: String(enqueueErr?.message || enqueueErr || "No se pudo encolar el export MP4.").trim()
+          },
+          updatedAt: new Date().toISOString()
+        }).catch(() => {});
+        return res.status(503).json({
+          error: "montage_export_queue_enqueue_failed",
+          code: "montage_export_queue_enqueue_failed",
+          detail: { jobId }
+        });
+      }
+    } else if (montageExportQueue) {
+      console.info("[backend][montage-export-v2] Redis queue configured but direct export mode is active", {
         jobId,
-        sessionId: input.sessionId,
-        ownerId: uid,
-        baseUrl
-      });
-      return res.status(202).json({
-        ...sanitizeMontageExportJobPublicPayload(initial),
-        renderPipeline: "ffmpeg-preview-runtime-v2"
+        queueSubmissionEnabled: false,
+        requireQueue: isMontageExportQueueRequired() === true
       });
     }
 
@@ -14526,7 +14556,26 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         });
         return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
       } catch (enqueueErr) {
-        console.error("[backend][montage-export] Failed to enqueue to BullMQ, falling back to direct run:", enqueueErr.message || enqueueErr);
+        console.error("[backend][montage-export] Failed to enqueue to BullMQ:", enqueueErr.message || enqueueErr);
+        if (isMontageExportQueueRequired()) {
+          await montageExportJobStore.updateJob(jobId, {
+            status: "error",
+            stage: "queue_unavailable",
+            progress: 0,
+            hint: "No se pudo conectar con la cola Redis de export.",
+            error: {
+              code: "montage_export_queue_enqueue_failed",
+              message: String(enqueueErr?.message || enqueueErr || "No se pudo encolar el export MP4.").trim()
+            },
+            updatedAt: new Date().toISOString()
+          }).catch(() => {});
+          return res.status(503).json({
+            error: "montage_export_queue_enqueue_failed",
+            code: "montage_export_queue_enqueue_failed",
+            detail: { jobId }
+          });
+        }
+        console.warn("[backend][montage-export] Falling back to direct run because queue is not required.");
       }
     } else if (montageExportQueue) {
       console.info("[backend][montage-export] Redis queue configured but direct export mode is active", {
