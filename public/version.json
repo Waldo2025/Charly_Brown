@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.329",
-  "build": "2026-1.0.10.329",
+  "version": "1.0.10.330",
+  "build": "2026-1.0.10.330",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Moodle Course vuelve a generar módulos con IA usando POST en /api/gemini/generate, alinea los cache-busters internos de moodleCourse para evitar instancias duplicadas y protege el tour contra QuotaExceededError de localStorage.",
     "Corregido: La generación VEO de escenas vuelve a conservar imagen/video de referencia remotos; el backend normaliza downloadUrl/storagePath correctamente, alinea image/referenceImages al formato oficial de Veo, cuenta esas referencias como input explícito y deja de degradar silenciosamente a text-only cuando no puede cargar la referencia.",
     "Corregido: El karaoke activo del export conserva la tipografia y tamano exactos usando el foreignObject completo del preview con solo el rect medido como fondo; las escenas de fondo solido/gradiente se renderizan como canvas completo sin crop/motion de imagen. Se incrementa podcaster-montage-export.js a la v2026-06-29.20.",
     "Corregido: Los PNGs activos del karaoke vuelven a incluir toda la frase con la palabra resaltada, evitando que el export muestre solo la palabra activa; el frame base se limita a huecos sin palabra activa para no duplicar el texto. Se incrementa podcaster-montage-export.js a la v2026-06-29.19.",
@@ -307,5 +308,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.325"
+  "cache_version": "2026-1.0.10.330"
 }

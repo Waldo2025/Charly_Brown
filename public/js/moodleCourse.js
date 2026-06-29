@@ -33,13 +33,13 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.18';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.19';
 
 import {
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
-} from './moodleClurse-extraFunctions.js?v=2026-1.0.1.14';
+} from './moodleClurse-extraFunctions.js?v=2026-1.0.1.15';
 import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.1.14';
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.1.14";
 import {
@@ -69,7 +69,7 @@ import {
     registrarToggleOriginalActivity,
     quitarActividadOriginalDelContenido,
     sincronizarSnapshotActividadOriginal
-} from "./moodleCourse-originalActivityToggle.js?v=2026-1.0.1.14";
+} from "./moodleCourse-originalActivityToggle.js?v=2026-1.0.1.15";
 import { sanitizeFilename } from "./word-export.js?v=2026-1.0.1.14";
 import {
     FEATURED_SOURCE_MODULE_TYPE,
@@ -8877,11 +8877,20 @@ function finalizarTourAccionesModulo(estadoFinal) {
     limpiarHighlightTourAccionesModulo();
     tourAccionesModuloActivo = false;
     tourAccionesModuloPaso = 0;
-    localStorage.setItem(TOUR_MODULOS_STORAGE_KEY, estadoFinal);
+    try {
+        localStorage.setItem(TOUR_MODULOS_STORAGE_KEY, estadoFinal);
+    } catch (error) {
+        console.warn("[Aprende] No se pudo persistir el estado del tour de módulos.", error);
+    }
 }
 
 function iniciarTourBotonesModuloSiAplica() {
-    const estado = localStorage.getItem(TOUR_MODULOS_STORAGE_KEY);
+    let estado = "";
+    try {
+        estado = localStorage.getItem(TOUR_MODULOS_STORAGE_KEY) || "";
+    } catch (error) {
+        console.warn("[Aprende] No se pudo leer el estado del tour de módulos.", error);
+    }
     if (estado === "done" || estado === "skip") return;
     if (tourAccionesModuloActivo) return;
     if (tourAccionesModuloMostradoEnSesion) return;

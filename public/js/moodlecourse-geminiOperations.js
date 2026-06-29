@@ -1,4 +1,4 @@
-import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.10.52";
+import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.10.64";
 import {
   authFetchJson,
   buildApiUrl,
@@ -125,7 +125,10 @@ async function geminiGenerateRequest(payload = {}, options = {}) {
     const url = candidates[index];
     const isFallbackAttempt = index > 0;
     try {
-      const response = await fetch(url, requestInit);
+      const response = await fetch(url, {
+        ...requestInit,
+        method: "POST"
+      });
       const data = await response.json().catch(() => ({}));
       const shouldRetryRemote =
         !isFallbackAttempt &&
