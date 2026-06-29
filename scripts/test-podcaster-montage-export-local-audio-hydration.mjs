@@ -31,6 +31,12 @@ assert.match(
 
 assert.match(
   exportSource,
+  /const hasStorageBackedRemoteSource = Boolean\(String\(asset\?\.storagePath \|\| ""\)\.trim\(\)\) && !cachedPlaybackBlobUrl;[\s\S]*if \(hasStorageBackedRemoteSource\) \{[\s\S]*url: sourceUrl,[\s\S]*downloadUrl: sourceUrl/,
+  "La hidratación del export no debe descargar desde el frontend assets remotos que ya tienen storagePath; el worker los resuelve server-side."
+);
+
+assert.match(
+  exportSource,
   /const preferredResolver = kind === "audio"[\s\S]*window\.resolveStorageAudioUrl\?\.\(directDownloadUrl, storagePath\)[\s\S]*const fallbackResolver = kind === "audio"[\s\S]*window\.resolveStorageVideoUrl\?\.\(directDownloadUrl, storagePath\)[\s\S]*const resolvedProxyUrl = resolveCandidate\(preferredResolver\) \|\| resolveCandidate\(fallbackResolver\);/,
   "Los assets de audio del export deben resolver primero con resolveStorageAudioUrl y no aceptar un gs:// crudo como URL final."
 );

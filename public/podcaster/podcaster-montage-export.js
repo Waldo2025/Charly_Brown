@@ -3953,6 +3953,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
     ? String(window.playbackController.getBlobUrlSync(sourceUrl) || "").trim()
     : "";
   const effectiveFetchUrl = cachedPlaybackBlobUrl || sourceUrl;
+  const hasStorageBackedRemoteSource = Boolean(String(asset?.storagePath || "").trim()) && !cachedPlaybackBlobUrl;
 
   if (!sourceUrl || sourceUrl.startsWith("gs://")) {
     return {
@@ -3960,6 +3961,14 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
       localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
       url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
       downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
+    };
+  }
+  if (hasStorageBackedRemoteSource) {
+    return {
+      ...asset,
+      localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+      url: sourceUrl,
+      downloadUrl: sourceUrl
     };
   }
 
