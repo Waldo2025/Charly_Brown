@@ -337,7 +337,10 @@ async function loadSessionsFromCloud(uid = "", deps = {}) {
   const deletedSessionIds = new Set(loadDeletedSessionIds(uid, deps, deps.storageAdapter));
   if (deps.hasAvailableApiBase?.()) {
     try {
-      const response = await deps.authFetchJson("/api/podcaster/sessions/list", { method: "GET" });
+      const response = await deps.authFetchJson("/api/podcaster/sessions/list", {
+        method: "GET",
+        preferRemote: false
+      });
       const apiSessions = Array.isArray(response?.sessions) ? response.sessions : [];
       return apiSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
     } catch (_) {
@@ -594,6 +597,7 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
   const response = deps.hasAvailableApiBase?.()
     ? await deps.authFetchJson("/api/podcaster/sessions/save", {
       method: "POST",
+      preferRemote: false,
       body: JSON.stringify({ session: payload })
     })
     : await saveSessionDirectToCloud(payload, deps);
