@@ -8855,7 +8855,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
     ));
     const requestedReferenceModelRetries = requestRequiresSceneReference
-      ? Math.max(1, Math.floor(clampNumber(req.body?.maxModelAttempts, 1, 999, 3)))
+      ? Math.max(1, Math.floor(clampNumber(req.body?.maxModelAttempts, 1, 999, 6)))
       : 1;
     const modelExecutionPlan = requestRequiresSceneReference
       ? [(sceneReferenceCompatibleModels.length ? sceneReferenceCompatibleModels[0] : DEFAULT_PODCASTER_VIDEO_MODEL)]
@@ -8987,26 +8987,28 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
                     modelAttemptLimit
                   });
                 }
-                logHeavyWorkMemory("dialogue_video", "poll_operation", {
-                  jobId,
-                  sessionId,
-                  rowId,
-                  attempt,
-                  maxAttempts
-                });
-                updateDialogueVideoJob({
-                  status: "running",
-                  stage: "poll_operation",
-                  progress: Math.max(0.22, Math.min(0.92, 0.22 + ((attempt / Math.max(1, maxAttempts)) * 0.56))),
-                  hint: `Esperando respuesta de Veo (${attempt}/${maxAttempts}).`,
-                  model: videoModel,
-                  variant: String(variant?.label || "").trim(),
-                  attempt,
-                  segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
-                  segmentCount: Number(req.body?.segmentCount || 0) || 0,
-                  modelAttempt: modelAttempt + 1,
-                  modelAttemptLimit
-                });
+                if (attempt === 1 || attempt % 5 === 0) {
+                  logHeavyWorkMemory("dialogue_video", "poll_operation", {
+                    jobId,
+                    sessionId,
+                    rowId,
+                    attempt,
+                    maxAttempts
+                  });
+                  updateDialogueVideoJob({
+                    status: "running",
+                    stage: "poll_operation",
+                    progress: Math.max(0.22, Math.min(0.92, 0.22 + ((attempt / Math.max(1, maxAttempts)) * 0.56))),
+                    hint: `Esperando respuesta de Veo (${attempt}/${maxAttempts}).`,
+                    model: videoModel,
+                    variant: String(variant?.label || "").trim(),
+                    attempt,
+                    segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
+                    segmentCount: Number(req.body?.segmentCount || 0) || 0,
+                    modelAttempt: modelAttempt + 1,
+                    modelAttemptLimit
+                  });
+                }
               }
             });
           } catch (error) {
