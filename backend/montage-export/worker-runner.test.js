@@ -51,6 +51,60 @@ test("worker runner writes ready result after pipeline success", async () => {
   assert.equal(updates.at(-1).patch.result.storagePath, "podcaster/exports/u/s/job-1.mp4");
 });
 
+test("worker runner loads persisted request input when BullMQ payload is thin", async () => {
+  const updates = [];
+  let receivedInput = null;
+  let receivedOptions = null;
+  const processor = createProcessMontageExportJob({
+    jobStore: {
+      async getJob() {
+        return {
+          status: "queued",
+          progress: 0,
+          sessionId: "session-persisted",
+          ownerId: "user-persisted",
+          request: {
+            baseUrl: "https://persisted.example.com",
+            input: {
+              sessionId: "session-persisted",
+              entries: [{ id: "row-1" }]
+            }
+          }
+        };
+      },
+      async updateJob(jobId, patch) {
+        updates.push({ jobId, patch });
+        return patch;
+      }
+    },
+    executeMontageExportPipeline: async (input, options) => {
+      receivedInput = input;
+      receivedOptions = options;
+      return {
+        export: {
+          storagePath: "podcaster/exports/u/s/job-thin.mp4",
+          downloadUrl: "https://example.com/video.mp4"
+        },
+        downloadUrl: "https://example.com/video.mp4"
+      };
+    },
+    buildMontageSceneFailure: (error) => ({ error: error.message })
+  });
+
+  await processor({
+    data: {
+      jobId: "job-thin",
+      sessionId: "session-thin",
+      ownerId: "user-thin"
+    }
+  });
+
+  assert.deepEqual(receivedInput.entries, [{ id: "row-1" }]);
+  assert.equal(receivedOptions.uid, "user-thin");
+  assert.equal(receivedOptions.baseUrl, "https://persisted.example.com");
+  assert.equal(updates.at(-1).patch.status, "ready");
+});
+
 test("worker runner does not publish ready before the durable result exists", async () => {
   const updates = [];
   const processor = createProcessMontageExportJob({

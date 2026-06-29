@@ -23,7 +23,6 @@ function createMontageExportQueue({
         jobId: String(job.jobId || "").trim(),
         sessionId: String(job.sessionId || "").trim(),
         ownerId: String(job.ownerId || "").trim(),
-        input: job.input && typeof job.input === "object" ? job.input : null,
         baseUrl: String(job.baseUrl || "").trim()
       };
       return queue.add("montage_export", payload, {

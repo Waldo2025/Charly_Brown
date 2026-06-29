@@ -3,7 +3,7 @@ function createProcessMontageExportJob({
   executeMontageExportPipeline,
   buildMontageSceneFailure
 } = {}) {
-  if (!jobStore || typeof jobStore.updateJob !== "function") {
+  if (!jobStore || typeof jobStore.updateJob !== "function" || typeof jobStore.getJob !== "function") {
     throw new Error("montage_export_job_store_required");
   }
   if (typeof executeMontageExportPipeline !== "function") {
@@ -16,10 +16,19 @@ function createProcessMontageExportJob({
   return async (job = {}) => {
     const data = job && typeof job === "object" ? (job.data || {}) : {};
     const jobId = String(data.jobId || "").trim();
-    const input = data.input && typeof data.input === "object" ? data.input : null;
+    const storedJob = jobId ? await jobStore.getJob(jobId).catch(() => null) : null;
+    const storedRequest = storedJob?.request && typeof storedJob.request === "object"
+      ? storedJob.request
+      : null;
+    const input = data.input && typeof data.input === "object"
+      ? data.input
+      : (storedRequest?.input && typeof storedRequest.input === "object" ? storedRequest.input : null);
     if (!jobId || !input) {
       throw new Error("invalid_montage_export_job");
     }
+    const ownerId = String(data.ownerId || storedJob?.ownerId || "").trim();
+    const sessionId = String(data.sessionId || storedJob?.sessionId || input.sessionId || "").trim();
+    const baseUrl = String(data.baseUrl || storedRequest?.baseUrl || "").trim();
 
     let cancelRequested = false;
     let cancelPollTimer = null;
@@ -58,16 +67,16 @@ function createProcessMontageExportJob({
     });
     console.info("[backend][montage-export][job-start]", {
       jobId,
-      sessionId: String(data.sessionId || "").trim(),
-      ownerId: String(data.ownerId || "").trim(),
+      sessionId,
+      ownerId,
       entries: Array.isArray(input?.entries) ? input.entries.length : 0
     });
 
     try {
       const result = await executeMontageExportPipeline(input, {
-        uid: String(data.ownerId || "").trim(),
+        uid: ownerId,
         jobId,
-        baseUrl: String(data.baseUrl || "").trim(),
+        baseUrl,
         shouldAbort: () => cancelRequested,
         onStage: async ({ stage, progress, hint, ...extra }) => {
           if (cancelRequested) return;

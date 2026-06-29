@@ -14319,7 +14319,6 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
         jobId,
         sessionId: input.sessionId,
         ownerId: uid,
-        input,
         baseUrl
       });
       return res.status(202).json({
@@ -14523,7 +14522,6 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
           jobId,
           sessionId: input.sessionId,
           ownerId: uid,
-          input,
           baseUrl
         });
         return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
