@@ -77,6 +77,13 @@ export function canUseSameOriginApi() {
   return isLocalHostRuntime() || window.__CHARLY_CONFIG__?.allowSameOriginApi === true;
 }
 
+function shouldForceSameOriginApiPath(path = "") {
+  if (isLocalHostRuntime()) return false;
+  if (window.__CHARLY_CONFIG__?.allowSameOriginApi !== true) return false;
+  const clean = String(path || "").trim();
+  return clean === "/api/podcaster" || clean.startsWith("/api/podcaster/");
+}
+
 export function hasAvailableApiBase() {
   return Boolean(getConfiguredApiBase()) || canUseSameOriginApi();
 }
@@ -112,7 +119,7 @@ export function buildApiUrl(path = "") {
   if (!input) return resolveApiBase();
   if (/^https?:\/\//i.test(input)) return input;
 
-  const base = resolveApiBase();
+  const base = shouldForceSameOriginApiPath(input) ? DEFAULT_REMOTE_API_BASE_SAFE : resolveApiBase();
   if (!base) return "";
   if (input.startsWith("/api/")) {
     return base.endsWith("/api") ? `${base}${input.slice(4)}` : `${base}${input}`;
@@ -125,6 +132,7 @@ export function buildApiUrlPreferRemote(path = "") {
   const input = String(path || "").trim();
   if (!input) return getRemoteApiBase();
   if (/^https?:\/\//i.test(input)) return input;
+  if (shouldForceSameOriginApiPath(input)) return buildApiUrl(input);
   const resolvedBase = resolveApiBase();
   const remoteBase = getRemoteApiBase();
   if (resolvedBase === "/api" && remoteBase && !isLocalHostRuntime()) {
