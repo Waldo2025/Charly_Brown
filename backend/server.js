@@ -8455,6 +8455,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
       const err = new Error("Tiempo de espera agotado al generar video de diálogo.");
       err.status = 504;
+      err.code = "veo_operation_poll_timeout";
+      err.operationName = operationName;
       err.latest = latest;
       throw err;
     };
@@ -8916,6 +8918,25 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           lastStatus = Number(error?.status || 504) || 504;
           lastErrorDetail = `${videoModel} [${variant.label}]: ${String(error?.message || "Error al esperar operación Veo.")}`;
           attemptErrors.push(lastErrorDetail);
+          if (error?.code === "veo_operation_poll_timeout") {
+            traceReferenceVideo("variant-poll-timeout-stop", {
+              model: videoModel,
+              variant: String(variant?.label || "").trim(),
+              operationName: String(error?.operationName || operationName || "").trim(),
+              maxAttempts: requestedMaxOperationPollAttempts
+            });
+            return res.status(504).json({
+              error: "veo_operation_poll_timeout",
+              code: "veo_operation_poll_timeout",
+              message: "Veo sigue procesando la operación y no devolvió video antes del límite de espera. No se lanzaron variantes adicionales para evitar reiniciar la generación.",
+              detail: {
+                model: videoModel,
+                variant: String(variant?.label || "").trim(),
+                operationName: String(error?.operationName || operationName || "").trim(),
+                maxAttempts: requestedMaxOperationPollAttempts
+              }
+            });
+          }
           continue;
         }
 
