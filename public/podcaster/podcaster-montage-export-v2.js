@@ -1,4 +1,4 @@
-import { authFetchJson, buildExportApiUrl } from "../js/api-client-podcaster.js?v=2026-06-26.7";
+import { authFetchJson, buildExportApiUrl } from "../js/api-client-podcaster.js?v=2026-06-26.8";
 import {
   buildMontageExportPayloadForSubmission,
   clearMontageExportPolling,

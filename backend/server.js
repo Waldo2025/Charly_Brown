@@ -216,20 +216,9 @@ function resolveFfmpegBinaryPath() {
   return staticPath || "ffmpeg";
 }
 
-let ffmpegStaticPath = resolveFfmpegBinaryPath();
+let ffmpegStaticPath = "";
+let ffmpegProbeAttempted = false;
 const MONTAGE_FFMPEG_LOW_MEMORY_ARGS = ["-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1"];
-
-function isFfmpegAvailable() {
-  return !!ffmpegStaticPath;
-}
-
-// Full Startup diagnostic
-try {
-  const versionInfo = execSync(`"${ffmpegStaticPath}" -version`, { encoding: "utf8" });
-  console.log("[backend] selected ffmpeg version:", versionInfo.split("\n")[0]);
-} catch (err) {
-  console.error("[backend] final ffmpeg diagnostic error:", err.message);
-}
 
 function loadLocalEnvFile() {
   const envPath = path.resolve(__dirname, "..", ".env");
@@ -1221,14 +1210,18 @@ const montageExportJobStore = createMontageExportJobStore({ db });
 let montageExportQueue = null;
 let montageExportQueueConfigured = false;
 try {
-  const { resolveRedisConnectionUrl, createBullMqQueue, createMontageExportQueue } = require("./montage-export/queue-bullmq.js");
-  montageExportQueueConfigured = Boolean(resolveRedisConnectionUrl());
-  if (montageExportQueueConfigured) {
-    const queue = createBullMqQueue();
-    montageExportQueue = createMontageExportQueue({ queue });
-    console.info("[backend] BullMQ montage export queue initialized successfully using Redis connection string.");
+  if (EXPORT_SERVICE_ONLY || BACKEND_SERVICE_ROLE === "all") {
+    const { resolveRedisConnectionUrl, createBullMqQueue, createMontageExportQueue } = require("./montage-export/queue-bullmq.js");
+    montageExportQueueConfigured = Boolean(resolveRedisConnectionUrl());
+    if (montageExportQueueConfigured) {
+      const queue = createBullMqQueue();
+      montageExportQueue = createMontageExportQueue({ queue });
+      console.info("[backend] BullMQ montage export queue initialized successfully using Redis connection string.");
+    } else {
+      console.info("[backend] RENDER_KEY_VALUE_CONNECTION_STRING not set. Using direct in-memory setImmediate fallback for export jobs.");
+    }
   } else {
-    console.info("[backend] RENDER_KEY_VALUE_CONNECTION_STRING not set. Using direct in-memory setImmediate fallback for export jobs.");
+    console.info("[backend] montage export queue disabled for service role:", BACKEND_SERVICE_ROLE || "all");
   }
 } catch (err) {
   console.warn("[backend] Failed to initialize BullMQ queue, falling back to direct in-memory execution:", err.message || err);
@@ -4894,7 +4887,18 @@ function getVideoExtension(mimeType = "video/mp4") {
 
 function isFfmpegAvailable() {
   try {
-    return Boolean(ffmpegStaticPath && fs.existsSync(ffmpegStaticPath));
+    if (!(EXPORT_SERVICE_ONLY || BACKEND_SERVICE_ROLE === "all")) return false;
+    if (!ffmpegProbeAttempted) {
+      ffmpegProbeAttempted = true;
+      ffmpegStaticPath = resolveFfmpegBinaryPath();
+      try {
+        const versionInfo = execSync(`"${ffmpegStaticPath}" -version`, { encoding: "utf8" });
+        console.log("[backend] selected ffmpeg version:", versionInfo.split("\n")[0]);
+      } catch (err) {
+        console.error("[backend] final ffmpeg diagnostic error:", err.message);
+      }
+    }
+    return Boolean(ffmpegStaticPath && (fs.existsSync(ffmpegStaticPath) || ffmpegStaticPath === "ffmpeg"));
   } catch (_) {
     return false;
   }

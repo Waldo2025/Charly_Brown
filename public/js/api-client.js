@@ -79,7 +79,6 @@ export function canUseSameOriginApi() {
 
 function shouldForceSameOriginApiPath(path = "") {
   if (isLocalHostRuntime()) return false;
-  if (window.__CHARLY_CONFIG__?.allowSameOriginApi !== true) return false;
   const clean = String(path || "").trim();
   return clean === "/api/podcaster" || clean.startsWith("/api/podcaster/");
 }
