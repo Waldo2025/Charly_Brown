@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.322",
-  "build": "2026-1.0.10.322",
+  "version": "1.0.10.323",
+  "build": "2026-1.0.10.323",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El pill/rect del karaoke en export ya no desplaza la palabra activa ni usa padding uniforme excesivo; ahora la caja se dibuja como fondo absoluto centrado y ajusta padding horizontal para palabras cortas como la, el, de y por. Se incrementan podcaster-on-screen-text.js y podcaster-text-render.js a la v2026-06-29.15.",
     "Corregido: El renderer de texto en pantalla/karaoke deja de caer al estilo Glow por defecto; el export usa Pill como default moderno, conserva redondo/rectangulo cuando se selecciona y el fallback SVG solo aplica glow si el usuario elige explicitamente Glow. Se incrementan podcaster-on-screen-text.js y podcaster-text-render.js a la v2026-06-29.14.",
     "Corregido: Cuando no hay worker BullMQ conectado, el fallback directo de export-v2 ya no usa los PNGs de karaoke como múltiples inputs FFmpeg; usa overlay ASS liviano para evitar que snoopy-export sea reiniciado por Render durante scene_ffmpeg_render.",
     "Corregido: api-client enruta directamente a snoopy-export las rutas de sesiones, librerías, scene-media, montage y proxy assets de Podcaster para conservar Authorization sin depender de redirects cross-origin. Se incrementan api-client.js, api-client-podcaster.js, podcaster.js y export modules.",
@@ -300,5 +301,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.322"
+  "cache_version": "2026-1.0.10.323"
 }

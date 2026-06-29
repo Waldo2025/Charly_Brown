@@ -188,13 +188,34 @@
     };
   }
 
-  function buildKaraokeHighlightInlineStyle(settings = {}) {
+  function resolveKaraokeTokenHighlightPadding(highlight = {}, token = "") {
+    const source = highlight && typeof highlight === "object" ? highlight : {};
+    const cleanToken = String(token || "").trim().replace(/[^\p{L}\p{N}]+/gu, "");
+    const charCount = Array.from(cleanToken).length;
+    const basePadX = Math.max(0, Math.min(40, Math.round(Number(source.paddingX ?? 10) || 0)));
+    const basePadY = Math.max(0, Math.min(28, Math.round(Number(source.paddingY ?? 4) || 0)));
+    let padX = basePadX;
+    if (charCount > 0 && charCount <= 2) {
+      padX = Math.min(basePadX, 5);
+    } else if (charCount === 3) {
+      padX = Math.min(basePadX, 6);
+    } else if (charCount === 4) {
+      padX = Math.min(basePadX, 8);
+    }
+    return {
+      paddingX: Math.max(0, padX),
+      paddingY: basePadY
+    };
+  }
+
+  function buildKaraokeHighlightInlineStyle(settings = {}, token = "") {
     const highlight = resolveKaraokeHighlightSettings(settings);
+    const tokenPadding = resolveKaraokeTokenHighlightPadding(highlight, token);
     return [
       `--pod-karaoke-highlight-color:${escapeHtml(highlight.color)}`,
       `--pod-karaoke-highlight-opacity:${Number(highlight.opacity.toFixed(3))}`,
-      `--pod-karaoke-highlight-pad-x:${highlight.paddingX}px`,
-      `--pod-karaoke-highlight-pad-y:${highlight.paddingY}px`,
+      `--pod-karaoke-highlight-pad-x:${tokenPadding.paddingX}px`,
+      `--pod-karaoke-highlight-pad-y:${tokenPadding.paddingY}px`,
       `--pod-karaoke-highlight-radius:${highlight.radius}px`,
       "font-size: inherit !important"
     ].join(";");
@@ -212,7 +233,7 @@
       if (/^\s+$/.test(token)) return token;
       const isActive = wordIndex === activeIndex;
       const className = `podcast-karaoke-word${isActive ? ` is-active is-highlight-${highlight.style}` : ""}`;
-      const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="${highlightStyle}">${escapeHtml(token)}</span>`;
+      const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="${isActive ? buildKaraokeHighlightInlineStyle(settings, token) : highlightStyle}">${escapeHtml(token)}</span>`;
       wordIndex += 1;
       return html;
     }).join("");
@@ -382,15 +403,31 @@
       }
       .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-pill,
       .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect {
-        padding: var(--pod-karaoke-highlight-pad-y, 4px) var(--pod-karaoke-highlight-pad-x, 10px);
-        border-radius: var(--pod-karaoke-highlight-radius, 12px);
-        background: var(--pod-karaoke-highlight-color, #facc15);
+        display: inline-block;
+        position: relative;
+        line-height: 1.02;
+        vertical-align: -0.04em;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
         color: #020617;
         text-shadow: none;
-        box-decoration-break: clone;
-        -webkit-box-decoration-break: clone;
+        z-index: 0;
       }
-      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect {
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-pill::before,
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect::before {
+        content: "";
+        position: absolute;
+        left: calc(-1 * var(--pod-karaoke-highlight-pad-x, 10px));
+        right: calc(-1 * var(--pod-karaoke-highlight-pad-x, 10px));
+        top: calc(-1 * var(--pod-karaoke-highlight-pad-y, 4px));
+        bottom: calc(-1 * var(--pod-karaoke-highlight-pad-y, 4px));
+        border-radius: var(--pod-karaoke-highlight-radius, 12px);
+        background: var(--pod-karaoke-highlight-color, #facc15);
+        opacity: var(--pod-karaoke-highlight-opacity, 0.92);
+        z-index: -1;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect::before {
         border-radius: min(4px, var(--pod-karaoke-highlight-radius, 4px));
       }
       .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-underline {
@@ -484,8 +521,7 @@
     const style = String(highlight?.style || "pill").trim().toLowerCase();
     if (!(style === "pill" || style === "rect") || activeWordIndex < 0) return "";
     const font = `${fontStyle === "italic" ? "italic " : ""}${fontWeight || "500"} ${Math.max(1, Math.round(Number(fontSizePx || 44) || 44))}px ${fontFamily}`;
-    const padX = Math.max(0, Number(highlight?.paddingX ?? 10) || 0);
-    const padY = Math.max(0, Number(highlight?.paddingY ?? 4) || 0);
+    const basePadY = Math.max(0, Number(highlight?.paddingY ?? 4) || 0);
     const rx = style === "rect"
       ? Math.min(4, Math.max(0, Number(highlight?.radius ?? 4) || 0))
       : Math.max(0, Number(highlight?.radius ?? 12) || 0);
@@ -505,6 +541,9 @@
         const tokenWidth = measureSvgTextWidth(token, font, fontSizePx);
         if (!/^\s+$/.test(token)) {
           if (wordIndex === activeWordIndex) {
+            const tokenPadding = resolveKaraokeTokenHighlightPadding(highlight, token);
+            const padX = tokenPadding.paddingX;
+            const padY = Math.min(basePadY, tokenPadding.paddingY);
             const textY = lineStartY + (lineIndex * lineStepY) + textOffsetYPx;
             const rectX = Math.max(0, lineStartX + cursor - padX);
             const rectY = Math.max(0, textY - (fontSizePx * 0.92) - padY);
