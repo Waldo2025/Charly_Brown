@@ -12,7 +12,7 @@ import {
   setMontageExportDownloadButton,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-29.19";
+} from "./podcaster-montage-export.js?v=2026-06-29.20";
 
 let montageExportV2SubmitLocked = false;
 

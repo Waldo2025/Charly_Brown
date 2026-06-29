@@ -11660,6 +11660,17 @@ function buildMontageImageMotionVideoFilter({
   });
 }
 
+function buildMontageFullCanvasImageVideoFilter({
+  inputLabel = "[0:v]",
+  outputLabel = "vout",
+  canvas = { width: 1280, height: 720 },
+  durationSec = 1
+} = {}) {
+  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
+  return `${inputLabel}scale=${width}:${height}:flags=fast_bilinear,setsar=1,trim=start=0:duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p[${outputLabel}]`;
+}
+
 function buildMontageVideoSceneFilter({
   inputLabel = "[0:v]",
   outputLabel = "vout",
@@ -13320,6 +13331,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       let inputVisualPath = "";
       let inputAudioPath = "";
       const sceneOverlayTempPaths = [];
+      let isGeneratedBackgroundVisual = false;
       try {
         throwIfCancelled(`scene_${sceneIndex}_before_download`);
         const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
@@ -13351,6 +13363,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             input?.resolution || "source",
             input?.reelModeEnabled === true
           );
+          isGeneratedBackgroundVisual = true;
           const grad = parseBackgroundGradient(entry.backgroundColor);
           let ppmContent = "";
           if (grad) {
@@ -13510,7 +13523,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoFilterGraph = videoFilterGraph ? `${videoFilterGraph};${sceneFilter}` : sceneFilter;
         } else {
           const sceneFilter = isImageAsset
-            ? buildMontageImageMotionVideoFilter({
+            ? (isGeneratedBackgroundVisual ? buildMontageFullCanvasImageVideoFilter({
+              inputLabel: "[0:v]",
+              outputLabel: "vout",
+              canvas,
+              durationSec: durSec
+            }) : buildMontageImageMotionVideoFilter({
               inputLabel: "[0:v]",
               outputLabel: "vout",
               canvas,
@@ -13524,7 +13542,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               mediaOffsetXPct,
               mediaOffsetYPct,
               mediaMotionPreset
-            })
+            }))
             : buildMontageVideoSceneFilter({
               inputLabel: previewRuntimeInputLabel,
               outputLabel: "vout",

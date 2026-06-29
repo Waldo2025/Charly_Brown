@@ -3766,6 +3766,30 @@ function parseMontageSnapshotCssPx(value = "", fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function buildMeasuredMontageKaraokeSnapshotHtml(html = "") {
+  const source = String(html || "").trim();
+  if (!source) return "";
+  const withoutActiveOnlyHide = source.replace(
+    /<style>\s*\.podcaster-onscreen-text-raster-shell\s+\.podcast-karaoke-word:not\(\.is-active\)\s*\{\s*visibility:\s*hidden\s*!important;\s*\}\s*<\/style>/i,
+    ""
+  );
+  const overrideStyle = `
+    <style>
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-pill,
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect {
+        color: #020617 !important;
+        text-shadow: none !important;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-pill::before,
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active.is-highlight-rect::before {
+        content: none !important;
+        display: none !important;
+      }
+    </style>
+  `.trim();
+  return withoutActiveOnlyHide.replace("</style>", `</style>${overrideStyle}`);
+}
+
 function buildMeasuredMontageKaraokeSnapshotSvg(plan = null, width = 0, height = 0, html = "") {
   if (!plan || plan.activeOnly !== true || Math.round(Number(plan.activeWordIndex ?? -1) || -1) < 0) return "";
   if (typeof document === "undefined" || !document?.body || !width || !height || !html) return "";
@@ -3803,45 +3827,14 @@ function buildMeasuredMontageKaraokeSnapshotSvg(plan = null, width = 0, height =
     const rectY = Math.max(0, activeRect.top - shellRect.top - padY);
     const rectW = Math.min(width - rectX, activeRect.width + (padX * 2));
     const rectH = Math.min(height - rectY, activeRect.height + (padY * 2));
-    const fontSize = parseMontageSnapshotCssPx(style.fontSize, 44);
-    const fontFamily = String(style.fontFamily || "system-ui, sans-serif").trim() || "system-ui, sans-serif";
-    const fontWeight = String(style.fontWeight || "700").trim() || "700";
-    const fontStyle = String(style.fontStyle || "normal").trim() || "normal";
-    const words = Array.from(host.querySelectorAll(".podcast-karaoke-word")).map((word) => {
-      const wordRect = word.getBoundingClientRect();
-      const wordText = String(word.textContent || "").trim();
-      if (!wordText || !wordRect.width || !wordRect.height) return null;
-      const wordStyle = window.getComputedStyle(word);
-      const wordFontSize = parseMontageSnapshotCssPx(wordStyle.fontSize, fontSize);
-      const wordFill = word.classList.contains("is-active")
-        ? "#020617"
-        : (String(wordStyle.color || "").trim() || "#f8fafc");
-      const strokeWidthRaw = parseMontageSnapshotCssPx(wordStyle.webkitTextStrokeWidth || wordStyle.getPropertyValue("-webkit-text-stroke-width"), 0);
-      return {
-        text: wordText,
-        x: wordRect.left - shellRect.left + (wordRect.width / 2),
-        y: wordRect.top - shellRect.top + (wordRect.height / 2),
-        fontSize: wordFontSize,
-        fontFamily: String(wordStyle.fontFamily || fontFamily).trim() || fontFamily,
-        fontWeight: String(wordStyle.fontWeight || fontWeight).trim() || fontWeight,
-        fontStyle: String(wordStyle.fontStyle || fontStyle).trim() || fontStyle,
-        fill: wordFill,
-        stroke: String(wordStyle.webkitTextStrokeColor || wordStyle.getPropertyValue("-webkit-text-stroke-color") || "#0f172a").trim() || "#0f172a",
-        strokeWidth: Math.max(0, Math.min(10, strokeWidthRaw || Math.max(1.25, wordFontSize * 0.055))),
-        active: word.classList.contains("is-active")
-      };
-    }).filter(Boolean);
-    if (!words.length) return "";
-    const textNodes = words.map((word) => {
-      const strokeAttr = word.active
-        ? ""
-        : ` stroke="${escapeMontageSnapshotSvg(word.stroke)}" stroke-width="${Number(word.strokeWidth).toFixed(2)}" paint-order="stroke fill"`;
-      return `<text x="${word.x.toFixed(2)}" y="${word.y.toFixed(2)}" text-anchor="middle" dominant-baseline="central" font-family="${escapeMontageSnapshotSvg(word.fontFamily)}" font-size="${Number(word.fontSize).toFixed(2)}" font-weight="${escapeMontageSnapshotSvg(word.fontWeight)}" font-style="${escapeMontageSnapshotSvg(word.fontStyle)}" fill="${escapeMontageSnapshotSvg(word.fill)}"${strokeAttr}>${escapeMontageSnapshotSvg(word.text)}</text>`;
-    }).join("\n        ");
+    const measuredHtml = buildMeasuredMontageKaraokeSnapshotHtml(html);
+    const xhtml = measuredHtml.includes("xmlns=\"http://www.w3.org/1999/xhtml\"")
+      ? measuredHtml
+      : `<div xmlns="http://www.w3.org/1999/xhtml">${measuredHtml}</div>`;
     return `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${Math.max(1, rectW).toFixed(2)}" height="${Math.max(1, rectH).toFixed(2)}" rx="${radius}" ry="${radius}" fill="${escapeMontageSnapshotSvg(fill)}" fill-opacity="${opacity.toFixed(3)}" />
-        ${textNodes}
+        <foreignObject x="0" y="0" width="${width}" height="${height}">${xhtml}</foreignObject>
       </svg>
     `.trim();
   } catch (_) {
