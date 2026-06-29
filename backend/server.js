@@ -342,10 +342,14 @@ const fetchCompat = (...args) => {
   return import("node-fetch").then(({ default: f }) => f(...args));
 };
 
-function applyVeoHdParameters(parameters = {}, aspectRatio = "16:9") {
+function applyVeoHdParameters(parameters = {}, aspectRatio = "16:9", modelName = "") {
   const next = parameters && typeof parameters === "object" ? { ...parameters } : {};
   next.aspectRatio = String(next.aspectRatio || aspectRatio).trim() || aspectRatio;
-  next.resolution = "1080p";
+  if (/^veo-2\.0\b/i.test(String(modelName || "").trim())) {
+    delete next.resolution;
+  } else {
+    next.resolution = "1080p";
+  }
   return next;
 }
 
@@ -3055,11 +3059,9 @@ async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl 
   }
   if (cleanStoragePath) {
     try {
-      const file = storageBucket.file(cleanStoragePath);
-      const [meta] = await withRetry(() => file.getMetadata()).catch(() => [{}]);
-      const [downloaded] = await withRetry(() => file.download());
-      buffer = Buffer.from(downloaded);
-      mimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
+      const downloaded = await downloadStorageObjectToBuffer(cleanStoragePath);
+      buffer = Buffer.from(downloaded.buffer);
+      mimeType = String(downloaded?.metadata?.contentType || "image/png").trim().toLowerCase();
     } catch (_) {
       buffer = null;
     }
@@ -8789,10 +8791,10 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     }
     for (const variant of requestVariants) {
       if (!variant?.body) continue;
-      variant.body.parameters = applyVeoHdParameters(
-        variant.body.parameters,
-        isReel ? "9:16" : "16:9"
-      );
+      variant.body.parameters = {
+        ...(variant.body.parameters || {}),
+        aspectRatio: isReel ? "9:16" : "16:9"
+      };
     }
     const requestedMaxVariantAttempts = Math.max(1, Math.min(
       requestVariants.length || 1,
@@ -8833,12 +8835,20 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
           segmentCount: Number(req.body?.segmentCount || 0) || 0
         });
+        const variantBody = {
+          ...variant.body,
+          parameters: applyVeoHdParameters(
+            variant.body.parameters,
+            isReel ? "9:16" : "16:9",
+            videoModel
+          )
+        };
         const createOpResponse = await fetchCompat(
           `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(variant.body)
+            body: JSON.stringify(variantBody)
           }
         );
         const createData = await safeJson(createOpResponse);
@@ -9500,7 +9510,7 @@ function normalizeStorageFilePath(value = "") {
   let raw = String(value || "").trim();
   if (!raw) return "";
   try { raw = decodeURIComponent(raw); } catch (_) {}
-  const shouldParseAsUrl = /^https?:\/\//i.test(raw) || raw.startsWith("/api/assets/proxy-media");
+  const shouldParseAsUrl = /^https?:\/\//i.test(raw) || raw.startsWith("/api/assets/proxy-media") || raw.startsWith("/api/assets/proxy-image");
   if (shouldParseAsUrl) try {
     const parsed = new URL(raw, "http://local.invalid");
     const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();

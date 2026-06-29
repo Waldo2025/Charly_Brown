@@ -6,6 +6,15 @@ function parseFirebaseStorageObjectPath(url = "") {
     const host = String(parsed.hostname || "").toLowerCase();
     const pathname = String(parsed.pathname || "");
     if (pathname.includes("/api/assets/proxy-media") || pathname.includes("/api/assets/proxy-image")) {
+      const proxyStoragePath = String(parsed.searchParams.get("storagePath") || "").trim();
+      if (proxyStoragePath) {
+        let objectPath = proxyStoragePath;
+        for (let i = 0; i < 3; i += 1) {
+          if (!/%[0-9a-f]{2}/i.test(objectPath)) break;
+          try { objectPath = decodeURIComponent(objectPath); } catch (_) { break; }
+        }
+        return objectPath.replace(/^\/+/, "").trim();
+      }
       const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
       const nestedPath = parseFirebaseStorageObjectPath(nestedUrl);
       if (nestedPath) return nestedPath;
@@ -15,8 +24,9 @@ function parseFirebaseStorageObjectPath(url = "") {
       if (!match) return "";
       let objectPath = String(match[1] || "").trim();
       try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
-      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
-        try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
+      for (let i = 0; i < 3; i += 1) {
+        if (!/%[0-9a-f]{2}/i.test(objectPath)) break;
+        try { objectPath = decodeURIComponent(objectPath); } catch (_) { break; }
       }
       return objectPath.replace(/^\/+/, "").trim();
     }

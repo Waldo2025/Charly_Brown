@@ -17,6 +17,14 @@ if (!/resolution\s*=\s*"1080p"/.test(source)) {
   throw new Error("El backend debe forzar resolution=1080p para Veo.");
 }
 
+if (!/\^veo-2\\\.0\\b/.test(source) || !/delete next\.resolution;/.test(source)) {
+  throw new Error("El backend no debe enviar resolution=1080p a veo-2.0-generate-001.");
+}
+
+if (!/parameters:\s*applyVeoHdParameters\([\s\S]*variant\.body\.parameters[\s\S]*videoModel[\s\S]*\)/m.test(source)) {
+  throw new Error("La resolución Veo debe resolverse por modelo al construir cada request.");
+}
+
 if (/compressionQuality\s*=/.test(source)) {
   throw new Error("El backend no debe enviar compressionQuality a Veo 3.1 en Gemini API.");
 }

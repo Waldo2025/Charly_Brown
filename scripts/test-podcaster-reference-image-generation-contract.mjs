@@ -13,4 +13,8 @@ if (!/const referenceImages = referenceMode === "image" && Array\.isArray\(req\.
   throw new Error("El backend debe consumir referenceImages remotas o inline al generar escenas con referencia.");
 }
 
+if (!/const downloaded = await downloadStorageObjectToBuffer\(cleanStoragePath\);/.test(backendSource)) {
+  throw new Error("loadOptionalImageReference debe descargar referencias de Storage con el helper robusto de buckets.");
+}
+
 console.log("Podcaster reference image generation contract OK.");
