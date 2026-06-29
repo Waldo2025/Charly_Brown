@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.332",
-  "build": "2026-1.0.10.332",
+  "version": "1.0.10.333",
+  "build": "2026-1.0.10.333",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Actualizado: Se incrementa version.json para forzar la carga del frontend vigente y conservar el pipeline de raster/karaoke en export.",
     "Corregido: Las referencias visuales de escenas Veo ahora derivan storagePath desde URLs proxy-media/proxy-image anidadas y desde firebasestorage.app, evitando que imágenes de referencia con solo downloadUrl fallen como scene_reference_image_unavailable.",
     "Corregido: La generación de escenas Veo con imagen de referencia ya no falla al final si el backend Gemini no tiene FFmpeg; cuando Veo devuelve MP4 válido, se conserva y sube directo sin transcodificar.",
     "Corregido: Moodle Course vuelve a generar módulos con IA usando POST en /api/gemini/generate, alinea los cache-busters internos de moodleCourse para evitar instancias duplicadas y protege el tour contra QuotaExceededError de localStorage.",
@@ -310,5 +311,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.332"
+  "cache_version": "2026-1.0.10.333"
 }
