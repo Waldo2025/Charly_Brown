@@ -3033,9 +3033,14 @@ function buildBackendPodcasterStudioScenePrompt({
 }
 
 async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl = "" }) {
-  const cleanStoragePath = clampText(storagePath || "", 700);
   const rawUrl = clampText(url || "", 3200);
   const cleanUrl = rawUrl.includes("%25") ? clampText(decodeURIComponent(rawUrl), 3200) : rawUrl;
+  const normalizedMediaRef = normalizePersistedMediaReference({
+    downloadUrl: cleanUrl,
+    storagePath: clampText(storagePath || "", 700)
+  });
+  const cleanStoragePath = clampText(normalizedMediaRef.storagePath || "", 700);
+  const fallbackUrl = clampText(normalizedMediaRef.downloadUrl || cleanUrl, 3200);
   const cleanDataUrl = String(dataUrl || "").trim();
   let buffer = null;
   let mimeType = "image/png";
@@ -3059,8 +3064,8 @@ async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl 
       buffer = null;
     }
   }
-  if (!buffer && cleanUrl) {
-    const response = await fetchCompat(cleanUrl, { method: "GET" }).catch(() => null);
+  if (!buffer && fallbackUrl) {
+    const response = await fetchCompat(fallbackUrl, { method: "GET" }).catch(() => null);
     if (response?.ok) {
       mimeType = String(response.headers.get("content-type") || "image/png").trim().toLowerCase();
       buffer = Buffer.from(await response.arrayBuffer());

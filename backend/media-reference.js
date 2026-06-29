@@ -4,8 +4,14 @@ function parseFirebaseStorageObjectPath(url = "") {
   try {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
+    const pathname = String(parsed.pathname || "");
+    if (pathname.includes("/api/assets/proxy-media") || pathname.includes("/api/assets/proxy-image")) {
+      const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
+      const nestedPath = parseFirebaseStorageObjectPath(nestedUrl);
+      if (nestedPath) return nestedPath;
+    }
     if (host === "firebasestorage.googleapis.com") {
-      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/[^/]+\/o\/(.+)$/);
+      const match = pathname.match(/^\/(?:v0\/)?b\/[^/]+\/o\/(.+)$/);
       if (!match) return "";
       let objectPath = String(match[1] || "").trim();
       try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
@@ -15,13 +21,21 @@ function parseFirebaseStorageObjectPath(url = "") {
       return objectPath.replace(/^\/+/, "").trim();
     }
     if (host === "storage.googleapis.com") {
-      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
+      const parts = pathname.split("/").filter(Boolean);
       if (parts.length < 2) return "";
       parts.shift();
-      return parts.join("/").trim();
+      let objectPath = parts.join("/").trim();
+      try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
+      return objectPath;
     }
     if (host.endsWith("firebasestorage.app")) {
-      return String(parsed.pathname || "").replace(/^\/+/, "").trim();
+      let objectPath = pathname.replace(/^\/+/, "").trim();
+      if (objectPath.startsWith("o/")) objectPath = objectPath.slice(2);
+      try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
+      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
+        try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
+      }
+      return objectPath.replace(/^\/+/, "").trim();
     }
     return "";
   } catch (_) {
