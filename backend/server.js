@@ -8037,14 +8037,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         referenceSourceCount: sceneReferenceSources.length,
         failures: sceneReferenceLoadFailures
       });
-      return res.status(422).json({
-        error: "scene_reference_image_unavailable",
-        code: "scene_reference_image_unavailable",
-        message: "No se pudo cargar la imagen de referencia para generar la escena. Revisa que la imagen exista en Storage o vuelve a adjuntarla.",
-        detail: {
-          referenceSourceCount: sceneReferenceSources.length,
-          failures: sceneReferenceLoadFailures
-        }
+      updateDialogueVideoJob({
+        status: "running",
+        stage: "scene_reference_unavailable",
+        progress: 0.2,
+        hint: "La referencia de escena no se pudo cargar; se continuará con el retrato y el prompt.",
+        referenceSourceCount: sceneReferenceSources.length,
+        referenceFailures: sceneReferenceLoadFailures
       });
     }
     const sceneReferenceImages = sceneReferences.map((item) => ({

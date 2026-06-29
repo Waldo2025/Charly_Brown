@@ -433,13 +433,25 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
 
 async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const key = String(rowId || "").trim();
-  const session = getActiveSession();
-  const sessionId = String(session?.id || "").trim();
+  let session = getActiveSession();
+  let sessionId = String(session?.id || "").trim();
   if (!sessionId || !key) return null;
-  const rows = session?.script?.rows || [];
-  const rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
-  const row = rowIndex >= 0 ? rows[rowIndex] : null;
+  let rows = session?.script?.rows || [];
+  let rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
+  let row = rowIndex >= 0 ? rows[rowIndex] : null;
   if (!row) return null;
+  if (typeof runtime.hydrateSessionReferenceMedia === "function") {
+    try {
+      const hydrated = await runtime.hydrateSessionReferenceMedia(session);
+      if (hydrated) {
+        session = getActiveSession() || session;
+        sessionId = String(session?.id || "").trim();
+        rows = session?.script?.rows || [];
+        rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
+        row = rowIndex >= 0 ? rows[rowIndex] : row;
+      }
+    } catch (_) { }
+  }
 
   const speakerLabel = String(row?.speaker || "").trim();
   const educationalMode = isEducationalVideoMode(session);

@@ -20000,6 +20000,7 @@ const podcasterGenerationRuntimeApi = {
   getSpeakerOptions,
   getSpeakerReferenceImageMap,
   getScenarioReferenceImageMap,
+  hydrateSessionReferenceMedia,
   normalizeVideoPreset,
   normalizeCreativeVideoConfig,
   getCreativeVideoConfig,
