@@ -1468,7 +1468,10 @@ export function initPodcasterOverlayCardsEditor() {
       renderOverlayCardEditorPreview(editor);
     }
   });
-  window.setInterval(() => renderPodcasterOverlayCardsForPreview(), 500);
+  window.setInterval(() => {
+    if (document.hidden) return;
+    renderPodcasterOverlayCardsForPreview();
+  }, 1000);
   renderPodcasterOverlayCardsForPreview();
 }
 

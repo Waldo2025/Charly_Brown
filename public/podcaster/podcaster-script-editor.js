@@ -25,6 +25,16 @@ function getScriptEditorRuntime() {
   return requirePodcasterScriptEditorRuntime();
 }
 
+function updateSingleScriptRow(current, targetRowId, updateRow) {
+  const rows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
+  const target = String(targetRowId || "").trim();
+  if (!target || rows.length === 0) return rows;
+  return rows.map((row, index) => {
+    if (String(row?.id || "").trim() !== target) return row;
+    return updateRow(row, index, rows) || row;
+  });
+}
+
 function autoSizeScriptTextarea(textarea) {
   if (!(textarea instanceof HTMLTextAreaElement)) return;
   textarea.style.overflowY = "hidden";
@@ -806,17 +816,15 @@ function handleScriptFieldUpdate(event) {
       ...current,
       script: {
         ...current.script,
-        rows: window.normalizeRows(current.script.rows).map((entry) => (
-          entry.id === rowId
-            ? window.normalizeRowVoiceConfig({
-              ...entry,
-              voiceName: value,
-              voiceNameSource: "row",
-              lastEditedAt: Date.now()
-            }, current, {
-              speaker
-            })
-            : entry
+        rows: updateSingleScriptRow(current, rowId, (entry) => (
+          window.normalizeRowVoiceConfig({
+            ...entry,
+            voiceName: value,
+            voiceNameSource: "row",
+            lastEditedAt: Date.now()
+          }, current, {
+            speaker
+          })
         ))
       }
     }), { ...baseSessionUpdateOptions, render: false });
@@ -841,16 +849,12 @@ function handleScriptFieldUpdate(event) {
       ...current,
       script: {
         ...current.script,
-        rows: (current.script?.rows || []).map((row) => (
-          row.id === rowId
-            ? {
-              ...row,
-              scenePrompt: window.isEducationalVideoMode(current)
-                ? requirePodcasterScriptGeneratorApiFunction("rewriteScenarioPromptForEducationalVideo")(String(target.value || "").replace(/\s+/g, " ").trim())
-                : String(target.value || "").replace(/\s+/g, " ").trim()
-            }
-            : row
-        ))
+        rows: updateSingleScriptRow(current, rowId, (row) => ({
+          ...row,
+          scenePrompt: window.isEducationalVideoMode(current)
+            ? requirePodcasterScriptGeneratorApiFunction("rewriteScenarioPromptForEducationalVideo")(String(target.value || "").replace(/\s+/g, " ").trim())
+            : String(target.value || "").replace(/\s+/g, " ").trim()
+        }))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
     scheduleConfirmedLocalPersist();
@@ -861,16 +865,12 @@ function handleScriptFieldUpdate(event) {
       ...current,
       script: {
         ...current.script,
-        rows: (current.script?.rows || []).map((row) => (
-          row.id === rowId
-            ? {
-              ...row,
-              videoDirective: window.isEducationalVideoMode(current)
-                ? requirePodcasterScriptGeneratorApiFunction("rewriteScenarioPromptForEducationalVideo")(String(target.value || "").replace(/\s+/g, " ").trim())
-                : String(target.value || "").replace(/\s+/g, " ").trim()
-            }
-            : row
-        ))
+        rows: updateSingleScriptRow(current, rowId, (row) => ({
+          ...row,
+          videoDirective: window.isEducationalVideoMode(current)
+            ? requirePodcasterScriptGeneratorApiFunction("rewriteScenarioPromptForEducationalVideo")(String(target.value || "").replace(/\s+/g, " ").trim())
+            : String(target.value || "").replace(/\s+/g, " ").trim()
+        }))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
     scheduleConfirmedLocalPersist();
@@ -887,14 +887,10 @@ function handleScriptFieldUpdate(event) {
       ...current,
       script: {
         ...current.script,
-        rows: (current.script?.rows || []).map((row) => (
-          row.id === rowId
-            ? {
-              ...row,
-              imagePrompts: prompts
-            }
-            : row
-        ))
+        rows: updateSingleScriptRow(current, rowId, (row) => ({
+          ...row,
+          imagePrompts: prompts
+        }))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
     scheduleConfirmedLocalPersist();
@@ -907,38 +903,36 @@ function handleScriptFieldUpdate(event) {
       script: {
         ...current.script,
         hosts: ["Narrador"],
-        rows: window.normalizeRows(current.script.rows).map((row, index) => (
-          row.id === rowId
-            ? window.normalizeCreativeRow({
-              ...row,
-              [field]: value,
-              ...(field === "sceneDescription"
-                ? {
-                  scenePrompt: value,
-                  Descripción: value,
-                  descripcionEscena: value,
-                  descripcionDeEscena: value,
-                  sceneDescriptionEditedStored: true
-                }
-                : {}),
-              ...(field === "onScreenText"
-                ? {
-                  onScreenTextNoSummarize: true
-                }
-                : {}),
-              ...(field === "visualNotes"
-                ? {
-                  visualNotesEditedText: value,
-                  visualNotesEditedStored: true,
-                  visualNotesProposal: ""
-                }
-                : {}),
-              lastEditedAt: Date.now()
-            }, index, {
-              videoPreset,
-              ...(field === "visualNotes" ? { preserveExactVisualNotes: true } : {})
-            })
-            : window.normalizeCreativeRow(row, index, { videoPreset })
+        rows: updateSingleScriptRow(current, rowId, (row, index) => (
+          window.normalizeCreativeRow({
+            ...row,
+            [field]: value,
+            ...(field === "sceneDescription"
+              ? {
+                scenePrompt: value,
+                Descripción: value,
+                descripcionEscena: value,
+                descripcionDeEscena: value,
+                sceneDescriptionEditedStored: true
+              }
+              : {}),
+            ...(field === "onScreenText"
+              ? {
+                onScreenTextNoSummarize: true
+              }
+              : {}),
+            ...(field === "visualNotes"
+              ? {
+                visualNotesEditedText: value,
+                visualNotesEditedStored: true,
+                visualNotesProposal: ""
+              }
+              : {}),
+            lastEditedAt: Date.now()
+          }, index, {
+            videoPreset,
+            ...(field === "visualNotes" ? { preserveExactVisualNotes: true } : {})
+          })
         ))
       }
     }), { ...baseSessionUpdateOptions, render: !isLiveInput });
@@ -990,22 +984,18 @@ function handleScriptFieldUpdate(event) {
       : {}),
     script: {
       ...current.script,
-      rows: window.normalizeRows(current.script.rows).map((row) => (
-        row.id === rowId
-          ? (
-            field === "speaker"
-              ? window.normalizeRowVoiceConfig({
-                ...row,
-                speaker: value,
-                voiceName: window.getSpeakerVoiceMap(current)[value] || window.resolveSpeakerVoiceName(value, current),
-                voiceNameSource: "host",
-                lastEditedAt: Date.now()
-              }, current, {
-                speaker: value
-              })
-              : { ...row, [field]: value, lastEditedAt: Date.now() }
-          )
-          : row
+      rows: updateSingleScriptRow(current, rowId, (row) => (
+        field === "speaker"
+          ? window.normalizeRowVoiceConfig({
+            ...row,
+            speaker: value,
+            voiceName: window.getSpeakerVoiceMap(current)[value] || window.resolveSpeakerVoiceName(value, current),
+            voiceNameSource: "host",
+            lastEditedAt: Date.now()
+          }, current, {
+            speaker: value
+          })
+          : { ...row, [field]: value, lastEditedAt: Date.now() }
       ))
     }
   }), { ...baseSessionUpdateOptions, render: nextRender });
