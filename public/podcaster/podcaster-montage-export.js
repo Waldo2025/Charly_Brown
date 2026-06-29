@@ -690,6 +690,8 @@ function sanitizeMontageExportJobFirestorePayload(job = null) {
   if (source.export && typeof source.export === "object") payload.export = source.export;
   if (source.downloadUrl) payload.downloadUrl = String(source.downloadUrl || "").trim();
   else if (payload.result?.downloadUrl) payload.downloadUrl = String(payload.result.downloadUrl || "").trim();
+  else if (payload.export?.downloadUrl) payload.downloadUrl = String(payload.export.downloadUrl || "").trim();
+  else if (source.currentDownloadUrl) payload.downloadUrl = String(source.currentDownloadUrl || "").trim();
   return payload;
 }
 
@@ -782,7 +784,17 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     const readyExport = data?.export && typeof data.export === "object"
       ? data.export
       : (data?.result && typeof data.result === "object" ? data.result : {});
-    const url = String(data?.downloadUrl || readyExport?.downloadUrl || data?.export?.downloadUrl || data?.result?.downloadUrl || "").trim();
+    const url = String(
+      data?.downloadUrl
+      || readyExport?.downloadUrl
+      || data?.export?.downloadUrl
+      || data?.result?.downloadUrl
+      || data?.currentDownloadUrl
+      || readyExport?.url
+      || data?.export?.url
+      || data?.result?.url
+      || ""
+    ).trim();
     const name = String(readyExport?.filename || data?.export?.filename || data?.result?.filename || window.montageExportState.filename || "montage").trim() || "montage";
     logMontageExportDevtools("export_ready", {
       stage,
@@ -804,7 +816,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     persistMontageExportReferenceToSession({
       exportId: String(readyExport?.exportId || data?.export?.exportId || data?.result?.exportId || "").trim(),
       downloadUrl: url,
-      storagePath: String(readyExport?.storagePath || data?.export?.storagePath || data?.result?.storagePath || "").trim(),
+      storagePath: String(readyExport?.storagePath || data?.export?.storagePath || data?.result?.storagePath || data?.currentStoragePath || "").trim(),
       filename: name,
       mimeType: String(readyExport?.mimeType || data?.export?.mimeType || data?.result?.mimeType || "").trim(),
       createdAtIso: String(readyExport?.createdAt || data?.export?.createdAt || data?.result?.createdAt || "").trim(),
@@ -1323,18 +1335,29 @@ export function setMontageExportDownloadButton({ visible = false, url = "", file
 
 function normalizeMontageExportReference(raw = null) {
   if (!raw || typeof raw !== "object") return null;
-  const downloadUrl = String(raw?.downloadUrl || raw?.url || "").trim();
-  const storagePath = String(raw?.storagePath || raw?.path || "").trim();
+  const nestedExport = raw?.export && typeof raw.export === "object" ? raw.export : null;
+  const nestedResult = raw?.result && typeof raw.result === "object" ? raw.result : null;
+  const downloadUrl = String(
+    raw?.downloadUrl
+    || raw?.currentDownloadUrl
+    || raw?.url
+    || nestedExport?.downloadUrl
+    || nestedResult?.downloadUrl
+    || nestedExport?.url
+    || nestedResult?.url
+    || ""
+  ).trim();
+  const storagePath = String(raw?.storagePath || raw?.currentStoragePath || raw?.path || nestedExport?.storagePath || nestedResult?.storagePath || "").trim();
   if (!downloadUrl && !storagePath) return null;
   return {
-    exportId: String(raw?.exportId || raw?.jobId || "").trim(),
+    exportId: String(raw?.exportId || raw?.jobId || nestedExport?.exportId || nestedResult?.exportId || "").trim(),
     downloadUrl,
     storagePath,
-    filename: String(raw?.filename || "").trim(),
-    mimeType: String(raw?.mimeType || "").trim().toLowerCase() || "video/mp4",
-    createdAtIso: String(raw?.createdAtIso || raw?.createdAt || "").trim(),
-    expiresAtIso: String(raw?.expiresAtIso || raw?.expiresAt || "").trim(),
-    bucketName: String(raw?.bucketName || "").trim()
+    filename: String(raw?.filename || nestedExport?.filename || nestedResult?.filename || "").trim(),
+    mimeType: String(raw?.mimeType || nestedExport?.mimeType || nestedResult?.mimeType || "").trim().toLowerCase() || "video/mp4",
+    createdAtIso: String(raw?.createdAtIso || raw?.createdAt || nestedExport?.createdAt || nestedResult?.createdAt || "").trim(),
+    expiresAtIso: String(raw?.expiresAtIso || raw?.expiresAt || nestedExport?.expiresAt || nestedResult?.expiresAt || "").trim(),
+    bucketName: String(raw?.bucketName || nestedExport?.bucketName || nestedResult?.bucketName || "").trim()
   };
 }
 
@@ -1381,9 +1404,30 @@ function hydrateMontageExportDownloadButtonFromSession() {
 }
 
 export function downloadReadyMontageExport() {
-  const url = String(window.montageExportJobState?.readyDownloadUrl || window.els.montageExportDownloadBtn?.dataset?.downloadUrl || "").trim();
-  if (!url) return;
-  const filename = String(window.montageExportJobState?.readyDownloadFilename || window.els.montageExportDownloadBtn?.dataset?.filename || "montage.mp4").trim() || "montage.mp4";
+  const reference = getPersistedMontageExportReference();
+  const url = String(
+    window.montageExportJobState?.readyDownloadUrl
+    || window.els.montageExportDownloadBtn?.dataset?.downloadUrl
+    || reference?.downloadUrl
+    || ""
+  ).trim();
+  if (!url) {
+    setMontageExportStatus(
+      "El enlace de descarga no está disponible.",
+      "Vuelve a abrir el modal o genera una exportación nueva.",
+      { tone: "warning" }
+    );
+    return;
+  }
+  const filename = String(
+    window.montageExportJobState?.readyDownloadFilename
+    || window.els.montageExportDownloadBtn?.dataset?.filename
+    || reference?.filename
+    || "montage.mp4"
+  ).trim() || "montage.mp4";
+  if (!window.montageExportJobState?.readyDownloadUrl || !window.els.montageExportDownloadBtn?.dataset?.downloadUrl) {
+    setMontageExportDownloadButton({ visible: true, url, filename });
+  }
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;

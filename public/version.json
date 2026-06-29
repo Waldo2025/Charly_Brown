@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.325",
-  "build": "2026-1.0.10.325",
+  "version": "1.0.10.326",
+  "build": "2026-1.0.10.326",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El botón Descargar MP4 del modal de export conserva el enlace del video recién generado aunque el estado temporal del job se reinicie; ahora recupera currentDownloadUrl/result/export desde polling o Firestore y alinea los cache-busters reales de podcaster.js, podcaster-montage-export-v2.js y podcaster-montage-export.js.",
     "Corregido: Los frames activos del karaoke ahora generan un SVG medido desde DOM real con getBoundingClientRect para centrar el pill sobre la palabra, y las escenas de fondo sólido/gradiente se materializan al tamaño completo del canvas de export. Se incrementan podcaster-text-render.js y podcaster-montage-export.js a la v2026-06-29.17.",
     "Corregido: El export de karaoke espera a que las fuentes web esten listas antes de rasterizar y el fallback SVG mide la palabra activa con actualBoundingBoxLeft/Right para centrar el pill sin acumulacion de error por posicion en la linea. Se incrementan podcaster-text-render.js y podcaster-montage-export.js a la v2026-06-29.16.",
     "Corregido: El pill/rect del karaoke en export ya no desplaza la palabra activa ni usa padding uniforme excesivo; ahora la caja se dibuja como fondo absoluto centrado y ajusta padding horizontal para palabras cortas como la, el, de y por. Se incrementan podcaster-on-screen-text.js y podcaster-text-render.js a la v2026-06-29.15.",
