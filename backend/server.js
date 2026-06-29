@@ -8842,19 +8842,24 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       Math.floor(clampNumber(req.body?.maxOperationPollAttempts, 12, 54, 54))
     ));
     const requestRequiresSceneReference = referenceMode === "image" && sceneReferenceAssets.length > 0 && !strictIdentity;
+    const sceneReferenceCompatibleModels = requestRequiresSceneReference
+      ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || ""))))
+      : [];
     const requestedModelLimit = Math.max(1, Math.min(
       videoModels.length || 1,
       Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
     ));
-    const effectiveVideoModels = requestRequiresSceneReference
-      ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || ""))))
-      : videoModels.slice(0, requestedModelLimit);
+    const requestedReferenceModelRetries = requestRequiresSceneReference
+      ? Math.max(1, Math.floor(clampNumber(req.body?.maxModelAttempts, 1, 999, 3)))
+      : 1;
     const modelExecutionPlan = requestRequiresSceneReference
-      ? (effectiveVideoModels.length ? effectiveVideoModels : [DEFAULT_PODCASTER_VIDEO_MODEL])
-      : effectiveVideoModels;
+      ? [(sceneReferenceCompatibleModels.length ? sceneReferenceCompatibleModels[0] : DEFAULT_PODCASTER_VIDEO_MODEL)]
+      : videoModels.slice(0, requestedModelLimit);
     traceReferenceVideo("execution-plan", {
       requestedMaxVariantAttempts,
       requestedMaxOperationPollAttempts,
+      requestedModelLimit,
+      requestedReferenceModelRetries,
       effectiveVideoModels: modelExecutionPlan,
       effectiveVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim()),
       promptChars: prompt.length,
@@ -8871,224 +8876,278 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         });
         continue;
       }
+      const modelAttemptLimit = requestRequiresSceneReference ? requestedReferenceModelRetries : 1;
       let modelReturnedDoneWithoutMedia = false;
-      for (const [variantIndex, variant] of modelRequestVariants.entries()) {
-        traceReferenceVideo("variant-start", {
-          model: videoModel,
-          variant: String(variant?.label || "").trim(),
-          variantIndex: variantIndex + 1,
-          variantCount: modelRequestVariants.length
-        });
-        updateDialogueVideoJob({
-          status: "running",
-          stage: "request_variant",
-          progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, modelRequestVariants.length)) * 0.2))),
-          hint: `Probando ${videoModel} · ${String(variant?.label || "").trim() || "variant"}.`,
-          model: videoModel,
-          variant: String(variant?.label || "").trim(),
-          segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
-          segmentCount: Number(req.body?.segmentCount || 0) || 0
-        });
-        const variantBody = {
-          ...variant.body,
-          parameters: applyVeoHdParameters(
-            variant.body.parameters,
-            isReel ? "9:16" : "16:9",
-            videoModel
-          )
-        };
-        const createOpResponse = await fetchCompat(
-          `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(variantBody)
+      for (let modelAttempt = 0; modelAttempt < modelAttemptLimit; modelAttempt += 1) {
+        modelReturnedDoneWithoutMedia = false;
+        for (const [variantIndex, variant] of modelRequestVariants.entries()) {
+          if (requestRequiresSceneReference && modelAttempt > 0) {
+            traceReferenceVideo("reference-model-retry-attempt", {
+              model: videoModel,
+              attempt: modelAttempt + 1,
+              maxAttempts: modelAttemptLimit,
+              remainingVariants: modelRequestVariants.length
+            });
           }
-        );
-        const createData = await safeJson(createOpResponse);
-        if (!createOpResponse.ok) {
-          const detail = String(createData?.error?.message || createData?.error || `HTTP ${createOpResponse.status}`).trim();
-          lastStatus = Number(createOpResponse.status || 502);
-          lastErrorDetail = `${videoModel} [${variant.label}]: ${detail}`;
-          attemptErrors.push(lastErrorDetail);
-          if ([400, 401, 403, 404].includes(lastStatus)) continue;
-          return res.status(lastStatus).json(createData);
-        }
-        const operationName = String(createData?.name || "").trim();
-        if (!operationName) {
-          lastStatus = 502;
-          lastErrorDetail = `${videoModel} [${variant.label}]: no devolvió nombre de operación`;
-          attemptErrors.push(lastErrorDetail);
-          continue;
-        }
-        traceReferenceVideo("variant-operation-created", {
-          model: videoModel,
-          variant: String(variant?.label || "").trim(),
-          operationName
-        });
+          if (modelAttempt > 0) {
+            updateDialogueVideoJob({
+              status: "running",
+              stage: "request_variant",
+              progress: 0.18,
+              hint: `Reintentando ${videoModel} · ${String(variant?.label || "").trim() || "variant"} (${modelAttempt + 1}/${modelAttemptLimit}).`,
+              model: videoModel,
+              variant: String(variant?.label || "").trim(),
+              segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
+              segmentCount: Number(req.body?.segmentCount || 0) || 0
+            });
+          }
+          traceReferenceVideo("variant-start", {
+            model: videoModel,
+            variant: String(variant?.label || "").trim(),
+            variantIndex: variantIndex + 1,
+            variantCount: modelRequestVariants.length,
+            modelAttempt: modelAttempt + 1,
+            modelAttemptLimit
+          });
+          updateDialogueVideoJob({
+            status: "running",
+            stage: "request_variant",
+            progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, modelRequestVariants.length)) * 0.2))),
+            hint: `Probando ${videoModel} · ${String(variant?.label || "").trim() || "variant"}${requestRequiresSceneReference && modelAttempt > 0 ? ` (reintento ${modelAttempt + 1}/${modelAttemptLimit})` : ""}.`,
+            model: videoModel,
+            variant: String(variant?.label || "").trim(),
+            variantAttempt: variantIndex + 1,
+            modelAttempt: modelAttempt + 1,
+            segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
+            segmentCount: Number(req.body?.segmentCount || 0) || 0
+          });
+          const variantBody = {
+            ...variant.body,
+            parameters: applyVeoHdParameters(
+              variant.body.parameters,
+              isReel ? "9:16" : "16:9",
+              videoModel
+            )
+          };
+          const createOpResponse = await fetchCompat(
+            `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(variantBody)
+            }
+          );
+          const createData = await safeJson(createOpResponse);
+          if (!createOpResponse.ok) {
+            const detail = String(createData?.error?.message || createData?.error || `HTTP ${createOpResponse.status}`).trim();
+            lastStatus = Number(createOpResponse.status || 502);
+            lastErrorDetail = `${videoModel} [${variant.label}]: ${detail}`;
+            attemptErrors.push(lastErrorDetail);
+            if ([400, 401, 403, 404].includes(lastStatus)) continue;
+            return res.status(lastStatus).json(createData);
+          }
+          const operationName = String(createData?.name || "").trim();
+          if (!operationName) {
+            lastStatus = 502;
+            lastErrorDetail = `${videoModel} [${variant.label}]: no devolvió nombre de operación`;
+            attemptErrors.push(lastErrorDetail);
+            continue;
+          }
+          traceReferenceVideo("variant-operation-created", {
+            model: videoModel,
+            variant: String(variant?.label || "").trim(),
+            operationName,
+            modelAttempt: modelAttempt + 1,
+            modelAttemptLimit
+          });
 
-        let operationDone = null;
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          operationDone = await pollUntilDone(operationName, {
-            maxAttempts: requestedMaxOperationPollAttempts,
-            requireResolvedMedia: true,
-            resolveResult: resolveVeoVideoResult,
-            postDoneGraceAttempts: 6,
-            postDoneGraceDelayMs: 2500,
-            onPoll: ({ attempt, maxAttempts }) => {
-              if (attempt === 1 || attempt % 5 === 0) {
-                traceReferenceVideo("variant-poll", {
-                  model: videoModel,
-                  variant: String(variant?.label || "").trim(),
-                  operationName,
+          let operationDone = null;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            operationDone = await pollUntilDone(operationName, {
+              maxAttempts: requestedMaxOperationPollAttempts,
+              requireResolvedMedia: true,
+              resolveResult: resolveVeoVideoResult,
+              postDoneGraceAttempts: 6,
+              postDoneGraceDelayMs: 2500,
+              onPoll: ({ attempt, maxAttempts }) => {
+                if (attempt === 1 || attempt % 5 === 0) {
+                  traceReferenceVideo("variant-poll", {
+                    model: videoModel,
+                    variant: String(variant?.label || "").trim(),
+                    operationName,
+                    attempt,
+                    maxAttempts,
+                    modelAttempt: modelAttempt + 1,
+                    modelAttemptLimit
+                  });
+                }
+                logHeavyWorkMemory("dialogue_video", "poll_operation", {
+                  jobId,
+                  sessionId,
+                  rowId,
                   attempt,
                   maxAttempts
                 });
+                updateDialogueVideoJob({
+                  status: "running",
+                  stage: "poll_operation",
+                  progress: Math.max(0.22, Math.min(0.92, 0.22 + ((attempt / Math.max(1, maxAttempts)) * 0.56))),
+                  hint: `Esperando respuesta de Veo (${attempt}/${maxAttempts}).`,
+                  model: videoModel,
+                  variant: String(variant?.label || "").trim(),
+                  attempt,
+                  segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
+                  segmentCount: Number(req.body?.segmentCount || 0) || 0,
+                  modelAttempt: modelAttempt + 1,
+                  modelAttemptLimit
+                });
               }
-              logHeavyWorkMemory("dialogue_video", "poll_operation", {
-                jobId,
-                sessionId,
-                rowId,
-                attempt,
-                maxAttempts
-              });
-              updateDialogueVideoJob({
-                status: "running",
-                stage: "poll_operation",
-                progress: Math.max(0.22, Math.min(0.92, 0.22 + ((attempt / Math.max(1, maxAttempts)) * 0.56))),
-                hint: `Esperando respuesta de Veo (${attempt}/${maxAttempts}).`,
-                model: videoModel,
-                variant: String(variant?.label || "").trim(),
-                attempt,
-                segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
-                segmentCount: Number(req.body?.segmentCount || 0) || 0
-              });
-            }
-          });
-        } catch (error) {
-          lastStatus = Number(error?.status || 504) || 504;
-          lastErrorDetail = `${videoModel} [${variant.label}]: ${String(error?.message || "Error al esperar operación Veo.")}`;
-          attemptErrors.push(lastErrorDetail);
-          if (error?.code === "veo_operation_poll_timeout") {
-            traceReferenceVideo("variant-poll-timeout-stop", {
-              model: videoModel,
-              variant: String(variant?.label || "").trim(),
-              operationName: String(error?.operationName || operationName || "").trim(),
-              maxAttempts: requestedMaxOperationPollAttempts
             });
-            return res.status(504).json({
-              error: "veo_operation_poll_timeout",
-              code: "veo_operation_poll_timeout",
-              message: "Veo sigue procesando la operación y no devolvió video antes del límite de espera. No se lanzaron variantes adicionales para evitar reiniciar la generación.",
-              detail: {
+          } catch (error) {
+            lastStatus = Number(error?.status || 504) || 504;
+            lastErrorDetail = `${videoModel} [${variant.label}]: ${String(error?.message || "Error al esperar operación Veo.")}`;
+            attemptErrors.push(lastErrorDetail);
+            if (error?.code === "veo_operation_poll_timeout") {
+              traceReferenceVideo("variant-poll-timeout-stop", {
                 model: videoModel,
                 variant: String(variant?.label || "").trim(),
                 operationName: String(error?.operationName || operationName || "").trim(),
                 maxAttempts: requestedMaxOperationPollAttempts
-              }
-            });
+              });
+              return res.status(504).json({
+                error: "veo_operation_poll_timeout",
+                code: "veo_operation_poll_timeout",
+                message: "Veo sigue procesando la operación y no devolvió video antes del límite de espera. No se lanzaron variantes adicionales para evitar reiniciar la generación.",
+                detail: {
+                  model: videoModel,
+                  variant: String(variant?.label || "").trim(),
+                  operationName: String(error?.operationName || operationName || "").trim(),
+                  maxAttempts: requestedMaxOperationPollAttempts
+                }
+              });
+            }
+            continue;
           }
-          continue;
-        }
 
-        const resolved = resolveVeoVideoResult(operationDone);
-        const videoUri = String(resolved?.uri || "").trim();
-        if (!videoUri && resolved?.inlineData?.data) {
-          traceReferenceVideo("variant-inline-video", {
+          const resolved = resolveVeoVideoResult(operationDone);
+          const videoUri = String(resolved?.uri || "").trim();
+          if (!videoUri && resolved?.inlineData?.data) {
+            traceReferenceVideo("variant-inline-video", {
+              model: videoModel,
+              variant: String(variant?.label || "").trim(),
+              operationName,
+              mimeType: String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4",
+              modelAttempt: modelAttempt + 1,
+              modelAttemptLimit
+            });
+            const mimeType = String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4";
+            const downloadedBuffer = Buffer.from(String(resolved.inlineData.data || ""), "base64");
+            if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
+              lastStatus = 413;
+              lastErrorDetail = `${videoModel} [${variant.label}]: video inline demasiado grande o vacío.`;
+              attemptErrors.push(lastErrorDetail);
+              continue;
+            }
+            finalVideoBuffer = downloadedBuffer;
+            finalVideoMimeType = mimeType.toLowerCase().startsWith("video/") ? mimeType : "video/mp4";
+            resolvedModel = videoModel;
+            resolvedVariant = String(variant?.label || "").trim();
+            break;
+          }
+          if (!videoUri) {
+            lastStatus = 502;
+            lastErrorDetail = `${videoModel} [${variant.label}]: operación completada sin URI de video`;
+            attemptErrors.push(lastErrorDetail);
+            modelReturnedDoneWithoutMedia = true;
+            const fallbackDecision = shouldContinueVariantFallback({
+              status: lastStatus,
+              reason: "done_without_media",
+              variantIndex,
+              variantCount: modelRequestVariants.length
+            });
+            traceReferenceVideo("variant-finished-without-media", {
+              model: videoModel,
+              variant: String(variant?.label || "").trim(),
+              operationName,
+              remainingVariants: fallbackDecision.remainingVariants,
+              continueCurrentModel: fallbackDecision.continueCurrentModel,
+              logReason: fallbackDecision.logReason
+            });
+            if (fallbackDecision.continueCurrentModel) {
+              continue;
+            }
+            break;
+          }
+          traceReferenceVideo("variant-video-uri", {
             model: videoModel,
             variant: String(variant?.label || "").trim(),
             operationName,
-            mimeType: String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4"
+            videoUri,
+            modelAttempt: modelAttempt + 1,
+            modelAttemptLimit
           });
-          const mimeType = String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4";
-          const downloadedBuffer = Buffer.from(String(resolved.inlineData.data || ""), "base64");
-          if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
-            lastStatus = 413;
-            lastErrorDetail = `${videoModel} [${variant.label}]: video inline demasiado grande o vacío.`;
+
+          // eslint-disable-next-line no-await-in-loop
+          const videoResponse = await fetchCompat(videoUri, {
+            method: "GET",
+            headers: {
+              "x-goog-api-key": GEMINI_API_KEY
+            }
+          });
+          logHeavyWorkMemory("dialogue_video", "download_generated_video", {
+            jobId,
+            sessionId,
+            rowId,
+            model: videoModel,
+            variant: String(variant?.label || "").trim()
+          });
+          if (!videoResponse.ok) {
+            // eslint-disable-next-line no-await-in-loop
+            const detail = await safeJson(videoResponse);
+            lastStatus = Number(videoResponse.status || 502) || 502;
+            lastErrorDetail = `${videoModel} [${variant.label}]: no se pudo descargar video (${String(detail?.error?.message || detail?.error || `HTTP ${videoResponse.status}`)})`;
             attemptErrors.push(lastErrorDetail);
             continue;
           }
+
+          // eslint-disable-next-line no-await-in-loop
+          const downloadedBuffer = Buffer.from(await videoResponse.arrayBuffer());
+          if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
+            lastStatus = 413;
+            lastErrorDetail = `${videoModel} [${variant.label}]: video generado demasiado grande.`;
+            attemptErrors.push(lastErrorDetail);
+            continue;
+          }
+
           finalVideoBuffer = downloadedBuffer;
-          finalVideoMimeType = mimeType.toLowerCase().startsWith("video/") ? mimeType : "video/mp4";
+          finalVideoMimeType = String(videoResponse.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
+          if (!String(finalVideoMimeType).toLowerCase().startsWith("video/")) {
+            finalVideoMimeType = "video/mp4";
+          }
           resolvedModel = videoModel;
           resolvedVariant = String(variant?.label || "").trim();
           break;
         }
-        if (!videoUri) {
-          lastStatus = 502;
-          lastErrorDetail = `${videoModel} [${variant.label}]: operación completada sin URI de video`;
-          attemptErrors.push(lastErrorDetail);
-          modelReturnedDoneWithoutMedia = true;
-          const fallbackDecision = shouldContinueVariantFallback({
-            status: lastStatus,
-            reason: "done_without_media",
-            variantIndex,
-            variantCount: modelRequestVariants.length
-          });
-          traceReferenceVideo("variant-finished-without-media", {
-            model: videoModel,
-            variant: String(variant?.label || "").trim(),
-            operationName,
-            remainingVariants: fallbackDecision.remainingVariants,
-            continueCurrentModel: fallbackDecision.continueCurrentModel,
-            logReason: fallbackDecision.logReason
-          });
-          if (fallbackDecision.continueCurrentModel) {
-            continue;
-          }
-          break;
-        }
-        traceReferenceVideo("variant-video-uri", {
+        if (finalVideoBuffer) break;
+        if (!requestRequiresSceneReference) break;
+        if (!modelReturnedDoneWithoutMedia) break;
+        if (modelAttempt + 1 >= modelAttemptLimit) break;
+        traceReferenceVideo("reference-model-retry-scheduled", {
           model: videoModel,
-          variant: String(variant?.label || "").trim(),
-          operationName,
-          videoUri
+          attempt: modelAttempt + 2,
+          maxAttempts: modelAttemptLimit
         });
-
-        // eslint-disable-next-line no-await-in-loop
-        const videoResponse = await fetchCompat(videoUri, {
-          method: "GET",
-          headers: {
-            "x-goog-api-key": GEMINI_API_KEY
-          }
-        });
-        logHeavyWorkMemory("dialogue_video", "download_generated_video", {
-          jobId,
-          sessionId,
-          rowId,
-          model: videoModel,
-          variant: String(variant?.label || "").trim()
-        });
-        if (!videoResponse.ok) {
-          // eslint-disable-next-line no-await-in-loop
-          const detail = await safeJson(videoResponse);
-          lastStatus = Number(videoResponse.status || 502) || 502;
-          lastErrorDetail = `${videoModel} [${variant.label}]: no se pudo descargar video (${String(detail?.error?.message || detail?.error || `HTTP ${videoResponse.status}`)})`;
-          attemptErrors.push(lastErrorDetail);
-          continue;
-        }
-
-        // eslint-disable-next-line no-await-in-loop
-        const downloadedBuffer = Buffer.from(await videoResponse.arrayBuffer());
-        if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
-          lastStatus = 413;
-          lastErrorDetail = `${videoModel} [${variant.label}]: video generado demasiado grande.`;
-          attemptErrors.push(lastErrorDetail);
-          continue;
-        }
-
-        finalVideoBuffer = downloadedBuffer;
-        finalVideoMimeType = String(videoResponse.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
-        if (!String(finalVideoMimeType).toLowerCase().startsWith("video/")) {
-          finalVideoMimeType = "video/mp4";
-        }
-        resolvedModel = videoModel;
-        resolvedVariant = String(variant?.label || "").trim();
-        break;
       }
       if (finalVideoBuffer) break;
-      if (modelReturnedDoneWithoutMedia) {
+      if (requestRequiresSceneReference && modelReturnedDoneWithoutMedia) {
+        traceReferenceVideo("reference-model-retries-exhausted", {
+          model: videoModel,
+          attemptedVariants: effectiveRequestVariants.length,
+          compatibleVariants: modelRequestVariants.length,
+          lastErrorDetail
+        });
+      } else if (modelReturnedDoneWithoutMedia) {
         traceReferenceVideo("switch-model-after-empty-media", {
           failedModel: videoModel,
           nextCandidates: modelExecutionPlan.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
