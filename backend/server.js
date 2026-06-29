@@ -3144,8 +3144,9 @@ function normalizeRole(value = "") {
 function sanitizeReferenceImageRecord(value = null, fallbackName = "Referencia") {
   if (!value || typeof value !== "object") return null;
   const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
+  const rawDownloadUrl = String(value?.downloadUrl || value?.url || "").trim();
   const mediaRef = normalizePersistedMediaReference({
-    downloadUrl: clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
+    downloadUrl: clampText(/^data:/i.test(rawDownloadUrl) ? "" : rawDownloadUrl, 3000),
     storagePath: clampText(String(value?.storagePath || value?.path || "").trim(), 700)
   });
   const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);

@@ -138,6 +138,12 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
   function normalizePersistedMediaReference(rawUrl = "", storagePath = "") {
     const cleanUrl = String(rawUrl || "").trim();
     const cleanStoragePath = deriveStoragePathFromMediaSource(cleanUrl, storagePath || "");
+    if (/^data:/i.test(cleanUrl)) {
+      return {
+        storagePath: cleanStoragePath,
+        downloadUrl: ""
+      };
+    }
     if (!cleanUrl && !cleanStoragePath) {
       return { downloadUrl: "", storagePath: "" };
     }

@@ -48,7 +48,7 @@ import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
-import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-18.3";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-29.1";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-26.8";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-06-12.2";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";

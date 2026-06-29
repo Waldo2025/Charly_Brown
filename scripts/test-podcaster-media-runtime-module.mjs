@@ -6,7 +6,7 @@ const runtimeModuleSource = fs.existsSync(runtimeModulePath)
   ? fs.readFileSync(runtimeModulePath, "utf8")
   : "";
 
-if (!/import\s+\{\s*createPodcasterMediaRuntimeApi\s*\}\s+from\s+"\.\/podcaster-media-runtime\.js";/m.test(podcasterSource)) {
+if (!/import\s+\{\s*createPodcasterMediaRuntimeApi\s*\}\s+from\s+"\.\/podcaster-media-runtime\.js(?:\?v=[^"]+)?";/m.test(podcasterSource)) {
   throw new Error("podcaster.js debe importar createPodcasterMediaRuntimeApi desde podcaster-media-runtime.js.");
 }
 
@@ -34,6 +34,10 @@ for (const legacyFn of [
 
 if (!/export\s+function\s+createPodcasterMediaRuntimeApi\s*\(/m.test(runtimeModuleSource)) {
   throw new Error("podcaster-media-runtime.js debe exportar createPodcasterMediaRuntimeApi.");
+}
+
+if (!/if\s*\(\/\^data:\/i\.test\(cleanUrl\)\)\s*\{[\s\S]*?downloadUrl:\s*""/m.test(runtimeModuleSource)) {
+  throw new Error("podcaster-media-runtime.js debe descartar data URLs de downloadUrl para no romper referencias locales.");
 }
 
 const runtimeInitIndex = podcasterSource.indexOf("const podcasterMediaRuntimeApi = createPodcasterMediaRuntimeApi(");
