@@ -2558,6 +2558,29 @@ function runMontageExportDirectJob({
   return true;
 }
 
+function buildMontageDirectFallbackInput(input = null) {
+  if (!input || typeof input !== "object") return input;
+  const textTimelineRaw = input.onScreenTextTimelineRaw && typeof input.onScreenTextTimelineRaw === "object"
+    ? {
+      ...input.onScreenTextTimelineRaw,
+      renderedSegments: [],
+      renderedFrameAttempted: false
+    }
+    : input.onScreenTextTimelineRaw;
+  return {
+    ...input,
+    onScreenTextRenderedSegments: [],
+    onScreenTextRenderedFrameAttempted: false,
+    onScreenTextTimelineRaw: textTimelineRaw,
+    directFallbackTextOverlayMode: "ass",
+    renderHints: {
+      ...(input.renderHints && typeof input.renderHints === "object" ? input.renderHints : {}),
+      directFallbackTextOverlayMode: "ass",
+      renderedTextFramesDisabledReason: "worker_unavailable"
+    }
+  };
+}
+
 function upsertDialogueVideoJob(jobId = "", patch = {}) {
   const id = clampExportId(jobId);
   if (!id) return null;
@@ -14357,7 +14380,9 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
             jobId,
             queueName: queueDiagnostics.queueName || null,
             jobCounts: queueDiagnostics.jobCounts || null,
-            hint: "BullMQ accepted the job, but no montage export worker is connected. Falling back to direct render in snoopy-export."
+            textOverlayMode: "ass",
+            renderedTextSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
+            hint: "BullMQ accepted the job, but no montage export worker is connected. Falling back to direct render in snoopy-export with low-memory text overlays."
           });
           if (queuedJob && typeof queuedJob.remove === "function") {
             await queuedJob.remove().catch((removeErr) => {
@@ -14392,7 +14417,7 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
             status: "queued",
             stage: "direct_fallback",
             progress: 0.01,
-            hint: "Worker no disponible; renderizando directo en snoopy-export.",
+            hint: "Worker no disponible; renderizando directo en snoopy-export con overlay de texto liviano.",
             updatedAt: new Date().toISOString()
           }).catch(() => {});
           logHeavyWorkSlots("montage_export", "acquire_direct_job_v2_worker_unavailable", {
@@ -14400,18 +14425,20 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
             mode: "direct",
             renderPipeline: "ffmpeg-preview-runtime-v2"
           });
+          const directFallbackInput = buildMontageDirectFallbackInput(input);
           runMontageExportDirectJob({
             jobId,
             uid,
             sessionId: input.sessionId,
-            input,
+            input: directFallbackInput,
             baseUrl
           });
           console.info("[backend][montage-export-v2][direct-started]", {
             jobId,
             mode: "direct",
             renderPipeline: "ffmpeg-preview-runtime-v2",
-            reason: "worker_unavailable"
+            reason: "worker_unavailable",
+            textOverlayMode: "ass"
           });
           return res.status(202).json({
             ...sanitizeMontageExportJobPublicPayload({
@@ -14419,7 +14446,7 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
               status: "queued",
               stage: "direct_fallback",
               progress: 0.01,
-              hint: "Worker no disponible; renderizando directo en snoopy-export."
+              hint: "Worker no disponible; renderizando directo en snoopy-export con overlay de texto liviano."
             }),
             renderPipeline: "ffmpeg-preview-runtime-v2",
             queueFallback: "direct_worker_unavailable"
