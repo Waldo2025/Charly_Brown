@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.328",
-  "build": "2026-1.0.10.328",
+  "version": "1.0.10.329",
+  "build": "2026-1.0.10.329",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: La generación VEO de escenas vuelve a conservar imagen/video de referencia remotos; el backend normaliza downloadUrl/storagePath correctamente, alinea image/referenceImages al formato oficial de Veo, cuenta esas referencias como input explícito y deja de degradar silenciosamente a text-only cuando no puede cargar la referencia.",
     "Corregido: El karaoke activo del export conserva la tipografia y tamano exactos usando el foreignObject completo del preview con solo el rect medido como fondo; las escenas de fondo solido/gradiente se renderizan como canvas completo sin crop/motion de imagen. Se incrementa podcaster-montage-export.js a la v2026-06-29.20.",
     "Corregido: Los PNGs activos del karaoke vuelven a incluir toda la frase con la palabra resaltada, evitando que el export muestre solo la palabra activa; el frame base se limita a huecos sin palabra activa para no duplicar el texto. Se incrementa podcaster-montage-export.js a la v2026-06-29.19.",
     "Corregido: El botón Descargar MP4 del modal de export conserva el enlace del video recién generado aunque el estado temporal del job se reinicie; ahora recupera currentDownloadUrl/result/export desde polling o Firestore y alinea los cache-busters reales de podcaster.js, podcaster-montage-export-v2.js y podcaster-montage-export.js.",

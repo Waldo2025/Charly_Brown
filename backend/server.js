@@ -3137,10 +3137,10 @@ function normalizeRole(value = "") {
 function sanitizeReferenceImageRecord(value = null, fallbackName = "Referencia") {
   if (!value || typeof value !== "object") return null;
   const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
-  const mediaRef = normalizePersistedMediaReference(
-    clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
-    clampText(String(value?.storagePath || value?.path || "").trim(), 700)
-  );
+  const mediaRef = normalizePersistedMediaReference({
+    downloadUrl: clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
+    storagePath: clampText(String(value?.storagePath || value?.path || "").trim(), 700)
+  });
   const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
   const storagePath = clampText(mediaRef.storagePath || "", 700);
   const mimeType = clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png";
@@ -3292,10 +3292,10 @@ function sanitizePodcasterSession(raw = {}) {
       const key = clampText(rawKey || "", 160);
       if (!key || !value || typeof value !== "object") return;
       const dataUrl = clampText(String(value?.dataUrl || "").trim(), 8_000_000);
-      const mediaRef = normalizePersistedMediaReference(
-        clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
-        clampText(String(value?.storagePath || value?.path || "").trim(), 700)
-      );
+      const mediaRef = normalizePersistedMediaReference({
+        downloadUrl: clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
+        storagePath: clampText(String(value?.storagePath || value?.path || "").trim(), 700)
+      });
       const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
       const storagePath = clampText(mediaRef.storagePath || "", 700);
       const mimeType = clampText(value?.mimeType || "video/mp4", 120).trim().toLowerCase() || "video/mp4";
@@ -7829,6 +7829,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     ].filter(Boolean)));
     const hasExplicitSceneReferenceInput = Boolean(
       referenceImageDataUrls.length
+      || referenceImages.length
       || referenceImageDataUrl
       || referenceVideoDataUrl
       || continuityReferenceImageDataUrl
@@ -8002,16 +8003,40 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       });
     }
     const sceneReferences = [];
+    const sceneReferenceLoadFailures = [];
     for (const imageSource of sceneReferenceSources) {
       const sceneReference = await loadOptionalImageReference({
         dataUrl: imageSource?.dataUrl,
         url: imageSource?.downloadUrl,
         storagePath: imageSource?.storagePath
       });
-      if (!sceneReference) continue;
+      if (!sceneReference) {
+        sceneReferenceLoadFailures.push({
+          name: clampText(imageSource?.name || "Referencia", 180),
+          hasDataUrl: Boolean(String(imageSource?.dataUrl || "").trim()),
+          hasDownloadUrl: Boolean(String(imageSource?.downloadUrl || "").trim()),
+          storagePath: clampText(imageSource?.storagePath || "", 700) || undefined
+        });
+        continue;
+      }
       sceneReferences.push({
         buffer: sceneReference.buffer,
         mimeType: String(sceneReference.mimeType || "image/png").trim().toLowerCase() || "image/png"
+      });
+    }
+    if (referenceMode === "image" && sceneReferenceSources.length > 0 && !sceneReferences.length) {
+      console.warn(`[backend][${requestDebugTag}] scene reference images could not be loaded`, {
+        referenceSourceCount: sceneReferenceSources.length,
+        failures: sceneReferenceLoadFailures
+      });
+      return res.status(422).json({
+        error: "scene_reference_image_unavailable",
+        code: "scene_reference_image_unavailable",
+        message: "No se pudo cargar la imagen de referencia para generar la escena. Revisa que la imagen exista en Storage o vuelve a adjuntarla.",
+        detail: {
+          referenceSourceCount: sceneReferenceSources.length,
+          failures: sceneReferenceLoadFailures
+        }
       });
     }
     const sceneReferenceImages = sceneReferences.map((item) => ({
@@ -8602,10 +8627,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             instances: [{
               prompt,
               image: {
-                inlineData: {
-                  mimeType: portraitMimeType,
-                  data: portraitBase64
-                }
+                bytesBase64Encoded: portraitBase64,
+                mimeType: portraitMimeType
               }
             }],
             parameters: {
@@ -8620,10 +8643,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             instances: [{
               prompt,
               image: {
-                inlineData: {
-                  mimeType: portraitMimeType,
-                  data: portraitBase64
-                }
+                bytesBase64Encoded: portraitBase64,
+                mimeType: portraitMimeType
               }
             }],
             parameters: {
