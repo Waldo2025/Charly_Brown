@@ -46,7 +46,7 @@ import {
 } from "./podcaster-montage-export-v2.js?v=2026-06-29.20";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
-import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-06-29.1";
+import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-06-29.2";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-29.1";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-26.8";

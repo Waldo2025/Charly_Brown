@@ -333,18 +333,12 @@ service cloud.firestore {
     }
 
     match /podcaster_sessions/{sessionId} {
-      allow read: if canReadPodcasterSessionData(resource.data);
-      allow create: if isSignedIn() && (isOwner(request.resource.data.ownerId) || isEditor()) && isPodcasterSessionShape(request.resource.data, sessionId);
-      allow update: if isEditor() || (
-        isSignedIn() &&
-        isOwner(resource.data.ownerId) &&
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
+      allow update: if isSignedIn() &&
         request.resource.data.ownerId == resource.data.ownerId &&
-        isPodcasterSessionShape(request.resource.data, sessionId)
-      );
-      allow delete: if isAdmin() || (
-        isSignedIn() &&
-        isOwner(resource.data.ownerId)
-      );
+        isPodcasterSessionShape(request.resource.data, sessionId);
+      allow delete: if isAdmin();
     }
 
     match /podcaster_export_jobs/{jobId} {

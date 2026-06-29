@@ -144,8 +144,13 @@ service firebase.storage {
       allow read: if true;
       allow write: if isSignedIn() && isSafePublicAsset(fileName);
     }
+    // Authenticated users can read and upload safe Firebase Storage assets.
+    match /{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && hasAllowedPublicContentType();
+    }
 
-    // Deny-by-default.
+    // Deny-by-default for unauthenticated or unsafe assets.
     match /{allPaths=**} {
       allow read, write: if false;
     }

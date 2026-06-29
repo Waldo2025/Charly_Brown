@@ -234,7 +234,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       || buildReferenceMediaCacheKey(options.scope, options.id || normalized.name, options.kind || "image")
     ).trim();
     let uploaded = null;
-    if (options.kind !== "video" && typeof deps.uploadReferenceImageToStorage === "function") {
+    if (options.skipUpload !== true && options.kind !== "video" && typeof deps.uploadReferenceImageToStorage === "function") {
       try {
         uploaded = await deps.uploadReferenceImageToStorage({
           ...normalized,
@@ -271,6 +271,73 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
         localMediaCacheKey: cacheKey
       };
     }
+  }
+
+  async function uploadRowReferenceImagesToStorage(rowId = "", references = []) {
+    const key = String(rowId || "").trim();
+    const pending = Array.isArray(references) ? references : [];
+    if (!key || !pending.length || typeof deps.uploadReferenceImageToStorage !== "function") return;
+    let uploadedAny = false;
+    const uploadedByCacheKey = new Map();
+    for (const item of pending) {
+      const record = item?.record && typeof item.record === "object" ? item.record : null;
+      const dataUrl = String(record?.dataUrl || "").trim();
+      const cacheKey = String(record?.localMediaCacheKey || "").trim();
+      if (!record || !dataUrl.startsWith("data:image/") || !cacheKey) continue;
+      try {
+        const uploaded = await deps.uploadReferenceImageToStorage(record, {
+          scope: "row-image",
+          id: item.uploadId || record.name || key
+        });
+        if (uploaded && typeof uploaded === "object") {
+          uploadedByCacheKey.set(cacheKey, {
+            downloadUrl: String(uploaded.downloadUrl || "").trim(),
+            storagePath: String(uploaded.storagePath || "").trim()
+          });
+          uploadedAny = true;
+        }
+      } catch (error) {
+        console.warn("[MediaReference] No se pudo subir la referencia de escena a Storage; se conserva localmente.", error);
+      }
+    }
+    if (!uploadedAny) return;
+    deps.upsertActiveSession?.((current) => {
+      const {
+        nextImageMap,
+        nextListMap,
+        nextVideoMap,
+        nextModeMap
+      } = buildMutableRowReferenceState(current);
+      const currentList = Array.isArray(nextListMap[key]) ? nextListMap[key] : [];
+      const updatedList = currentList.map((record) => {
+        const cacheKey = String(record?.localMediaCacheKey || "").trim();
+        const uploaded = uploadedByCacheKey.get(cacheKey);
+        if (!uploaded) return record;
+        return {
+          ...record,
+          downloadUrl: uploaded.downloadUrl || String(record?.downloadUrl || "").trim(),
+          storagePath: uploaded.storagePath || String(record?.storagePath || "").trim()
+        };
+      });
+      const primary = updatedList[0] || null;
+      if (primary) nextImageMap[key] = primary;
+      if (updatedList.length) {
+        nextListMap[key] = updatedList;
+        delete nextVideoMap[key];
+        nextModeMap[key] = "image";
+      }
+      return {
+        ...current,
+        rowReferenceImageMap: nextImageMap,
+        rowReferenceImageListMap: nextListMap,
+        rowReferenceVideoMap: nextVideoMap,
+        rowReferenceModeByRowId: nextModeMap
+      };
+    }, { render: false });
+    const refreshed = getActiveSession();
+    deps.syncPodcastStudioInspector?.(refreshed, { forceRender: true });
+    void persistRowReferencesToCloud(refreshed);
+    deps.scheduleSessionLocalPersist?.("row-reference-images-uploaded");
   }
 
   async function hydrateReferenceRecord(reference = null, kind = "image") {
@@ -562,10 +629,15 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       : getRowReferenceImageList(activeSession, key);
     const seedList = normalizeReferenceImageList(existingReferences, MAX_ROW_REFERENCE_IMAGE_ITEMS);
     const normalizedList = [];
+    const pendingUploads = [];
     const appendedList = [...seedList];
     for (let index = 0; index < (Array.isArray(references) ? references.length : 0); index += 1) {
-      const normalized = await persistReferenceMediaRecord(references[index], { scope: "row-image", id: `${key}:${seedList.length + index}`, kind: "image" });
-      if (normalized) normalizedList.push(normalized);
+      const uploadId = `${key}:${seedList.length + index}`;
+      const normalized = await persistReferenceMediaRecord(references[index], { scope: "row-image", id: uploadId, kind: "image", skipUpload: true });
+      if (normalized) {
+        normalizedList.push(normalized);
+        pendingUploads.push({ record: normalized, uploadId });
+      }
     }
     appendedList.push(...normalizedList);
     const limitedList = normalizeReferenceImageList(appendedList, MAX_ROW_REFERENCE_IMAGE_ITEMS);
@@ -601,6 +673,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     deps.renderPodcastVideoShell?.(refreshed);
     deps.renderCreativeVideoShell?.(refreshed);
     void persistRowReferencesToCloud(refreshed);
+    void uploadRowReferenceImagesToStorage(key, pendingUploads);
     deps.scheduleSessionLocalPersist?.("row-reference-images");
     return true;
   }
