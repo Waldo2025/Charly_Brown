@@ -45,8 +45,10 @@ test("export v2 submits the preview runtime contract to a new FFmpeg route", () 
   assert.match(exportV2Source, /\/api\/podcaster\/montage\/export-v2/);
   assert.match(exportV2Source, /ffmpeg_preview_runtime_v2_request/);
   assert.match(exportV2Source, /ffmpeg_preview_runtime_v2_response/);
-  assert.match(exportV2Source, /renderOnScreenTextFrames:\s*false/);
-  assert.match(exportV2Source, /onScreenTextMode:\s*"ass"/);
+  assert.match(exportV2Source, /renderOnScreenTextFrames:\s*true/);
+  assert.match(exportV2Source, /renderedTextFrameCount\s*<\s*1/);
+  assert.match(exportV2Source, /onScreenTextMode:\s*"rendered_png_overlay"/);
+  assert.doesNotMatch(exportV2Source, /onScreenTextMode:\s*"ass"/);
 });
 
 test("export v2 imports only exported montage-export helpers", () => {

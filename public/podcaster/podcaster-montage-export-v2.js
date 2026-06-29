@@ -12,7 +12,7 @@ import {
   setMontageExportDownloadButton,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-29.5";
+} from "./podcaster-montage-export.js?v=2026-06-29.6";
 
 let montageExportV2SubmitLocked = false;
 
@@ -164,9 +164,28 @@ export async function runMontageExportV2() {
       { tone: "neutral" }
     );
 
-    const prepared = await buildMontageExportPayloadForSubmission(session, { renderOnScreenTextFrames: false });
+    const prepared = await buildMontageExportPayloadForSubmission(session, { renderOnScreenTextFrames: true });
     if (!prepared?.ok || !prepared?.payload) {
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
+      setMontageExportBusy(false, { label: "Exportar" });
+      return;
+    }
+    const onScreenTextSegmentCount = Array.isArray(prepared.payload.onScreenTextTimeline?.segments)
+      ? prepared.payload.onScreenTextTimeline.segments.length
+      : 0;
+    const renderedTextSegments = Array.isArray(prepared.payload.onScreenTextRenderedSegments)
+      ? prepared.payload.onScreenTextRenderedSegments
+      : [];
+    const renderedTextFrameCount = renderedTextSegments.reduce((total, segment) => {
+      return total + (Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0);
+    }, 0);
+    if (onScreenTextSegmentCount > 0 && renderedTextFrameCount < 1) {
+      setMontageExportStatus(
+        "No pudimos preparar el karaoke para exportar.",
+        "No se generaron las capturas PNG del texto en pantalla; se detuvo para no exportar un MP4 sin el highlight seleccionado.",
+        { tone: "error" }
+      );
+      setMontageExportBusy(false, { label: "Exportar" });
       return;
     }
     const previewRuntime = buildPreviewRuntimeSnapshot(session, runtimeEntries);
@@ -183,9 +202,10 @@ export async function runMontageExportV2() {
       entries: Array.isArray(payload.entries) ? payload.entries.length : 0,
       timingEntries: previewRuntime.entries.length,
       timingSegments: previewRuntime.entries.reduce((acc, entry) => acc + (Array.isArray(entry.timingSegments) ? entry.timingSegments.length : 0), 0),
-      onScreenTextSegments: Array.isArray(payload.onScreenTextTimeline?.segments) ? payload.onScreenTextTimeline.segments.length : 0,
-      renderedTextSegments: 0,
-      onScreenTextMode: "ass"
+      onScreenTextSegments: onScreenTextSegmentCount,
+      renderedTextSegments: renderedTextSegments.length,
+      renderedTextFrames: renderedTextFrameCount,
+      onScreenTextMode: "rendered_png_overlay"
     });
 
     const exportV2Endpoint = buildMontageExportV2Endpoint("/api/podcaster/montage/export-v2");
