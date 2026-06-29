@@ -9040,6 +9040,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const sourceVideoMimeType = String(finalVideoMimeType || "video/mp4").trim() || "video/mp4";
     const sourceVideoBytes = Number(finalVideoBuffer?.length || 0);
     let transcodeMeta = null;
+    let dialogueVideoWasTranscoded = true;
     try {
       logHeavyWorkMemory("dialogue_video", "transcode_video", {
         jobId,
@@ -9053,28 +9054,58 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     } catch (error) {
       const stage = String(error?.stage || "transcode").trim() || "transcode";
       const reason = String(error?.code || error?.message || "video_transcode_failed").trim() || "video_transcode_failed";
-      console.error(`[backend][${requestDebugTag}] video_transcode_failed`, {
-        model: resolvedModel,
-        variant: resolvedVariant,
-        sourceMimeType: sourceVideoMimeType,
-        stage,
-        reason
-      });
-      return res.status(502).json({
-        error: `video_transcode_failed: ${reason}`,
-        code: "video_transcode_failed",
-        detail: {
-          model: resolvedModel,
+      const canKeepGeneratedMp4 = (
+        reason === "ffmpeg_static_missing"
+        && sourceVideoBytes > 0
+        && String(sourceVideoMimeType || "").trim().toLowerCase().includes("mp4")
+      );
+      if (canKeepGeneratedMp4) {
+        dialogueVideoWasTranscoded = false;
+        finalVideoMimeType = "video/mp4";
+        transcodeMeta = {
+          buffer: finalVideoBuffer,
+          mimeType: "video/mp4",
+          container: "mp4",
+          transcoded: false,
           sourceMimeType: sourceVideoMimeType,
-          stage
-        }
-      });
+          videoCodec: "unknown",
+          audioCodec: "unknown",
+          inputProbe: { videoCodec: "", audioCodec: "", duration: "" },
+          outputProbe: { videoCodec: "", audioCodec: "", duration: "" },
+          fallbackReason: reason
+        };
+        console.warn(`[backend][${requestDebugTag}] video_transcode_skipped`, {
+          model: resolvedModel,
+          variant: resolvedVariant,
+          sourceMimeType: sourceVideoMimeType,
+          sourceBytes: sourceVideoBytes,
+          reason
+        });
+      } else {
+        console.error(`[backend][${requestDebugTag}] video_transcode_failed`, {
+          model: resolvedModel,
+          variant: resolvedVariant,
+          sourceMimeType: sourceVideoMimeType,
+          stage,
+          reason
+        });
+        return res.status(502).json({
+          error: `video_transcode_failed: ${reason}`,
+          code: "video_transcode_failed",
+          detail: {
+            model: resolvedModel,
+            sourceMimeType: sourceVideoMimeType,
+            stage
+          }
+        });
+      }
     }
     console.info(`[backend][${requestDebugTag}] video-transcode`, {
       model: resolvedModel,
       variant: resolvedVariant,
       sourceMimeType: sourceVideoMimeType,
       outputMimeType: finalVideoMimeType,
+      transcoded: dialogueVideoWasTranscoded,
       inputVideoCodec: String(transcodeMeta?.inputProbe?.videoCodec || "").trim() || "unknown",
       inputAudioCodec: String(transcodeMeta?.inputProbe?.audioCodec || "").trim() || "unknown",
       outputVideoCodec: String(transcodeMeta?.videoCodec || "").trim() || "h264",
@@ -9126,6 +9157,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         sourceMimeType: sourceVideoMimeType,
         videoCodec: String(transcodeMeta?.videoCodec || "h264").trim() || "h264",
         audioCodec: String(transcodeMeta?.audioCodec || "aac").trim() || "aac",
+        transcoded: dialogueVideoWasTranscoded ? "1" : "0",
+        transcodeFallbackReason: String(transcodeMeta?.fallbackReason || "").trim(),
         kind: "dialogue_video"
       }
     });
@@ -9143,7 +9176,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         container: "mp4",
         videoCodec: String(transcodeMeta?.videoCodec || "h264").trim() || "h264",
         audioCodec: String(transcodeMeta?.audioCodec || "aac").trim() || "aac",
-        transcoded: true,
+        transcoded: dialogueVideoWasTranscoded,
         model: resolvedModel,
         variant: resolvedVariant || null,
         promptVersion: "podcaster_veo_v1",
