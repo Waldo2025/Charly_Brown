@@ -461,7 +461,7 @@ async function playPodcastSceneLibraryPreview(item = null) {
   if (!normalized) return false;
   const source = runtime.resolveStorageVideoUrl(normalized.downloadUrl || "", normalized.storagePath || "");
   if (!source) return false;
-  const video = runtime.els.podcastActiveSpeakerVideoAlt || runtime.els.podcastActiveSpeakerVideo || null;
+  const video = runtime.getActiveStageVideoEl?.() || runtime.els.podcastActiveSpeakerVideoAlt || runtime.els.podcastActiveSpeakerVideo || null;
   if (!video) return false;
   
   if (typeof runtime.stopRowAudio === "function") {
