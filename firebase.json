@@ -110,6 +110,46 @@
         "type": 307
       },
       {
+        "source": "/api/podcaster/sessions/:path*",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/sessions/:path*",
+        "type": 307
+      },
+      {
+        "source": "/api/podcaster/scene-library/:path*",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/scene-library/:path*",
+        "type": 307
+      },
+      {
+        "source": "/api/podcaster/music/upload",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/music/upload",
+        "type": 307
+      },
+      {
+        "source": "/api/podcaster/music/library/:path*",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/music/library/:path*",
+        "type": 307
+      },
+      {
+        "source": "/api/podcaster/scene-media/upload",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/scene-media/upload",
+        "type": 307
+      },
+      {
+        "source": "/api/assets/proxy-media",
+        "destination": "https://snoopy-export.onrender.com/api/assets/proxy-media",
+        "type": 302
+      },
+      {
+        "source": "/api/assets/proxy-image",
+        "destination": "https://snoopy-export.onrender.com/api/assets/proxy-image",
+        "type": 302
+      },
+      {
+        "source": "/api/assets/montage-download",
+        "destination": "https://snoopy-export.onrender.com/api/assets/montage-download",
+        "type": 302
+      },
+      {
         "source": "/api/podcaster/speaker-portraits/generate",
         "destination": "https://gemini-veo.onrender.com/api/podcaster/speaker-portraits/generate",
         "type": 302

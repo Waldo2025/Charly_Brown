@@ -14353,11 +14353,11 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
         }
         const hasKnownMissingWorkers = queueDiagnostics && Number(queueDiagnostics.workerCount) === 0;
         if (hasKnownMissingWorkers && isMontageExportActiveWorkerRequired()) {
-          console.error("[backend][montage-export-v2][worker-unavailable]", {
+          console.warn("[backend][montage-export-v2][worker-unavailable-direct-fallback]", {
             jobId,
             queueName: queueDiagnostics.queueName || null,
             jobCounts: queueDiagnostics.jobCounts || null,
-            hint: "BullMQ accepted the job, but no montage export worker is connected."
+            hint: "BullMQ accepted the job, but no montage export worker is connected. Falling back to direct render in snoopy-export."
           });
           if (queuedJob && typeof queuedJob.remove === "function") {
             await queuedJob.remove().catch((removeErr) => {
@@ -14367,25 +14367,62 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
               });
             });
           }
+          const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+          if (!slot.ok) {
+            await montageExportJobStore.updateJob(jobId, {
+              status: "error",
+              stage: "backend_busy",
+              progress: 0,
+              hint: "No hay worker conectado y snoopy-export ya procesa otra tarea pesada.",
+              error: {
+                code: "backend_busy_with_export",
+                message: "No hay worker de export conectado y el fallback directo ya está ocupado.",
+                detail: slot.error?.detail || null
+              },
+              updatedAt: new Date().toISOString()
+            }).catch(() => {});
+            return res.status(429).json({
+              error: "backend_busy_with_export",
+              code: "backend_busy_with_export",
+              message: "No hay worker conectado y snoopy-export ya procesa otra exportación.",
+              detail: slot.error?.detail
+            });
+          }
           await montageExportJobStore.updateJob(jobId, {
-            status: "error",
-            stage: "queue_worker_unavailable",
-            progress: 0,
-            hint: "El export quedó en cola pero no hay worker de Render conectado para procesarlo.",
-            error: {
-              code: "montage_export_worker_unavailable",
-              message: "BullMQ aceptó el job, pero charly-brown-podcaster-export-worker no aparece conectado a Redis.",
-              detail: {
-                queueName: queueDiagnostics.queueName || null,
-                jobCounts: queueDiagnostics.jobCounts || null
-              }
-            },
+            status: "queued",
+            stage: "direct_fallback",
+            progress: 0.01,
+            hint: "Worker no disponible; renderizando directo en snoopy-export.",
             updatedAt: new Date().toISOString()
           }).catch(() => {});
-          return res.status(503).json({
-            error: "montage_export_worker_unavailable",
-            code: "montage_export_worker_unavailable",
-            detail: { jobId, queueDiagnostics }
+          logHeavyWorkSlots("montage_export", "acquire_direct_job_v2_worker_unavailable", {
+            jobId,
+            mode: "direct",
+            renderPipeline: "ffmpeg-preview-runtime-v2"
+          });
+          runMontageExportDirectJob({
+            jobId,
+            uid,
+            sessionId: input.sessionId,
+            input,
+            baseUrl
+          });
+          console.info("[backend][montage-export-v2][direct-started]", {
+            jobId,
+            mode: "direct",
+            renderPipeline: "ffmpeg-preview-runtime-v2",
+            reason: "worker_unavailable"
+          });
+          return res.status(202).json({
+            ...sanitizeMontageExportJobPublicPayload({
+              ...initial,
+              status: "queued",
+              stage: "direct_fallback",
+              progress: 0.01,
+              hint: "Worker no disponible; renderizando directo en snoopy-export."
+            }),
+            renderPipeline: "ffmpeg-preview-runtime-v2",
+            queueFallback: "direct_worker_unavailable"
           });
         }
         return res.status(202).json({
