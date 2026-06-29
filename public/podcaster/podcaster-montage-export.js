@@ -425,6 +425,7 @@ export let montageExportJobState = {
   reviewExcelFilename: "",
   readyDownloadUrl: "",
   readyDownloadFilename: "",
+  autoDownloadTriggered: false,
   recentLogs: []
 };
 
@@ -778,31 +779,36 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     });
   }
   if (String(data?.status || "").trim() === "ready") {
+    const readyExport = data?.export && typeof data.export === "object"
+      ? data.export
+      : (data?.result && typeof data.result === "object" ? data.result : {});
+    const url = String(data?.downloadUrl || readyExport?.downloadUrl || data?.export?.downloadUrl || data?.result?.downloadUrl || "").trim();
+    const name = String(readyExport?.filename || data?.export?.filename || data?.result?.filename || window.montageExportState.filename || "montage").trim() || "montage";
     logMontageExportDevtools("export_ready", {
       stage,
       progress,
-      warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0
+      warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0,
+      hasDownloadUrl: Boolean(url),
+      filename: name
     });
     clearMontageExportPolling();
     persistMontageExportActiveJob("");
     setMontageExportContinueButton({ visible: false });
     const statusText = "Tu video está listo.";
     let hintText = "";
-    const url = String(data?.downloadUrl || data?.export?.downloadUrl || "").trim();
-    const name = String(data?.export?.filename || window.montageExportState.filename || "montage").trim() || "montage";
     setMontageExportDownloadButton({
       visible: Boolean(url),
       url,
       filename: name
     });
     persistMontageExportReferenceToSession({
-      exportId: String(data?.export?.exportId || "").trim(),
+      exportId: String(readyExport?.exportId || data?.export?.exportId || data?.result?.exportId || "").trim(),
       downloadUrl: url,
-      storagePath: String(data?.export?.storagePath || "").trim(),
+      storagePath: String(readyExport?.storagePath || data?.export?.storagePath || data?.result?.storagePath || "").trim(),
       filename: name,
-      mimeType: String(data?.export?.mimeType || "").trim(),
-      createdAtIso: String(data?.export?.createdAt || "").trim(),
-      expiresAtIso: String(data?.export?.expiresAt || "").trim()
+      mimeType: String(readyExport?.mimeType || data?.export?.mimeType || data?.result?.mimeType || "").trim(),
+      createdAtIso: String(readyExport?.createdAt || data?.export?.createdAt || data?.result?.createdAt || "").trim(),
+      expiresAtIso: String(readyExport?.expiresAt || data?.export?.expiresAt || data?.result?.expiresAt || "").trim()
     });
     if (window.montageExportJobState.reviewExcelEnabled === true && window.montageExportState.exportMode === "review") {
       try {
@@ -828,6 +834,12 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     window.setTimelinePreviewsSuspended(false);
     setMontageExportPreviewPaused(false);
     setMontageExportBusy(false);
+    if (url && window.montageExportJobState.autoDownloadTriggered !== true) {
+      window.montageExportJobState.autoDownloadTriggered = true;
+      window.setTimeout(() => {
+        downloadReadyMontageExport();
+      }, 100);
+    }
     if (window.els.montageExportFloatingCard) {
       window.els.montageExportFloatingCard.hidden = true;
     }
@@ -1407,6 +1419,7 @@ export function resetMontageExportJobState() {
     reviewExcelFilename: "",
     readyDownloadUrl: "",
     readyDownloadFilename: "",
+    autoDownloadTriggered: false,
     recentLogs: []
   };
   setMontageExportContinueButton({ visible: false });

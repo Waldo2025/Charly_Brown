@@ -25,6 +25,12 @@ test("podcaster loads the preview-faithful montage export v2 module", () => {
   assert.match(podcasterSource, /handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick/);
 });
 
+test("ready export status exposes and downloads result URLs", () => {
+  assert.match(legacyExportSource, /data\?\.result\?\.downloadUrl/);
+  assert.match(legacyExportSource, /autoDownloadTriggered/);
+  assert.match(legacyExportSource, /downloadReadyMontageExport\(\)/);
+});
+
 test("export v2 submits the preview runtime contract to a new FFmpeg route", () => {
   assert.match(legacyExportSource, /export async function buildMontageExportPayloadForSubmission/);
   assert.match(exportV2Source, /buildPreviewRuntimeSnapshot/);

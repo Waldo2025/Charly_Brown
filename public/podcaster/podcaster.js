@@ -39,7 +39,7 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-06-28.21";
+} from "./podcaster-montage-export.js?v=2026-06-29.3";
 import {
   handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick,
   runMontageExportV2 as runMontageExport
