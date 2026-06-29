@@ -33,7 +33,7 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.19';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.20';
 
 import {
     activarEdicionModuloCompleto,
@@ -332,7 +332,7 @@ async function syncGeminiModelOptionsForMoodle() {
 
     geminiModelsSyncPromise = (async () => {
         try {
-            const data = await authFetchJson("/api/gemini/models", { method: "GET" });
+            const data = await authFetchJson("/api/gemini/models", { method: "GET", preferRemote: true });
             const backendModels = Array.isArray(data?.models) ? data.models : [];
             const filteredBackendModels = backendModels
                 .filter(isTextGeminiGenerationModel)
@@ -2467,6 +2467,7 @@ JSON:
 `.trim();
     const response = await authFetchJson("/api/gemini/generate", {
         method: "POST",
+        preferRemote: true,
         body: {
             model: "gemini-2.5-flash-lite",
             payload: {
@@ -15871,6 +15872,16 @@ function hidratarHtmlInstruccionesGemini(html = "", moduloId = "", imageRecords 
             img.setAttribute("src", construirPlaceholderImagenGemini(fallbackId));
             return;
         }
+    });
+    container.querySelectorAll("img[src]").forEach((img) => {
+        const src = String(img.getAttribute("src") || "").trim();
+        if (!src || /^(?:https?:|data:image\/|blob:|\/|#)/i.test(src)) return;
+        if (!/\.(?:avif|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i.test(src)) return;
+        const imageId = String(img.getAttribute("data-gemini-image-id") || "").trim()
+            || src.split(/[/?#]/).filter(Boolean).pop()
+            || "imagen-referencia";
+        img.setAttribute("data-gemini-image-id", imageId);
+        img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
     });
     return container.innerHTML;
 }

@@ -1,7 +1,8 @@
-import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.10.64";
+import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.10.65";
 import {
   authFetchJson,
   buildApiUrl,
+  buildApiUrlPreferRemote,
   buildApiUrlFromBase,
   getAuthHeaders,
   getRemoteApiBase,
@@ -16,7 +17,7 @@ import {
 } from "./moodleCourse-featuredSources.js?v=2026-1.0.1.24";
 
 function getGeminiEndpoint() {
-  return buildApiUrl("/api/gemini/generate");
+  return buildApiUrlPreferRemote("/api/gemini/generate");
 }
 
 function shouldTryDedicatedModuleGraphicRoute() {
@@ -49,7 +50,7 @@ async function extraerFuenteDestacadaStricta(modulo = {}) {
     headers,
     body: JSON.stringify({ url: validation.url })
   };
-  const primaryUrl = buildApiUrl(endpointPath);
+  const primaryUrl = buildApiUrlPreferRemote(endpointPath);
   const remoteUrl = isLoopbackApiBase(primaryUrl)
     ? buildApiUrlFromBase(getRemoteApiBase(), endpointPath)
     : "";
@@ -113,7 +114,7 @@ async function geminiGenerateRequest(payload = {}, options = {}) {
     ...(options?.signal ? { signal: options.signal } : {})
   };
   const endpointPath = "/api/gemini/generate";
-  const primaryUrl = buildApiUrl(endpointPath);
+  const primaryUrl = buildApiUrlPreferRemote(endpointPath);
   const remoteUrl = isLoopbackApiBase(primaryUrl)
     ? buildApiUrlFromBase(getRemoteApiBase(), endpointPath)
     : "";
