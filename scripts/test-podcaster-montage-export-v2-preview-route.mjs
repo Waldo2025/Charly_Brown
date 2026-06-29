@@ -30,6 +30,28 @@ test("export v2 submits the preview runtime contract to a new FFmpeg route", () 
   assert.match(exportV2Source, /\/api\/podcaster\/montage\/export-v2/);
 });
 
+test("export v2 imports only exported montage-export helpers", () => {
+  [
+    "buildMontageExportPayloadForSubmission",
+    "clearMontageExportPolling",
+    "continueMontageExportPolling",
+    "getMontagePreviewRowId",
+    "logMontageExportDevtools",
+    "montageExportJobState",
+    "montageExportState",
+    "pollMontageExportJob",
+    "resetMontageExportJobState",
+    "setMontageExportBusy",
+    "setMontageExportContinueButton",
+    "setMontageExportDownloadButton",
+    "setMontageExportProgress",
+    "setMontageExportStatus"
+  ].forEach((name) => {
+    assert.match(exportV2Source, new RegExp(`\\b${name}\\b`));
+    assert.match(legacyExportSource, new RegExp(`export (?:async )?(?:function|let|const) ${name}\\b`));
+  });
+});
+
 test("backend exposes export-v2 as an FFmpeg preview-runtime pipeline", () => {
   assert.match(backendSource, /app\.post\("\/api\/podcaster\/montage\/export-v2"/);
   assert.match(backendSource, /normalizeMontageExportV2RequestBody/);

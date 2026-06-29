@@ -596,7 +596,7 @@ export function reopenMontageExportModalFromCard() {
   }
 }
 
-function logMontageExportDevtools(event = "", payload = {}, level = "info") {
+export function logMontageExportDevtools(event = "", payload = {}, level = "info") {
   const cleanEvent = String(event || "").trim() || "event";
   const cleanLevel = ["info", "warn", "error", "debug"].includes(String(level || "").trim())
     ? String(level || "").trim()
@@ -1272,7 +1272,7 @@ export function setMontageExportOpen(isOpen = false) {
   }
 }
 
-function clearMontageExportPolling() {
+export function clearMontageExportPolling() {
   if (window.montageExportJobState.pollTimer) {
     window.clearTimeout(window.montageExportJobState.pollTimer);
     window.montageExportJobState.pollTimer = null;
@@ -1294,7 +1294,7 @@ export function setMontageExportContinueButton({ visible = false, label = "Conti
   }
 }
 
-function setMontageExportDownloadButton({ visible = false, url = "", filename = "" } = {}) {
+export function setMontageExportDownloadButton({ visible = false, url = "", filename = "" } = {}) {
   if (!window.els.montageExportDownloadBtn) return;
   const cleanUrl = String(url || "").trim();
   const cleanFilename = String(filename || "").trim() || "montage.mp4";
