@@ -35,14 +35,35 @@ function sanitizePersistedRenderedFrames(renderedFrames = []) {
   const sanitizedFrames = Array.isArray(renderedFrames)
     ? renderedFrames.map((frame) => {
       const source = frame && typeof frame === "object" ? frame : null;
-      if (!source) return source;
-      const nextFrame = { ...source };
-      if (typeof nextFrame.dataUrl === "string" && nextFrame.dataUrl.trim().startsWith("data:image/")) {
-        delete nextFrame.dataUrl;
+      if (!source) return null;
+      const storagePath = String(source.storagePath || "").trim();
+      const downloadUrl = String(source.downloadUrl || source.url || "").trim();
+      const hasInlineDataUrl = typeof source.dataUrl === "string" && source.dataUrl.trim().startsWith("data:image/");
+      if (hasInlineDataUrl) {
         redactedFrameCount += 1;
       }
-      return nextFrame;
-    })
+      if (!storagePath && !downloadUrl) return null;
+      const compactFrame = stripUndefinedDeep({
+        kind: String(source.kind || "base").trim() || "base",
+        text: String(source.text || "").trim(),
+        wordIndex: Number.isFinite(Number(source.wordIndex)) ? Math.max(-1, Math.round(Number(source.wordIndex))) : -1,
+        startMs: Math.max(0, Math.round(Number(source.startMs || 0) || 0)),
+        endMs: Math.max(0, Math.round(Number(source.endMs || 0) || 0)),
+        storagePath,
+        downloadUrl: storagePath ? undefined : downloadUrl,
+        url: storagePath ? undefined : downloadUrl,
+        mimeType: String(source.mimeType || "image/png").trim() || "image/png",
+        padPx: Math.max(0, Math.round(Number(source.padPx || 0) || 0)),
+        widthPx: Math.max(1, Math.round(Number(source.widthPx || 1) || 1)),
+        heightPx: Math.max(1, Math.round(Number(source.heightPx || 1) || 1)),
+        offsetXPx: Math.max(0, Math.round(Number(source.offsetXPx || 0) || 0)),
+        offsetYPx: Math.max(0, Math.round(Number(source.offsetYPx || 0) || 0)),
+        sourceWidth: Math.max(2, Math.round(Number(source.sourceWidth || 1280) || 1280)),
+        sourceHeight: Math.max(2, Math.round(Number(source.sourceHeight || 720) || 720)),
+        activeOnly: source.activeOnly === true ? true : undefined
+      });
+      return compactFrame.storagePath || compactFrame.downloadUrl || compactFrame.url ? compactFrame : null;
+    }).filter(Boolean)
     : [];
   return {
     sanitizedFrames,
@@ -326,7 +347,20 @@ function sanitizeMontageExportPersistedInput(input = null) {
   }
 
   if (Array.isArray(nextInput.onScreenTextRenderedSegments)) {
-    nextInput.onScreenTextRenderedSegments = [];
+    nextInput.onScreenTextRenderedSegments = nextInput.onScreenTextRenderedSegments
+      .map((segment) => {
+        const sourceSegment = segment && typeof segment === "object" ? segment : null;
+        if (!sourceSegment) return null;
+        const renderedFrames = Array.isArray(sourceSegment.renderedFrames)
+          ? sourceSegment.renderedFrames.filter(Boolean)
+          : [];
+        if (!renderedFrames.length) return null;
+        return {
+          ...sourceSegment,
+          renderedFrames
+        };
+      })
+      .filter(Boolean);
     nextInput.persistedOnScreenTextRenderedSegmentCount = originalOnScreenTextRenderedSegmentCount;
   }
 

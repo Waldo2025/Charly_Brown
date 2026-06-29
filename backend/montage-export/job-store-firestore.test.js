@@ -127,7 +127,11 @@ test("createJob strips inline on-screen raster payloads from persisted request i
           renderedFrames: [{
             kind: "base",
             wordIndex: -1,
-            dataUrl: "data:image/png;base64,QUJDRA=="
+            dataUrl: "data:image/png;base64,QUJDRA==",
+            storagePath: "podcaster/sessions/session-raster/tmp/base.png",
+            downloadUrl: "https://example.com/base.png",
+            widthPx: 400,
+            heightPx: 120
           }, {
             kind: "karaoke-word",
             wordIndex: 0,
@@ -151,7 +155,20 @@ test("createJob strips inline on-screen raster payloads from persisted request i
     false
   );
   assert.equal(Array.isArray(created.request.input.onScreenTextRenderedSegments), true);
-  assert.equal(created.request.input.onScreenTextRenderedSegments.length, 0);
+  assert.equal(created.request.input.onScreenTextRenderedSegments.length, 1);
+  assert.equal(created.request.input.onScreenTextRenderedSegments[0].renderedFrames.length, 1);
+  assert.equal(
+    created.request.input.onScreenTextRenderedSegments[0].renderedFrames[0].storagePath,
+    "podcaster/sessions/session-raster/tmp/base.png"
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input.onScreenTextRenderedSegments[0].renderedFrames[0], "dataUrl"),
+    false
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input.onScreenTextRenderedSegments[0].renderedFrames[0], "downloadUrl"),
+    false
+  );
   assert.equal(created.request.input.persistedOnScreenTextRenderedSegmentCount, 1);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "onScreenTextTimeline"), false);
 });

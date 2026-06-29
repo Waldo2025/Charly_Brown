@@ -3,7 +3,8 @@ const assert = require("node:assert/strict");
 
 const {
   canAutoResumeInterruptedMontageExportJob,
-  buildAutoResumeInterruptedMontageExportJobPatch
+  buildAutoResumeInterruptedMontageExportJobPatch,
+  hasPersistedRenderedFrameSource
 } = require("./restart-recovery.js");
 
 test("canAutoResumeInterruptedMontageExportJob returns true for direct-mode restarted jobs with persisted input", () => {
@@ -134,6 +135,32 @@ test("canAutoResumeInterruptedMontageExportJob returns false when inline rasters
   });
 
   assert.equal(result, false);
+});
+
+test("canAutoResumeInterruptedMontageExportJob allows redacted raster jobs when storage-backed frames remain", () => {
+  const input = {
+    sessionId: "session-1",
+    renderPipeline: "ffmpeg-preview-runtime-v2",
+    entries: [{ rowId: "row-1" }],
+    persistedInlineRastersRedacted: true,
+    onScreenTextRenderedSegments: [{
+      rowId: "row-1",
+      renderedFrames: [{
+        kind: "base",
+        storagePath: "podcaster/sessions/session-1/tmp/base.png"
+      }]
+    }]
+  };
+  assert.equal(hasPersistedRenderedFrameSource(input), true);
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "running",
+    stage: "render_scene_segments",
+    request: { input }
+  }, {
+    queueAvailable: true
+  });
+
+  assert.equal(result, true);
 });
 
 test("canAutoResumeInterruptedMontageExportJob returns true when the persisted request was compacted but remains replayable", () => {

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.304",
-  "build": "2026-1.0.10.304",
+  "version": "1.0.10.305",
+  "build": "2026-1.0.10.305",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El backend de export MP4 v2 conserva en Firestore los frames PNG de texto/karaoke respaldados por Storage como metadatos compactos, permitiendo reanudar un job tras reinicio de Render sin perder el highlight redondeado o cuadrado del preview.",
     "Corregido: El export MP4 FFmpeg v2 de Podcaster vuelve a generar capturas PNG del texto en pantalla/karaoke antes de enviar el job, las usa como overlay primario para conservar el highlight redondeado o cuadrado del preview y detiene el envío si no hay frames PNG para no producir un MP4 sin el estilo seleccionado. Se incrementan podcaster.js, podcaster-montage-export.js y podcaster-montage-export-v2.js a la v2026-06-29.6.",
     "Actualizado: Se incrementan version.json y cache-busters de Podcaster para forzar la carga del export MP4 FFmpeg v2 con polling sincronizado y descarga automática del resultado listo. Se incrementan podcaster.js, podcaster-montage-export.js y podcaster-montage-export-v2.js a la v2026-06-29.5.",
     "Corregido: El export MP4 de Podcaster bloquea y deja de exponer la ruta experimental de export local por frames; el flujo normal queda forzado a backend/FFmpeg y el frontend solo genera raster/renderedFrames PNG del texto/karaoke. Se incrementan podcaster.js y podcaster-montage-export.js a la v2026-06-28.20.",
@@ -96,6 +97,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: Los exports MP4 v2 pueden reanudarse tras reinicio de Render conservando los PNGs del karaoke en Storage.",
     "Corregido: El export MP4 v2 de Podcaster conserva el highlight karaoke redondeado o cuadrado usando capturas PNG del preview como overlay FFmpeg.",
     "Actualizado: Se fuerza la recarga del export MP4 v2 de Podcaster con polling corregido y descarga automática al quedar listo.",
     "Corregido: Los PNG temporales del texto en pantalla para export ya no usan la ruta profunda owners/tmp que Firebase Storage rechazaba con 403.",

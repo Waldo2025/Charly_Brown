@@ -1,3 +1,20 @@
+function hasPersistedRenderedFrameSource(input = null) {
+  const source = input && typeof input === "object" ? input : null;
+  if (!source) return false;
+  const segments = Array.isArray(source.onScreenTextRenderedSegments)
+    ? source.onScreenTextRenderedSegments
+    : [];
+  return segments.some((segment) => {
+    const frames = Array.isArray(segment?.renderedFrames) ? segment.renderedFrames : [];
+    return frames.some((frame) => {
+      return Boolean(
+        String(frame?.storagePath || "").trim()
+        || String(frame?.downloadUrl || frame?.url || "").trim()
+      );
+    });
+  });
+}
+
 function canAutoResumeInterruptedMontageExportJob(job = null, {
   queueAvailable = false
 } = {}) {
@@ -8,7 +25,7 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   const request = source.request && typeof source.request === "object" ? source.request : null;
   const input = request?.input && typeof request.input === "object" ? request.input : null;
   if (!input) return false;
-  if (input.persistedInlineRastersRedacted === true) return false;
+  if (input.persistedInlineRastersRedacted === true && !hasPersistedRenderedFrameSource(input)) return false;
   const renderPipeline = String(input.renderPipeline || input.previewRuntime?.pipeline || "").trim();
   const isPreviewRuntimeV2 = renderPipeline === "ffmpeg-preview-runtime-v2";
   const restartResumeCount = Math.max(0, Math.round(Number(source.restartResumeCount || 0) || 0));
@@ -56,5 +73,6 @@ function buildAutoResumeInterruptedMontageExportJobPatch(job = null, nowIso = ne
 
 module.exports = {
   canAutoResumeInterruptedMontageExportJob,
-  buildAutoResumeInterruptedMontageExportJobPatch
+  buildAutoResumeInterruptedMontageExportJobPatch,
+  hasPersistedRenderedFrameSource
 };
