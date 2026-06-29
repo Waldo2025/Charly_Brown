@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.319",
-  "build": "2026-1.0.10.319",
+  "version": "1.0.10.320",
+  "build": "2026-1.0.10.320",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: api-client enruta directamente a snoopy-export las rutas de sesiones, librerías, scene-media, montage y proxy assets de Podcaster para conservar Authorization sin depender de redirects cross-origin. Se incrementan api-client.js, api-client-podcaster.js, podcaster.js y export modules.",
     "Corregido: Firebase Hosting redirige sesiones, librerías, scene-media y proxy assets de Podcaster a snoopy-export en vez del catch-all de Gemini; si Redis no tiene worker BullMQ conectado, export-v2 cae a render directo en snoopy-export en lugar de devolver montage_export_worker_unavailable.",
     "Corregido: El export MP4 v2 ahora detecta cuando Redis acepta el job pero no hay worker BullMQ conectado, marca el job como queue_worker_unavailable en vez de quedarse indefinidamente en queued, agrega logs active/completed del worker y sube cache-busters de Podcaster/api-client para forzar el frontend nuevo.",
     "Corregido: Los builds de Render ya no instalan Chromium/FFmpeg de Playwright en ningun servicio, incluido snoopy-export y el worker; el postinstall queda desactivado por defecto y solo se instala Chromium con un comando explicito.",
@@ -297,5 +298,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.319"
+  "cache_version": "2026-1.0.10.320"
 }

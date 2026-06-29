@@ -83,6 +83,21 @@ function shouldForceSameOriginApiPath(path = "") {
   return clean === "/api/podcaster" || clean.startsWith("/api/podcaster/");
 }
 
+function shouldUseExportApiPath(path = "") {
+  if (isLocalHostRuntime()) return false;
+  const clean = String(path || "").trim();
+  if (clean === "/api/assets/proxy-media" || clean.startsWith("/api/assets/proxy-media?")) return true;
+  if (clean === "/api/assets/proxy-image" || clean.startsWith("/api/assets/proxy-image?")) return true;
+  if (clean === "/api/assets/montage-download" || clean.startsWith("/api/assets/montage-download?")) return true;
+  if (clean.startsWith("/api/podcaster/montage/")) return true;
+  if (clean.startsWith("/api/podcaster/sessions/")) return true;
+  if (clean.startsWith("/api/podcaster/scene-library/")) return true;
+  if (clean === "/api/podcaster/scene-media/upload") return true;
+  if (clean === "/api/podcaster/music/upload") return true;
+  if (clean.startsWith("/api/podcaster/music/library/")) return true;
+  return false;
+}
+
 export function hasAvailableApiBase() {
   return Boolean(getConfiguredApiBase()) || canUseSameOriginApi();
 }
@@ -118,7 +133,9 @@ export function buildApiUrl(path = "") {
   if (!input) return resolveApiBase();
   if (/^https?:\/\//i.test(input)) return input;
 
-  const base = shouldForceSameOriginApiPath(input) ? DEFAULT_REMOTE_API_BASE_SAFE : resolveApiBase();
+  const base = shouldUseExportApiPath(input)
+    ? getExportApiBase()
+    : (shouldForceSameOriginApiPath(input) ? DEFAULT_REMOTE_API_BASE_SAFE : resolveApiBase());
   if (!base) return "";
   if (input.startsWith("/api/")) {
     return base.endsWith("/api") ? `${base}${input.slice(4)}` : `${base}${input}`;
@@ -131,6 +148,7 @@ export function buildApiUrlPreferRemote(path = "") {
   const input = String(path || "").trim();
   if (!input) return getRemoteApiBase();
   if (/^https?:\/\//i.test(input)) return input;
+  if (shouldUseExportApiPath(input)) return buildApiUrl(input);
   if (shouldForceSameOriginApiPath(input)) return buildApiUrl(input);
   const resolvedBase = resolveApiBase();
   const remoteBase = getRemoteApiBase();
