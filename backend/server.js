@@ -10832,7 +10832,9 @@ function doesMontageOnScreenTextSegmentBelongToScene(segment = {}, entry = {}, s
   const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
   const endMs = Math.max(startMs + 1, Math.round(startMs + Number(segment?.durationMs || 0) || 0));
   const overlapsSceneWindow = endMs > sceneStartMs && startMs < sceneEndMs;
-  if (segmentRowId && entryRowId && segmentRowId === entryRowId) return overlapsSceneWindow;
+  if (segmentRowId && entryRowId) {
+    return segmentRowId === entryRowId && overlapsSceneWindow;
+  }
   const normalizedSceneIndex = Math.max(1, Math.round(Number(sceneIndex || 1) || 1));
   const hasExplicitSceneIndex = segment?.sceneIndex !== null
     && segment?.sceneIndex !== undefined

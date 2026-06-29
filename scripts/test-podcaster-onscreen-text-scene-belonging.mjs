@@ -10,8 +10,12 @@ if (!/const hasExplicitSceneIndex = segment\?\.sceneIndex !== null[\s\S]*?if \(h
   throw new Error("El backend no debe tratar un sceneIndex ausente como si perteneciera a la escena actual.");
 }
 
-if (!/const overlapsSceneWindow = endMs > sceneStartMs && startMs < sceneEndMs;[\s\S]*?segmentRowId && entryRowId && segmentRowId === entryRowId\) return overlapsSceneWindow;/.test(backendSource)) {
+if (!/const overlapsSceneWindow = endMs > sceneStartMs && startMs < sceneEndMs;[\s\S]*?if \(segmentRowId && entryRowId\) \{[\s\S]*?return segmentRowId === entryRowId && overlapsSceneWindow;[\s\S]*?\}/.test(backendSource)) {
   throw new Error("Los segmentos de texto en pantalla con rowId coincidente deben seguir recortados a la ventana temporal de la escena.");
+}
+
+if (!/return segmentRowId === entryRowId && overlapsSceneWindow;/.test(backendSource)) {
+  throw new Error("Los segmentos de texto en pantalla con rowId distinto no deben caer al match por sceneIndex u overlap.");
 }
 
 if (!/segmentSceneIndex === normalizedSceneIndex\) return overlapsSceneWindow;/.test(backendSource)) {
