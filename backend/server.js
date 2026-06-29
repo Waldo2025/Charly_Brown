@@ -14252,6 +14252,13 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
   if (!ensureMontageExportServiceEnabled(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
+    console.info("[backend][montage-export-v2][request-received]", {
+      uid: uid || null,
+      contentLength: String(req.headers?.["content-length"] || "").trim() || null,
+      queueSubmissionEnabled: isMontageExportQueueSubmissionEnabled() === true,
+      queueRequired: isMontageExportQueueRequired() === true,
+      queueAvailable: Boolean(montageExportQueue)
+    });
     const input = normalizeMontageExportV2RequestBody(req.body || {});
     const preflight = validateMontageExportPreflight(input, {
       maxScenes: MAX_MONTAGE_EXPORT_SCENES,
@@ -14300,6 +14307,11 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
     upsertMontageExportJob(jobId, initial);
 
     if (montageExportQueue && isMontageExportQueueSubmissionEnabled()) {
+      console.info("[backend][montage-export-v2][enqueue]", {
+        jobId,
+        mode: "queue",
+        renderPipeline: "ffmpeg-preview-runtime-v2"
+      });
       await montageExportQueue.enqueueExportJob({
         jobId,
         sessionId: input.sessionId,
@@ -14352,6 +14364,11 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
       sessionId: input.sessionId,
       input,
       baseUrl
+    });
+    console.info("[backend][montage-export-v2][direct-started]", {
+      jobId,
+      mode: "direct",
+      renderPipeline: "ffmpeg-preview-runtime-v2"
     });
 
     return res.status(202).json({

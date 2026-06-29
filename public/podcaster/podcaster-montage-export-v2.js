@@ -189,10 +189,22 @@ export async function runMontageExportV2() {
       renderedTextSegments: Array.isArray(payload.onScreenTextRenderedSegments) ? payload.onScreenTextRenderedSegments.length : 0
     });
 
-    const data = await authFetchJson(buildMontageExportV2Endpoint("/api/podcaster/montage/export-v2"), {
+    const exportV2Endpoint = buildMontageExportV2Endpoint("/api/podcaster/montage/export-v2");
+    logMontageExportDevtools("ffmpeg_preview_runtime_v2_request", {
+      endpoint: exportV2Endpoint,
+      renderPipeline: payload.renderPipeline,
+      entries: Array.isArray(payload.entries) ? payload.entries.length : 0
+    });
+    const data = await authFetchJson(exportV2Endpoint, {
       method: "POST",
       preferRemote: false,
       body: payload
+    });
+    logMontageExportDevtools("ffmpeg_preview_runtime_v2_response", {
+      jobId: String(data?.jobId || data?.id || "").trim(),
+      status: String(data?.status || "").trim(),
+      stage: String(data?.stage || "").trim(),
+      renderPipeline: String(data?.renderPipeline || "").trim()
     });
     const jobId = String(data?.jobId || data?.id || "").trim();
     if (!jobId) throw new Error("montage_export_v2_job_missing");

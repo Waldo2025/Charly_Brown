@@ -17,6 +17,7 @@ const legacyExportSource = readSource("../public/podcaster/podcaster-montage-exp
 const exportV2Source = readSource("../public/podcaster/podcaster-montage-export-v2.js");
 const backendSource = readSource("../backend/server.js");
 const restartRecoverySource = readSource("../backend/montage-export/restart-recovery.js");
+const renderSource = readSource("../render.yaml");
 
 test("podcaster loads the preview-faithful montage export v2 module", () => {
   assert.match(htmlSource, /podcaster\/podcaster-montage-export-v2\.js\?v=/);
@@ -29,6 +30,8 @@ test("export v2 submits the preview runtime contract to a new FFmpeg route", () 
   assert.match(exportV2Source, /buildPreviewRuntimeSnapshot/);
   assert.match(exportV2Source, /ffmpeg-preview-runtime-v2/);
   assert.match(exportV2Source, /\/api\/podcaster\/montage\/export-v2/);
+  assert.match(exportV2Source, /ffmpeg_preview_runtime_v2_request/);
+  assert.match(exportV2Source, /ffmpeg_preview_runtime_v2_response/);
 });
 
 test("export v2 imports only exported montage-export helpers", () => {
@@ -57,6 +60,8 @@ test("backend exposes export-v2 as an FFmpeg preview-runtime pipeline", () => {
   assert.match(backendSource, /app\.post\("\/api\/podcaster\/montage\/export-v2"/);
   assert.match(backendSource, /normalizeMontageExportV2RequestBody/);
   assert.match(backendSource, /applyMontageExportV2PreviewRuntime/);
+  assert.match(backendSource, /\[backend\]\[montage-export-v2\]\[request-received\]/);
+  assert.match(backendSource, /\[backend\]\[montage-export-v2\]\[direct-started\]/);
   assert.match(backendSource, /ffmpeg_preview_runtime/);
 });
 
@@ -66,4 +71,9 @@ test("export-status resumes v2 jobs with the preview-runtime payload intact", ()
   assert.match(backendSource, /normalizeMontageExportResumeRequestBody\(request\.input\)/);
   assert.match(restartRecoverySource, /isPreviewRuntimeV2/);
   assert.match(restartRecoverySource, /queueAvailable && !isPreviewRuntimeV2/);
+});
+
+test("Render export services emit short FFmpeg heartbeats", () => {
+  assert.match(renderSource, /name:\s+snoopy-export[\s\S]*MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS\s*\n\s*value:\s+2000/);
+  assert.match(renderSource, /name:\s+charly-brown-podcaster-export-worker[\s\S]*MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS\s*\n\s*value:\s+2000/);
 });

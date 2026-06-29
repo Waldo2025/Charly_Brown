@@ -102,6 +102,8 @@ services:
         value: https://snoopy-export.onrender.com
       - key: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS
         value: 900000
+      - key: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS
+        value: 2000
       - key: MONTAGE_EXPORT_MAX_CONCURRENT
         value: 1
       - key: MONTAGE_EXPORT_WORKER_CONCURRENCY
@@ -150,6 +152,8 @@ services:
         value: https://snoopy-export.onrender.com
       - key: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS
         value: 900000
+      - key: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS
+        value: 2000
       - key: MONTAGE_EXPORT_MAX_CONCURRENT
         value: 1
       - key: MONTAGE_EXPORT_WORKER_CONCURRENCY
