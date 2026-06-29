@@ -56,6 +56,11 @@ if (!verifyOnly && (
   process.exit(0);
 }
 
+if (isPostinstall && String(process.env.PLAYWRIGHT_INSTALL_ON_POSTINSTALL || "").trim() !== "1") {
+  log("skipped", "postinstall browser install disabled; use npm run install:chromium when Chromium is required.");
+  process.exit(0);
+}
+
 if (isPostinstall && backendServiceRole && backendServiceRole !== "export" && backendServiceRole !== "all") {
   log("skipped", `service role ${backendServiceRole} does not need Playwright browsers.`);
   process.exit(0);
