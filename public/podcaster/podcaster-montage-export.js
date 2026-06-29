@@ -3807,14 +3807,41 @@ function buildMeasuredMontageKaraokeSnapshotSvg(plan = null, width = 0, height =
     const fontFamily = String(style.fontFamily || "system-ui, sans-serif").trim() || "system-ui, sans-serif";
     const fontWeight = String(style.fontWeight || "700").trim() || "700";
     const fontStyle = String(style.fontStyle || "normal").trim() || "normal";
-    const text = String(active.textContent || "").trim();
-    if (!text) return "";
-    const textX = activeRect.left - shellRect.left + (activeRect.width / 2);
-    const textY = activeRect.top - shellRect.top + (activeRect.height / 2);
+    const words = Array.from(host.querySelectorAll(".podcast-karaoke-word")).map((word) => {
+      const wordRect = word.getBoundingClientRect();
+      const wordText = String(word.textContent || "").trim();
+      if (!wordText || !wordRect.width || !wordRect.height) return null;
+      const wordStyle = window.getComputedStyle(word);
+      const wordFontSize = parseMontageSnapshotCssPx(wordStyle.fontSize, fontSize);
+      const wordFill = word.classList.contains("is-active")
+        ? "#020617"
+        : (String(wordStyle.color || "").trim() || "#f8fafc");
+      const strokeWidthRaw = parseMontageSnapshotCssPx(wordStyle.webkitTextStrokeWidth || wordStyle.getPropertyValue("-webkit-text-stroke-width"), 0);
+      return {
+        text: wordText,
+        x: wordRect.left - shellRect.left + (wordRect.width / 2),
+        y: wordRect.top - shellRect.top + (wordRect.height / 2),
+        fontSize: wordFontSize,
+        fontFamily: String(wordStyle.fontFamily || fontFamily).trim() || fontFamily,
+        fontWeight: String(wordStyle.fontWeight || fontWeight).trim() || fontWeight,
+        fontStyle: String(wordStyle.fontStyle || fontStyle).trim() || fontStyle,
+        fill: wordFill,
+        stroke: String(wordStyle.webkitTextStrokeColor || wordStyle.getPropertyValue("-webkit-text-stroke-color") || "#0f172a").trim() || "#0f172a",
+        strokeWidth: Math.max(0, Math.min(10, strokeWidthRaw || Math.max(1.25, wordFontSize * 0.055))),
+        active: word.classList.contains("is-active")
+      };
+    }).filter(Boolean);
+    if (!words.length) return "";
+    const textNodes = words.map((word) => {
+      const strokeAttr = word.active
+        ? ""
+        : ` stroke="${escapeMontageSnapshotSvg(word.stroke)}" stroke-width="${Number(word.strokeWidth).toFixed(2)}" paint-order="stroke fill"`;
+      return `<text x="${word.x.toFixed(2)}" y="${word.y.toFixed(2)}" text-anchor="middle" dominant-baseline="central" font-family="${escapeMontageSnapshotSvg(word.fontFamily)}" font-size="${Number(word.fontSize).toFixed(2)}" font-weight="${escapeMontageSnapshotSvg(word.fontWeight)}" font-style="${escapeMontageSnapshotSvg(word.fontStyle)}" fill="${escapeMontageSnapshotSvg(word.fill)}"${strokeAttr}>${escapeMontageSnapshotSvg(word.text)}</text>`;
+    }).join("\n        ");
     return `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${Math.max(1, rectW).toFixed(2)}" height="${Math.max(1, rectH).toFixed(2)}" rx="${radius}" ry="${radius}" fill="${escapeMontageSnapshotSvg(fill)}" fill-opacity="${opacity.toFixed(3)}" />
-        <text x="${textX.toFixed(2)}" y="${textY.toFixed(2)}" text-anchor="middle" dominant-baseline="central" font-family="${escapeMontageSnapshotSvg(fontFamily)}" font-size="${fontSize}" font-weight="${escapeMontageSnapshotSvg(fontWeight)}" font-style="${escapeMontageSnapshotSvg(fontStyle)}" fill="#020617">${escapeMontageSnapshotSvg(text)}</text>
+        ${textNodes}
       </svg>
     `.trim();
   } catch (_) {
@@ -4731,21 +4758,40 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
         .filter((word) => Math.max(0, Number(word?.endMs || 0) || 0) > Math.max(0, Number(word?.startMs || 0) || 0))
         .slice(0, Math.max(0, MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT - 1))
       : [];
-    const frameSpecs = [
-      { kind: "base", wordIndex: -1, startMs: 0, endMs: durationMs, activeOnly: false },
-      ...selectedWordTimings.map((word, index) => ({
-        kind: "karaoke-word",
-        wordIndex: index,
-        text: String(word?.text || "").trim(),
-        startMs: Math.max(0, Math.round(Number(word?.startMs || 0) || 0)),
-        endMs: Math.min(durationMs, Math.max(0, Math.round(Number(word?.endMs || 0) || 0))),
-        activeOnly: true
-      }))
-    ].filter((frame) => frame.endMs > frame.startMs && frameTotal < MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL);
-    if (!frameSpecs.length) continue;
+    const frameSpecs = [];
+    let cursorMs = 0;
+    selectedWordTimings.forEach((word, index) => {
+      const startMs = Math.max(0, Math.min(durationMs, Math.round(Number(word?.startMs || 0) || 0)));
+      const endMs = Math.max(startMs, Math.min(durationMs, Math.round(Number(word?.endMs || 0) || 0)));
+      if (startMs > cursorMs + 1) {
+        frameSpecs.push({ kind: "base", wordIndex: -1, startMs: cursorMs, endMs: startMs, activeOnly: false });
+      }
+      if (endMs > startMs) {
+        frameSpecs.push({
+          kind: "karaoke-word",
+          wordIndex: index,
+          text: String(word?.text || "").trim(),
+          startMs,
+          endMs,
+          activeOnly: true
+        });
+        cursorMs = Math.max(cursorMs, endMs);
+      }
+    });
+    if (!selectedWordTimings.length || cursorMs < durationMs - 1) {
+      frameSpecs.push({ kind: "base", wordIndex: -1, startMs: Math.max(0, cursorMs), endMs: durationMs, activeOnly: false });
+    }
+    const limitedFrameSpecs = frameSpecs
+      .filter((frame) => frame.endMs > frame.startMs)
+      .slice(0, Math.max(0, MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_PER_SEGMENT))
+      .filter((frame) => frameTotal < MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL);
+    const usableFrameSpecs = limitedFrameSpecs.length ? limitedFrameSpecs : [
+      { kind: "base", wordIndex: -1, startMs: 0, endMs: durationMs, activeOnly: false }
+    ];
+    if (!usableFrameSpecs.length) continue;
 
     const renderedFrames = [];
-    for (const frame of frameSpecs) {
+    for (const frame of usableFrameSpecs) {
       if (frameTotal >= MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL) break;
       let plan = null;
       try {
