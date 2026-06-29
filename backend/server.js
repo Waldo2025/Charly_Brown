@@ -434,6 +434,10 @@ function escapeFfmpegFilterPath(value = "") {
     .replace(/\]/g, "\\]");
 }
 
+function escapeFfmpegConcatPath(value = "") {
+  return String(value || "").replace(/'/g, "'\\''");
+}
+
 function buildFfmpegDuckVolumeExpr(segments = [], duckVolume = 0.46) {
   const list = Array.isArray(segments) ? segments : [];
   const windows = list
@@ -2563,20 +2567,20 @@ function buildMontageDirectFallbackInput(input = null) {
   const textTimelineRaw = input.onScreenTextTimelineRaw && typeof input.onScreenTextTimelineRaw === "object"
     ? {
       ...input.onScreenTextTimelineRaw,
-      renderedSegments: [],
       renderedFrameAttempted: false
     }
     : input.onScreenTextTimelineRaw;
   return {
     ...input,
-    onScreenTextRenderedSegments: [],
+    onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments)
+      ? input.onScreenTextRenderedSegments
+      : [],
     onScreenTextRenderedFrameAttempted: false,
     onScreenTextTimelineRaw: textTimelineRaw,
-    directFallbackTextOverlayMode: "ass",
+    directFallbackTextOverlayMode: "rendered_alpha_video",
     renderHints: {
       ...(input.renderHints && typeof input.renderHints === "object" ? input.renderHints : {}),
-      directFallbackTextOverlayMode: "ass",
-      renderedTextFramesDisabledReason: "worker_unavailable"
+      directFallbackTextOverlayMode: "rendered_alpha_video"
     }
   };
 }
@@ -12251,6 +12255,211 @@ async function appendMontageSceneOnScreenTextAssFilters({
   };
 }
 
+function normalizeMontageRenderedTextFrameGeometry({
+  frame = {},
+  canvas = { width: 1280, height: 720 }
+} = {}) {
+  const sourceWidth = Math.max(2, Math.round(Number(frame.sourceWidth || 1280) || 1280));
+  const sourceHeight = Math.max(2, Math.round(Number(frame.sourceHeight || 720) || 720));
+  const scaleX = Math.max(0.0001, Math.max(2, Number(canvas.width || 1280) || 1280) / sourceWidth);
+  const scaleY = Math.max(0.0001, Math.max(2, Number(canvas.height || 720) || 720) / sourceHeight);
+  const overlayWidth = Math.max(1, Math.round(Number(frame.widthPx || 1) * scaleX));
+  const overlayHeight = Math.max(1, Math.round(Number(frame.heightPx || 1) * scaleY));
+  const overlayX = Math.round(Number(frame.offsetXPx || 0) * scaleX);
+  const overlayY = Math.round(Number(frame.offsetYPx || 0) * scaleY);
+  return {
+    overlayWidth,
+    overlayHeight,
+    overlayX,
+    overlayY,
+    key: [overlayWidth, overlayHeight, overlayX, overlayY].join("x")
+  };
+}
+
+function groupMontageRenderedTextFrameItems(frameItems = [], {
+  canvas = { width: 1280, height: 720 },
+  sceneTimelineStartMs = 0,
+  sceneTimelineEndMs = 0
+} = {}) {
+  const groups = [];
+  const byKey = new Map();
+  const sortedItems = (Array.isArray(frameItems) ? frameItems : [])
+    .slice()
+    .sort((a, b) => Number(a.absoluteStartMs || 0) - Number(b.absoluteStartMs || 0));
+  sortedItems.forEach((item) => {
+    const frame = item?.frame || {};
+    const geometry = normalizeMontageRenderedTextFrameGeometry({ frame, canvas });
+    const startSec = Math.max(0, (Math.max(Number(item.absoluteStartMs || 0), sceneTimelineStartMs) - sceneTimelineStartMs) / 1000);
+    const endSec = Math.max(startSec + 0.001, (Math.min(Number(item.absoluteEndMs || 0), sceneTimelineEndMs) - sceneTimelineStartMs) / 1000);
+    if (endSec <= startSec || geometry.overlayWidth < 1 || geometry.overlayHeight < 1) return;
+    if (!byKey.has(geometry.key)) {
+      const group = {
+        geometry,
+        frameItems: [],
+        startSec,
+        endSec
+      };
+      byKey.set(geometry.key, group);
+      groups.push(group);
+    }
+    const group = byKey.get(geometry.key);
+    group.startSec = Math.min(group.startSec, startSec);
+    group.endSec = Math.max(group.endSec, endSec);
+    group.frameItems.push({
+      ...item,
+      startSec,
+      endSec
+    });
+  });
+  return groups;
+}
+
+function buildMontageRenderedTextFrameAsset(frame = {}) {
+  return {
+    storagePath: String(frame.storagePath || "").trim(),
+    downloadUrl: String(frame.downloadUrl || frame.url || "").trim(),
+    url: String(frame.url || frame.downloadUrl || "").trim(),
+    dataUrl: String(frame.dataUrl || "").trim(),
+    localDataUrl: String(frame.dataUrl || "").trim(),
+    mimeType: String(frame.mimeType || "image/png").trim() || "image/png"
+  };
+}
+
+async function appendMontageSceneOnScreenTextRenderedVideoFilters({
+  input = {},
+  entry = {},
+  sceneIndex = 1,
+  sceneTimelineStartMs = 0,
+  sceneTimelineEndMs = 0,
+  canvas = { width: 1280, height: 720 },
+  videoFilterGraph = "",
+  baseVideoMapLabel = "[vout]",
+  tmpDir = "",
+  args = [],
+  nextInputIndex = 2,
+  tempPaths = [],
+  downloadInput = null,
+  frameItems = []
+} = {}) {
+  const groups = groupMontageRenderedTextFrameItems(frameItems, {
+    canvas,
+    sceneTimelineStartMs,
+    sceneTimelineEndMs
+  }).filter((group) => Array.isArray(group.frameItems) && group.frameItems.length > 0);
+  if (!groups.length) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      nextInputIndex,
+      appliedOverlayCount: 0
+    };
+  }
+
+  let graph = String(videoFilterGraph || "");
+  let currentLabel = String(baseVideoMapLabel || "[vout]");
+  let inputIndex = Math.max(0, Math.round(Number(nextInputIndex || 0) || 0));
+  let appliedOverlayCount = 0;
+  let overlayVideoCount = 0;
+
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const group = groups[groupIndex];
+    const downloadedFrames = [];
+    for (let idx = 0; idx < group.frameItems.length; idx += 1) {
+      const item = group.frameItems[idx] || {};
+      const frameAsset = buildMontageRenderedTextFrameAsset(item.frame || {});
+      if (!frameAsset.storagePath && !frameAsset.downloadUrl && !frameAsset.url && !String(frameAsset.dataUrl || "").startsWith("data:image/")) continue;
+      try {
+        const overlayPath = await downloadInput(frameAsset, "image", inputIndex + idx);
+        if (!overlayPath) continue;
+        tempPaths.push(overlayPath);
+        downloadedFrames.push({
+          ...item,
+          overlayPath
+        });
+      } catch (error) {
+        console.warn("[backend][montage-export][scene-onscreen-rendered-frame-download-failed]", {
+          sceneIndex,
+          rowId: String(item.segment?.rowId || entry?.rowId || "").trim() || undefined,
+          frameIndex: idx,
+          storagePath: frameAsset.storagePath || undefined,
+          downloadUrl: frameAsset.downloadUrl ? redactUrlForLogs(frameAsset.downloadUrl) : undefined,
+          message: String(error?.message || error || "").trim()
+        });
+      }
+    }
+    if (!downloadedFrames.length) continue;
+
+    downloadedFrames.sort((a, b) => Number(a.startSec || 0) - Number(b.startSec || 0));
+    const concatPath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-onscreen-${groupIndex + 1}.ffconcat`);
+    const overlayVideoPath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-onscreen-${groupIndex + 1}.mov`);
+    const concatLines = ["ffconcat version 1.0"];
+    downloadedFrames.forEach((item, idx) => {
+      const nextStartSec = idx + 1 < downloadedFrames.length
+        ? Math.max(Number(downloadedFrames[idx + 1].startSec || 0), Number(item.startSec || 0))
+        : Number(item.endSec || item.startSec || 0);
+      const durationSec = Math.max(1 / 24, nextStartSec - Number(item.startSec || 0));
+      concatLines.push(`file '${escapeFfmpegConcatPath(item.overlayPath)}'`);
+      concatLines.push(`duration ${durationSec.toFixed(6)}`);
+    });
+    concatLines.push(`file '${escapeFfmpegConcatPath(downloadedFrames[downloadedFrames.length - 1].overlayPath)}'`);
+    await fs.promises.writeFile(concatPath, `${concatLines.join("\n")}\n`, "utf8");
+    tempPaths.push(concatPath, overlayVideoPath);
+
+    try {
+      await runFfmpegCommand([
+        "-y", "-hide_banner", "-loglevel", "warning",
+        "-f", "concat", "-safe", "0", "-i", concatPath,
+        "-vf", `fps=24,format=rgba,scale=${group.geometry.overlayWidth}:${group.geometry.overlayHeight}:flags=lanczos`,
+        "-an",
+        "-c:v", "qtrle",
+        "-pix_fmt", "argb",
+        overlayVideoPath
+      ], {
+        stage: `montage_scene_${sceneIndex}_onscreen_text_overlay_${groupIndex + 1}`,
+        timeoutMs: Math.max(60 * 1000, Math.ceil((group.endSec - group.startSec) * 20 * 1000)),
+        timeoutCode: "onscreen_text_overlay_video_timeout"
+      });
+    } catch (error) {
+      console.warn("[backend][montage-export][scene-onscreen-rendered-video-failed]", {
+        sceneIndex,
+        rowId: String(entry?.rowId || "").trim() || undefined,
+        groupIndex: groupIndex + 1,
+        frameCount: downloadedFrames.length,
+        message: String(error?.message || error || "").trim()
+      });
+      continue;
+    }
+
+    args.push("-i", overlayVideoPath);
+    const videoLabel = `onscreen_vid_${sceneIndex}_${groupIndex + 1}`;
+    const outLabel = `onscreen_out_${sceneIndex}_${groupIndex + 1}`;
+    const delaySec = Math.max(0, Number(group.startSec || 0) || 0);
+    const endSec = Math.max(delaySec + 0.001, Number(group.endSec || delaySec) || delaySec);
+    const filter = `[${inputIndex}:v]format=rgba,setpts=PTS-STARTPTS+${delaySec.toFixed(3)}/TB[${videoLabel}];${currentLabel}[${videoLabel}]overlay=x=${group.geometry.overlayX}:y=${group.geometry.overlayY}:format=auto:eof_action=pass:enable='between(t,${delaySec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
+    graph = graph ? `${graph};${filter}` : filter;
+    currentLabel = `[${outLabel}]`;
+    inputIndex += 1;
+    overlayVideoCount += 1;
+    appliedOverlayCount += downloadedFrames.length;
+  }
+
+  if (appliedOverlayCount > 0) {
+    console.info("[backend][montage-export][scene-onscreen-rendered-video]", {
+      sceneIndex,
+      rowId: String(entry?.rowId || "").trim() || undefined,
+      frameCount: appliedOverlayCount,
+      overlayVideoCount
+    });
+  }
+
+  return {
+    videoFilterGraph: graph,
+    finalVideoMapLabel: currentLabel,
+    nextInputIndex: inputIndex,
+    appliedOverlayCount
+  };
+}
+
 async function appendMontageSceneOnScreenTextRenderedFrameFilters({
   input = {},
   entry = {},
@@ -12338,18 +12547,48 @@ async function appendMontageSceneOnScreenTextRenderedFrameFilters({
   let currentLabel = String(baseVideoMapLabel || "[vout]");
   let inputIndex = Math.max(0, Math.round(Number(nextInputIndex || 0) || 0));
   let appliedOverlayCount = 0;
+  const preferRenderedVideoOverlay = IS_RENDER_RUNTIME
+    || String(input.directFallbackTextOverlayMode || "").trim() === "rendered_alpha_video"
+    || workingFrameItems.length > 4;
+
+  if (preferRenderedVideoOverlay) {
+    const renderedVideoResult = await appendMontageSceneOnScreenTextRenderedVideoFilters({
+      input,
+      entry,
+      sceneIndex,
+      sceneTimelineStartMs,
+      sceneTimelineEndMs,
+      canvas,
+      videoFilterGraph: graph,
+      baseVideoMapLabel: currentLabel,
+      tmpDir,
+      args,
+      nextInputIndex: inputIndex,
+      tempPaths,
+      downloadInput,
+      frameItems: workingFrameItems
+    });
+    if (renderedVideoResult.appliedOverlayCount > 0) {
+      return {
+        ...renderedVideoResult,
+        truncatedByFrameLimit: selectedFrameItems.truncated === true
+      };
+    }
+    if (IS_RENDER_RUNTIME || String(input.directFallbackTextOverlayMode || "").trim() === "rendered_alpha_video") {
+      return {
+        videoFilterGraph: graph,
+        finalVideoMapLabel: currentLabel,
+        nextInputIndex: inputIndex,
+        appliedOverlayCount: 0,
+        truncatedByFrameLimit: selectedFrameItems.truncated === true
+      };
+    }
+  }
 
   for (let idx = 0; idx < workingFrameItems.length; idx += 1) {
     const item = workingFrameItems[idx] || {};
     const frame = item.frame || {};
-    const frameAsset = {
-      storagePath: String(frame.storagePath || "").trim(),
-      downloadUrl: String(frame.downloadUrl || frame.url || "").trim(),
-      url: String(frame.url || frame.downloadUrl || "").trim(),
-      dataUrl: String(frame.dataUrl || "").trim(),
-      localDataUrl: String(frame.dataUrl || "").trim(),
-      mimeType: String(frame.mimeType || "image/png").trim() || "image/png"
-    };
+    const frameAsset = buildMontageRenderedTextFrameAsset(frame);
     if (!frameAsset.storagePath && !frameAsset.downloadUrl && !frameAsset.url && !String(frameAsset.dataUrl || "").startsWith("data:image/")) continue;
     let overlayPath = "";
     try {
@@ -12368,19 +12607,12 @@ async function appendMontageSceneOnScreenTextRenderedFrameFilters({
     if (!overlayPath) continue;
     tempPaths.push(overlayPath);
     args.push("-loop", "1", "-framerate", "24", "-i", overlayPath);
-    const sourceWidth = Math.max(2, Math.round(Number(frame.sourceWidth || 1280) || 1280));
-    const sourceHeight = Math.max(2, Math.round(Number(frame.sourceHeight || 720) || 720));
-    const scaleX = Math.max(0.0001, Math.max(2, Number(canvas.width || 1280) || 1280) / sourceWidth);
-    const scaleY = Math.max(0.0001, Math.max(2, Number(canvas.height || 720) || 720) / sourceHeight);
-    const overlayWidth = Math.max(1, Math.round(Number(frame.widthPx || 1) * scaleX));
-    const overlayHeight = Math.max(1, Math.round(Number(frame.heightPx || 1) * scaleY));
-    const overlayX = Math.round(Number(frame.offsetXPx || 0) * scaleX);
-    const overlayY = Math.round(Number(frame.offsetYPx || 0) * scaleY);
+    const geometry = normalizeMontageRenderedTextFrameGeometry({ frame, canvas });
     const startSec = Math.max(0, (Math.max(item.absoluteStartMs, sceneTimelineStartMs) - sceneTimelineStartMs) / 1000);
     const endSec = Math.max(startSec + 0.001, (Math.min(item.absoluteEndMs, sceneTimelineEndMs) - sceneTimelineStartMs) / 1000);
     const imageLabel = `onscreen_img_${sceneIndex}_${idx + 1}`;
     const outLabel = `onscreen_out_${sceneIndex}_${idx + 1}`;
-    const filter = `[${inputIndex}:v]format=rgba,scale=${overlayWidth}:${overlayHeight}:flags=lanczos[${imageLabel}];${currentLabel}[${imageLabel}]overlay=x=${overlayX}:y=${overlayY}:format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
+    const filter = `[${inputIndex}:v]format=rgba,scale=${geometry.overlayWidth}:${geometry.overlayHeight}:flags=lanczos[${imageLabel}];${currentLabel}[${imageLabel}]overlay=x=${geometry.overlayX}:y=${geometry.overlayY}:format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${outLabel}]`;
     graph = graph ? `${graph};${filter}` : filter;
     currentLabel = `[${outLabel}]`;
     inputIndex += 1;
