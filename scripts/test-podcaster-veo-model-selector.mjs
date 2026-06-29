@@ -5,7 +5,7 @@ const timelineModel = readFileSync(new URL("../public/podcaster/podcaster-timeli
 const podcasterJs = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const backend = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
-if (!/const PODCASTER_VIDEO_MODEL_CANDIDATES = Object\.freeze\(\[\s*"veo-3\.1-generate-preview",\s*"veo-3\.1-fast-generate-preview",\s*"veo-3\.1-generate-001",\s*"veo-3\.1-fast-generate-001",\s*"veo-3\.1-lite-generate-preview",\s*"veo-3\.0-generate-001",\s*"veo-3\.0-fast-generate-001",\s*"veo-2\.0-generate-001"\s*\]\);/m.test(backend)) {
+if (!/const PODCASTER_VIDEO_MODEL_CANDIDATES = Object\.freeze\(\[\s*"veo-3\.1-generate-preview",\s*"veo-3\.1-fast-generate-preview",\s*"veo-3\.1-lite-generate-preview",\s*"veo-3\.0-generate-001",\s*"veo-3\.0-fast-generate-001",\s*"veo-2\.0-generate-001"\s*\]\);/m.test(backend)) {
   throw new Error("El backend debe exponer todos los modelos Veo compatibles con esta integración.");
 }
 
@@ -17,7 +17,7 @@ if (!/videoModel:\s*normalizedVideoModel/.test(timelineModel)) {
   throw new Error("normalizePodcastVideoConfig debe devolver videoModel.");
 }
 
-if (!/<select id="globalCheapVideoMode">[\s\S]*<option value="veo-3\.1-generate-preview">[\s\S]*<option value="veo-3\.1-fast-generate-preview">[\s\S]*<option value="veo-3\.1-generate-001">[\s\S]*<option value="veo-3\.1-fast-generate-001">[\s\S]*<option value="veo-3\.1-lite-generate-preview">[\s\S]*<option value="veo-3\.0-generate-001">[\s\S]*<option value="veo-3\.0-fast-generate-001">[\s\S]*<option value="veo-2\.0-generate-001">/m.test(html)) {
+if (!/<select id="globalCheapVideoMode">[\s\S]*<option value="veo-3\.1-generate-preview">[\s\S]*<option value="veo-3\.1-fast-generate-preview">[\s\S]*<option value="veo-3\.1-lite-generate-preview">[\s\S]*<option value="veo-3\.0-generate-001">[\s\S]*<option value="veo-3\.0-fast-generate-001">[\s\S]*<option value="veo-2\.0-generate-001">/m.test(html)) {
   throw new Error("globalCheapVideoMode debe listar todos los modelos Veo disponibles.");
 }
 

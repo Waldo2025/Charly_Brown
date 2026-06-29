@@ -249,8 +249,6 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
 const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
   "veo-3.1-generate-preview",
   "veo-3.1-fast-generate-preview",
-  "veo-3.1-generate-001",
-  "veo-3.1-fast-generate-001",
   "veo-3.1-lite-generate-preview",
   "veo-3.0-generate-001",
   "veo-3.0-fast-generate-001",

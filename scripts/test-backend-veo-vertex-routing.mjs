@@ -13,11 +13,11 @@ if (/publishers\/google\/models\/\$\{encodeURIComponent\(videoModel\)\}:predictL
   throw new Error("La generación de video Veo no debe cambiarse a Vertex AI en esta integración.");
 }
 
-if (!/label: "text-only\+aspect\+duration"[\s\S]*instances: \[\{\s*prompt\s*\}\]/m.test(source)) {
+if (!/label: "text-only\+aspect\+duration"[\s\S]*instances: \[\{\s*prompt: veoPrompt\s*\}\]/m.test(source)) {
   throw new Error("La variante text-only+aspect+duration no debe incluir referenceImages.");
 }
 
-if (!/label: "text-only\+aspect"[\s\S]*instances: \[\{\s*prompt\s*\}\]/m.test(source)) {
+if (!/label: "text-only\+aspect"[\s\S]*instances: \[\{\s*prompt: veoPrompt\s*\}\]/m.test(source)) {
   throw new Error("La variante text-only+aspect no debe incluir referenceImages.");
 }
 

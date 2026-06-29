@@ -20,7 +20,7 @@ function shouldContinueVariantFallback(options = {}) {
 }
 
 function veoModelSupportsReferenceImages(modelName = "") {
-  return /^veo-3\.1-(?:fast-)?generate-(?:preview|001)$/i.test(String(modelName || "").trim());
+  return /^veo-3\.1-(?:fast-)?generate-preview$/i.test(String(modelName || "").trim());
 }
 
 function veoVariantUsesReferenceImages(variant = {}) {

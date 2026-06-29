@@ -304,8 +304,6 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
 const PODCASTER_VIDEO_MODEL_CANDIDATES = Object.freeze([
   "veo-3.1-generate-preview",
   "veo-3.1-fast-generate-preview",
-  "veo-3.1-generate-001",
-  "veo-3.1-fast-generate-001",
   "veo-3.1-lite-generate-preview",
   "veo-3.0-generate-001",
   "veo-3.0-fast-generate-001",
@@ -354,6 +352,15 @@ function applyVeoHdParameters(parameters = {}, aspectRatio = "16:9", modelName =
     next.resolution = "1080p";
   }
   return next;
+}
+
+const VEO_PROMPT_MAX_CHARS = 3600;
+function compactVeoPromptForRequest(prompt = "") {
+  const text = String(prompt || "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (text.length <= VEO_PROMPT_MAX_CHARS) return text;
+  const head = text.slice(0, 2200).trim();
+  const tail = text.slice(-1200).trim();
+  return `${head}\n\nResumen tecnico omitido para respetar limite de prompt de Veo.\n\n${tail}`.trim();
 }
 
 const dialogueVideoJobs = new Map();
@@ -8426,6 +8433,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       "Prohibido cualquier texto incrustado en imagen o video: no titulos, no nombres, no etiquetas, no transcripcion en pantalla, no texto decorativo.",
       `Diálogo objetivo: "${String(text).replace(/"/g, '\\"')}"`
     ].filter(Boolean).join("\n");
+    const veoPrompt = compactVeoPromptForRequest(prompt);
+    traceReferenceVideo("prompt-prepared", {
+      promptChars: prompt.length,
+      veoPromptChars: veoPrompt.length,
+      promptCompacted: veoPrompt.length < prompt.length,
+      maxPromptChars: VEO_PROMPT_MAX_CHARS
+    });
 
     const pollUntilDone = async (operationName = "", options = {}) => {
       const maxAttempts = Math.max(12, Math.min(54, Math.floor(Number(options?.maxAttempts || 54) || 54)));
@@ -8513,7 +8527,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-scene+aspect+duration",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
@@ -8526,7 +8540,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-scene+aspect",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
@@ -8543,7 +8557,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-continuity+aspect+duration",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [continuityReferenceImage]
             }],
             parameters: {
@@ -8556,7 +8570,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-continuity+aspect",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [continuityReferenceImage]
             }],
             parameters: {
@@ -8572,7 +8586,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-gcs+aspect+duration",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [{
                 image: {
                   gcsUri: portraitGcsUri,
@@ -8591,7 +8605,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-gcs+aspect",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [{
                 image: {
                   gcsUri: portraitGcsUri,
@@ -8613,7 +8627,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-bytes+aspect+duration",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [{
                 image: {
                   bytesBase64Encoded: portraitBase64,
@@ -8632,7 +8646,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "reference-bytes+aspect",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               referenceImages: [{
                 image: {
                   bytesBase64Encoded: portraitBase64,
@@ -8654,7 +8668,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "image+aspect+duration",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               image: {
                 bytesBase64Encoded: portraitBase64,
                 mimeType: portraitMimeType
@@ -8670,7 +8684,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           label: "image+aspect",
           body: {
             instances: [{
-              prompt,
+              prompt: veoPrompt,
               image: {
                 bytesBase64Encoded: portraitBase64,
                 mimeType: portraitMimeType
@@ -8688,7 +8702,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         {
           label: "text-only+aspect+duration",
           body: {
-            instances: [{ prompt }],
+            instances: [{ prompt: veoPrompt }],
             parameters: {
               aspectRatio: "16:9",
               durationSeconds: inferredTargetDurationSec
@@ -8698,7 +8712,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         {
           label: "text-only+aspect",
           body: {
-            instances: [{ prompt }],
+            instances: [{ prompt: veoPrompt }],
             parameters: {
               aspectRatio: "16:9"
             }
@@ -8711,7 +8725,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         {
           label: "strict-fallback-text-only+aspect+duration",
           body: {
-            instances: [{ prompt }],
+            instances: [{ prompt: veoPrompt }],
             parameters: {
               aspectRatio: "16:9",
               durationSeconds: inferredTargetDurationSec
@@ -8721,7 +8735,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         {
           label: "strict-fallback-text-only+aspect",
           body: {
-            instances: [{ prompt }],
+            instances: [{ prompt: veoPrompt }],
             parameters: {
               aspectRatio: "16:9"
             }
@@ -8842,7 +8856,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       requestedMaxVariantAttempts,
       requestedMaxOperationPollAttempts,
       effectiveVideoModels: modelExecutionPlan,
-      effectiveVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim())
+      effectiveVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim()),
+      promptChars: prompt.length,
+      veoPromptChars: veoPrompt.length
     });
 
     for (const videoModel of modelExecutionPlan) {

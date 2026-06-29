@@ -35,6 +35,12 @@ assert.match(
 );
 
 assert.match(
+  backendSource,
+  /const veoPrompt = compactVeoPromptForRequest\(prompt\);[\s\S]*prompt: veoPrompt/,
+  "El backend debe compactar el prompt antes de enviarlo a Veo para respetar el limite de texto del modelo."
+);
+
+assert.match(
   frontendSource,
   /hasStoragePath: Boolean\(String\(item\?\.storagePath \|\| item\?\.path \|\| ""\)\.trim\(\)\)/,
   "El trace frontend debe reportar referencias remotas por storagePath, no solo dataUrl inline."
