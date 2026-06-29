@@ -8039,12 +8039,29 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         failures: sceneReferenceLoadFailures
       });
       updateDialogueVideoJob({
-        status: "running",
+        status: "error",
         stage: "scene_reference_unavailable",
-        progress: 0.2,
-        hint: "La referencia de escena no se pudo cargar; se continuará con el retrato y el prompt.",
+        progress: 1,
+        hint: "La imagen de referencia de la escena no se pudo cargar desde Storage/cache.",
+        error: {
+          error: "scene_reference_unavailable",
+          message: "La imagen de referencia de la escena no se pudo cargar desde Storage/cache. Vuelve a adjuntarla o recarga la sesión y prueba de nuevo.",
+          status: 422,
+          detail: {
+            referenceSourceCount: sceneReferenceSources.length,
+            failures: sceneReferenceLoadFailures
+          }
+        },
         referenceSourceCount: sceneReferenceSources.length,
         referenceFailures: sceneReferenceLoadFailures
+      });
+      return res.status(422).json({
+        error: "scene_reference_unavailable",
+        message: "La imagen de referencia de la escena no se pudo cargar desde Storage/cache. Vuelve a adjuntarla o recarga la sesión y prueba de nuevo.",
+        detail: {
+          referenceSourceCount: sceneReferenceSources.length,
+          failures: sceneReferenceLoadFailures
+        }
       });
     }
     const sceneReferenceImages = sceneReferences.map((item) => ({
@@ -8808,19 +8825,27 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       54,
       Math.floor(clampNumber(req.body?.maxOperationPollAttempts, 12, 54, 54))
     ));
-    const effectiveVideoModels = videoModels.slice(0, Math.max(1, Math.min(
+    const requestRequiresSceneReference = referenceMode === "image" && sceneReferenceAssets.length > 0 && !strictIdentity;
+    const requestedModelLimit = Math.max(1, Math.min(
       videoModels.length || 1,
       Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
-    )));
+    ));
+    const effectiveVideoModels = requestRequiresSceneReference
+      ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || "")))).slice(0, requestedModelLimit)
+      : videoModels.slice(0, requestedModelLimit);
+    const modelExecutionPlan = requestRequiresSceneReference
+      ? (effectiveVideoModels.length ? effectiveVideoModels : [DEFAULT_PODCASTER_VIDEO_MODEL])
+      : effectiveVideoModels;
     traceReferenceVideo("execution-plan", {
       requestedMaxVariantAttempts,
       requestedMaxOperationPollAttempts,
-      effectiveVideoModels,
+      effectiveVideoModels: modelExecutionPlan,
       effectiveVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim())
     });
 
-    for (const videoModel of effectiveVideoModels) {
-      const modelRequestVariants = filterVeoVariantsForModel(effectiveRequestVariants, videoModel);
+    for (const videoModel of modelExecutionPlan) {
+      const modelRequestVariants = filterVeoVariantsForModel(effectiveRequestVariants, videoModel)
+        .filter((variant) => !requestRequiresSceneReference || /reference-/i.test(String(variant?.label || "")));
       if (!modelRequestVariants.length) {
         traceReferenceVideo("model-skipped-no-compatible-variants", {
           model: videoModel,
@@ -9048,7 +9073,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       if (modelReturnedDoneWithoutMedia) {
         traceReferenceVideo("switch-model-after-empty-media", {
           failedModel: videoModel,
-          nextCandidates: effectiveVideoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
+          nextCandidates: modelExecutionPlan.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
           attemptedVariants: effectiveRequestVariants.length,
           compatibleVariants: modelRequestVariants.length,
           lastErrorDetail

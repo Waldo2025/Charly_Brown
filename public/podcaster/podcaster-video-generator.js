@@ -126,9 +126,12 @@ function buildVisualReferenceTraceMeta(options = {}) {
     .map((item, index) => ({
       index: index + 1,
       name: String(item?.name || "").trim() || `Referencia ${index + 1}`,
+      hasDataUrl: Boolean(String(item?.dataUrl || "").trim()),
+      hasDownloadUrl: Boolean(String(item?.downloadUrl || item?.url || "").trim()),
+      hasStoragePath: Boolean(String(item?.storagePath || item?.path || "").trim()),
       ...formatInlineAssetDebug(item?.dataUrl || "")
     }))
-    .filter((item) => item.mimeType);
+    .filter((item) => item.mimeType || item.hasDownloadUrl || item.hasStoragePath);
   const videoAsset = referenceVideo
     ? {
       name: String(referenceVideo?.name || "").trim() || "Referencia de video",
