@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.312",
-  "build": "2026-1.0.10.312",
+  "version": "1.0.10.313",
+  "build": "2026-1.0.10.313",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El endpoint export-v2 de Podcaster vuelve a encolar en BullMQ siempre que la cola exista, aunque MONTAGE_EXPORT_USE_QUEUE llegue falso en un deploy viejo, para impedir que snoopy-export ejecute FFmpeg en el web service y sea reiniciado por Render durante scene_ffmpeg_render.",
     "Corregido: El store de sesiones de Podcaster fuerza preferRemote=false al listar/guardar sesiones para impedir requests a charly-brown-gemini-backend.onrender.com durante el arranque. Se incrementa podcaster.js a la v2026-06-29.10 y podcaster-session-store.js a la v2026-06-12.3.",
     "Corregido: Las rutas /api/podcaster/* fuerzan el proxy same-origin /api en producción aunque exista un apiBaseUrl remoto heredado, evitando que sessions/list vuelva a charly-brown-gemini-backend.onrender.com y responda 401/CORS. Se incrementan podcaster.js, podcaster-montage-export.js y podcaster-montage-export-v2.js a la v2026-06-29.9.",
     "Corregido: Podcaster vuelve a consultar sesiones autenticadas por el proxy same-origin /api en vez de preferir Render/Gemini directo, evitando CORS cuando el backend remoto responde 502; además export-v2 reporta queue_unavailable si Redis rechaza el enqueue. Se incrementan podcaster.js, podcaster-montage-export.js y podcaster-montage-export-v2.js a la v2026-06-29.8.",
