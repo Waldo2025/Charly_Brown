@@ -5,8 +5,6 @@ import {
   continueMontageExportPolling,
   getMontagePreviewRowId,
   logMontageExportDevtools,
-  montageExportJobState,
-  montageExportState,
   pollMontageExportJob,
   resetMontageExportJobState,
   setMontageExportBusy,
@@ -209,12 +207,15 @@ export async function runMontageExportV2() {
     });
     const jobId = String(data?.jobId || data?.id || "").trim();
     if (!jobId) throw new Error("montage_export_v2_job_missing");
-    montageExportJobState.jobId = jobId;
-    montageExportJobState.lastStage = String(data?.stage || "").trim();
-    montageExportJobState.lastHint = String(data?.hint || "").trim();
-    montageExportJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
-    setMontageExportProgress(montageExportJobState.lastProgress);
-    setMontageExportStatus("Exportación FFmpeg v2 iniciada…", montageExportJobState.lastHint || "Renderizando con la ruta nueva.", { tone: "neutral" });
+    const activeJobState = window.montageExportJobState || {};
+    activeJobState.jobId = jobId;
+    activeJobState.startedAtMs = Date.now();
+    activeJobState.lastStage = String(data?.stage || "").trim();
+    activeJobState.lastHint = String(data?.hint || "").trim();
+    activeJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
+    window.montageExportJobState = activeJobState;
+    setMontageExportProgress(activeJobState.lastProgress);
+    setMontageExportStatus("Exportación FFmpeg v2 iniciada…", activeJobState.lastHint || "Renderizando con la ruta nueva.", { tone: "neutral" });
     pollMontageExportJob(jobId).catch(() => {});
   } catch (error) {
     console.error("[podcaster][montage-export-v2] failed", error);

@@ -31,6 +31,13 @@ test("ready export status exposes and downloads result URLs", () => {
   assert.match(legacyExportSource, /downloadReadyMontageExport\(\)/);
 });
 
+test("export v2 stores the job id in the global polling state", () => {
+  assert.match(exportV2Source, /const activeJobState = window\.montageExportJobState \|\| \{\}/);
+  assert.match(exportV2Source, /activeJobState\.jobId = jobId/);
+  assert.match(exportV2Source, /window\.montageExportJobState = activeJobState/);
+  assert.doesNotMatch(exportV2Source, /montageExportJobState\.jobId = jobId/);
+});
+
 test("export v2 submits the preview runtime contract to a new FFmpeg route", () => {
   assert.match(legacyExportSource, /export async function buildMontageExportPayloadForSubmission/);
   assert.match(exportV2Source, /buildPreviewRuntimeSnapshot/);
@@ -49,8 +56,6 @@ test("export v2 imports only exported montage-export helpers", () => {
     "continueMontageExportPolling",
     "getMontagePreviewRowId",
     "logMontageExportDevtools",
-    "montageExportJobState",
-    "montageExportState",
     "pollMontageExportJob",
     "resetMontageExportJobState",
     "setMontageExportBusy",
@@ -62,6 +67,8 @@ test("export v2 imports only exported montage-export helpers", () => {
     assert.match(exportV2Source, new RegExp(`\\b${name}\\b`));
     assert.match(legacyExportSource, new RegExp(`export (?:async )?(?:function|let|const) ${name}\\b`));
   });
+  assert.doesNotMatch(exportV2Source, /import \{[\s\S]*montageExportJobState[\s\S]*\} from/);
+  assert.doesNotMatch(exportV2Source, /import \{[\s\S]*montageExportState[\s\S]*\} from/);
 });
 
 test("backend exposes export-v2 as an FFmpeg preview-runtime pipeline", () => {
