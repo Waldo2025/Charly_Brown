@@ -14308,11 +14308,12 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
     });
     upsertMontageExportJob(jobId, initial);
 
-    if (montageExportQueue && isMontageExportQueueSubmissionEnabled()) {
+    if (montageExportQueue) {
       console.info("[backend][montage-export-v2][enqueue]", {
         jobId,
         mode: "queue",
-        renderPipeline: "ffmpeg-preview-runtime-v2"
+        renderPipeline: "ffmpeg-preview-runtime-v2",
+        reason: "v2_requires_worker_isolation"
       });
       await montageExportQueue.enqueueExportJob({
         jobId,

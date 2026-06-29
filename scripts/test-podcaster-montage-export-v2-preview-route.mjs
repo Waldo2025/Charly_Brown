@@ -78,6 +78,8 @@ test("backend exposes export-v2 as an FFmpeg preview-runtime pipeline", () => {
   assert.match(backendSource, /normalizeMontageExportV2RequestBody/);
   assert.match(backendSource, /applyMontageExportV2PreviewRuntime/);
   assert.match(backendSource, /\[backend\]\[montage-export-v2\]\[request-received\]/);
+  assert.match(backendSource, /\[backend\]\[montage-export-v2\]\[enqueue\]/);
+  assert.match(backendSource, /v2_requires_worker_isolation/);
   assert.match(backendSource, /\[backend\]\[montage-export-v2\]\[direct-started\]/);
   assert.match(backendSource, /ffmpeg_preview_runtime/);
 });
