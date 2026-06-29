@@ -11311,6 +11311,84 @@ function normalizeMontageOverlayCards(raw = null) {
   }).filter(Boolean);
 }
 
+function normalizeMontagePreviewRuntimeTimingSegments(rawSegments = []) {
+  if (!Array.isArray(rawSegments)) return [];
+  return rawSegments.slice(0, 240).map((segment) => {
+    if (!segment || typeof segment !== "object") return null;
+    const kind = String(segment.kind || "play").trim().toLowerCase() === "hold" ? "hold" : "play";
+    const startSourceMs = Math.max(0, Math.round(Number(segment.startSourceMs || 0) || 0));
+    const endSourceMs = Math.max(startSourceMs, Math.round(Number(segment.endSourceMs || startSourceMs) || startSourceMs));
+    const timelineDurationMs = Math.max(0, Math.round(Number(segment.timelineDurationMs || 0) || 0));
+    if (timelineDurationMs < 1) return null;
+    if (kind === "play" && endSourceMs <= startSourceMs) return null;
+    return {
+      kind,
+      startSourceMs,
+      endSourceMs: kind === "hold" ? startSourceMs : endSourceMs,
+      playbackRate: kind === "hold" ? 0 : Math.max(0.25, Math.min(4, Number(segment.playbackRate || 1) || 1)),
+      timelineDurationMs
+    };
+  }).filter(Boolean);
+}
+
+function normalizeMontagePreviewRuntimeEntry(raw = null, fallbackEntry = null) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const rowId = clampText(source.rowId || fallbackEntry?.rowId || "", 140);
+  if (!rowId) return null;
+  const timingSegments = normalizeMontagePreviewRuntimeTimingSegments(source.timingSegments || fallbackEntry?.previewRuntime?.timingSegments || []);
+  return {
+    rowId,
+    sceneIndex: Math.max(1, Math.round(Number(source.sceneIndex || fallbackEntry?.sceneIndex || 1) || 1)),
+    startMs: Math.max(0, Math.round(Number(source.startMs ?? fallbackEntry?.timelineStartMs ?? 0) || 0)),
+    endMs: Math.max(0, Math.round(Number(source.endMs ?? fallbackEntry?.timelineEndMs ?? 0) || 0)),
+    durationMs: Math.max(500, Math.round(Number(source.durationMs || fallbackEntry?.durationMs || 0) || 0)),
+    sourceDurationMs: Math.max(500, Math.round(Number(source.sourceDurationMs || fallbackEntry?.sourceDurationMs || 0) || 0)),
+    frameHolds: Array.isArray(source.frameHolds || fallbackEntry?.frameHolds) ? (source.frameHolds || fallbackEntry.frameHolds).slice(0, 80) : [],
+    speedRanges: Array.isArray(source.speedRanges || fallbackEntry?.speedRanges) ? (source.speedRanges || fallbackEntry.speedRanges).slice(0, 80) : [],
+    timingSegments
+  };
+}
+
+function applyMontageExportV2PreviewRuntime(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const previewRuntime = source.previewRuntime && typeof source.previewRuntime === "object" ? source.previewRuntime : {};
+  const runtimeEntries = Array.isArray(previewRuntime.entries) ? previewRuntime.entries : [];
+  const runtimeByRowId = new Map(runtimeEntries.map((entry) => {
+    const normalized = normalizeMontagePreviewRuntimeEntry(entry, null);
+    return normalized ? [normalized.rowId, normalized] : null;
+  }).filter(Boolean));
+  const entries = (Array.isArray(source.entries) ? source.entries : []).map((entry) => {
+    const rowId = clampText(entry?.rowId || "", 140);
+    const normalizedRuntime = normalizeMontagePreviewRuntimeEntry(runtimeByRowId.get(rowId) || entry?.previewRuntime || null, entry);
+    if (!normalizedRuntime) return entry;
+    return {
+      ...entry,
+      sourceDurationMs: normalizedRuntime.sourceDurationMs || entry.sourceDurationMs,
+      frameHolds: normalizedRuntime.frameHolds,
+      speedRanges: normalizedRuntime.speedRanges,
+      previewRuntime: normalizedRuntime
+    };
+  });
+  return {
+    ...source,
+    renderPipeline: "ffmpeg-preview-runtime-v2",
+    previewRuntime: {
+      pipeline: "ffmpeg-preview-runtime-v2",
+      timelineVersion: Math.max(1, Math.round(Number(previewRuntime.timelineVersion || 3) || 3)),
+      generatedAt: clampText(previewRuntime.generatedAt || "", 80),
+      entries: entries.map((entry) => entry.previewRuntime).filter(Boolean)
+    },
+    entries
+  };
+}
+
+function normalizeMontageExportV2RequestBody(body = {}) {
+  return applyMontageExportV2PreviewRuntime({
+    ...normalizeMontageExportRequestBody(body),
+    renderPipeline: "ffmpeg-preview-runtime-v2"
+  });
+}
+
 function buildMontageMediaPositionFilter({
   width = 1280,
   height = 720,
@@ -11570,6 +11648,36 @@ function buildMontageVideoSceneFilter({
     scaleFilter,
     cloneTail: true
   });
+}
+
+function buildMontagePreviewRuntimeTimingVideoFilter({
+  inputLabel = "[0:v]",
+  outputLabel = "preview_runtime_v",
+  timingSegments = []
+} = {}) {
+  const segments = normalizeMontagePreviewRuntimeTimingSegments(timingSegments);
+  if (!segments.length) return "";
+  const labels = [];
+  const filters = [];
+  const splitLabels = segments.map((_, index) => `[preview_src_${index}]`);
+  filters.push(`${inputLabel}split=${segments.length}${splitLabels.join("")}`);
+  segments.forEach((segment, index) => {
+    const srcLabel = `preview_src_${index}`;
+    const outLabel = `preview_seg_${index}`;
+    labels.push(`[${outLabel}]`);
+    if (segment.kind === "hold") {
+      const atSec = Math.max(0, Number(segment.startSourceMs || 0) / 1000);
+      const holdSec = Math.max(0.001, Number(segment.timelineDurationMs || 0) / 1000);
+      filters.push(`[${srcLabel}]trim=start=${atSec.toFixed(3)}:duration=0.042,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${holdSec.toFixed(3)},trim=start=0:duration=${holdSec.toFixed(3)},setpts=PTS-STARTPTS[${outLabel}]`);
+      return;
+    }
+    const startSec = Math.max(0, Number(segment.startSourceMs || 0) / 1000);
+    const endSec = Math.max(startSec + 0.001, Number(segment.endSourceMs || 0) / 1000);
+    const playbackRate = Math.max(0.25, Math.min(4, Number(segment.playbackRate || 1) || 1));
+    filters.push(`[${srcLabel}]trim=start=${startSec.toFixed(3)}:end=${endSec.toFixed(3)},setpts=(PTS-STARTPTS)/${playbackRate.toFixed(6)}[${outLabel}]`);
+  });
+  filters.push(`${labels.join("")}concat=n=${labels.length}:v=1:a=0,setpts=PTS-STARTPTS[${outputLabel}]`);
+  return filters.join(";");
 }
 
 function buildMontageOverlapCompositionPlan(exportedEntries = []) {
@@ -13094,10 +13202,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const sceneTimelineStartMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
         const sceneTimelineEndMs = Math.max(sceneTimelineStartMs + 1, Math.round(Number(entry?.timelineEndMs || (sceneTimelineStartMs + durationMs)) || (sceneTimelineStartMs + durationMs)));
         const sceneReelModeEnabled = input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || "");
-        let videoFilterGraph = "";
-        if (!isImageAsset && visualLayoutMode === "blur-backdrop") {
-          videoFilterGraph = buildMontageVideoSceneFilter({
+        const previewRuntimeTimingSegments = normalizeMontagePreviewRuntimeTimingSegments(entry?.previewRuntime?.timingSegments || []);
+        const hasPreviewRuntimeTiming = !isImageAsset && previewRuntimeTimingSegments.length > 0;
+        const previewRuntimeInputLabel = hasPreviewRuntimeTiming ? "[preview_runtime_v]" : "[0:v]";
+        let videoFilterGraph = hasPreviewRuntimeTiming
+          ? buildMontagePreviewRuntimeTimingVideoFilter({
             inputLabel: "[0:v]",
+            outputLabel: "preview_runtime_v",
+            timingSegments: previewRuntimeTimingSegments
+          })
+          : "";
+        if (!isImageAsset && visualLayoutMode === "blur-backdrop") {
+          const sceneFilter = buildMontageVideoSceneFilter({
+            inputLabel: previewRuntimeInputLabel,
             outputLabel: "vout",
             canvas,
             sourceWidth: sourceDims?.width || canvas.width,
@@ -13111,8 +13228,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             mediaOffsetYPct,
             mediaMotionPreset
           });
+          videoFilterGraph = videoFilterGraph ? `${videoFilterGraph};${sceneFilter}` : sceneFilter;
         } else {
-          videoFilterGraph = isImageAsset
+          const sceneFilter = isImageAsset
             ? buildMontageImageMotionVideoFilter({
               inputLabel: "[0:v]",
               outputLabel: "vout",
@@ -13129,7 +13247,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               mediaMotionPreset
             })
             : buildMontageVideoSceneFilter({
-              inputLabel: "[0:v]",
+              inputLabel: previewRuntimeInputLabel,
               outputLabel: "vout",
               canvas,
               sourceWidth: sourceDims?.width || canvas.width,
@@ -13143,6 +13261,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               mediaOffsetYPct,
               mediaMotionPreset
             });
+          videoFilterGraph = videoFilterGraph ? `${videoFilterGraph};${sceneFilter}` : sceneFilter;
         }
 
         let finalVideoMapLabel = "[vout]";
@@ -13230,6 +13349,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
 
         if (isImageAsset) {
           args.push("-t", String(durSec));
+        } else if (hasPreviewRuntimeTiming) {
+          args.push("-t", String(durSec));
         } else {
           args.push("-ss", String(trimSec), "-t", String(durSec));
         }
@@ -13254,6 +13375,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           hasInputAudio: Boolean(inputAudioPath),
           renderedTextFrameLimit: MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT,
           forceAssTextOnRender: MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER,
+          previewRuntimeTimingSegments: previewRuntimeTimingSegments.length,
           overlayTempPathCount: sceneOverlayTempPaths.length,
           ffmpegTimeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
           memory: {
@@ -14113,6 +14235,131 @@ app.post("/api/podcaster/montage/validate-export", async (req, res) => {
     return res.status(status).json({
       ok: false,
       error: String(error?.code || error?.message || "montage_export_preflight_failed").trim(),
+      code: String(error?.code || "").trim() || undefined,
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
+  }
+});
+
+app.post("/api/podcaster/montage/export-v2", async (req, res) => {
+  if (!ensureMontageExportServiceEnabled(res)) return;
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const input = normalizeMontageExportV2RequestBody(req.body || {});
+    const preflight = validateMontageExportPreflight(input, {
+      maxScenes: MAX_MONTAGE_EXPORT_SCENES,
+      maxTotalSec: MAX_MONTAGE_EXPORT_TOTAL_SEC
+    });
+    if (!preflight.ok) {
+      console.warn("[backend][montage-export-v2][preflight-failed]", {
+        sessionId: String(input.sessionId || "").trim(),
+        issueCount: preflight.issueCount,
+        codes: preflight.issues.slice(0, 8).map((issue) => String(issue?.code || "").trim()).filter(Boolean)
+      });
+      throw createMontageExportPreflightError(preflight);
+    }
+    validateMontageExportRequest(input);
+    console.info("[backend][montage-export-v2][request-body]", {
+      sessionId: String(input.sessionId || "").trim(),
+      renderPipeline: String(input.renderPipeline || "").trim() || null,
+      entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
+      previewRuntimeEntries: Array.isArray(input.previewRuntime?.entries) ? input.previewRuntime.entries.length : 0,
+      previewRuntimeSegments: (Array.isArray(input.previewRuntime?.entries) ? input.previewRuntime.entries : [])
+        .reduce((acc, entry) => acc + (Array.isArray(entry?.timingSegments) ? entry.timingSegments.length : 0), 0),
+      ffmpegStage: "ffmpeg_preview_runtime"
+    });
+
+    const blockingPersistedJob = await resolveBlockingPersistedMontageExportJob();
+    if (blockingPersistedJob) {
+      const activeJobId = clampExportId(blockingPersistedJob.jobId || "");
+      return res.status(429).json({
+        error: "backend_busy_with_export",
+        code: "backend_busy_with_export",
+        message: "El servidor ya tiene una exportación MP4 activa. Continúa o cancela ese export antes de iniciar otro.",
+        detail: buildDirectFallbackBusyDetail("montage_export", [activeJobId])
+      });
+    }
+
+    const jobId = clampExportId(randomUUID());
+    const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
+    const persistedRequest = sanitizeMontageExportPersistedRequest({ input, baseUrl });
+    const initial = await montageExportJobStore.createJob({
+      jobId,
+      sessionId: input.sessionId,
+      ownerId: uid,
+      request: persistedRequest,
+      totalScenes: input.entries.length
+    });
+    upsertMontageExportJob(jobId, initial);
+
+    if (montageExportQueue && isMontageExportQueueSubmissionEnabled()) {
+      await montageExportQueue.enqueueExportJob({
+        jobId,
+        sessionId: input.sessionId,
+        ownerId: uid,
+        input,
+        baseUrl
+      });
+      return res.status(202).json({
+        ...sanitizeMontageExportJobPublicPayload(initial),
+        renderPipeline: "ffmpeg-preview-runtime-v2"
+      });
+    }
+
+    if (isMontageExportQueueRequired() && !montageExportQueue) {
+      await montageExportJobStore.updateJob(jobId, {
+        status: "error",
+        stage: "queue_unavailable",
+        progress: 0,
+        hint: "La cola de export no esta configurada en el backend.",
+        error: {
+          code: "montage_export_queue_unavailable",
+          message: "Render no inyecto la conexion Key Value/Redis requerida para procesar exports MP4."
+        },
+        updatedAt: new Date().toISOString()
+      }).catch(() => {});
+      return res.status(503).json({
+        error: "montage_export_queue_unavailable",
+        code: "montage_export_queue_unavailable",
+        detail: { jobId, requireQueue: true }
+      });
+    }
+
+    const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+    if (!slot.ok) {
+      return res.status(429).json({
+        error: "backend_busy_with_export",
+        code: "backend_busy_with_export",
+        message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
+        detail: slot.error?.detail
+      });
+    }
+    logHeavyWorkSlots("montage_export", "acquire_direct_job_v2", {
+      jobId,
+      mode: "direct",
+      renderPipeline: "ffmpeg-preview-runtime-v2"
+    });
+    runMontageExportDirectJob({
+      jobId,
+      uid,
+      sessionId: input.sessionId,
+      input,
+      baseUrl
+    });
+
+    return res.status(202).json({
+      ...sanitizeMontageExportJobPublicPayload(initial),
+      renderPipeline: "ffmpeg-preview-runtime-v2"
+    });
+  } catch (error) {
+    console.error("[backend][montage-export-v2] request failed", {
+      status: Number(error?.status || 500) || 500,
+      code: String(error?.code || "").trim() || null,
+      message: String(error?.message || error || "montage_export_v2_failed").trim(),
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
+    return res.status(Number(error?.status || 500)).json({
+      error: String(error?.code || error?.message || "montage_export_v2_failed").trim(),
       code: String(error?.code || "").trim() || undefined,
       detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
     });

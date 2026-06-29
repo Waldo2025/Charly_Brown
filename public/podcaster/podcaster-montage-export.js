@@ -402,7 +402,7 @@ let montageExportJassubState = {
   rendering: false
 };
 
-let montageExportJobState = {
+export let montageExportJobState = {
   jobId: "",
   pollTimer: null,
   resumeOnOnlineHandler: null,
@@ -4883,7 +4883,7 @@ function resolveEffectiveMontageOnScreenTextTimeline({
   };
 }
 
-async function buildMontageExportPayloadForSubmission(session = null, options = {}) {
+export async function buildMontageExportPayloadForSubmission(session = null, options = {}) {
   const shouldRenderOnScreenTextFrames = options?.renderOnScreenTextFrames === true;
   const activeSession = session || window.getActiveSession?.() || null;
   if (activeSession) {
@@ -5276,6 +5276,26 @@ export function buildMontageExportPayload(session = null) {
           videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
           visualEffects: activeSession?.visualEffectsMap?.[rowId] || null,
           transitionOut,
+          sourceDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.sourceDurationMs || 0) || durationMs),
+          frameHolds: Array.isArray(entry?.frameHolds) ? entry.frameHolds : [],
+          speedRanges: Array.isArray(entry?.speedRanges) ? entry.speedRanges : [],
+          previewRuntime: {
+            rowId,
+            sceneIndex: index + 1,
+            startMs: Math.max(0, Number(entry?.startMs || 0) || 0),
+            endMs: Math.max(0, Number(entry?.endMs || 0) || 0),
+            sourceDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.sourceDurationMs || 0) || durationMs),
+            baseDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.baseDurationMs || 0) || durationMs),
+            effectiveDurationMs: durationMs,
+            frameHolds: Array.isArray(entry?.frameHolds) ? entry.frameHolds : [],
+            speedRanges: Array.isArray(entry?.speedRanges) ? entry.speedRanges : [],
+            clip: entry?.clip && typeof entry.clip === "object" ? {
+              startMs: Math.max(0, Number(entry.clip.startMs || 0) || 0),
+              trimInMs,
+              trimOutMs: Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry.clip.trimOutMs || trimInMs + durationMs) || (trimInMs + durationMs)),
+              sourceDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry.clip.sourceDurationMs || entry?.sourceDurationMs || trimInMs + durationMs) || (trimInMs + durationMs))
+            } : null
+          },
           video: {
             storagePath: videoStoragePath || "",
             url: videoDownloadUrl || "",

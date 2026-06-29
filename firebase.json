@@ -95,6 +95,11 @@
         "type": 307
       },
       {
+        "source": "/api/podcaster/montage/export-v2",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/montage/export-v2",
+        "type": 307
+      },
+      {
         "source": "/api/podcaster/montage/export-status",
         "destination": "https://snoopy-export.onrender.com/api/podcaster/montage/export-status",
         "type": 302
