@@ -30,6 +30,29 @@ function createMontageExportQueue({
         removeOnComplete: true,
         removeOnFail: false
       });
+    },
+    async getDiagnostics() {
+      const diagnostics = {
+        queueName,
+        workerCount: null,
+        workers: [],
+        jobCounts: null
+      };
+      if (typeof queue.getWorkers === "function") {
+        const workers = await queue.getWorkers();
+        diagnostics.workers = Array.isArray(workers)
+          ? workers.map((worker) => ({
+            name: String(worker?.name || worker?.id || "").trim() || null,
+            addr: String(worker?.addr || "").trim() || null,
+            flags: String(worker?.flags || "").trim() || null
+          }))
+          : [];
+        diagnostics.workerCount = diagnostics.workers.length;
+      }
+      if (typeof queue.getJobCounts === "function") {
+        diagnostics.jobCounts = await queue.getJobCounts("waiting", "active", "delayed", "failed", "completed", "paused");
+      }
+      return diagnostics;
     }
   };
 }

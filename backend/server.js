@@ -1240,6 +1240,11 @@ function isMontageExportQueueRequired() {
   return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_REQUIRE_QUEUE, IS_RENDER_RUNTIME);
 }
 
+function isMontageExportActiveWorkerRequired() {
+  if (!EXPORT_SERVICE_ONLY) return false;
+  return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_REQUIRE_ACTIVE_WORKER, IS_RENDER_RUNTIME);
+}
+
 function isMontageExportQueueSubmissionEnabled() {
   if (!EXPORT_SERVICE_ONLY) return false;
   return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_USE_QUEUE, isMontageExportQueueRequired());
@@ -14321,12 +14326,68 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
         queueSubmissionEnabled: isMontageExportQueueSubmissionEnabled() === true
       });
       try {
-        await montageExportQueue.enqueueExportJob({
+        const queuedJob = await montageExportQueue.enqueueExportJob({
           jobId,
           sessionId: input.sessionId,
           ownerId: uid,
           baseUrl
         });
+        let queueDiagnostics = null;
+        try {
+          queueDiagnostics = typeof montageExportQueue.getDiagnostics === "function"
+            ? await montageExportQueue.getDiagnostics()
+            : null;
+        } catch (diagnosticsErr) {
+          console.warn("[backend][montage-export-v2][queue-diagnostics-failed]", {
+            jobId,
+            message: String(diagnosticsErr?.message || diagnosticsErr || "queue_diagnostics_failed").trim()
+          });
+        }
+        if (queueDiagnostics) {
+          console.info("[backend][montage-export-v2][queue-diagnostics]", {
+            jobId,
+            queueName: queueDiagnostics.queueName || null,
+            workerCount: Number.isFinite(Number(queueDiagnostics.workerCount)) ? Number(queueDiagnostics.workerCount) : null,
+            jobCounts: queueDiagnostics.jobCounts || null
+          });
+        }
+        const hasKnownMissingWorkers = queueDiagnostics && Number(queueDiagnostics.workerCount) === 0;
+        if (hasKnownMissingWorkers && isMontageExportActiveWorkerRequired()) {
+          console.error("[backend][montage-export-v2][worker-unavailable]", {
+            jobId,
+            queueName: queueDiagnostics.queueName || null,
+            jobCounts: queueDiagnostics.jobCounts || null,
+            hint: "BullMQ accepted the job, but no montage export worker is connected."
+          });
+          if (queuedJob && typeof queuedJob.remove === "function") {
+            await queuedJob.remove().catch((removeErr) => {
+              console.warn("[backend][montage-export-v2][queued-job-remove-failed]", {
+                jobId,
+                message: String(removeErr?.message || removeErr || "queued_job_remove_failed").trim()
+              });
+            });
+          }
+          await montageExportJobStore.updateJob(jobId, {
+            status: "error",
+            stage: "queue_worker_unavailable",
+            progress: 0,
+            hint: "El export quedó en cola pero no hay worker de Render conectado para procesarlo.",
+            error: {
+              code: "montage_export_worker_unavailable",
+              message: "BullMQ aceptó el job, pero charly-brown-podcaster-export-worker no aparece conectado a Redis.",
+              detail: {
+                queueName: queueDiagnostics.queueName || null,
+                jobCounts: queueDiagnostics.jobCounts || null
+              }
+            },
+            updatedAt: new Date().toISOString()
+          }).catch(() => {});
+          return res.status(503).json({
+            error: "montage_export_worker_unavailable",
+            code: "montage_export_worker_unavailable",
+            detail: { jobId, queueDiagnostics }
+          });
+        }
         return res.status(202).json({
           ...sanitizeMontageExportJobPublicPayload(initial),
           renderPipeline: "ffmpeg-preview-runtime-v2"
@@ -16611,7 +16672,7 @@ if (IS_MAIN_MODULE) {
       playwrightModuleAvailable: healthPayload.playwrightModuleAvailable,
       playwrightChromiumExecutablePresent: healthPayload.playwrightChromiumExecutablePresent
     });
-    console.log(`[gemini-backend] listening on http://${HOST}:${PORT}`);
+    console.log(`[${BACKEND_SERVICE_ROLE || "backend"}-backend] listening on http://${HOST}:${PORT}`);
   });
 }
 
