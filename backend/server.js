@@ -4846,6 +4846,20 @@ function readGeminiAudioParts(responseBody = {}) {
   return audioParts;
 }
 
+function parseRetryAfterHeaderMs(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber) && asNumber >= 0) {
+    return Math.max(0, Math.min(Math.round(asNumber * 1000), 300000));
+  }
+  const unixMs = Date.parse(raw);
+  if (!Number.isFinite(unixMs)) return 0;
+  const deltaMs = unixMs - Date.now();
+  if (deltaMs <= 0) return 0;
+  return Math.max(0, Math.min(deltaMs, 300000));
+}
+
 function readGeminiInteractionAudioParts(responseBody = {}) {
   const audioBlocks = [
     responseBody?.output_audio,
@@ -9631,20 +9645,37 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       };
     }
 
-    let upstream = await fetchCompat(
-      `${GEMINI_BASE}/interactions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY
-        },
-        body: JSON.stringify(interactionPayload)
+    const requestGeminiAudio = async () => {
+      const interactionUpstream = await fetchCompat(
+        `${GEMINI_BASE}/interactions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY
+          },
+          body: JSON.stringify(interactionPayload)
+        }
+      );
+      const interactionData = await safeJson(interactionUpstream);
+      const interactionAudioParts = readGeminiInteractionAudioParts(interactionData);
+      const interactionStatus = Number(interactionUpstream.status || 0) || 0;
+
+      if ((interactionUpstream.ok && interactionAudioParts.length) || interactionUpstream.status === 401 || interactionUpstream.status === 403) {
+        return {
+          upstream: interactionUpstream,
+          data: interactionData,
+          audioParts: interactionAudioParts
+        };
       }
-    );
-    let data = await safeJson(upstream);
-    let audioParts = readGeminiInteractionAudioParts(data);
-    if ((!upstream.ok || !audioParts.length) && upstream.status !== 401 && upstream.status !== 403) {
+      if (isRetryableGeminiUpstreamStatus(interactionStatus)) {
+        return {
+          upstream: interactionUpstream,
+          data: interactionData,
+          audioParts: interactionAudioParts
+        };
+      }
+
       const legacyUpstream = await fetchCompat(
         `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
         {
@@ -9656,14 +9687,44 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       const legacyData = await safeJson(legacyUpstream);
       const legacyAudioParts = readGeminiAudioParts(legacyData);
       if (legacyUpstream.ok || legacyAudioParts.length) {
-        upstream = legacyUpstream;
-        data = legacyData;
-        audioParts = legacyAudioParts;
+        return {
+          upstream: legacyUpstream,
+          data: legacyData,
+          audioParts: legacyAudioParts
+        };
       }
+      return {
+        upstream: legacyUpstream,
+        data: legacyData,
+        audioParts: legacyAudioParts
+      };
+    };
+
+    const { upstream, data, audioParts: finalAudioParts } = await fetchGeminiWithRetry({
+      requestFn: async ({ attempt }) => {
+        const result = await requestGeminiAudio();
+        if (!result.upstream.ok && isRetryableGeminiUpstreamStatus(result.upstream.status)) {
+          console.warn("[GEMINI][dialogue-audio] retryable upstream failure", {
+            status: Number(result.upstream.status || 0),
+            attempt: attempt + 1
+          });
+        }
+        return result;
+      },
+      retryDelaysMs: buildGeminiUpstreamRetryDelays(3, 800)
+    });
+
+    let dataToUse = data;
+    let audioParts = finalAudioParts;
+    if (!finalAudioParts.length) {
+      // Extraer audio de la payload de respuestas intermedias si el fallback no la devolvió explícitamente.
+      audioParts = readGeminiAudioParts(dataToUse || {});
     }
     if (!upstream.ok) {
       return res.status(Number(upstream.status || 502)).json({
-        error: String(data?.error?.message || data?.error || `No se pudo generar audio (${upstream.status}).`)
+        error: String(dataToUse?.error?.message || dataToUse?.error || `No se pudo generar audio (${upstream.status}).`),
+        retryAfterMs: parseRetryAfterHeaderMs(upstream.headers?.get?.("retry-after") || ""),
+        upstreamStatus: Number(upstream.status || 0)
       });
     }
 
