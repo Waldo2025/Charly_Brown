@@ -817,14 +817,13 @@ function handleScriptFieldUpdate(event) {
       script: {
         ...current.script,
         rows: updateSingleScriptRow(current, rowId, (entry) => (
-          window.normalizeRowVoiceConfig({
+          {
             ...entry,
-            voiceName: value,
+            speaker,
+            voiceName: window.normalizeLiveVoiceName(String(value || "").trim(), ""),
             voiceNameSource: "row",
             lastEditedAt: Date.now()
-          }, current, {
-            speaker
-          })
+          }
         ))
       }
     }), { ...baseSessionUpdateOptions, render: false });
@@ -904,35 +903,34 @@ function handleScriptFieldUpdate(event) {
         ...current.script,
         hosts: ["Narrador"],
         rows: updateSingleScriptRow(current, rowId, (row, index) => (
-          window.normalizeCreativeRow({
-            ...row,
-            [field]: value,
-            ...(field === "sceneDescription"
-              ? {
-                scenePrompt: value,
-                Descripción: value,
-                descripcionEscena: value,
-                descripcionDeEscena: value,
-                sceneDescriptionEditedStored: true
-              }
-              : {}),
-            ...(field === "onScreenText"
-              ? {
-                onScreenTextNoSummarize: true
-              }
-              : {}),
-            ...(field === "visualNotes"
-              ? {
-                visualNotesEditedText: value,
-                visualNotesEditedStored: true,
-                visualNotesProposal: ""
-              }
-              : {}),
-            lastEditedAt: Date.now()
-          }, index, {
-            videoPreset,
-            ...(field === "visualNotes" ? { preserveExactVisualNotes: true } : {})
-          })
+          String(row?.id || "").trim() !== rowId
+            ? row
+            : ({
+              ...row,
+              [field]: value,
+              ...(field === "sceneDescription"
+                ? {
+                  scenePrompt: value,
+                  Descripción: value,
+                  descripcionEscena: value,
+                  descripcionDeEscena: value,
+                  sceneDescriptionEditedStored: true
+                }
+                : {}),
+              ...(field === "onScreenText"
+                ? {
+                  onScreenTextNoSummarize: true
+                }
+                : {}),
+              ...(field === "visualNotes"
+                ? {
+                  visualNotesEditedText: value,
+                  visualNotesEditedStored: true,
+                  visualNotesProposal: ""
+                }
+                : {}),
+              lastEditedAt: Date.now()
+            })
         ))
       }
     }), { ...baseSessionUpdateOptions, render: !isLiveInput });
@@ -986,15 +984,13 @@ function handleScriptFieldUpdate(event) {
       ...current.script,
       rows: updateSingleScriptRow(current, rowId, (row) => (
         field === "speaker"
-          ? window.normalizeRowVoiceConfig({
+          ? {
             ...row,
             speaker: value,
             voiceName: window.getSpeakerVoiceMap(current)[value] || window.resolveSpeakerVoiceName(value, current),
             voiceNameSource: "host",
             lastEditedAt: Date.now()
-          }, current, {
-            speaker: value
-          })
+          }
           : { ...row, [field]: value, lastEditedAt: Date.now() }
       ))
     }

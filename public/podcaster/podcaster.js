@@ -10154,8 +10154,19 @@ function primeScriptSetupModal() {
 function buildCloudSessionPayload(session = null) {
   const source = session || getActiveSession();
   const chat = Array.isArray(source?.chat) ? source.chat : [];
+  const isCreative = isCreativeVideoMode(source);
+  const videoPreset = isCreative ? resolveActiveVideoPreset(source) : null;
+  const normalizedSourceForCloud = isCreative && source
+    ? {
+      ...source,
+      script: {
+        ...source.script,
+        rows: normalizeRows(source?.script?.rows).map((row, index) => normalizeCreativeRow(row, index, { videoPreset }))
+      }
+    }
+    : source;
 
-  return _buildCloudSessionPayload(source, panelMusicState, chat, {
+  return _buildCloudSessionPayload(normalizedSourceForCloud, panelMusicState, chat, {
     makeId,
     nowIso,
     isCreativeVideoMode,
@@ -17130,7 +17141,6 @@ function attachEvents() {
       const field = String(target.dataset.field || "").trim();
       if (!rowId || !field) return;
       const isLiveInput = String(event?.type || "").trim().toLowerCase() === "input";
-      const videoPreset = resolveActiveVideoPreset(getActiveSession());
       const rawValue = field === "durationSec"
         ? Number(target.value || 0)
         : String(target.value || "");
@@ -17139,14 +17149,16 @@ function attachEvents() {
         script: {
           ...current.script,
           hosts: ["Narrador"],
-          rows: (current.script?.rows || []).map((row, index) => (
-            String(row?.id || "").trim() === rowId
-              ? normalizeCreativeRow({
-                ...row,
-                [field]: rawValue
-              }, index, { videoPreset })
-              : normalizeCreativeRow(row, index, { videoPreset })
-          ))
+          rows: (() => {
+            const rows = Array.isArray(current.script?.rows) ? [...current.script.rows] : [];
+            const targetIndex = rows.findIndex((row) => String(row?.id || "").trim() === rowId);
+            if (targetIndex < 0) return rows;
+            rows[targetIndex] = {
+              ...(rows[targetIndex] || {}),
+              [field]: rawValue
+            };
+            return rows;
+          })()
         }
       }), {
         render: false,
@@ -17187,7 +17199,6 @@ function attachEvents() {
       const session = getActiveSession();
       const rowId = String(geminiCreativityModalState.rowId || "").trim();
       if (!session || !rowId) return;
-      const videoPreset = resolveActiveVideoPreset(session);
       const level = Math.round(Math.max(1, Math.min(10, Number(els.geminiCreativityRange.value || 3) || 3)));
       if (els.geminiCreativityValueLabel) {
         els.geminiCreativityValueLabel.textContent = `${level} · ${describeGeminiCreativityLevel(level)}`;
@@ -17197,11 +17208,16 @@ function attachEvents() {
         script: {
           ...current.script,
           hosts: ["Narrador"],
-          rows: (current.script?.rows || []).map((row, index) => (
-            String(row?.id || "").trim() === rowId
-              ? normalizeCreativeRow({ ...row, geminiCreativityLevel: level }, index, { videoPreset })
-              : normalizeCreativeRow(row, index, { videoPreset })
-          ))
+          rows: (() => {
+            const rows = Array.isArray(current.script?.rows) ? [...current.script.rows] : [];
+            const targetIndex = rows.findIndex((row) => String(row?.id || "").trim() === rowId);
+            if (targetIndex < 0) return rows;
+            rows[targetIndex] = {
+              ...(rows[targetIndex] || {}),
+              geminiCreativityLevel: level
+            };
+            return rows;
+          })()
         }
       }), { render: false });
     });
