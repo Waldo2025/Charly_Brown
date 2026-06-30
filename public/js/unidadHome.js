@@ -1,7 +1,7 @@
 import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { getFirestore, collection, query, where, getDocs, doc, deleteDoc, updateDoc, getDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
 import VanillaTilt from './vendor/vanilla-tilt/vanilla-tilt.es2015.js';
-import { escapeHtml } from './security-utils.js?v=2026-1.0.0.59';
+import { escapeHtml } from './security-utils.js';
 import { getDefaultFirebaseApp } from './firebase-default-app.js';
 
 const app = getDefaultFirebaseApp();

@@ -1,6 +1,6 @@
 import { getStorage, ref, uploadString, listAll, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
-import { buildVeoApiUrl, getAuthHeaders } from './api-client.js?v=2026-06-25.1';
+import { buildVeoApiUrl, getAuthHeaders } from './api-client.js';
 import { getDefaultFirebaseApp } from './firebase-default-app.js';
 
 const app = getDefaultFirebaseApp();

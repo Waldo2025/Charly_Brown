@@ -4844,6 +4844,32 @@ function readGeminiAudioParts(responseBody = {}) {
   return audioParts;
 }
 
+function readGeminiInteractionAudioParts(responseBody = {}) {
+  const audioBlocks = [
+    responseBody?.output_audio,
+    responseBody?.outputAudio,
+    responseBody?.audio,
+    responseBody?.output?.audio
+  ].filter(Boolean);
+  const audioParts = [];
+  audioBlocks.forEach((block) => {
+    const data = String(block?.data || block?.base64 || block?.audio_data || block?.audioData || "").trim();
+    if (!data) return;
+    const mimeType = String(block?.mime_type || block?.mimeType || "audio/L16;rate=24000").trim() || "audio/L16;rate=24000";
+    audioParts.push({ data, mimeType });
+  });
+  const events = Array.isArray(responseBody?.events) ? responseBody.events : [];
+  events.forEach((event) => {
+    const delta = event?.delta || {};
+    if (String(delta?.type || "").trim().toLowerCase() !== "audio") return;
+    const data = String(delta?.data || "").trim();
+    if (!data) return;
+    const mimeType = String(delta?.mime_type || delta?.mimeType || "audio/L16;rate=24000").trim() || "audio/L16;rate=24000";
+    audioParts.push({ data, mimeType });
+  });
+  return audioParts;
+}
+
 function pcm16ToWavBuffer(pcmBuffer = Buffer.alloc(0), sampleRate = 24000) {
   const pcm = Buffer.isBuffer(pcmBuffer) ? pcmBuffer : Buffer.from(pcmBuffer || []);
   const safeRate = Math.max(8000, Math.min(96000, Number(sampleRate) || 24000));
@@ -9549,14 +9575,27 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       ttsDirection
     });
 
-    const payload = {
+    const interactionPayload = {
+      model,
+      input: prompt,
+      response_format: {
+        type: "audio"
+      },
+      generation_config: {
+        speech_config: [
+          voiceName ? { voice: voiceName } : { voice: "Kore" }
+        ]
+      }
+    };
+
+    const legacyPayload = {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         responseModalities: ["AUDIO"]
       }
     };
     if (voiceName) {
-      payload.generationConfig.speechConfig = {
+      legacyPayload.generationConfig.speechConfig = {
         voiceConfig: {
           prebuiltVoiceConfig: {
             voiceName
@@ -9565,22 +9604,42 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       };
     }
 
-    const upstream = await fetchCompat(
-      `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    let upstream = await fetchCompat(
+      `${GEMINI_BASE}/interactions`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY
+        },
+        body: JSON.stringify(interactionPayload)
       }
     );
-    const data = await safeJson(upstream);
+    let data = await safeJson(upstream);
+    let audioParts = readGeminiInteractionAudioParts(data);
+    if ((!upstream.ok || !audioParts.length) && upstream.status !== 401 && upstream.status !== 403) {
+      const legacyUpstream = await fetchCompat(
+        `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(legacyPayload)
+        }
+      );
+      const legacyData = await safeJson(legacyUpstream);
+      const legacyAudioParts = readGeminiAudioParts(legacyData);
+      if (legacyUpstream.ok || legacyAudioParts.length) {
+        upstream = legacyUpstream;
+        data = legacyData;
+        audioParts = legacyAudioParts;
+      }
+    }
     if (!upstream.ok) {
       return res.status(Number(upstream.status || 502)).json({
         error: String(data?.error?.message || data?.error || `No se pudo generar audio (${upstream.status}).`)
       });
     }
 
-    const audioParts = readGeminiAudioParts(data);
     if (!audioParts.length) {
       return res.status(502).json({ error: "Gemini no devolvió audio para la escena." });
     }
@@ -16567,6 +16626,13 @@ app.get("/api/mineblox/screenshots/list", async (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: String(error?.message || "No se pudo listar la galería.") });
   }
+});
+
+app.get("/api/gemini/generate", (_req, res) => {
+  return res.status(405).json({
+    error: "method_not_allowed",
+    message: "Usa POST /api/gemini/generate con JSON { model, payload }. Gemini generateContent no acepta GET."
+  });
 });
 
 app.post("/api/gemini/generate", async (req, res) => {

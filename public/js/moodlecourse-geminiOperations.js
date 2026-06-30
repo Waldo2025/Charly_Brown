@@ -1,4 +1,4 @@
-import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.10.65";
+import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js";
 import {
   authFetchJson,
   buildApiUrl,
@@ -7,14 +7,14 @@ import {
   getAuthHeaders,
   getRemoteApiBase,
   isLoopbackApiBase
-} from "./api-client.js?v=2026-1.0.1.15";
+} from "./api-client.js";
 import {
   FEATURED_SOURCE_MODULE_TYPE_NORMALIZED,
   construirPromptFuentesDestacadas,
   extraerConsignaFuentesDestacadasDesdeInstrucciones,
   normalizarSalidaFuentesDestacadasMarkdown,
   validarFuentesDestacadas
-} from "./moodleCourse-featuredSources.js?v=2026-1.0.1.24";
+} from "./moodleCourse-featuredSources.js";
 
 function getGeminiEndpoint() {
   return buildApiUrlPreferRemote("/api/gemini/generate");

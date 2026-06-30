@@ -20,7 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-import { authFetchJson, buildVeoApiUrl, hasAvailableApiBase } from "./api-client.js?v=2026-06-25.1";
+import { authFetchJson, buildVeoApiUrl, hasAvailableApiBase } from "./api-client.js";
 import {
   normalizeEscapeRoomProject,
   normalizeMission,

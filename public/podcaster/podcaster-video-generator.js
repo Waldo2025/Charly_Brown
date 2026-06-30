@@ -1,5 +1,5 @@
 
-import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js?v=2026-06-26.4";
+import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js";
 import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
 import { isReelModeEnabled } from "./podcaster-reels.js";

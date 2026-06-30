@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js?v=2026-06-26.10";
+import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -18,7 +18,7 @@ import {
   buildMontageRenderAssContent,
   normalizeMontageRenderMode,
   resolveMontageRenderEntryAtTime
-} from "./podcaster-montage-render-surface.js?v=2026-06-26.2";
+} from "./podcaster-montage-render-surface.js";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;

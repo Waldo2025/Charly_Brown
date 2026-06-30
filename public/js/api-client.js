@@ -281,8 +281,10 @@ export async function authFetchJson(url, options = {}) {
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};
   const buildRequestInit = async (forceRefresh = false) => {
     const headers = auth ? await getAuthHeadersWithRefresh(baseHeaders, forceRefresh) : baseHeaders;
+    const inferredMethod = requestHasBody && !requestOptions.method ? "POST" : requestOptions.method;
     return {
       ...requestOptions,
+      ...(inferredMethod ? { method: inferredMethod } : {}),
       headers: {
         ...headers,
         ...(requestOptions.headers || {}),

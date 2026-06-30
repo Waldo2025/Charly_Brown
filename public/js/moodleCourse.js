@@ -1,4 +1,4 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.1.14";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // Firebase imports
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
@@ -33,21 +33,21 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.20';
+} from './moodlecourse-geminiOperations.js';
 
 import {
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
-} from './moodleClurse-extraFunctions.js?v=2026-1.0.1.15';
-import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.1.14';
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.1.14";
+} from './moodleClurse-extraFunctions.js';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js';
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import {
     authFetchJson,
     buildApiUrl,
     buildApiUrlFromBase,
     getRemoteApiBase
-} from "./api-client.js?v=2026-1.0.1.15";
+} from "./api-client.js";
 import {
     applySimplePreviewStateFromLayers,
     cleanupModuleGraphicInlinePreview,
@@ -59,7 +59,7 @@ import {
     renderSimplePreviewFooter,
     renderSimplePreviewText,
     upsertSelectedPreviewText
-} from "./moodleCourse-graphicPreview.js?v=2026-1.0.1.15";
+} from "./moodleCourse-graphicPreview.js";
 import {
     actualizarEstadoActividadOriginal,
     aplicarVisibilidadActividadOriginalEnContenido,
@@ -69,8 +69,8 @@ import {
     registrarToggleOriginalActivity,
     quitarActividadOriginalDelContenido,
     sincronizarSnapshotActividadOriginal
-} from "./moodleCourse-originalActivityToggle.js?v=2026-1.0.1.15";
-import { sanitizeFilename } from "./word-export.js?v=2026-1.0.1.14";
+} from "./moodleCourse-originalActivityToggle.js";
+import { sanitizeFilename } from "./word-export.js";
 import {
     FEATURED_SOURCE_MODULE_TYPE,
     FEATURED_SOURCE_MODULE_TYPE_NORMALIZED,
@@ -78,7 +78,7 @@ import {
     crearDefaultsFuentesDestacadas,
     extraerCamposFuentesDestacadasDesdeInstrucciones,
     validarFuentesDestacadas
-} from "./moodleCourse-featuredSources.js?v=2026-1.0.1.24";
+} from "./moodleCourse-featuredSources.js";
 
 
 /* CONFIGURACIÓN FIREBASE */

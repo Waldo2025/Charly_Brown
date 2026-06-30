@@ -6,7 +6,7 @@ import {
   buildKaraokeSubtitleMarkup,
   normalizeKaraokeWordTimings,
   resolveActiveKaraokeWordIndex
-} from "./podcaster-karaoke.js?v=2026-06-16.15";
+} from "./podcaster-karaoke.js";
 import { getPodcasterLocalMediaBlob } from "./podcaster-local-media-cache.js";
 
 /**

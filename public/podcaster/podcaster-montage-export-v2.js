@@ -1,4 +1,4 @@
-import { authFetchJson, buildExportApiUrl } from "../js/api-client-podcaster.js?v=2026-06-26.10";
+import { authFetchJson, buildExportApiUrl } from "../js/api-client-podcaster.js";
 import {
   buildMontageExportPayloadForSubmission,
   clearMontageExportPolling,
@@ -12,7 +12,7 @@ import {
   setMontageExportDownloadButton,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-29.20";
+} from "./podcaster-montage-export.js";
 
 let montageExportV2SubmitLocked = false;
 

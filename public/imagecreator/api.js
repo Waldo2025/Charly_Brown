@@ -1,4 +1,4 @@
-import { authFetchJson, buildVeoApiUrl } from "../js/api-client.js?v=2026-06-25.1";
+import { authFetchJson, buildVeoApiUrl } from "../js/api-client.js";
 import { prepareAttachmentsForGemini } from "./attachments.js";
 import { buildGeminiImagePayload, estimateGeminiPayloadBytes } from "./payloads.js";
 import { MAX_GEMINI_PAYLOAD_BYTES, MAX_RESULTS_PER_TURN } from "./constants.js";
