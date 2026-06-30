@@ -146,7 +146,8 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
 
     const resp = await authFetchJson("/api/podcaster/dialogue-audio/generate", {
       method: "POST",
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      preferRemote: true
     });
 
     if (!resp?.ok) throw new Error(resp?.error || "Error al generar audio.");
