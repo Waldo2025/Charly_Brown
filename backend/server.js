@@ -273,6 +273,11 @@ const BACKEND_BOOT_ISO = new Date().toISOString();
 const BACKEND_BOOT_SIGNATURE = `backend/server.js@${BACKEND_BOOT_ISO}`;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const PRIMARY_GEMINI_BACKEND_BASE = String(
+  process.env.PRIMARY_GEMINI_BACKEND_BASE
+  || process.env.GEMINI_BACKEND_PUBLIC_BASE_URL
+  || "https://charly-brown-gemini-backend.onrender.com"
+).trim().replace(/\/+$/, "");
 // Montage exports can carry sizable JSON payloads when they include cached
 // inline media or rendered text snapshots. Keep the global parser roomy enough
 // for those requests, and fail cleanly when a payload still exceeds the limit.
@@ -7182,6 +7187,7 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
 
 app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
   try {
+    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     const uid = String(req.authContext?.uid || "").trim();
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
@@ -7265,6 +7271,7 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
 
 app.get("/api/podcaster/sessions/list-audios", async (req, res) => {
   try {
+    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     const uid = String(req.authContext?.uid || "").trim();
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
@@ -9925,6 +9932,73 @@ function coerceReadableStream(body = null) {
     return Readable.fromWeb(body);
   }
   return null;
+}
+
+function shouldForwardMisroutedEditorRequestToGemini(req) {
+  if (!EXPORT_SERVICE_ONLY) return false;
+  const pathName = String(req?.path || req?.originalUrl || "").trim();
+  return pathName === "/api/assets/proxy-media"
+    || pathName === "/api/assets/proxy-image"
+    || pathName === "/api/podcaster/sessions/list"
+    || pathName === "/api/podcaster/sessions/list-videos"
+    || pathName === "/api/podcaster/sessions/list-audios"
+    || pathName.startsWith("/api/podcaster/scene-library/");
+}
+
+async function forwardMisroutedEditorRequestToGemini(req, res) {
+  if (!shouldForwardMisroutedEditorRequestToGemini(req) || !PRIMARY_GEMINI_BACKEND_BASE) {
+    return false;
+  }
+  const targetUrl = `${PRIMARY_GEMINI_BACKEND_BASE}${String(req.originalUrl || req.url || "").trim()}`;
+  const headers = {};
+  [
+    "authorization",
+    "range",
+    "accept",
+    "if-none-match",
+    "if-modified-since",
+    "user-agent"
+  ].forEach((name) => {
+    const value = req.headers?.[name];
+    if (!value) return;
+    headers[name] = Array.isArray(value) ? value.join(", ") : String(value);
+  });
+  try {
+    console.info("[backend][misroute-forward]", {
+      serviceRole: BACKEND_SERVICE_ROLE,
+      path: String(req.path || "").trim(),
+      targetUrl
+    });
+    const upstream = await fetchCompat(targetUrl, {
+      method: String(req.method || "GET").toUpperCase(),
+      headers
+    });
+    applyAssetCorsHeaders(req, res);
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      const headerName = String(key || "").trim().toLowerCase();
+      if (!headerName || headerName === "transfer-encoding" || headerName === "connection") return;
+      try {
+        res.setHeader(key, value);
+      } catch (_) {}
+    });
+    const stream = coerceReadableStream(upstream.body);
+    if (stream) {
+      await safePipeline(stream, res);
+      return true;
+    }
+    const buffer = Buffer.from(await upstream.arrayBuffer().catch(() => new ArrayBuffer(0)));
+    res.send(buffer);
+    return true;
+  } catch (error) {
+    console.error("[backend][misroute-forward][error]", {
+      serviceRole: BACKEND_SERVICE_ROLE,
+      path: String(req.path || "").trim(),
+      targetUrl,
+      message: String(error?.message || error)
+    });
+    return false;
+  }
 }
 
 function parseFirebaseStorageGoogleApisObjectUrl(url = "") {
@@ -16969,6 +17043,7 @@ app.post("/api/gemini/live-token", async (req, res) => {
 
 app.get("/api/assets/proxy-image", async (req, res) => {
   try {
+    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     applyAssetCorsHeaders(req, res);
     const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
     if (storagePath) {
@@ -17196,6 +17271,7 @@ app.get("/api/assets/montage-download", async (req, res) => {
 app.get("/api/assets/proxy-media", async (req, res) => {
   const requestId = randomUUID().slice(0, 8);
   try {
+    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     applyAssetCorsHeaders(req, res);
     const ignoreRange = String(req.query?.noRange || "").trim() === "1" || String(req.query?.noRange || "").trim().toLowerCase() === "true";
     const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
