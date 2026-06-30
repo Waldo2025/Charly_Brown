@@ -13902,7 +13902,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             }
           }
         }
-        }
         const stylizedOverlayResult = await appendMontageSceneStylizedTextFilters({
           input,
           entry,
