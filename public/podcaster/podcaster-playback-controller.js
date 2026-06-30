@@ -133,6 +133,23 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
     return clean;
   }
+
+  hasFirebaseDirectAccessToken(url = "") {
+    const clean = String(url || "").trim();
+    if (!clean) return false;
+    return clean.includes("token=") || clean.includes("downloadToken=");
+  }
+
+  toFirebaseStorageProxyUrl(firebaseUrl = "", storagePath = "", options = {}) {
+    const cleanUrl = String(firebaseUrl || "").trim();
+    const kind = String(options?.kind || "media").trim().toLowerCase() === "image" ? "image" : "media";
+    const cleanPath = String(storagePath || "").trim();
+    if (cleanPath) {
+      return this.buildMediaProxyUrl(`/api/assets/proxy-${kind}?storagePath=${encodeURIComponent(cleanPath)}`);
+    }
+    if (!cleanUrl) return "";
+    return this.buildMediaProxyUrl(`/api/assets/proxy-${kind}?url=${encodeURIComponent(cleanUrl)}`);
+  }
   resolveStageMediaScaleContainer() {
     return this.els?.podcastActiveSpeakerVideo?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
       || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
@@ -655,7 +672,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
 
           const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
-          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-')) {
+          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
             finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
           }
 
@@ -724,11 +741,13 @@ export class PodcasterPlaybackController extends EventEmitter {
             } else if (originalUrl && originalUrl.startsWith('http') && !originalUrl.includes('/api/assets/proxy')) {
               finalUrl = originalUrl;
             }
-            if (isDirectFirebaseUrl && finalUrl.includes('firebasestorage.googleapis.com') && !finalUrl.includes('token=') && !finalUrl.includes('downloadToken=')) {
-              if (storagePath) {
-                const proxyPath = isImageLikeUrl ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
-                finalUrl = this.buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(storagePath)}`);
-              }
+            if (
+              isDirectFirebaseUrl &&
+              finalUrl.includes('firebasestorage.googleapis.com') &&
+              !this.hasFirebaseDirectAccessToken(finalUrl) &&
+              !finalUrl.includes('/api/assets/proxy-')
+            ) {
+              finalUrl = this.toFirebaseStorageProxyUrl(finalUrl, storagePath, { kind: isImageLikeUrl ? "image" : "media" });
             }
           } catch (e) { }
         }
@@ -1714,11 +1733,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
     const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
     const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
-    const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}`;
+    const trimOutMs = Math.max(0, Number(activeSegment.trimOutMs || 0));
+    const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}|${trimInMs}|${trimOutMs}`;
     const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey;
     const sourceIsContinuous = useContinuousSource === true;
     const previousBackgroundSegmentIndex = this.backgroundSegmentIndex;
     const previousBackgroundSegmentIdentity = this.backgroundSegmentIdentity;
+    const isActiveSegmentIdentityChanged = previousBackgroundSegmentIdentity !== activeSegmentIdentity;
 
     if (!sourceHasNotChanged) {
       this.backgroundSegmentSkewMs = null;
@@ -1857,7 +1878,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           || !Number.isFinite(this.backgroundSyncAnchorMs)
           || !Number.isFinite(this.backgroundSyncAnchorOffsetMs)
           || previousBackgroundSegmentIndex !== activeSegmentIndex
-          || previousBackgroundSegmentIdentity !== activeSegmentIdentity
+          || isActiveSegmentIdentityChanged
           || this.backgroundAudio.dataset.initialized !== "true"
           || timelineJumpMs > 1500;
         if (needsAnchorReset) {
@@ -1876,7 +1897,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundSyncLastTimelineMs = currentTimelineMs;
       } else {
         this.backgroundSegmentIndex = activeSegmentIndex;
-        if (this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
+        if (isActiveSegmentIdentityChanged || this.backgroundSegmentSkewMs === null || !Number.isFinite(this.backgroundSegmentSkewMs)) {
           this.backgroundSegmentSkewMs = Number(this.backgroundAudio.currentTime || 0) * 1000 - segmentBaseOffsetMs;
         }
         const expectedOffsetFromSkewMs = Number(currentMs || 0) + this.backgroundSegmentSkewMs;
