@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.337",
-  "build": "2026-1.0.10.337",
+  "version": "1.0.10.338",
+  "build": "2026-1.0.10.338",
   "branch": "codex-bootstrap",
   "changelog": [
     "Mejorado: Los cache-busters del frontend se controlan en runtime desde version.json mediante cache-version-loader.js; las paginas publicas migradas declaran assets con data-cache-src/data-cache-href y los imports internos locales dejan de fijar versiones antiguas.",
@@ -315,5 +315,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.337"
+  "cache_version": "2026-1.0.10.338"
 }
