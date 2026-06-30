@@ -2919,6 +2919,27 @@ body.is-resizing-podcast-stage {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(2, 6, 23, 0.18));
 }
 
+.montage-export-download-select {
+  cursor: pointer;
+  min-width: 260px;
+  border-radius: 14px;
+  padding: 0 14px;
+  height: 34px;
+  width: auto;
+  font: inherit;
+  font-size: 0.91rem;
+  color: color-mix(in srgb, var(--pod-accent) 88%, #f8fafc 12%);
+  background-color: color-mix(in srgb, var(--pod-accent) 18%, var(--pod-surface) 82%);
+  border: 1px solid;
+  border-color: color-mix(in srgb, var(--pod-accent) 46%, var(--pod-border) 54%);
+  appearance: none;
+}
+
+.montage-export-download-select option {
+  color: var(--pod-text);
+  background: var(--pod-surface);
+}
+
 @media (max-width: 720px) {
   .montage-export-body {
     grid-template-columns: 1fr;

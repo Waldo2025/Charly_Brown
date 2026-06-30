@@ -17477,8 +17477,10 @@ function attachEvents() {
     });
   }
   if (els.montageExportDownloadBtn) {
-    els.montageExportDownloadBtn.addEventListener("click", () => {
-      downloadReadyMontageExport();
+    els.montageExportDownloadBtn.addEventListener("change", (event) => {
+      const value = String(event?.target?.value || "").trim();
+      if (!value) return;
+      downloadReadyMontageExport(value);
     });
   }
   if (els.montageExportFormat) {

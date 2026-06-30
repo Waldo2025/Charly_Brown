@@ -40,6 +40,9 @@ const MONTAGE_FRONTEND_EXPORT_DRIFT_SEEK_THRESHOLD_SEC = 0.45;
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
 const MONTAGE_EXPORT_ACTIVE_JOB_KEY = "cb_podcast_montage_export_active_job_v1";
+const MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY = "cb_podcast_montage_export_history_v1";
+const MONTAGE_EXPORT_DOWNLOAD_HISTORY_MAX_ENTRIES = 20;
+let montageExportDownloadHistory = [];
 const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   enabled: true,
   assetPath: "public/podcaster/logo.png",
@@ -808,12 +811,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     setMontageExportContinueButton({ visible: false });
     const statusText = "Tu video está listo.";
     let hintText = "";
-    setMontageExportDownloadButton({
-      visible: Boolean(url),
-      url,
-      filename: name
-    });
-    persistMontageExportReferenceToSession({
+    const readyExportReference = {
       exportId: String(readyExport?.exportId || data?.export?.exportId || data?.result?.exportId || "").trim(),
       downloadUrl: url,
       storagePath: String(readyExport?.storagePath || data?.export?.storagePath || data?.result?.storagePath || data?.currentStoragePath || "").trim(),
@@ -821,7 +819,14 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
       mimeType: String(readyExport?.mimeType || data?.export?.mimeType || data?.result?.mimeType || "").trim(),
       createdAtIso: String(readyExport?.createdAt || data?.export?.createdAt || data?.result?.createdAt || "").trim(),
       expiresAtIso: String(readyExport?.expiresAt || data?.export?.expiresAt || data?.result?.expiresAt || "").trim()
+    };
+    setMontageExportDownloadButton({
+      visible: Boolean(url),
+      url,
+      filename: name
     });
+    upsertMontageExportDownloadHistory(readyExportReference);
+    persistMontageExportReferenceToSession(readyExportReference);
     if (window.montageExportJobState.reviewExcelEnabled === true && window.montageExportState.exportMode === "review") {
       try {
         await downloadMontageReviewExcel(
@@ -1397,12 +1402,10 @@ export function setMontageExportDownloadButton({ visible = false, url = "", file
   const shouldShow = Boolean(visible) && Boolean(cleanUrl);
   window.montageExportJobState.readyDownloadUrl = shouldShow ? cleanUrl : "";
   window.montageExportJobState.readyDownloadFilename = shouldShow ? cleanFilename : "";
-  window.els.montageExportDownloadBtn.hidden = !shouldShow;
-  window.els.montageExportDownloadBtn.disabled = false;
-  window.els.montageExportDownloadBtn.dataset.downloadUrl = shouldShow ? cleanUrl : "";
-  window.els.montageExportDownloadBtn.dataset.filename = shouldShow ? cleanFilename : "";
-  const textEl = window.els.montageExportDownloadBtn.querySelector("span");
-  if (textEl) textEl.textContent = cleanFilename.toLowerCase().endsWith(".mp4") ? "Descargar MP4" : "Descargar archivo";
+  renderMontageExportDownloadHistory({
+    selectedUrl: shouldShow ? cleanUrl : "",
+    selectedFilename: shouldShow ? cleanFilename : ""
+  });
 }
 
 function normalizeMontageExportReference(raw = null) {
@@ -1421,16 +1424,186 @@ function normalizeMontageExportReference(raw = null) {
   ).trim();
   const storagePath = String(raw?.storagePath || raw?.currentStoragePath || raw?.path || nestedExport?.storagePath || nestedResult?.storagePath || "").trim();
   if (!downloadUrl && !storagePath) return null;
+  const rawCreatedAtIso = String(raw?.createdAtIso || raw?.createdAt || nestedExport?.createdAt || nestedResult?.createdAt || "").trim();
+  const createdAtMsValue = Number.isFinite(Number(raw?.createdAtMs))
+    ? Number(raw?.createdAtMs)
+    : Number.isFinite(Date.parse(rawCreatedAtIso))
+      ? Date.parse(rawCreatedAtIso)
+      : Date.now();
+  const normalizedExportId = String(
+    raw?.exportId
+    || raw?.jobId
+    || raw?.id
+    || raw?.recordId
+    || nestedExport?.exportId
+    || nestedResult?.exportId
+    || ""
+  ).trim();
+  const filename = String(raw?.filename || nestedExport?.filename || nestedResult?.filename || "").trim() || "montage.mp4";
+  const storageBucket = String(raw?.bucketName || nestedExport?.bucketName || nestedResult?.bucketName || "").trim();
   return {
-    exportId: String(raw?.exportId || raw?.jobId || nestedExport?.exportId || nestedResult?.exportId || "").trim(),
+    exportId: normalizedExportId,
     downloadUrl,
     storagePath,
-    filename: String(raw?.filename || nestedExport?.filename || nestedResult?.filename || "").trim(),
+    filename,
     mimeType: String(raw?.mimeType || nestedExport?.mimeType || nestedResult?.mimeType || "").trim().toLowerCase() || "video/mp4",
-    createdAtIso: String(raw?.createdAtIso || raw?.createdAt || nestedExport?.createdAt || nestedResult?.createdAt || "").trim(),
+    createdAtMs: createdAtMsValue > 0 ? createdAtMsValue : Date.now(),
+    createdAtIso: rawCreatedAtIso || new Date(createdAtMsValue > 0 ? createdAtMsValue : Date.now()).toISOString(),
     expiresAtIso: String(raw?.expiresAtIso || raw?.expiresAt || nestedExport?.expiresAt || nestedResult?.expiresAt || "").trim(),
-    bucketName: String(raw?.bucketName || nestedExport?.bucketName || nestedResult?.bucketName || "").trim()
+    bucketName: storageBucket,
+    id: normalizedExportId || `${downloadUrl || storagePath || filename}`
   };
+}
+
+function normalizeMontageExportDownloadHistory(raw = null) {
+  if (!Array.isArray(raw)) return [];
+  const normalized = raw
+    .map((entry) => normalizeMontageExportReference(entry))
+    .filter((entry) => Boolean(entry && (entry.downloadUrl || entry.storagePath)));
+  const deduped = [];
+  const seen = new Set();
+  for (const entry of normalized) {
+    const key = entry.downloadUrl || entry.storagePath || `${entry.filename}__${entry.createdAtMs}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entry.id = String(entry.id || "").trim() || `${key}`;
+    deduped.push(entry);
+  }
+  deduped.sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
+  return deduped.slice(0, MONTAGE_EXPORT_DOWNLOAD_HISTORY_MAX_ENTRIES);
+}
+
+function loadMontageExportDownloadHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY) || "[]");
+    montageExportDownloadHistory = normalizeMontageExportDownloadHistory(Array.isArray(parsed) ? parsed : []);
+    return montageExportDownloadHistory;
+  } catch (_error) {
+    montageExportDownloadHistory = [];
+    return [];
+  }
+}
+
+function persistMontageExportDownloadHistory(history = null) {
+  const normalized = normalizeMontageExportDownloadHistory(Array.isArray(history) ? history : []);
+  montageExportDownloadHistory = normalized;
+  try {
+    localStorage.setItem(MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY, JSON.stringify(normalized));
+  } catch (_error) {
+    // noop
+  }
+}
+
+function getMontageExportDownloadHistory() {
+  if (Array.isArray(montageExportDownloadHistory) && montageExportDownloadHistory.length) return montageExportDownloadHistory;
+  return loadMontageExportDownloadHistory();
+}
+
+function upsertMontageExportDownloadHistory(reference = null) {
+  const normalized = normalizeMontageExportReference(reference);
+  if (!normalized?.downloadUrl && !normalized?.storagePath) return null;
+  const history = getMontageExportDownloadHistory();
+  const current = normalizeMontageExportDownloadHistory([
+    {
+      ...normalized,
+      createdAtMs: normalized.createdAtMs > 0 ? normalized.createdAtMs : Date.now(),
+      createdAtIso: normalized.createdAtIso || new Date(normalized.createdAtMs > 0 ? normalized.createdAtMs : Date.now()).toISOString(),
+      filename: String(normalized.filename || "montage.mp4").trim() || "montage.mp4"
+    },
+    ...history
+  ]);
+  persistMontageExportDownloadHistory(current);
+  renderMontageExportDownloadHistory({
+    selectedUrl: current[0]?.downloadUrl || "",
+    selectedFilename: current[0]?.filename || "montage.mp4"
+  });
+  return normalized;
+}
+
+function getMontageExportDownloadOptionLabel(entry = null, index = 0) {
+  const name = String(entry?.filename || "montage.mp4").trim() || "montage.mp4";
+  const cleanedName = name.toLowerCase().endsWith(".mp4") ? name : `${name}.mp4`;
+  if (index === 0) {
+    return `${cleanedName} (Más reciente)`;
+  }
+  return cleanedName;
+}
+
+function getSelectedMontageExportDownloadEntry(selectionValue = "") {
+  const select = window.els.montageExportDownloadBtn;
+  if (!select) return null;
+  const option = String(selectionValue || "").trim()
+    ? Array.from(select.options).find((candidate) => String(candidate.value || "").trim() === String(selectionValue).trim())
+    : (select.selectedOptions?.[0] || null);
+  if (!option || !String(option.value || "").trim()) return null;
+  return {
+    url: String(option.dataset?.downloadUrl || "").trim(),
+    filename: String(option.dataset?.filename || option.textContent || "").trim() || "montage.mp4"
+  };
+}
+
+function renderMontageExportDownloadHistory({
+  selectedUrl = "",
+  selectedFilename = ""
+} = {}) {
+  const select = window.els.montageExportDownloadBtn;
+  if (!select) return;
+  const history = getMontageExportDownloadHistory();
+  if (!history.length && !selectedUrl) {
+    select.hidden = true;
+    select.innerHTML = "";
+    return;
+  }
+  select.hidden = false;
+  select.disabled = false;
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Selecciona una exportación MP4";
+  select.appendChild(placeholder);
+  const normalizedSelectedUrl = String(selectedUrl).trim();
+  const normalizedSelectedFilename = String(selectedFilename || "").trim() || "montage.mp4";
+  const hasSelectedInHistory = normalizedSelectedUrl
+    ? history.some((entry) => entry.downloadUrl === normalizedSelectedUrl)
+    : false;
+  if (normalizedSelectedUrl && !hasSelectedInHistory) {
+    const option = document.createElement("option");
+    option.value = `current-${Date.now()}`;
+    option.textContent = `${normalizedSelectedFilename.toLowerCase().endsWith(".mp4") ? normalizedSelectedFilename : `${normalizedSelectedFilename}.mp4`} (Más reciente)`;
+    option.dataset.downloadUrl = normalizedSelectedUrl;
+    option.dataset.filename = normalizedSelectedFilename;
+    option.selected = true;
+    select.appendChild(option);
+  }
+  let selected = normalizedSelectedUrl && !hasSelectedInHistory;
+  history.forEach((entry, index) => {
+    const option = document.createElement("option");
+    option.value = String(entry.id || entry.downloadUrl || `${index}`);
+    option.textContent = getMontageExportDownloadOptionLabel(entry, index);
+    option.dataset.downloadUrl = String(entry.downloadUrl || "").trim();
+    option.dataset.filename = String(entry.filename || "montage.mp4").trim();
+    if (
+      !selected
+      && (
+        (selectedUrl && option.dataset.downloadUrl === String(selectedUrl).trim())
+        || (!selectedUrl && index === 0)
+      )
+      && option.dataset.downloadUrl
+    ) {
+      option.selected = true;
+      selected = true;
+    }
+    if (
+      !selected
+      && selectedFilename
+      && option.dataset.filename === String(selectedFilename).trim()
+    ) {
+      option.selected = true;
+      selected = true;
+    }
+    select.appendChild(option);
+  });
+  if (!selected && history.length > 0) select.selectedIndex = 1;
 }
 
 function getPersistedMontageExportReference(session = null) {
@@ -1462,7 +1635,10 @@ function persistMontageExportReferenceToSession(reference = null) {
 function hydrateMontageExportDownloadButtonFromSession() {
   if (window.montageExportJobState?.jobId || window.montageExportBusy === true) return;
   const reference = getPersistedMontageExportReference();
-  if (!reference?.downloadUrl) {
+  const history = getMontageExportDownloadHistory();
+  const latestHistoryItem = history[0] || null;
+  const referenceCandidate = latestHistoryItem?.downloadUrl ? latestHistoryItem : reference;
+  if (!referenceCandidate?.downloadUrl) {
     if (!window.montageExportJobState?.readyDownloadUrl) {
       setMontageExportDownloadButton({ visible: false });
     }
@@ -1470,19 +1646,28 @@ function hydrateMontageExportDownloadButtonFromSession() {
   }
   setMontageExportDownloadButton({
     visible: true,
-    url: reference.downloadUrl,
-    filename: reference.filename || window.montageExportState.filename || "montage.mp4"
+    url: referenceCandidate.downloadUrl,
+    filename: referenceCandidate.filename || window.montageExportState.filename || "montage.mp4"
   });
 }
 
-export function downloadReadyMontageExport() {
+export function downloadReadyMontageExport(selectionValue = "") {
+  const selectedReference = getSelectedMontageExportDownloadEntry(selectionValue);
   const reference = getPersistedMontageExportReference();
-  const url = String(
-    window.montageExportJobState?.readyDownloadUrl
-    || window.els.montageExportDownloadBtn?.dataset?.downloadUrl
+  const selectedUrl = selectedReference?.url || "";
+  const referenceUrl = String(
+    selectedUrl
+    || window.montageExportJobState?.readyDownloadUrl
     || reference?.downloadUrl
     || ""
   ).trim();
+  const selectedFilename = String(
+    selectedReference?.filename
+    || window.montageExportJobState?.readyDownloadFilename
+    || reference?.filename
+    || "montage.mp4"
+  ).trim() || "montage.mp4";
+  const url = selectedUrl || referenceUrl;
   if (!url) {
     setMontageExportStatus(
       "El enlace de descarga no está disponible.",
@@ -1491,17 +1676,11 @@ export function downloadReadyMontageExport() {
     );
     return;
   }
-  const filename = String(
-    window.montageExportJobState?.readyDownloadFilename
-    || window.els.montageExportDownloadBtn?.dataset?.filename
-    || reference?.filename
-    || "montage.mp4"
-  ).trim() || "montage.mp4";
-  if (!window.montageExportJobState?.readyDownloadUrl || !window.els.montageExportDownloadBtn?.dataset?.downloadUrl) {
-    setMontageExportDownloadButton({ visible: true, url, filename });
-  }
+  const filename = selectedFilename;
   const anchor = document.createElement("a");
   anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
   anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
