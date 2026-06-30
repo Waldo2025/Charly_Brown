@@ -254,7 +254,9 @@ async function resolveRoleFromToken(user) {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function initSidebar() {
+  if (window.__cbSidebarInitialized) return;
+  window.__cbSidebarInitialized = true;
   setHeaderUserEmail(auth.currentUser?.email || "");
   applySidebarRoleVisibility("");
 
@@ -373,4 +375,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initSidebar, { once: true });
+} else {
+  initSidebar();
+}

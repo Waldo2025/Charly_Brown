@@ -29,6 +29,16 @@ const db = initializeFirestore(app, {
   })
 });
 const auth = getAuth(app);
+const workbenchFilters = {
+  lecturas: "published",
+  unidades: "published",
+  multimedia: "published",
+  podcasts: "published",
+  escapeRooms: "published",
+  aprende: "published"
+};
+let chartLecturasInstance = null;
+let chartUnidadesInstance = null;
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
@@ -1958,16 +1968,6 @@ function mostrarSeccion(viewId) {
 /**
  * CARGA DE DATOS DEL USUARIO
  */
-let chartLecturasInstance = null;
-let chartUnidadesInstance = null;
-const workbenchFilters = {
-  lecturas: "published",
-  unidades: "published",
-  multimedia: "published",
-  podcasts: "published",
-  escapeRooms: "published"
-};
-
 async function loadUserStats() {
   // Esta función puede precargar datos para el dashboard principal si es necesario
 }

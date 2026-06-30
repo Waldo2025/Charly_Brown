@@ -175,9 +175,24 @@
         "type": 302
       },
       {
+        "source": "/api/podcaster/dialogue-audio/generate",
+        "destination": "https://charly-brown-gemini-backend.onrender.com/api/podcaster/dialogue-audio/generate",
+        "type": 307
+      },
+      {
+        "source": "/api/podcaster/dialogue-audios/generate",
+        "destination": "https://charly-brown-gemini-backend.onrender.com/api/podcaster/dialogue-audios/generate",
+        "type": 307
+      },
+      {
+        "source": "/api/gemini/generate",
+        "destination": "https://charly-brown-gemini-backend.onrender.com/api/gemini/generate",
+        "type": 307
+      },
+      {
         "source": "/api/:path*",
         "destination": "https://charly-brown-gemini-backend.onrender.com/api/:path*",
-        "type": 302
+        "type": 307
       }
     ],
     "rewrites": [
