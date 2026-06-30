@@ -47,14 +47,14 @@ assert.match(
 
 assert.match(
   backendSource,
-  /if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?else if \(input\.onScreenTextRenderedFrameAttempted !== true\)[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
-  "El backend solo debe usar ASS cuando el frontend no intento generar snapshots PNG."
+  /if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?text_overlay_fallback[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
+  "El backend debe usar ASS como fallback visible cuando los snapshots PNG no se apliquen."
 );
 
 assert.match(
   backendSource,
-  /Skipping ASS fallback because frontend attempted rendered PNG frames/,
-  "Si el frontend intento snapshots PNG, el backend no debe meter el karaoke amarillo legacy."
+  /reason: "rendered_png_empty_or_failed"[\s\S]*fallback: "ass"/,
+  "Si el frontend intento snapshots PNG y fallan, el backend debe quemar texto con ASS."
 );
 
 assert.doesNotMatch(

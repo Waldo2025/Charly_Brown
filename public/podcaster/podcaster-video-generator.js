@@ -814,7 +814,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
             trimInMs: 0,
             trimOutMs: targetDurationMs
           };
-        }, { persist: true });
+        }, { persist: true, render: false });
       }
 
       if (options.syncStageAfterGenerate !== false) {
@@ -964,7 +964,7 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
   if (generationKey) {
     timelineSceneVideoGenerationPending.add(generationKey);
     timelineSceneVideoGenerationStatus.set(generationKey, { hint: "Encolando generación de video...", stage: "queued" });
-    renderPodcastVideoTimeline(getActiveSession(), { reason: "structure" });
+    renderPodcastVideoTimeline(getActiveSession(), { reason: "ephemeral" });
     traceVisualReferenceScene("flow-spinner-on", {
       generationKey,
       rowId: key,
@@ -1010,7 +1010,7 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
       enhanceFromExistingVideo: options.enhanceFromExistingVideo === true,
       silent: options.silent === true,
       videoDirective: nextVideoDirective,
-      deferTimelineRender: options.deferTimelineRender === true,
+      deferTimelineRender: options.deferTimelineRender !== false,
       syncStageAfterGenerate: options.syncStageAfterGenerate !== false && !preserveInteractivePlayback,
       onJobUpdate: (jobData) => {
         if (!generationKey) return;
@@ -1037,7 +1037,7 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     if (generationKey) {
       timelineSceneVideoGenerationPending.delete(generationKey);
       timelineSceneVideoGenerationStatus.delete(generationKey);
-      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+      renderPodcastVideoTimeline(getActiveSession(), { lightweight: true, reason: "generation-complete" });
       traceVisualReferenceScene("flow-spinner-off", {
         generationKey,
         rowId: key,

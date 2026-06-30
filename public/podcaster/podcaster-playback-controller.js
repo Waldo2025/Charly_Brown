@@ -1630,7 +1630,25 @@ export class PodcasterPlaybackController extends EventEmitter {
     const useContinuousSource = Boolean(String(panelCfg.sourceUrl || "").trim())
       || (sourceItems.length > 0 && uniqueSourceKeys.size <= 1);
     const activeSegmentLookup = (() => {
+      const findMatchingSourceItem = () => {
+        if (!sourceItems.length) return null;
+        const matches = [];
+        for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
+          const candidate = sourceItems[segmentIndex];
+          if (!candidate) continue;
+          const candidateStartMs = Number(candidate.startOffsetMs || 0);
+          const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
+          if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
+            matches.push({ segmentIndex, segment: candidate });
+          }
+        }
+        if (!matches.length) return null;
+        return matches
+          .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
+      };
       if (useContinuousSource) {
+        const matchingItem = findMatchingSourceItem();
+        if (matchingItem) return matchingItem;
         const orderedItems = sourceItems
           .slice()
           .sort((a, b) => Number(a.startOffsetMs || 0) - Number(b.startOffsetMs || 0));
@@ -1658,25 +1676,12 @@ export class PodcasterPlaybackController extends EventEmitter {
               Math.max(0, Number(panelCfg.trimInMs || firstSegment?.trimInMs || 0) || 0) + 1,
               Number(panelCfg.trimOutMs || lastSegment?.trimOutMs || trackEndMs) || trackEndMs
             ),
-            fadeInMs: 0,
-            fadeOutMs: 0
+            fadeInMs: Math.max(0, Number(firstSegment?.fadeInMs || 0) || 0),
+            fadeOutMs: Math.max(0, Number(lastSegment?.fadeOutMs || 0) || 0)
           }
         };
       }
-      if (!sourceItems.length) return null;
-      const matches = [];
-      for (let segmentIndex = 0; segmentIndex < sourceItems.length; segmentIndex += 1) {
-        const candidate = sourceItems[segmentIndex];
-        if (!candidate) continue;
-        const candidateStartMs = Number(candidate.startOffsetMs || 0);
-        const candidateEndMs = Number(candidate.endOffsetMs || candidateStartMs);
-        if (this.isTimelineMsInRange(currentMs, candidateStartMs, candidateEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
-          matches.push({ segmentIndex, segment: candidate });
-        }
-      }
-      if (!matches.length) return null;
-      return matches
-        .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
+      return findMatchingSourceItem();
     })();
 
     if (!activeSegmentLookup || !activeSegmentLookup.segment) {
@@ -1712,6 +1717,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}`;
     const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey;
     const sourceIsContinuous = useContinuousSource === true;
+    const previousBackgroundSegmentIndex = this.backgroundSegmentIndex;
+    const previousBackgroundSegmentIdentity = this.backgroundSegmentIdentity;
 
     if (!sourceHasNotChanged) {
       this.backgroundSegmentSkewMs = null;
@@ -1757,7 +1764,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundAudio.crossOrigin = 'anonymous';
         this.backgroundAudio.src = blobSrc;
         this.backgroundAudio.dataset.initialized = "false";
-        this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+        const useNativeLoop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+        this.backgroundAudio.loop = sourceIsContinuous ? false : useNativeLoop;
       } catch (e) {
         this.backgroundSrc = "";
         this.backgroundSourceKey = "";
@@ -1765,7 +1773,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         return;
       }
     } else if (this.backgroundAudio) {
-      this.backgroundAudio.loop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+      const useNativeLoop = activeSegment.loop !== undefined ? activeSegment.loop : true;
+      this.backgroundAudio.loop = sourceIsContinuous ? false : useNativeLoop;
       this.backgroundSegmentIdentity = activeSegmentIdentity;
     }
 
@@ -1790,6 +1799,19 @@ export class PodcasterPlaybackController extends EventEmitter {
     const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0
       ? (remainingMs <= segmentFadeOutMs ? Math.max(0, Math.min(1, remainingMs / segmentFadeOutMs)) : 1.0)
       : 1.0;
+    const configuredTrimSpanMs = (() => {
+      const configuredTrimOutMs = Number(activeSegment.trimOutMs || 0) || 0;
+      const configuredTrimSpan = configuredTrimOutMs > trimInMs ? (configuredTrimOutMs - trimInMs) : 0;
+      if (configuredTrimSpan > 0) return configuredTrimSpan;
+      return segmentDurationMs;
+    })();
+    const sourceDurationMs = Number(this.backgroundAudio.duration || 0) * 1000;
+    const continuousLoopSpanMs = sourceIsContinuous && activeSegment.loop !== false
+      ? Math.max(1, Math.min(
+        configuredTrimSpanMs,
+        Number.isFinite(sourceDurationMs) && sourceDurationMs > 0 ? sourceDurationMs : configuredTrimSpanMs
+      ))
+      : 0;
 
     this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
     const finalVolume = (baseVolume / 100) * this.backgroundDuckFactor * sceneBackgroundFactor * fadeInFactor * fadeOutFactor;
@@ -1817,8 +1839,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundAudio.playbackRate = speed;
 
     const segmentBaseOffsetMs = trimInMs + elapsedMs;
+    const timelineOffsetMs = Math.max(0, Number(currentMs || 0) - activeSegmentStartMs);
     const continuousSourceOffsetMs = sourceIsContinuous
-      ? Math.max(0, Number(currentMs || 0) - activeSegmentStartMs) + trimInMs
+      ? (activeSegment.loop === false
+        ? (trimInMs + timelineOffsetMs)
+        : (trimInMs + (timelineOffsetMs % continuousLoopSpanMs)))
       : segmentBaseOffsetMs;
     let offsetMs = continuousSourceOffsetMs;
     if (sourceHasNotChanged) {
@@ -1831,6 +1856,8 @@ export class PodcasterPlaybackController extends EventEmitter {
           || this.backgroundSyncAnchorOffsetMs === null
           || !Number.isFinite(this.backgroundSyncAnchorMs)
           || !Number.isFinite(this.backgroundSyncAnchorOffsetMs)
+          || previousBackgroundSegmentIndex !== activeSegmentIndex
+          || previousBackgroundSegmentIdentity !== activeSegmentIdentity
           || this.backgroundAudio.dataset.initialized !== "true"
           || timelineJumpMs > 1500;
         if (needsAnchorReset) {
@@ -1845,6 +1872,7 @@ export class PodcasterPlaybackController extends EventEmitter {
             offsetMs = continuousSourceOffsetMs;
           }
         }
+        this.backgroundSegmentIndex = activeSegmentIndex;
         this.backgroundSyncLastTimelineMs = currentTimelineMs;
       } else {
         this.backgroundSegmentIndex = activeSegmentIndex;
@@ -2237,6 +2265,45 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (!imageEl) return;
       imageEl.style.opacity = 0;
       this.resetEntryVisualStateOnSurface(imageEl);
+      imageEl.style.visibility = "hidden";
+      imageEl.style.transform = "";
+      imageEl.style.filter = "";
+      imageEl.style.transition = "";
+      imageEl.hidden = true;
+      imageEl.className = imageEl.classList.contains("podcast-active-speaker-image-alt")
+        || imageEl.id === "podcastActiveSpeakerImageAlt"
+        || imageEl.id === "montageExportPreviewImageAlt"
+        ? "podcast-active-speaker-image podcast-active-speaker-image-alt"
+        : "podcast-active-speaker-image";
+      imageEl.style.animationPlayState = "";
+    });
+  }
+
+  clearAllStageVisualSurfaces() {
+    [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt, this.els?.podcastActiveSpeakerBackdropVideo, this.els?.podcastActiveSpeakerBackdropVideoAlt].forEach((video) => {
+      if (!video) return;
+      try { video.pause(); } catch (_) { }
+      this.releaseTransientStageVideoObjectUrl(video);
+      video.removeAttribute("src");
+      delete video.dataset.src;
+      delete video.dataset.rowId;
+      delete video.dataset.stageMode;
+      this.resetEntryVisualStateOnSurface(video);
+      video.style.opacity = 0;
+      video.style.visibility = "hidden";
+      video.style.transform = "";
+      video.style.filter = "";
+      video.style.transition = "";
+      video.hidden = true;
+    });
+    [this.els?.podcastActiveSpeakerImage, this.els?.podcastActiveSpeakerImageAlt].forEach((imageEl) => {
+      if (!imageEl) return;
+      imageEl.removeAttribute("src");
+      delete imageEl.dataset.src;
+      delete imageEl.dataset.rowId;
+      delete imageEl.dataset.stageMode;
+      this.resetEntryVisualStateOnSurface(imageEl);
+      imageEl.style.opacity = 0;
       imageEl.style.visibility = "hidden";
       imageEl.style.transform = "";
       imageEl.style.filter = "";
@@ -3613,13 +3680,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       return;
     }
 
-    this.getStageVideoElements().forEach((video) => {
-      try { video.pause(); } catch (_) { }
-      this.releaseTransientStageVideoObjectUrl(video);
-      video.removeAttribute("src");
-      delete video.dataset.src;
-      video.hidden = true;
-    });
+    this.clearAllStageVisualSurfaces();
     if (typeof window.hideStageImagePreview === "function") {
       window.hideStageImagePreview();
     }

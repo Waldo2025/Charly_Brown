@@ -4183,6 +4183,41 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
   });
 }
 
+const MONTAGE_TEXT_RETRY_DELAYS_MS = [300, 900, 1800];
+
+function waitMontageTextRetryMs(ms = 0) {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms || 0) || 0)));
+}
+
+async function retryMontageTextSnapshotTask(label = "text_snapshot", task = null, meta = {}) {
+  if (typeof task !== "function") return null;
+  let lastError = null;
+  const attempts = MONTAGE_TEXT_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task(attempt);
+    } catch (error) {
+      lastError = error;
+      const canRetry = attempt < attempts;
+      const payload = {
+        ...meta,
+        label,
+        attempt,
+        attempts,
+        message: String(error?.message || error || "").trim() || undefined
+      };
+      if (canRetry) {
+        console.warn("[podcaster][montage-export][text_snapshot_retry]", payload);
+        await waitMontageTextRetryMs(MONTAGE_TEXT_RETRY_DELAYS_MS[attempt - 1]);
+      } else {
+        console.warn("[podcaster][montage-export][text_snapshot_failed]", payload);
+      }
+    }
+  }
+  if (lastError) throw lastError;
+  return null;
+}
+
 async function uploadMontageOnScreenTextSnapshotBlob({
   blob = null,
   storagePath = "",
@@ -4205,6 +4240,9 @@ async function uploadMontageOnScreenTextSnapshotBlob({
     }
   });
   const downloadUrl = await getDownloadURL(fileRef);
+  if (!String(downloadUrl || "").trim()) {
+    throw new Error("snapshot_download_url_missing");
+  }
   return {
     storagePath,
     downloadUrl,
@@ -5096,33 +5134,43 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
       if (frameTotal >= MONTAGE_ONSCREEN_TEXT_RENDERED_FRAME_MAX_TOTAL) break;
       let plan = null;
       try {
-        plan = buildSnapshotPlan({
+        const uploaded = await retryMontageTextSnapshotTask("render_upload_frame", async () => {
+          plan = buildSnapshotPlan({
+            rowId,
+            settings,
+            layout: segment.layout || {},
+            text,
+            wrappedText: segment.wrappedText || "",
+            wordTimings,
+            activeWordIndex: frame.wordIndex,
+            activeOnly: frame.activeOnly,
+            sourceWidth,
+            sourceHeight,
+            resolution
+          });
+          const blob = await renderMontageOnScreenTextSnapshotBlob(plan);
+          const storagePath = buildMontageOnScreenTextTempFramePath({
+            sessionId: cleanSessionId,
+            uid,
+            exportId: cleanExportId,
+            rowId,
+            frameIndex: frameTotal + 1
+          });
+          const result = await uploadMontageOnScreenTextSnapshotBlob({
+            blob,
+            storagePath,
+            sessionId: cleanSessionId,
+            rowId,
+            exportId: cleanExportId
+          });
+          if (!result?.storagePath || !(result?.downloadUrl || result?.url)) {
+            throw new Error("snapshot_upload_result_incomplete");
+          }
+          return result;
+        }, {
           rowId,
-          settings,
-          layout: segment.layout || {},
-          text,
-          wrappedText: segment.wrappedText || "",
-          wordTimings,
-          activeWordIndex: frame.wordIndex,
-          activeOnly: frame.activeOnly,
-          sourceWidth,
-          sourceHeight,
-          resolution
-        });
-        const blob = await renderMontageOnScreenTextSnapshotBlob(plan);
-        const storagePath = buildMontageOnScreenTextTempFramePath({
-          sessionId: cleanSessionId,
-          uid,
-          exportId: cleanExportId,
-          rowId,
-          frameIndex: frameTotal + 1
-        });
-        const uploaded = await uploadMontageOnScreenTextSnapshotBlob({
-          blob,
-          storagePath,
-          sessionId: cleanSessionId,
-          rowId,
-          exportId: cleanExportId
+          kind: frame.kind,
+          wordIndex: Number.isFinite(Number(frame.wordIndex)) ? Number(frame.wordIndex) : undefined
         });
         if (!uploaded?.storagePath) continue;
         renderedFrames.push({
@@ -5416,6 +5464,11 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
     };
   }
   const effectiveTimeline = prepared.payload.onScreenTextTimeline || null;
+  const exportCanvas = resolveFrontendMontageExportFrameSize(prepared.payload);
+  prepared.payload.exportCanvas = {
+    width: Math.max(2, Math.round(Number(exportCanvas?.width || 1280) || 1280)),
+    height: Math.max(2, Math.round(Number(exportCanvas?.height || 720) || 720))
+  };
   const onScreenTextFrameExportId = `onscreen-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const timelineHiddenRowIds = new Set(
     (Array.isArray(effectiveTimeline?.hiddenRowIds) ? effectiveTimeline.hiddenRowIds : [])
@@ -5431,8 +5484,8 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
       exportId: onScreenTextFrameExportId,
       partyKaraoke: prepared.payload.partyKaraoke !== false,
       resolution: prepared.payload.resolution || "source",
-      sourceWidth: 1280,
-      sourceHeight: 720
+      sourceWidth: prepared.payload.exportCanvas.width,
+      sourceHeight: prepared.payload.exportCanvas.height
     })
     : [];
   await hydrateMontageExportPayloadMedia(prepared.payload);

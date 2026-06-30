@@ -111,7 +111,25 @@ export function setPodcastVideoStageMaxHeight(nextHeightPx = null, { persist = t
 /**
  * Initializes the stage resize listeners.
  */
-export function setupPodcastVideoStageResize(els = {}, upsertUiState = () => {}) {
+export function setupPodcastVideoStageResize(els = {}, options = {}) {
+  const normalizedOptions = typeof options === "function"
+    ? { upsertUiState: options }
+    : (options && typeof options === "object" ? options : {});
+  const upsertUiState = typeof normalizedOptions.upsertUiState === "function"
+    ? normalizedOptions.upsertUiState
+    : () => {};
+  const onStageResize = typeof normalizedOptions.onStageResize === "function"
+    ? normalizedOptions.onStageResize
+    : () => {};
+  let stageResizeRefreshFrame = 0;
+  const scheduleStageResizeRefresh = () => {
+    if (stageResizeRefreshFrame) window.cancelAnimationFrame(stageResizeRefreshFrame);
+    stageResizeRefreshFrame = window.requestAnimationFrame(() => {
+      stageResizeRefreshFrame = 0;
+      onStageResize();
+    });
+  };
+
   if (podcastStageResizeCleanup) {
     podcastStageResizeCleanup();
     podcastStageResizeCleanup = null;
@@ -129,7 +147,10 @@ export function setupPodcastVideoStageResize(els = {}, upsertUiState = () => {})
   const handle = els.podcastStageResizeHandle;
   const stage = els.podcastVideoStage;
 
-  const onDoubleClick = () => setPodcastVideoStageMaxHeight(null, { els, upsertUiState });
+  const onDoubleClick = () => {
+    setPodcastVideoStageMaxHeight(null, { els, upsertUiState });
+    scheduleStageResizeRefresh();
+  };
   
   const onPointerDown = (event) => {
     if (event.button !== 0) return;
@@ -146,6 +167,7 @@ export function setupPodcastVideoStageResize(els = {}, upsertUiState = () => {})
     const onPointerMove = (moveEvent) => {
       const deltaY = moveEvent.clientY - startY;
       setPodcastVideoStageMaxHeight(safeStartHeight + deltaY, { persist: false, els, upsertUiState });
+      scheduleStageResizeRefresh();
     };
 
     const stopResize = () => {
@@ -154,6 +176,7 @@ export function setupPodcastVideoStageResize(els = {}, upsertUiState = () => {})
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
       setPodcastVideoStageMaxHeight(podcastStageMaxHeightPx, { persist: true, els, upsertUiState });
+      scheduleStageResizeRefresh();
     };
 
     window.addEventListener("pointermove", onPointerMove);
@@ -167,7 +190,19 @@ export function setupPodcastVideoStageResize(els = {}, upsertUiState = () => {})
   podcastStageResizeCleanup = () => {
     handle.removeEventListener("dblclick", onDoubleClick);
     handle.removeEventListener("pointerdown", onPointerDown);
+    if (stageResizeRefreshFrame) {
+      window.cancelAnimationFrame(stageResizeRefreshFrame);
+      stageResizeRefreshFrame = 0;
+    }
   };
+
+  if (typeof ResizeObserver === "function") {
+    const observedPreview = stage.querySelector(".podcast-video-preview") || stage;
+    podcastStageResizeObserver = new ResizeObserver(() => {
+      scheduleStageResizeRefresh();
+    });
+    podcastStageResizeObserver.observe(observedPreview);
+  }
 }
 
 /**

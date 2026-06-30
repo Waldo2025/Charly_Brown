@@ -72,14 +72,14 @@ assert.match(
 
 assert.match(
   backendSource,
-  /appendMontageSceneOnScreenTextRenderedFrameFilters\([\s\S]*?if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?else if \(input\.onScreenTextRenderedFrameAttempted !== true\)[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
-  "El backend debe usar PNGs renderizados antes de caer al fallback ASS."
+  /appendMontageSceneOnScreenTextRenderedFrameFilters\([\s\S]*?if \(renderedTextOverlayResult\.appliedOverlayCount > 0\)[\s\S]*?text_overlay_fallback[\s\S]*?appendMontageSceneOnScreenTextAssFilters/,
+  "El backend debe usar PNGs renderizados primero y caer a ASS visible si no se aplican."
 );
 
 assert.match(
   backendSource,
-  /Skipping ASS fallback because frontend attempted rendered PNG frames/,
-  "El backend no debe volver al ASS amarillo legacy cuando el frontend ya intentó frames PNG."
+  /reason: "rendered_png_empty_or_failed"[\s\S]*fallback: "ass"/,
+  "Si los PNGs renderizados fallan, el backend debe registrar fallback ASS por escena."
 );
 
 console.log("Podcaster on-screen text storage-frame export contract OK.");

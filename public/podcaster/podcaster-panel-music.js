@@ -1201,7 +1201,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         storagePath: String(segment?.storagePath || "").trim(),
         startOffsetMs: Math.max(0, Number(segment?.startMs || 0) || 0),
         endOffsetMs: Math.max(0, Number(segment?.endMs || 0) || 0),
-        loop: segment?.loop === true,
+        loop: track?.loopEnabled !== false,
         durationSec: Math.max(0, Number(segment?.durationSec || 0) || 0),
         trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
         trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0),

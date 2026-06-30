@@ -493,6 +493,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       if (podcastVideoState.showMontageAudioSubtracks) {
         syncMontageAudioSubtrackAlignment();
       }
+      syncTimelineEphemeralState(activeSession);
       syncPodcastTimelineSelectionUi(activeSession);
       syncPodcastTimelinePlayhead(activeSession);
       return;
@@ -1102,6 +1103,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                         </button>
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="publish-scene-to-library" data-row-id="${escapeHtml(rowId)}" title="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}" aria-label="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}">
                           <i class="fas fa-globe" aria-hidden="true"></i>
+                        </button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-share-scene-video-link" data-row-id="${escapeHtml(rowId)}" title="Compartir enlace del video de la escena" aria-label="Compartir enlace del video de la escena"${videoSrc ? "" : " disabled"}>
+                          <i class="fas fa-link" aria-hidden="true"></i>
                         </button>
                         <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video" aria-label="${videoSrc ? "Regenerar video" : "Generar video"}"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
                           <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}" aria-hidden="true"></i>

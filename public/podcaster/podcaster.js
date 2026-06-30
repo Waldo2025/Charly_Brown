@@ -56,7 +56,7 @@ import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=202
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-28.4";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-26.7";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-30.2";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js?v=2026-06-28.3";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -12877,6 +12877,62 @@ function syncTimelineEphemeralState(session = null) {
   const clipMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
   const dialogueMap = getDialogueVideoMap(activeSession);
 
+  const syncPreviewMedia = (itemEl = null, rowId = "") => {
+    if (!itemEl || !rowId) return;
+    const preview = itemEl.querySelector(".podcast-video-scene-preview, .podcast-video-clip-preview");
+    if (!preview) return;
+    const generatedClip = dialogueMap[rowId] || null;
+    const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+    const videoSrc = resolveStorageVideoUrl(
+      primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
+      primarySegment?.storagePath || generatedClip?.storagePath || "",
+      {
+        updatedAt: generatedClip?.updatedAt || "",
+        type: primarySegment?.type || generatedClip?.type || "",
+        mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
+      }
+    );
+    if (!videoSrc) return;
+    const mediaRecord = primarySegment || generatedClip;
+    const wantsImage = isLikelyImageMediaRecord(mediaRecord);
+    const sceneCard = itemEl.querySelector(".podcast-video-scene-card");
+    if (sceneCard) sceneCard.classList.toggle("has-video", Boolean(videoSrc));
+    if (itemEl.classList?.contains("podcast-video-timeline-clip")) {
+      itemEl.classList.toggle("has-video", Boolean(videoSrc));
+    }
+    itemEl.querySelectorAll("[data-action='timeline-delete-scene-video'], [data-action='timeline-share-scene-video-link']")
+      .forEach((btn) => {
+        btn.disabled = !videoSrc;
+      });
+    const currentMedia = preview.querySelector("img[data-preview-src], video[data-preview-src]");
+    const currentSrc = String(currentMedia?.dataset?.previewSrc || "").trim();
+    if (currentSrc === videoSrc) return;
+    const loading = preview.querySelector(".podcast-video-scene-loading");
+    Array.from(preview.children).forEach((child) => {
+      if (child === loading) return;
+      if (child.classList?.contains("podcast-scene-stylized-text-badge")) return;
+      child.remove();
+    });
+    const nextMedia = document.createElement(wantsImage ? "img" : "video");
+    nextMedia.dataset.previewSrc = videoSrc;
+    if (wantsImage) {
+      nextMedia.src = videoSrc;
+      nextMedia.alt = "Preview";
+      nextMedia.loading = "lazy";
+      nextMedia.style.width = "100%";
+      nextMedia.style.height = "100%";
+      nextMedia.style.objectFit = "cover";
+    } else {
+      nextMedia.preload = "none";
+      nextMedia.muted = true;
+      nextMedia.playsInline = true;
+      nextMedia.crossOrigin = "anonymous";
+      nextMedia.poster = "SnoopyPodcastCreator.png";
+    }
+    preview.insertBefore(nextMedia, loading || preview.firstChild);
+    if (!wantsImage) loadTimelinePreviewVideo(nextMedia, { preferAuto: false });
+  };
+
   const items = Array.from(els.podcastVideoTimeline.querySelectorAll(".podcast-video-timeline-item[data-row-id], .podcast-video-timeline-clip[data-row-id]"));
   items.forEach((itemEl) => {
     const rowId = String(itemEl.dataset.rowId || "").trim();
@@ -12943,6 +12999,8 @@ function syncTimelineEphemeralState(session = null) {
         }
       }
     });
+
+    syncPreviewMedia(itemEl, rowId);
   });
 }
 
@@ -12954,6 +13012,7 @@ function updateTimelineClipForRow(rowId = "", mutator = null, options = {}) {
   const key = String(rowId || "").trim();
   if (!key || typeof mutator !== "function") return false;
   const persist = options.persist !== false;
+  const renderTimeline = options.render !== false;
   let changed = false;
   upsertPodcastVideoConfig((cfg, session) => {
     const clips = ensureTimelineClipsByRowId(session);
@@ -12974,7 +13033,7 @@ function updateTimelineClipForRow(rowId = "", mutator = null, options = {}) {
   });
   if (changed && persist) {
     podcastVideoState.timelineDurationSec = Math.max(0, getTimelineTotalDurationMs(getActiveSession()) / 1000);
-    renderPodcastVideoTimeline(getActiveSession());
+    if (renderTimeline) renderPodcastVideoTimeline(getActiveSession());
     syncPodcastStudioInspector(getActiveSession());
     scheduleSessionLocalPersist("timeline-clip");
   }
@@ -15284,8 +15343,28 @@ function setPodcastVideoStageMaxHeight(nextHeightPx = null, options = {}) {
   PodcasterResize.setPodcastVideoStageMaxHeight(nextHeightPx, { ...options, els, upsertUiState: upsertPodcastStudioUiState });
 }
 
+function refreshPodcastStageMediaLayoutAfterResize() {
+  const activeSession = getActiveSession();
+  if (!activeSession) return;
+  const activeEntry = playbackController?.getEntryAtMs?.(Math.max(0, Number(podcastVideoState.montageCursorMs || 0))) || null;
+  const rowId = String(podcastVideoState.activeRowId || activeEntry?.rowId || "").trim();
+  if (!rowId) return;
+  const clip = ensureTimelineClipsByRowId(activeSession, { persist: false })[rowId] || null;
+  applySceneMediaScaleToStage({
+    rowId,
+    mediaScale: clip?.mediaScale,
+    mediaOffsetXPct: clip?.mediaOffsetXPct,
+    mediaOffsetYPct: clip?.mediaOffsetYPct,
+    mediaMotionPreset: clip?.mediaMotionPreset,
+    visualLayoutMode: clip?.visualLayoutMode
+  });
+}
+
 function setupPodcastVideoStageResize() {
-  PodcasterResize.setupPodcastVideoStageResize(els, upsertPodcastStudioUiState);
+  PodcasterResize.setupPodcastVideoStageResize(els, {
+    upsertUiState: upsertPodcastStudioUiState,
+    onStageResize: refreshPodcastStageMediaLayoutAfterResize
+  });
 }
 
 function buildMarkdownTableFromRows(rows = []) {
@@ -16059,6 +16138,50 @@ function deleteSceneRowById(rowId = "") {
   render();
   scheduleSessionLocalPersist("structure");
   return true;
+}
+
+function resolvePublicSceneVideoLink(rawUrl = "") {
+  const cleanUrl = String(rawUrl || "").trim();
+  if (!cleanUrl) return "";
+  if (cleanUrl.startsWith("/api/assets/proxy-media") || cleanUrl.startsWith("/api/assets/proxy-image")) {
+    try {
+      const proxyUrl = new URL(cleanUrl, window.location.origin);
+      const directUrl = String(proxyUrl.searchParams.get("url") || "").trim();
+      if (directUrl) return directUrl;
+    } catch (_) {
+      // noop
+    }
+  }
+  return cleanUrl;
+}
+
+async function resolveSceneShareableVideoUrl(session = null, rowId = "") {
+  const activeSession = session || getActiveSession();
+  const key = String(rowId || "").trim();
+  if (!activeSession || !key) return "";
+  const row = (activeSession?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
+  const clip = resolveDialogueVideoForRow(activeSession, key);
+  const primarySegment = resolvePrimaryDialogueVideoSegment(clip);
+  const candidateSources = [
+    { url: String(primarySegment?.downloadUrl || "").trim(), storagePath: String(primarySegment?.storagePath || "").trim() },
+    { url: String(clip?.downloadUrl || "").trim(), storagePath: String(clip?.storagePath || "").trim() },
+    { url: String(row?.publicSceneVideoUrl || "").trim(), storagePath: String(row?.publicSceneStoragePath || "").trim() },
+    { url: String(row?.downloadUrl || "").trim(), storagePath: String(row?.storagePath || "").trim() }
+  ];
+  for (const source of candidateSources) {
+    const normalized = normalizePersistedMediaReference(
+      String(source?.url || "").trim(),
+      String(source?.storagePath || "").trim()
+    );
+    const mediaUrl = resolvePublicSceneVideoLink(String(normalized?.downloadUrl || "").trim());
+    if (mediaUrl) return mediaUrl;
+    const gsPath = String(normalized?.storagePath || "").trim();
+    if (gsPath.startsWith("gs://")) {
+      const remoteUrl = await resolveFirebaseStorageUrl(gsPath);
+      if (remoteUrl) return remoteUrl;
+    }
+  }
+  return "";
 }
 
 function attachEvents() {
@@ -18228,6 +18351,23 @@ function attachEvents() {
           addChatMessage("system", `No se pudo publicar la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
           setGenerationStatus("Error", "");
         });
+      }
+      const shareSceneLinkBtn = event.target.closest("[data-action='timeline-share-scene-video-link']");
+      if (shareSceneLinkBtn) {
+        const rowId = String(shareSceneLinkBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        const shareUrl = await resolveSceneShareableVideoUrl(getActiveSession(), rowId);
+        if (!shareUrl) {
+          addChatMessage("system", `No se encontró un video compartible para la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}.`);
+          return;
+        }
+        window.open(shareUrl, "_blank", "noopener,noreferrer");
+        const copied = await copyTextToClipboard(shareUrl);
+        if (copied) {
+          addChatMessage("system", `Enlace copiado: ${shareUrl}`);
+          return;
+        }
+        addChatMessage("system", `No se pudo copiar el enlace de la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}.`);
       }
     });
     document.addEventListener("click", (event) => {

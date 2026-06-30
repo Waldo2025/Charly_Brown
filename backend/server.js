@@ -1883,11 +1883,45 @@ const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
   ) || 320)
 );
 const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
+const MONTAGE_TEXT_RETRY_DELAYS_MS = [300, 900, 1800];
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
   Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
 );
 const montageExportJobs = new Map();
+
+function waitMontageTextRetryMs(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0) || 0)));
+}
+
+async function retryMontageTextOverlayTask(label = "text_overlay", task = null, meta = {}) {
+  if (typeof task !== "function") return null;
+  let lastError = null;
+  const attempts = MONTAGE_TEXT_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task(attempt);
+    } catch (error) {
+      lastError = error;
+      const canRetry = attempt < attempts;
+      const payload = {
+        ...meta,
+        label,
+        attempt,
+        attempts,
+        message: String(error?.message || error || "").trim() || undefined
+      };
+      if (canRetry) {
+        console.warn("[backend][montage-export][text_overlay_retry]", payload);
+        await waitMontageTextRetryMs(MONTAGE_TEXT_RETRY_DELAYS_MS[attempt - 1]);
+      } else {
+        console.warn("[backend][montage-export][text_overlay_fallback]", payload);
+      }
+    }
+  }
+  if (lastError) throw lastError;
+  return null;
+}
 const activeMontageExportCancelControllers = new Map();
 
 function registerActiveMontageExportCancelController(jobId = "") {
@@ -12597,7 +12631,17 @@ async function appendMontageSceneOnScreenTextRenderedVideoFilters({
       const frameAsset = buildMontageRenderedTextFrameAsset(item.frame || {});
       if (!frameAsset.storagePath && !frameAsset.downloadUrl && !frameAsset.url && !String(frameAsset.dataUrl || "").startsWith("data:image/")) continue;
       try {
-        const overlayPath = await downloadInput(frameAsset, "image", inputIndex + idx);
+        const overlayPath = await retryMontageTextOverlayTask("download_rendered_frame", async () => {
+          const downloadedPath = await downloadInput(frameAsset, "image", inputIndex + idx);
+          if (!downloadedPath) throw new Error("rendered_frame_download_empty");
+          return downloadedPath;
+        }, {
+          sceneIndex,
+          rowId: String(item.segment?.rowId || entry?.rowId || "").trim() || undefined,
+          frameIndex: idx,
+          storagePath: frameAsset.storagePath || undefined,
+          downloadUrl: frameAsset.downloadUrl ? redactUrlForLogs(frameAsset.downloadUrl) : undefined
+        });
         if (!overlayPath) continue;
         tempPaths.push(overlayPath);
         downloadedFrames.push({
@@ -12634,18 +12678,26 @@ async function appendMontageSceneOnScreenTextRenderedVideoFilters({
     tempPaths.push(concatPath, overlayVideoPath);
 
     try {
-      await runFfmpegCommand([
-        "-y", "-hide_banner", "-loglevel", "warning",
-        "-f", "concat", "-safe", "0", "-i", concatPath,
-        "-vf", `fps=24,format=rgba,scale=${group.geometry.overlayWidth}:${group.geometry.overlayHeight}:flags=lanczos`,
-        "-an",
-        "-c:v", "qtrle",
-        "-pix_fmt", "argb",
-        overlayVideoPath
-      ], {
-        stage: `montage_scene_${sceneIndex}_onscreen_text_overlay_${groupIndex + 1}`,
-        timeoutMs: Math.max(60 * 1000, Math.ceil((group.endSec - group.startSec) * 20 * 1000)),
-        timeoutCode: "onscreen_text_overlay_video_timeout"
+      await retryMontageTextOverlayTask("create_rendered_alpha_video", async () => {
+        await runFfmpegCommand([
+          "-y", "-hide_banner", "-loglevel", "warning",
+          "-f", "concat", "-safe", "0", "-i", concatPath,
+          "-vf", `fps=24,format=rgba,scale=${group.geometry.overlayWidth}:${group.geometry.overlayHeight}:flags=lanczos`,
+          "-an",
+          "-c:v", "qtrle",
+          "-pix_fmt", "argb",
+          overlayVideoPath
+        ], {
+          stage: `montage_scene_${sceneIndex}_onscreen_text_overlay_${groupIndex + 1}`,
+          timeoutMs: Math.max(60 * 1000, Math.ceil((group.endSec - group.startSec) * 20 * 1000)),
+          timeoutCode: "onscreen_text_overlay_video_timeout"
+        });
+        return true;
+      }, {
+        sceneIndex,
+        rowId: String(entry?.rowId || "").trim() || undefined,
+        groupIndex: groupIndex + 1,
+        frameCount: downloadedFrames.length
       });
     } catch (error) {
       console.warn("[backend][montage-export][scene-onscreen-rendered-video-failed]", {
@@ -12820,7 +12872,17 @@ async function appendMontageSceneOnScreenTextRenderedFrameFilters({
     if (!frameAsset.storagePath && !frameAsset.downloadUrl && !frameAsset.url && !String(frameAsset.dataUrl || "").startsWith("data:image/")) continue;
     let overlayPath = "";
     try {
-      overlayPath = await downloadInput(frameAsset, "image", inputIndex);
+      overlayPath = await retryMontageTextOverlayTask("download_rendered_frame", async () => {
+        const downloadedPath = await downloadInput(frameAsset, "image", inputIndex);
+        if (!downloadedPath) throw new Error("rendered_frame_download_empty");
+        return downloadedPath;
+      }, {
+        sceneIndex,
+        rowId: String(item.segment?.rowId || entry?.rowId || "").trim() || undefined,
+        frameIndex: idx,
+        storagePath: frameAsset.storagePath || undefined,
+        downloadUrl: frameAsset.downloadUrl ? redactUrlForLogs(frameAsset.downloadUrl) : undefined
+      });
     } catch (error) {
       console.warn("[backend][montage-export][scene-onscreen-rendered-frame-download-failed]", {
         sceneIndex,
@@ -13800,7 +13862,23 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             videoFilterGraph = renderedTextOverlayResult.videoFilterGraph;
             finalVideoMapLabel = renderedTextOverlayResult.finalVideoMapLabel;
             nextOverlayInputIndex = renderedTextOverlayResult.nextInputIndex;
-          } else if (input.onScreenTextRenderedFrameAttempted !== true) {
+          } else {
+            const sceneTextSegmentsForFallback = resolveMontageSceneOnScreenTextSegments({
+              input,
+              entry,
+              sceneIndex,
+              sceneStartMs: sceneTimelineStartMs,
+              sceneEndMs: sceneTimelineEndMs
+            });
+            if (input.onScreenTextRenderedFrameAttempted === true && sceneTextSegmentsForFallback.length) {
+              console.warn("[backend][montage-export][text_overlay_fallback]", {
+                sceneIndex,
+                rowId: String(entry?.rowId || "").trim() || undefined,
+                reason: "rendered_png_empty_or_failed",
+                truncatedByFrameLimit: renderedTextOverlayResult.truncatedByFrameLimit === true,
+                fallback: "ass"
+              });
+            }
             const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
               input,
               entry,
@@ -13814,14 +13892,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             });
             videoFilterGraph = textOverlayResult.videoFilterGraph;
             finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
-          } else {
-            console.warn("[backend][montage-export][scene-onscreen-rendered-frames-empty]", {
-              sceneIndex,
-              rowId: String(entry?.rowId || "").trim() || undefined,
-              truncatedByFrameLimit: renderedTextOverlayResult.truncatedByFrameLimit === true,
-              message: "Skipping ASS fallback because frontend attempted rendered PNG frames."
-            });
+            if (textOverlayResult.appliedOverlayCount <= 0 && input.onScreenTextRenderedFrameAttempted === true) {
+              console.warn("[backend][montage-export][scene-onscreen-rendered-frames-empty]", {
+                sceneIndex,
+                rowId: String(entry?.rowId || "").trim() || undefined,
+                truncatedByFrameLimit: renderedTextOverlayResult.truncatedByFrameLimit === true,
+                message: "No rendered PNG frames or ASS fallback were applied for this scene."
+              });
+            }
           }
+        }
         }
         const stylizedOverlayResult = await appendMontageSceneStylizedTextFilters({
           input,
