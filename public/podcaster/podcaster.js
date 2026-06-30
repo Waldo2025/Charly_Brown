@@ -6782,7 +6782,7 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
       return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
     })();
     if (firebaseGsUrl) {
-      return resolveStaleAwareProxyMediaUrl(firebaseGsUrl, "", treatAsImage ? "image" : "media", options);
+      return resolveStaleAwareProxyMediaUrl(firebaseGsUrl, cleanStoragePath, treatAsImage ? "image" : "media", options);
     }
     const isLibraryAsset = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
     if (cleanStoragePath || isLibraryAsset) {
@@ -6855,10 +6855,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
       return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
     })();
     if (firebaseGsUrl) {
-      let proxyUrl = buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}`);
-      const timestamp = options.updatedAt || options.timestamp || "";
-      if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
-      return proxyUrl;
+      return resolveStaleAwareProxyMediaUrl(firebaseGsUrl, cleanStoragePath, "media", options);
     }
     if (cleanStoragePath) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media", options);
@@ -19950,6 +19947,7 @@ podcasterTimelineInteractionApi = createPodcasterTimelineInteractionApi({
   normalizePanelMusicTrack,
   getPanelMusicTrackDurationSec,
   stopPanelMusic,
+  selectPanelMusicTrackKind,
   syncActivePanelMusicTrack,
   syncMusicControls,
   normalizeGeminiDialogueTrack,

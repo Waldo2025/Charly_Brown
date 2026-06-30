@@ -377,6 +377,17 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (/\/api\/assets\/proxy-image\?/i.test(source)) return true;
     return false;
   }
+
+  isColorSceneEntry(entry = null) {
+    const color = String(entry?.clip?.backgroundColor || entry?.backgroundColor || "").trim();
+    return Boolean(color);
+  }
+
+  hasStageVisualSurface(entry = null) {
+    if (this.isImageStageEntry(entry)) return true;
+    const source = String(entry?.videoSrc || "").trim();
+    return Boolean(source) && !this.isColorSceneEntry(entry);
+  }
   parseOverlayCssPercent(value, fallback = 0) {
     const raw = String(value || "").trim();
     if (!raw) return fallback;
@@ -592,6 +603,10 @@ export class PodcasterPlaybackController extends EventEmitter {
           if (localBlobUrl) return localBlobUrl;
         }
         return "";
+      }
+      const resolvedDirectSource = this.deps?.resolveStorageAudioUrl?.(directSource, clip?.storagePath);
+      if (resolvedDirectSource && String(resolvedDirectSource).trim()) {
+        return this.getBlobUrl(resolvedDirectSource);
       }
       return directSource;
     }
@@ -2029,6 +2044,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     const entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
     const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 45000).slice(0, 8);
     upcoming.forEach(e => {
+      if (!this.hasStageVisualSurface(e) || this.isColorSceneEntry(e)) {
+        return;
+      }
       if (this.isImageStageEntry(e)) {
         this.preloadImageSrc(e.videoSrc).catch(() => { });
       } else {
@@ -2094,6 +2112,15 @@ export class PodcasterPlaybackController extends EventEmitter {
     const altImage = this.els?.podcastActiveSpeakerImageAlt;
     const backIsImage = this.isImageStageEntry(backEntry);
     const frontIsImage = this.isImageStageEntry(frontEntry);
+    const backHasSurface = this.hasStageVisualSurface(backEntry);
+    const frontHasSurface = this.hasStageVisualSurface(frontEntry);
+
+    if (!backHasSurface || !frontHasSurface) {
+      await this.syncStageSwitching(frontEntry, currentMs);
+      this.overlapState.key = "";
+      return;
+    }
+
     const needsVideoSurface = !backIsImage || !frontIsImage;
     const needsImageSurface = backIsImage || frontIsImage;
     if ((needsVideoSurface && (!primary || !alt || !this.deps?.setPodcastStageVideoSourceForElement))

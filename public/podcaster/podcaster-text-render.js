@@ -208,17 +208,24 @@
     };
   }
 
-  function buildKaraokeHighlightInlineStyle(settings = {}, token = "") {
+  function buildKaraokeHighlightInlineStyle(settings = {}, token = "", options = {}) {
     const highlight = resolveKaraokeHighlightSettings(settings);
     const tokenPadding = resolveKaraokeTokenHighlightPadding(highlight, token);
-    return [
+    const parts = [
       `--pod-karaoke-highlight-color:${escapeHtml(highlight.color)}`,
       `--pod-karaoke-highlight-opacity:${Number(highlight.opacity.toFixed(3))}`,
       `--pod-karaoke-highlight-pad-x:${tokenPadding.paddingX}px`,
       `--pod-karaoke-highlight-pad-y:${tokenPadding.paddingY}px`,
       `--pod-karaoke-highlight-radius:${highlight.radius}px`,
       "font-size: inherit !important"
-    ].join(";");
+    ];
+    const isActive = options?.active === true;
+    if (isActive && (highlight.style === "pill" || highlight.style === "rect")) {
+      parts.push("color:#020617 !important");
+      parts.push("text-shadow:none !important");
+      parts.push("filter:none !important");
+    }
+    return parts.join(";");
   }
 
   function buildKaraokeSubtitleMarkup(text = "", wordTimings = [], activeIndex = -1, settings = {}) {
@@ -233,7 +240,7 @@
       if (/^\s+$/.test(token)) return token;
       const isActive = wordIndex === activeIndex;
       const className = `podcast-karaoke-word${isActive ? ` is-active is-highlight-${highlight.style}` : ""}`;
-      const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="${isActive ? buildKaraokeHighlightInlineStyle(settings, token) : highlightStyle}">${escapeHtml(token)}</span>`;
+      const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="${isActive ? buildKaraokeHighlightInlineStyle(settings, token, { active: true }) : highlightStyle}">${escapeHtml(token)}</span>`;
       wordIndex += 1;
       return html;
     }).join("");

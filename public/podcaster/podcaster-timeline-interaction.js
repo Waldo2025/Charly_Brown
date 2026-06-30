@@ -48,6 +48,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     normalizePanelMusicTrack,
     getPanelMusicTrackDurationSec,
     stopPanelMusic,
+    selectPanelMusicTrackKind,
     syncActivePanelMusicTrack,
     syncMusicControls,
     normalizeGeminiDialogueTrack,
@@ -147,13 +148,28 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
 
   function beginAudioTrimDrag(mode = "audio-trim-start", event = null) {
     if (!event) return;
-    const requestedTrackIndex = Math.max(0, Math.floor(Number(event?.target?.closest?.("[data-track-index]")?.dataset?.trackIndex || 0) || 0));
-    if (event?.target?.closest?.("[data-track-index]")) {
+    const trimTarget = event?.target?.closest?.(
+      "[data-action='timeline-audio-trim-start']," +
+      "[data-action='timeline-audio-trim-end']," +
+      "[data-action='timeline-audio-fadein-handle']," +
+      "[data-action='timeline-audio-fadeout-handle']"
+    );
+    const chip = trimTarget?.closest?.(".podcast-audio-timeline-chip.has-audio[data-loop-index]")
+      || event?.target?.closest?.(".podcast-audio-timeline-chip.has-audio[data-loop-index]");
+    if (!trimTarget || !chip) return;
+    const rawRequestedTrackIndex = trimTarget?.dataset?.trackIndex ?? chip?.dataset?.trackIndex;
+    const requestedTrackIndex = Math.max(0, Math.floor(Number(rawRequestedTrackIndex || 0) || 0));
+    const clickedTrackKind = resolvePanelMusicTrackKind(
+      trimTarget?.dataset?.trackKind || chip?.dataset?.trackKind || panelMusicState.selectedTrackKind
+    );
+    if (clickedTrackKind === "uploaded" && trimTarget?.dataset?.trackIndex != null) {
       selectUploadedPanelMusicTrackByIndex(requestedTrackIndex);
+    } else if (clickedTrackKind && clickedTrackKind !== panelMusicState.selectedTrackKind) {
+      selectPanelMusicTrackKind(clickedTrackKind, { notify: false });
     }
-    const track = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
+    const track = getPanelMusicTrackAvailability(clickedTrackKind) || getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
     if (!track) return;
-    const loopIndex = Math.max(0, Math.floor(Number(event?.target?.closest?.("[data-loop-index]")?.dataset?.loopIndex || 0) || 0));
+    const loopIndex = Math.max(0, Math.floor(Number(trimTarget?.dataset?.loopIndex || 0) || 0));
     const loopSetting = getPanelMusicLoopSetting(track, loopIndex);
     podcastVideoState.timelineDrag = {
       mode,
@@ -165,7 +181,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       initialFadeOutMs: Math.max(0, Number(loopSetting?.fadeOutMs || 0) || 0),
       sourceDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(getPanelMusicTrackDurationSec(track) * 1000) || STUDIO_TIMELINE_MIN_CLIP_MS),
       initialStartOffsetMs: Math.max(0, Number(track.startOffsetMs || 0) || 0),
-      selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
+      selectedTrackKind: clickedTrackKind,
       selectedTrackIndex: requestedTrackIndex
     };
     document.body.classList.add("podcast-timeline-dragging");
@@ -177,8 +193,15 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     if (event?.target?.closest?.("[data-track-index]")) {
       selectUploadedPanelMusicTrackByIndex(requestedTrackIndex);
     }
+    const session = getActiveSession();
     const track = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
     if (!track) return;
+    const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
+    const durationSec = getPanelMusicTrackDurationSec(track);
+    const trimInMs = Math.max(0, Number(track?.trimInMs || 0) || 0);
+    const trimOutMs = Math.max(trimInMs + minTrimLen, Number(track?.trimOutMs || Math.round(durationSec * 1000) || STUDIO_TIMELINE_MIN_CLIP_MS) || STUDIO_TIMELINE_MIN_CLIP_MS);
+    const effectiveLoopMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
+    const maxStartOffsetMs = Math.max(0, totalMs - effectiveLoopMs);
     podcastVideoState.timelineDrag = {
       mode: "audio-move",
       startClientX: Number(event.clientX || 0),
@@ -187,7 +210,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       selectedTrackIndex: requestedTrackIndex,
       previewChip: event.target?.closest?.(".podcast-audio-timeline-chip") || null,
       previewTranslatePx: 0,
-      nextStartOffsetMs: Math.max(0, Number(track.startOffsetMs || 0) || 0)
+      nextStartOffsetMs: Math.max(0, Number(track.startOffsetMs || 0) || 0),
+      maxStartOffsetMs
     };
     document.body.classList.add("podcast-timeline-dragging");
   }
@@ -1229,13 +1253,12 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     if (drag.mode === "audio-move") {
       const trackKind = resolvePanelMusicTrackKind(drag.selectedTrackKind || panelMusicState.selectedTrackKind);
       const session = getActiveSession();
-      const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
       const track = getPanelMusicTrackAvailability(trackKind) || normalizePanelMusicTrack(panelMusicState.track);
       const durationSec = getPanelMusicTrackDurationSec(track);
       const trimInMs = Math.max(0, Number(track?.trimInMs || 0) || 0);
       const trimOutMs = Math.max(trimInMs + minTrimLen, Number(track?.trimOutMs || Math.round(durationSec * 1000) || minTrimLen) || minTrimLen);
       const effectiveLoopMs = Math.max(minTrimLen, trimOutMs - trimInMs);
-      const maxStartOffsetMs = Math.max(0, totalMs - effectiveLoopMs);
+      const maxStartOffsetMs = Math.max(0, Number(drag.maxStartOffsetMs || 0) || (Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session)) - effectiveLoopMs));
       const nextStartOffsetMs = Math.max(
         0,
         Math.min(maxStartOffsetMs, snapTimelineMsWithStep(Number(drag.initialStartOffsetMs || 0) + deltaMsRaw, dragStepMs))

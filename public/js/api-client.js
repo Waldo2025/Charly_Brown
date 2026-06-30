@@ -92,15 +92,8 @@ function shouldForceRemotePodcasterAudioApiPath(path = "") {
 function shouldUseExportApiPath(path = "") {
   if (isLocalHostRuntime()) return false;
   const clean = String(path || "").trim();
-  if (clean === "/api/assets/proxy-media" || clean.startsWith("/api/assets/proxy-media?")) return true;
-  if (clean === "/api/assets/proxy-image" || clean.startsWith("/api/assets/proxy-image?")) return true;
   if (clean === "/api/assets/montage-download" || clean.startsWith("/api/assets/montage-download?")) return true;
   if (clean.startsWith("/api/podcaster/montage/")) return true;
-  if (clean.startsWith("/api/podcaster/sessions/")) return true;
-  if (clean.startsWith("/api/podcaster/scene-library/")) return true;
-  if (clean === "/api/podcaster/scene-media/upload") return true;
-  if (clean === "/api/podcaster/music/upload") return true;
-  if (clean.startsWith("/api/podcaster/music/library/")) return true;
   return false;
 }
 

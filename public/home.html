@@ -26,6 +26,7 @@
   <link rel="stylesheet" data-cache-href="home.css">
   <link rel="stylesheet" data-cache-href="chatbot.css">
   <link rel="stylesheet" data-cache-href="header.css">
+  <link rel="stylesheet" data-cache-href="podcaster.css">
   <style>
     /* Ken Burns Effects */
     @keyframes ken-burns-pan-left { from { transform: scale(1.2) translateX(-10%); } to { transform: scale(1.2) translateX(10%); } }
@@ -559,6 +560,7 @@
             <video id="podcastActiveSpeakerBackdropVideoAlt" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
             <video id="playerVideoB" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
             <img id="podcastActiveSpeakerImage" class="podcast-active-speaker-image" alt="Scene image" hidden crossorigin="anonymous">
+            <img id="podcastActiveSpeakerImageAlt" class="podcast-active-speaker-image podcast-active-speaker-image-alt" alt="Scene image transition" hidden crossorigin="anonymous">
             <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
             <button id="playerStageFullscreenBtn" class="player-action-btn podcast-stage-fullscreen-btn" type="button"
               aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
@@ -672,160 +674,7 @@
               align-items: center;
               justify-content: center;
             }
-            /* Estilos para los subtítulos sintetizados */
-            .podcast-onscreen-text-clip-content {
-              --pod-onscreen-text-color: #f8fafc;
-              position: absolute;
-              left: var(--pod-onscreen-text-x, 50%);
-              top: var(--pod-onscreen-text-y, 90%);
-              transform: translate(-50%, -50%);
-              background: rgba(0, 0, 0, 0.75);
-              backdrop-filter: blur(4px);
-              padding: 0.6rem 1.2rem;
-              border-radius: 12px;
-              color: var(--pod-onscreen-text-color);
-              font-size: 1.1rem;
-              font-weight: 500;
-              text-align: center;
-              max-width: 80%;
-              border: 1px solid rgba(255, 255, 255, 0.15);
-              box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-              white-space: pre-wrap;
-              pointer-events: none;
-            }
-
-            .podcast-on-screen-text-content {
-              --pod-onscreen-text-preset-shadow: 0 3px 14px rgba(2, 6, 23, 0.24);
-              --pod-onscreen-text-user-shadow: 0 0 0 transparent;
-              --pod-onscreen-text-stroke-shadow: 0 0 0 transparent;
-              --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.88);
-              max-width: min(96%, 1400px);
-              position: absolute;
-              left: var(--pod-onscreen-text-x, 21%);
-              top: var(--pod-onscreen-text-y, 72%);
-              transform: none;
-              display: block;
-              box-sizing: border-box;
-              padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
-              border-radius: calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
-              background: transparent;
-              box-shadow: none;
-              backdrop-filter: none;
-              color: var(--pod-onscreen-text-color, #f8fafc);
-              font-family: var(--pod-onscreen-text-font-family, inherit);
-              font-size: var(--pod-onscreen-text-font-size, 16px);
-              font-weight: var(--pod-onscreen-text-font-weight, 500);
-              font-style: var(--pod-onscreen-text-font-style, normal);
-              text-align: var(--pod-onscreen-text-align, center);
-              letter-spacing: 0;
-              line-height: var(--pod-onscreen-text-line-height, 1.22em);
-              white-space: pre-wrap;
-              overflow-wrap: anywhere;
-              text-wrap: pretty;
-              text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
-              opacity: var(--pod-onscreen-text-opacity, 1);
-              width: var(--pod-onscreen-text-bubble-width, auto);
-              height: var(--pod-onscreen-text-bubble-height, auto);
-              min-width: 0;
-              min-height: 0;
-              transition: opacity 0.18s ease;
-            }
-
-            .podcast-on-screen-text-content.is-style-3d {
-              --pod-onscreen-text-preset-shadow: 0 2px 6px rgba(2, 6, 23, 0.24), 0 10px 20px rgba(2, 6, 23, 0.18);
-            }
-
-            .podcast-on-screen-text-content.is-style-flat {
-              --pod-onscreen-text-preset-shadow: 0 4px 10px rgba(15, 23, 42, 0.46);
-            }
-
-            .podcast-on-screen-text-content.is-style-glow {
-              max-width: min(96%, 1400px) !important;
-              --pod-onscreen-text-preset-shadow: 0 0 8px rgba(255, 255, 255, 0.18), 0 0 18px rgba(56, 189, 248, 0.24), 0 6px 16px rgba(2, 6, 23, 0.24);
-              --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.42);
-            }
-
-            .podcast-on-screen-text-content.is-style-chrome {
-              --pod-onscreen-text-preset-shadow: 0 2px 8px rgba(2, 6, 23, 0.30), 0 10px 22px rgba(2, 6, 23, 0.22);
-              --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.48);
-            }
-
-            .podcast-on-screen-text-content.is-bg-solid {
-              background: rgba(2, 6, 23, calc(0.82 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
-              box-shadow: 0 14px 30px rgba(2, 6, 23, 0.36);
-              backdrop-filter: blur(7px) saturate(1.02) !important;
-            }
-
-            .podcast-on-screen-text-content.is-bg-glass {
-              background: rgba(15, 23, 42, calc(0.65 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
-              backdrop-filter: blur(12px) saturate(1.1) !important;
-              border: 1px solid rgba(255, 255, 255, 0.1);
-            }
-
-            .podcast-on-screen-text-content.is-bg-none {
-              background: transparent !important;
-              box-shadow: none !important;
-              backdrop-filter: none !important;
-              padding-inline: 0 !important;
-              padding-left: 0 !important;
-              padding-right: 0 !important;
-              max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1400px)) !important;
-            }
-
-            .podcast-on-screen-text-content span,
-            .podcast-karaoke-word {
-              --pod-karaoke-highlight-color: #facc15;
-              --pod-karaoke-highlight-opacity: 0.92;
-              --pod-karaoke-highlight-radius: 12px;
-              --pod-karaoke-highlight-pad-x: 10px;
-              --pod-karaoke-highlight-pad-y: 4px;
-              display: inline;
-              color: inherit;
-              font-size: inherit !important;
-              font-family: inherit;
-              font-weight: inherit;
-              font-style: inherit;
-              transition: color 0.12s ease, filter 0.12s ease, text-shadow 0.12s ease;
-            }
-
-            .podcast-karaoke-word.is-active {
-              color: var(--pod-karaoke-highlight-color, #facc15);
-              filter: brightness(1.08);
-              text-shadow:
-                0 0 0.2em var(--pod-karaoke-highlight-color, #facc15),
-                0 0 0.72em var(--pod-karaoke-highlight-color, #facc15),
-                var(--pod-onscreen-text-stroke-shadow),
-                var(--pod-onscreen-text-preset-shadow),
-                var(--pod-onscreen-text-user-shadow);
-            }
-
-            .podcast-karaoke-word.is-active.is-highlight-text {
-              filter: none;
-              text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
-            }
-
-            .podcast-karaoke-word.is-active.is-highlight-pill,
-            .podcast-karaoke-word.is-active.is-highlight-rect {
-              padding: var(--pod-karaoke-highlight-pad-y, 4px) var(--pod-karaoke-highlight-pad-x, 10px);
-              border-radius: var(--pod-karaoke-highlight-radius, 12px);
-              background: var(--pod-karaoke-highlight-color, #facc15);
-              color: #020617;
-              text-shadow: none;
-              box-decoration-break: clone;
-              -webkit-box-decoration-break: clone;
-            }
-
-            .podcast-karaoke-word.is-active.is-highlight-rect {
-              border-radius: min(4px, var(--pod-karaoke-highlight-radius, 4px));
-            }
-
-            .podcast-karaoke-word.is-active.is-highlight-underline {
-              text-decoration-line: underline;
-              text-decoration-thickness: max(0.08em, var(--pod-karaoke-highlight-pad-y, 4px));
-              text-decoration-color: var(--pod-karaoke-highlight-color, #facc15);
-              text-underline-offset: 0.14em;
-            }
-
+            /* Texto en pantalla compartido con podcaster.css */
             .multimedia-render-btn {
               background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
               color: white !important;
@@ -842,6 +691,7 @@
             .multimedia-render-btn:hover {
               filter: brightness(1.1);
             }
+
             .player-update-badge {
               background: #fbbf24;
               color: #0f172a;

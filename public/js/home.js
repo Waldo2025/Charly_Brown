@@ -2599,14 +2599,57 @@ function resolveDashboardRowOnScreenText(row = null) {
   ).trim();
 }
 
+const HOME_DEFAULT_ON_SCREEN_TEXT_TRACK_SETTINGS = Object.freeze({
+  enabled: true,
+  showTrack: true,
+  fontFamily: "Unbounded",
+  fontSizePx: 44,
+  stylePreset: "3d",
+  fontWeight: "normal",
+  fontStyle: "normal",
+  fontVariant: "regular",
+  textAlign: "center",
+  textColor: "#f8fafc",
+  karaokeHighlightColor: "#facc15",
+  karaokeHighlightStyle: "pill",
+  karaokeHighlightOpacity: 0.92,
+  karaokeHighlightPaddingXPx: 10,
+  karaokeHighlightPaddingYPx: 4,
+  karaokeHighlightRadiusPx: 12,
+  strokeColor: "#0f172a",
+  strokeEnabled: true,
+  strokeWidthPx: 3,
+  textOpacity: 1,
+  bgPreset: "glass",
+  bgOpacity: 1,
+  bgScale: 1,
+  shadowEnabled: true,
+  shadowBlurPx: 12,
+  shadowOffsetXPx: 0,
+  shadowOffsetYPx: 4,
+  shadowOpacity: 0.55,
+  shadowSizePx: 0
+});
+
+function normalizeHomeOnScreenTextTrackSettings(raw = null) {
+  if (typeof window.normalizeOnScreenTextTrackSettings === "function") {
+    return window.normalizeOnScreenTextTrackSettings(raw || {});
+  }
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    ...HOME_DEFAULT_ON_SCREEN_TEXT_TRACK_SETTINGS,
+    ...Object.fromEntries(
+      Object.entries(source).filter(([, value]) => value !== undefined)
+    )
+  };
+}
+
 function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntries = []) {
   const activeSession = session || currentMultimediaSession;
   if (!activeSession) return { settings: { enabled: false }, segments: [], suppressFallbackFromEntries: true };
   const rows = extractDashboardSessionRows(activeSession) || [];
   const cfg = multimediaPlaybackDeps.getPodcastVideoConfig(activeSession) || {};
-  const settings = typeof window.normalizeOnScreenTextTrackSettings === 'function'
-    ? window.normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {})
-    : { enabled: true, showTrack: true };
+  const settings = normalizeHomeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
   const trackVisible = settings.enabled !== false && settings.showTrack !== false;
   const clipMap = cfg.timelineOnScreenTextClipsByRowId || {};
   const clips = Object.values(clipMap || {});
@@ -3176,6 +3219,17 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
     const trackIndex = Math.max(0, Math.floor(Number(item?.trackIndex || 0) || 0));
     const loopIndex = Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0));
     const track = uploadedTracks[trackIndex] || null;
+    const normalizedLoopSettings = Array.isArray(track?.loopSettings)
+      ? track.loopSettings.map((loopSetting) => ({
+        loopIndex: Math.max(0, Math.floor(Number(loopSetting?.loopIndex || 0) || 0)),
+        trimInMs: Math.max(0, Math.round(Number(loopSetting?.trimInMs || 0) || 0)),
+        trimOutMs: Math.max(0, Math.round(Number(loopSetting?.trimOutMs || 0) || 0)),
+        fadeInMs: Math.max(0, Math.round(Number(loopSetting?.fadeInMs || 0) || 0)),
+        fadeOutMs: Math.max(0, Math.round(Number(loopSetting?.fadeOutMs || 0) || 0))
+      }))
+      : [];
+    const loopSetting = normalizedLoopSettings.find((entry) => entry.loopIndex === loopIndex);
+    const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
     const sourceUrl = String(resolveAudio(item?.sourceUrl || item?.downloadUrl || "", item?.storagePath || "") || "").trim();
     const localDataUrl = String(item?.localDataUrl || track?.localDataUrl || "").trim();
     const localMediaCacheKey = String(item?.localMediaCacheKey || track?.localMediaCacheKey || "").trim();
@@ -3189,6 +3243,10 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
     const rawDurationMs = Math.round(Number(item?.durationMs || 0) || 0);
     const durationMs = Math.max(0, rawDurationMs || rawEndOffsetMs - startOffsetMs);
     const endOffsetMs = Math.max(startOffsetMs, rawEndOffsetMs || (startOffsetMs + durationMs));
+    const loopTrimInMs = loopSetting ? loopSetting.trimInMs : 0;
+    const loopTrimOutMs = loopSetting ? loopSetting.trimOutMs : 0;
+    const loopFadeInMs = loopSetting ? loopSetting.fadeInMs : 0;
+    const loopFadeOutMs = loopSetting ? loopSetting.fadeOutMs : 0;
     const mutedLoopIndexes = new Set(normalizeHomePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
     return {
       ...item,
@@ -3196,10 +3254,18 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
       startOffsetMs,
       endOffsetMs,
       durationSec: Math.max(0, Number(item?.durationSec || durationMs / 1000) || 0),
-      trimInMs: Math.max(0, Math.round(Number(item?.trimInMs || 0) || 0)),
-      trimOutMs: Math.max(0, Math.round(Number(item?.trimOutMs || 0) || 0)),
-      fadeInMs: Math.max(0, Math.round(Number(item?.fadeInMs || 0) || 0)),
-      fadeOutMs: Math.max(0, Math.round(Number(item?.fadeOutMs || 0) || 0)),
+      trimInMs: Math.max(0, Math.round(hasOwn(item, "trimInMs")
+        ? Number(item?.trimInMs || 0)
+        : loopTrimInMs)),
+      trimOutMs: Math.max(0, Math.round(hasOwn(item, "trimOutMs")
+        ? Number(item?.trimOutMs || 0)
+        : loopTrimOutMs)),
+      fadeInMs: Math.max(0, Math.round(hasOwn(item, "fadeInMs")
+        ? Number(item?.fadeInMs || 0)
+        : loopFadeInMs)),
+      fadeOutMs: Math.max(0, Math.round(hasOwn(item, "fadeOutMs")
+        ? Number(item?.fadeOutMs || 0)
+        : loopFadeOutMs)),
       trackIndex,
       loopIndex,
       muted: item?.muted === true || mutedLoopIndexes.has(loopIndex),
@@ -3363,8 +3429,11 @@ function buildHomeUploadedPanelMusicSegments(session = null, options = {}) {
 }
 
 function buildHomePanelMontageMusicConfig(session = null, options = {}) {
-  const rawCfg = session?.panelMusicConfig || session?.session?.panelMusicConfig ||
-    session?.panelMusicState || session?.session?.panelMusicState ||
+  const rawCfg = session?.podcastVideoConfig?.panelMusicConfig
+    || session?.script?.podcastVideoConfig?.panelMusicConfig
+    || session?.panelMusicConfig
+    || session?.session?.panelMusicConfig
+    || session?.panelMusicState || session?.session?.panelMusicState ||
     session?.podcastStudioUiState?.panelMusicState ||
     session?.podcastStudioUiState?.panelMusicConfig;
   const cfg = rawCfg ? JSON.parse(JSON.stringify(rawCfg)) : { sourceType: "none" };
@@ -3489,14 +3558,30 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
   };
 }
 
+function hasHomeTimelineVisualEntry(entry = null) {
+  const videoSrc = String(entry?.videoSrc || entry?.imageSrc || "").trim();
+  const backgroundColor = String(entry?.clip?.backgroundColor || entry?.backgroundColor || "").trim();
+  return Boolean(videoSrc || backgroundColor);
+}
+
+function hasHomeTimelineEntry(entry = null) {
+  const videoSrc = String(entry?.videoSrc || entry?.imageSrc || "").trim();
+  const audioSrc = String(entry?.audioSrc || "").trim();
+  const backgroundColor = String(entry?.clip?.backgroundColor || entry?.backgroundColor || "").trim();
+  return Boolean(videoSrc || backgroundColor || audioSrc);
+}
+
 function resolveHomeTimelineRuntimeOverlapPairAtMs(session = null, currentMs = 0, runtimeEntries = null) {
   const entries = Array.isArray(runtimeEntries) ? runtimeEntries : [];
+  const targetMs = Math.max(0, Number(currentMs || 0) || 0);
+  const toleranceMs = 12;
   const activeEntries = entries
     .filter((entry) => {
-      const startMs = Math.max(0, Number(entry?.startMs || 0) || 0);
-      const endMs = Math.max(startMs, Number(entry?.endMs || startMs) || startMs);
-      return currentMs >= startMs && currentMs < endMs;
+      const startMs = Math.max(0, Number(entry?.startMs || 0));
+      const endMs = Math.max(startMs, Number(entry?.endMs || 0));
+      return targetMs >= (startMs - toleranceMs) && targetMs <= (endMs + toleranceMs);
     })
+    .filter((entry) => hasHomeTimelineVisualEntry(entry))
     .sort((a, b) =>
       Number(a?.startMs || 0) - Number(b?.startMs || 0)
       || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
@@ -3537,7 +3622,7 @@ function resolveHomeTimelineRuntimeOverlapPairAtMs(session = null, currentMs = 0
     overlapEndMs,
     overlapDurationMs,
     progress,
-    isOverlapActive: overlapDurationMs > 0
+    isOverlapActive: overlapDurationMs >= 20
   };
 }
 
@@ -3585,35 +3670,37 @@ function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
 }
 
 function resolveTimelineClipMix(session = null, rowId = "") {
-  if (!session) return { videoVolume: 1, voiceVolume: 1, backgroundVolume: 1 };
+  if (typeof window.resolveTimelineClipMix === "function") {
+    try {
+      return window.resolveTimelineClipMix(session, rowId);
+    } catch (error) {
+      console.warn("[Home] Fallback a mezcla de clips local: resolveTimelineClipMix global falló", error);
+    }
+  }
+
+  if (!session) return { videoVolume: 1, voiceVolume: 1, backgroundVolume: 1, masterPct: 100, veoPct: 100, geminiPct: 100, backgroundPct: 100 };
   const key = String(rowId || "").trim();
   const videoConfig = session.podcastVideoConfig || session.script?.podcastVideoConfig || {};
-  const geminiTrack = videoConfig?.geminiDialogueTrack || {};
-  
-  // Obtener clips (pueden estar en varias rutas según el origen de la sesión)
-  const clipMap = session.timelineClipMap 
-    || videoConfig.timelineClipsByRowId 
-    || session.podcastStudioUiState?.timelineClipsByRowId 
+  const fallbackVeoPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultVeoVolumePct || 100)));
+  const fallbackGeminiPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultGeminiVolumePct || 100)));
+  const masterPct = Math.max(0, Math.min(100, Number(videoConfig.masterVolume || 100)));
+  const clipMap = session.timelineClipMap
+    || videoConfig.timelineClipsByRowId
+    || session.podcastStudioUiState?.timelineClipsByRowId
     || {};
-    
   const clip = clipMap[key] || null;
-  
-  // Valores base por defecto
-  const fallbackVeoPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultVeoVolumePct ?? 100)));
-  const fallbackGeminiPct = Math.max(0, Math.min(100, Number(geminiTrack?.volumePct ?? videoConfig.montageDefaultGeminiVolumePct ?? 100)));
-  
-  // Overrides específicos del clip (seteados en el modal de duración/volumen del Studio)
   const veoOverride = clip?.veoVolumeOverridePct;
   const geminiOverride = clip?.geminiVolumeOverridePct;
-  
   const veoPct = Number.isFinite(veoOverride) ? Math.max(0, Math.min(100, Math.round(veoOverride))) : fallbackVeoPct;
   const geminiPct = Number.isFinite(geminiOverride) ? Math.max(0, Math.min(100, Math.round(geminiOverride))) : fallbackGeminiPct;
-  
-  // Override de música de fondo (timelineSceneAudioMixByRowId)
   const backgroundOverride = videoConfig.timelineSceneAudioMixByRowId?.[key]?.backgroundMusicVolumePct;
   const backgroundPct = Number.isFinite(backgroundOverride) ? Math.max(0, Math.min(200, Math.round(backgroundOverride))) : 100;
-  
+
   return {
+    masterPct,
+    veoPct,
+    geminiPct,
+    backgroundPct,
     videoVolume: Math.max(0, Math.min(1, veoPct / 100)),
     voiceVolume: Math.max(0, Math.min(1, geminiPct / 100)),
     backgroundVolume: Math.max(0, Math.min(2, backgroundPct / 100))
@@ -3698,6 +3785,44 @@ let cachedRuntimeEntries = null;
 let cachedRuntimeEntriesKey = null;
 let cachedVideoConfig = null;
 let cachedVideoConfigSessionId = null;
+let cachedVideoConfigCacheKey = null;
+
+function mergeHomePodcastVideoConfig(base = {}, incoming = {}) {
+  const currentBase = base && typeof base === "object" ? base : {};
+  const nextIncoming = incoming && typeof incoming === "object" ? incoming : {};
+  return {
+    ...currentBase,
+    ...nextIncoming,
+    geminiDialogueTrack: {
+      ...(currentBase?.geminiDialogueTrack || {}),
+      ...(nextIncoming?.geminiDialogueTrack || {})
+    },
+    onScreenTextTrack: {
+      ...(currentBase?.onScreenTextTrack || {}),
+      ...(nextIncoming?.onScreenTextTrack || {})
+    },
+    panelMusicConfig: {
+      ...(currentBase?.panelMusicConfig || {}),
+      ...(nextIncoming?.panelMusicConfig || {})
+    },
+    timelineOnScreenTextClipsByRowId: {
+      ...(currentBase?.timelineOnScreenTextClipsByRowId || {}),
+      ...(nextIncoming?.timelineOnScreenTextClipsByRowId || {})
+    },
+    timelineOnScreenTextLayoutByRowId: {
+      ...(currentBase?.timelineOnScreenTextLayoutByRowId || {}),
+      ...(nextIncoming?.timelineOnScreenTextLayoutByRowId || {})
+    },
+    timelineClipsByRowId: {
+      ...(currentBase?.timelineClipsByRowId || {}),
+      ...(nextIncoming?.timelineClipsByRowId || {})
+    },
+    timelineSceneAudioMixByRowId: {
+      ...(currentBase?.timelineSceneAudioMixByRowId || {}),
+      ...(nextIncoming?.timelineSceneAudioMixByRowId || {})
+    }
+  };
+}
 
 const multimediaPlaybackDeps = {
   getTimelineTotalDurationMs: (s) => {
@@ -3735,7 +3860,7 @@ const multimediaPlaybackDeps = {
       clipMap
     });
     const entries = baseEntries.map((baseEntry, index) => {
-      const rowId = String(baseEntry?.rowId || rows[index]?.id || `row_${index}`).trim();
+    const rowId = String(baseEntry?.rowId || rows[index]?.id || `row_${index}`).trim();
       const sceneClip = videoMap[rowId];
       const audioClip = audioMap[rowId];
       const clipPlaybackRate = resolveDialogueAudioPlaybackRate(s, rowId);
@@ -3761,7 +3886,7 @@ const multimediaPlaybackDeps = {
         audioDurationMs: Math.round((Number(audioClip?.durationSec || 0) * 1000) / clipPlaybackRate),
         zIndex: Number(baseEntry?.clip?.zIndex || index + 1)
       };
-    }).filter((entry) => entry.videoSrc || entry.audioSrc);
+    }).filter((entry) => hasHomeTimelineEntry(entry) && Boolean(String(entry?.rowId || "").trim()));
 
     const finalEntries = entries.sort((a, b) => a.startMs - b.startMs);
     cachedRuntimeEntries = finalEntries;
@@ -3862,15 +3987,32 @@ const multimediaPlaybackDeps = {
   getPlaybackSpeed: () => Number(currentMultimediaSession?.podcastVideoConfig?.playbackSpeed || 1),
   getPodcastVideoConfig: (s) => {
     if (!s) return {};
-    if (cachedVideoConfig && cachedVideoConfigSessionId === s.id) {
+    const sessionCfg = s?.podcastVideoConfig && typeof s.podcastVideoConfig === "object" ? s.podcastVideoConfig : {};
+    const scriptCfg = s?.script?.podcastVideoConfig && typeof s.script.podcastVideoConfig === "object" ? s.script.podcastVideoConfig : {};
+    const uiCfg = s?.podcastStudioUiState?.podcastVideoConfig && typeof s.podcastStudioUiState.podcastVideoConfig === "object"
+      ? s.podcastStudioUiState.podcastVideoConfig
+      : {};
+    const baseCfg = mergeHomePodcastVideoConfig(
+      mergeHomePodcastVideoConfig(scriptCfg, uiCfg),
+      sessionCfg
+    );
+    const panelCfg = baseCfg?.panelMusicConfig
+      || s?.panelMusicConfig
+      || s?.session?.panelMusicConfig
+      || s?.panelMusicState
+      || s?.session?.panelMusicState
+      || s?.podcastStudioUiState?.panelMusicState
+      || s?.podcastStudioUiState?.panelMusicConfig
+      || {};
+    const videoConfigFingerprint = `${String(s?.updatedAt || s?.payload?.updatedAt || "").trim()}|${String(sessionCfg?.updatedAt || "").trim()}|${String(scriptCfg?.updatedAt || "").trim()}|${String(uiCfg?.updatedAt || "").trim()}|${String(baseCfg?.updatedAt || "").trim()}|${panelCfg?.updatedAt || ""}|${JSON.stringify(baseCfg?.onScreenTextTrack || {})}|${Object.keys(baseCfg?.timelineOnScreenTextClipsByRowId || {}).length}|${Object.keys(baseCfg?.timelineOnScreenTextLayoutByRowId || {}).length}|${Array.isArray(panelCfg?.sourceItems)
+      ? panelCfg.sourceItems.length
+      : 0}|${String(baseCfg?.geminiDialogueTrack?.enabled || "")}|${String(s?.id || "")}`;
+
+    if (cachedVideoConfig && cachedVideoConfigSessionId === s.id && cachedVideoConfigCacheKey === videoConfigFingerprint) {
       return cachedVideoConfig;
     }
 
-    if (!s.podcastVideoConfig) {
-      s.podcastVideoConfig = s.podcastStudioUiState?.podcastVideoConfig || {};
-    }
-    const cfg = JSON.parse(JSON.stringify(s.podcastVideoConfig));
-    const normalizeSharedTrack = window.normalizeOnScreenTextTrackSettings || ((value) => value || {});
+    const cfg = JSON.parse(JSON.stringify(baseCfg));
     const normalizeSharedClipItem = window.normalizeOnScreenTextClipItem || ((value, rowId) => ({ ...(value || {}), rowId }));
     const normalizeSharedClipMap = window.normalizeOnScreenTextClipsByRowId || ((value) => value || {});
     const normalizeSharedLayoutMap = window.normalizeOnScreenTextLayoutByRowId || ((value) => value || {});
@@ -3896,13 +4038,20 @@ const multimediaPlaybackDeps = {
       };
     }
 
-    if (!cfg.onScreenTextTrack) {
-      cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow', karaokeHighlightStyle: 'glow' };
+    const onScreenTextTrackSource = cfg.onScreenTextTrack && typeof cfg.onScreenTextTrack === "object"
+      ? cfg.onScreenTextTrack
+      : {};
+    cfg.onScreenTextTrack = normalizeHomeOnScreenTextTrackSettings(onScreenTextTrackSource);
+    if (onScreenTextTrackSource?.enabled === false) {
+      cfg.onScreenTextTrack.enabled = false;
+    } else {
+      cfg.onScreenTextTrack.enabled = true;
     }
-    // Asegurar que enabled y showTrack estén habilitados para visualización garantizada en el Dashboard
-    cfg.onScreenTextTrack.enabled = true;
-    cfg.onScreenTextTrack.showTrack = true;
-    cfg.onScreenTextTrack = normalizeSharedTrack(cfg.onScreenTextTrack);
+    if (onScreenTextTrackSource?.showTrack === false) {
+      cfg.onScreenTextTrack.showTrack = false;
+    } else {
+      cfg.onScreenTextTrack.showTrack = true;
+    }
 
     const existingOnScreenTextClips = normalizeSharedClipMap(s?.timelineOnScreenTextClipsByRowId
       || s?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
@@ -3964,6 +4113,7 @@ const multimediaPlaybackDeps = {
 
     cachedVideoConfig = cfg;
     cachedVideoConfigSessionId = s.id;
+    cachedVideoConfigCacheKey = videoConfigFingerprint;
     return cfg;
   },
   updatePodcastVideoTransportUi: () => {
@@ -4286,6 +4436,7 @@ function initMultimediaPlayer() {
     podcastActiveSpeakerBackdropVideo: document.getElementById("podcastActiveSpeakerBackdropVideo"),
     podcastActiveSpeakerBackdropVideoAlt: document.getElementById("podcastActiveSpeakerBackdropVideoAlt"),
     podcastActiveSpeakerImage: document.getElementById("podcastActiveSpeakerImage"),
+    podcastActiveSpeakerImageAlt: document.getElementById("podcastActiveSpeakerImageAlt"),
     podcastStylizedTextOverlay: document.getElementById("podcastStylizedTextOverlay"),
     podcastOnScreenTextOverlay: overlay,
     podcastVideoStage: stage
@@ -4508,13 +4659,17 @@ async function abrirReproductorMultimedia(session) {
             ...incomingSession,
             dialogueAudioMap: incomingSession?.dialogueAudioMap || currentMultimediaSession.dialogueAudioMap,
             timelineClipMap: incomingSession?.timelineClipMap || currentMultimediaSession.timelineClipMap,
-            podcastVideoConfig: {
-              ...(currentMultimediaSession.podcastVideoConfig || {}),
-              ...(incomingSession?.podcastVideoConfig || {})
-            },
+            podcastVideoConfig: mergeHomePodcastVideoConfig(
+              currentMultimediaSession?.podcastVideoConfig || {},
+              incomingSession?.podcastVideoConfig || {}
+            ),
             script: {
               ...(currentMultimediaSession.script || {}),
               ...(incomingSession?.script || {}),
+              podcastVideoConfig: mergeHomePodcastVideoConfig(
+                currentMultimediaSession?.script?.podcastVideoConfig || {},
+                incomingSession?.script?.podcastVideoConfig || {}
+              ),
               rows: updatedRows
             }
           };
