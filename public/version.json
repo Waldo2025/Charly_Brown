@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.333",
-  "build": "2026-1.0.10.333",
+  "version": "1.0.10.334",
+  "build": "2026-1.0.10.334",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export de MP4 de Podcaster ya no renderiza texto en pantalla oculto por escena y respeta la tipografía seleccionada en sesión. Se incrementa podcaster-montage-export.js a la v2026-06-30.1 (estable).",
     "Actualizado: Se incrementa version.json para forzar la carga del frontend vigente y conservar el pipeline de raster/karaoke en export.",
     "Corregido: Las referencias visuales de escenas Veo ahora derivan storagePath desde URLs proxy-media/proxy-image anidadas y desde firebasestorage.app, evitando que imágenes de referencia con solo downloadUrl fallen como scene_reference_image_unavailable.",
     "Corregido: La generación de escenas Veo con imagen de referencia ya no falla al final si el backend Gemini no tiene FFmpeg; cuando Veo devuelve MP4 válido, se conserva y sube directo sin transcodificar.",
@@ -125,6 +126,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El export MP4 de Podcaster respeta las escenas con texto en pantalla oculto y conserva la tipografía personalizada de sesión al renderizar los overlays.",
     "Corregido: El modal de export ya no llama proxy-media para assets remotos con storagePath durante la preparación del payload.",
     "Corregido: El export MP4 v2 usa el worker de cola cuando está disponible para evitar 502 por reinicio del web service durante FFmpeg.",
     "Corregido: El karaoke PNG del export MP4 v2 ya no se mezcla entre escenas con rowId distinto.",

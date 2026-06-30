@@ -1197,6 +1197,7 @@
       `--pod-onscreen-text-stroke-color:${current.strokeColor || "#0f172a"}`,
       `--pod-onscreen-text-line-height:${metrics.previewLineHeightPx}px`,
       `--pod-onscreen-text-border-width:${metrics.previewBorderWidthPx}px`,
+      `--pod-onscreen-text-opacity:${current.textOpacity ?? 1}`,
       `--pod-onscreen-text-bg-opacity:${current.bgOpacity ?? 0.82}`,
       `--pod-onscreen-text-bg-scale:${current.bgScale ?? 1.0}`,
       `--pod-onscreen-text-stroke-shadow:${buildOnScreenTextPreviewStrokeShadowCss(current, { strokeWidthPx: metrics.previewBorderWidthPx })}`,

@@ -1010,8 +1010,80 @@ function getMontageExportPreviewSubtitleCanvas() {
 }
 
 function resolveMontageExportAssFontFamily(value = "") {
-  const first = String(value || "").split(",")[0]?.trim() || "";
+  const raw = String(value || "").trim();
+  const cssValue = typeof window.getOnScreenTextFontFamilyCss === "function"
+    ? String(window.getOnScreenTextFontFamilyCss(raw) || "").trim()
+    : raw;
+  const first = String(cssValue || raw).split(",")[0]?.trim() || "";
   return first.replace(/^['"]|['"]$/g, "").trim() || "Arial";
+}
+
+function resolveMontageExportHiddenTextRowIds(activeSession = null, timeline = null) {
+  const hiddenRowIds = new Set(
+    (Array.isArray(timeline?.hiddenRowIds) ? timeline.hiddenRowIds : [])
+      .map((rowId) => String(rowId || "").trim())
+      .filter(Boolean)
+  );
+  const clipMap = typeof window.ensureOnScreenTextClipsByRowId === "function"
+    ? window.ensureOnScreenTextClipsByRowId(activeSession, { persist: false })
+    : {};
+  Object.values(clipMap || {})
+    .filter((clip) => clip?.hidden === true)
+    .map((clip) => String(clip?.rowId || "").trim())
+    .filter(Boolean)
+    .forEach((rowId) => hiddenRowIds.add(rowId));
+  return hiddenRowIds;
+}
+
+function resolveMontageExportOnScreenTextSettings(activeSession = null) {
+  const cfg = window.getPodcastVideoConfig?.(activeSession) || {};
+  const fromConfig = typeof window.normalizeOnScreenTextTrackSettings === "function"
+    ? window.normalizeOnScreenTextTrackSettings(cfg.onScreenTextTrack || {})
+    : null;
+  return fromConfig && typeof fromConfig === "object"
+    ? fromConfig
+    : null;
+}
+
+function sanitizeMontageExportOnScreenTextTimeline(activeSession = null, timeline = null) {
+  if (!timeline || typeof timeline !== "object") return null;
+  const rows = Array.isArray(window.getSessionRows?.(activeSession)) ? window.getSessionRows(activeSession) : [];
+  const validRowIds = new Set(rows.map((row) => String(row?.id || "").trim()).filter(Boolean));
+  const clipMap = typeof window.ensureOnScreenTextClipsByRowId === "function"
+    ? window.ensureOnScreenTextClipsByRowId(activeSession, { persist: false })
+    : {};
+  const clipHiddenRowIds = new Set(
+    Object.values(clipMap || {})
+      .filter((clip) => clip?.hidden === true)
+      .map((clip) => String(clip?.rowId || "").trim())
+      .filter(Boolean)
+  );
+  const timelineHiddenRowIds = new Set(
+    (Array.isArray(timeline?.hiddenRowIds) ? timeline.hiddenRowIds : [])
+      .map((rowId) => String(rowId || "").trim())
+      .filter(Boolean)
+  );
+  clipHiddenRowIds.forEach((rowId) => timelineHiddenRowIds.add(rowId));
+  const baseSegments = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  const segments = baseSegments
+    .filter((segment) => segment && typeof segment === "object")
+    .map((segment) => ({ ...segment }))
+    .filter((segment) => segment.hidden !== true)
+    .filter((segment) => {
+      const rowId = String(segment?.rowId || "").trim();
+      if (!rowId) return false;
+      if (validRowIds.size && !validRowIds.has(rowId)) return false;
+      return !timelineHiddenRowIds.has(rowId);
+    })
+    .filter((segment) => String(segment?.text || "").trim() || String(segment?.wrappedText || "").trim());
+  const settings = resolveMontageExportOnScreenTextSettings(activeSession) || timeline?.settings || null;
+  return {
+    ...timeline,
+    settings,
+    segments,
+    hiddenRowIds: Array.from(timelineHiddenRowIds),
+    suppressFallbackFromEntries: timeline?.suppressFallbackFromEntries === true
+  };
 }
 
 function getMontageExportPreviewCanvasSize() {
@@ -3858,6 +3930,10 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
       return;
     }
     const fallbackSvg = String(plan.svg || "").trim();
+    const textRenderApi = window.PodcasterTextRenderSpec || window.PodcasterKaraokeRenderSpec || {};
+    const directCanvasRenderer = typeof textRenderApi.renderOnScreenTextRasterSnapshotToCanvas === "function"
+      ? textRenderApi.renderOnScreenTextRasterSnapshotToCanvas
+      : null;
     const xhtml = html.includes("xmlns=\"http://www.w3.org/1999/xhtml\"")
       ? html
       : `<div xmlns="http://www.w3.org/1999/xhtml">${html}</div>`;
@@ -3867,6 +3943,26 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
     let queueIndex = 0;
     const img = new Image();
     const cleanup = () => {};
+    const tryDirectCanvasRender = () => {
+      if (!directCanvasRenderer) return false;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return false;
+        const rendered = directCanvasRenderer(ctx, plan);
+        if (rendered !== true) return false;
+        canvas.toBlob((blob) => {
+          cleanup();
+          if (blob) resolve(blob);
+          else loadNext();
+        }, "image/png");
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
     const loadNext = () => {
       const nextSvg = svgQueue[queueIndex] || "";
       if (!nextSvg) {
@@ -3903,6 +3999,7 @@ function renderMontageOnScreenTextSnapshotBlob(plan = null) {
       cleanup();
       reject(new Error("snapshot_image_decode_failed"));
     };
+    if (tryDirectCanvasRender()) return;
     loadNext();
   });
 }
@@ -4705,6 +4802,7 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
   dialogueAudioMap = {},
   sessionId = "",
   exportId = "",
+  partyKaraoke = true,
   resolution = "source",
   sourceWidth = 1280,
   sourceHeight = 720
@@ -4719,13 +4817,42 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
   const scaleWordTimings = typeof textRenderApi.scaleKaraokeWordTimingsForPlaybackRate === "function"
     ? textRenderApi.scaleKaraokeWordTimingsForPlaybackRate
     : window.scaleKaraokeWordTimingsForPlaybackRate;
+  const resolveFontFamilyCss = typeof window.getOnScreenTextFontFamilyCss === "function"
+    ? window.getOnScreenTextFontFamilyCss
+    : (typeof textRenderApi.getOnScreenTextFontFamilyCss === "function" ? textRenderApi.getOnScreenTextFontFamilyCss : null);
   if (!buildSnapshotPlan || typeof normalizeWordTimings !== "function") return [];
-  const settings = timeline?.settings && typeof timeline.settings === "object" ? timeline.settings : {};
-  const sourceSegments = Array.isArray(timeline?.segments) ? timeline.segments.filter(Boolean) : [];
+  const sanitizedTimeline = sanitizeMontageExportOnScreenTextTimeline(activeSession, timeline);
+  const settings = sanitizedTimeline?.settings && typeof sanitizedTimeline.settings === "object"
+    ? sanitizedTimeline.settings
+    : timeline?.settings && typeof timeline.settings === "object"
+      ? timeline.settings
+      : {};
+  const sourceSegments = Array.isArray(sanitizedTimeline?.segments)
+    ? sanitizedTimeline.segments
+    : Array.isArray(timeline?.segments)
+      ? timeline.segments
+        .filter(Boolean)
+        .filter((segment) => segment.hidden !== true)
+      : [];
   if (!sourceSegments.length || settings.enabled === false || settings.showTrack === false) return [];
   try {
     if (document?.fonts && typeof document.fonts.ready?.then === "function") {
       await document.fonts.ready;
+    }
+  } catch (_) {}
+  try {
+    if (document?.fonts && typeof document.fonts.load === "function" && resolveFontFamilyCss) {
+      const fontFamilyCss = String(resolveFontFamilyCss(settings.fontFamily) || "").trim();
+      const exactFontFamily = String(fontFamilyCss || "").split(",")[0]?.trim().replace(/^['"]|['"]$/g, "");
+      if (exactFontFamily) {
+        const fontStyle = String(settings.fontStyle || "").trim().toLowerCase() === "italic" ? "italic" : "normal";
+        const fontWeight = String(settings.fontWeight || "").trim().toLowerCase() === "bold" ? "700" : "400";
+        const fontSizePx = Math.max(16, Math.round(Number(settings.fontSizePx || 44) || 44));
+        await Promise.allSettled([
+          document.fonts.load(`${fontStyle} ${fontWeight} ${fontSizePx}px "${exactFontFamily}"`),
+          document.fonts.load(`${fontStyle} ${fontWeight} ${Math.max(16, Math.round(fontSizePx * 0.82))}px "${exactFontFamily}"`)
+        ]);
+      }
     }
   } catch (_) {}
   const uid = resolveMontageExportCurrentUid();
@@ -4742,8 +4869,10 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
     const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
     const audioClip = dialogueAudioMap?.[rowId] || null;
     const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || audioClip?.playbackRate || 1) || 1));
-    const rawWordTimings = normalizeWordTimings(audioClip, String(segment?.wrappedText || text).trim());
-    const wordTimings = typeof scaleWordTimings === "function"
+    const rawWordTimings = settings.partyKaraoke !== false
+      ? normalizeWordTimings(audioClip, String(segment?.wrappedText || text).trim())
+      : [];
+    const wordTimings = settings.partyKaraoke !== false && typeof scaleWordTimings === "function"
       ? scaleWordTimings(rawWordTimings, playbackRate)
       : rawWordTimings;
     const selectedWordTimings = Array.isArray(wordTimings)
@@ -4860,18 +4989,25 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
     ? onScreenTextTimeline
     : { settings: null, segments: [] };
   const existingSegments = Array.isArray(baseTimeline.segments) ? baseTimeline.segments.filter(Boolean) : [];
+  const hiddenRowIds = new Set(
+    (Array.isArray(baseTimeline.hiddenRowIds) ? baseTimeline.hiddenRowIds : [])
+      .map((rowId) => String(rowId || "").trim())
+      .filter(Boolean)
+  );
   if (baseTimeline?.suppressFallbackFromEntries === true) {
     return {
       settings: baseTimeline.settings || null,
       segments: [],
-      suppressFallbackFromEntries: true
+      suppressFallbackFromEntries: true,
+      hiddenRowIds: Array.from(hiddenRowIds)
     };
   }
   if (existingSegments.length) {
     return {
       settings: baseTimeline.settings || null,
       segments: existingSegments,
-      suppressFallbackFromEntries: false
+      suppressFallbackFromEntries: false,
+      hiddenRowIds: Array.from(hiddenRowIds)
     };
   }
   const segmentByRowId = new Map(
@@ -4884,6 +5020,7 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
       const text = String(entry?.onScreenText || "").replace(/\s+/g, " ").trim();
       if (!text) return null;
       const rowId = String(entry?.rowId || "").trim();
+      if (rowId && hiddenRowIds.has(rowId)) return null;
       const geminiSeg = segmentByRowId.get(rowId) || null;
       const startMs = geminiSeg
         ? Math.max(0, Math.round(Number(geminiSeg?.startMs || 0) || 0))
@@ -4911,7 +5048,8 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
   return {
     settings: baseTimeline.settings || (fallbackSegments.length ? { fontSizePx: 44 } : null),
     segments: fallbackSegments,
-    suppressFallbackFromEntries: false
+    suppressFallbackFromEntries: false,
+    hiddenRowIds: Array.from(hiddenRowIds)
   };
 }
 
@@ -5021,6 +5159,12 @@ function resolveEffectiveMontageOnScreenTextTimeline({
   const clipMap = window.ensureOnScreenTextClipsByRowId?.(activeSession, { persist: false }) || {};
   const clips = Object.values(clipMap || {});
   const rows = Array.isArray(window.getSessionRows?.(activeSession)) ? window.getSessionRows(activeSession) : [];
+  const hiddenRowIds = new Set(
+    clips
+      .filter((clip) => clip?.hidden === true)
+      .map((clip) => String(clip?.rowId || "").trim())
+      .filter(Boolean)
+  );
   const trackVisible = settings?.enabled !== false && settings?.showTrack !== false;
   const allHidden = clips.length > 0 && clips.every((clip) => {
     if (clip?.hidden === true) return true;
@@ -5036,6 +5180,7 @@ function resolveEffectiveMontageOnScreenTextTimeline({
       settings,
       segments: [],
       suppressFallbackFromEntries: true,
+      hiddenRowIds: Array.from(hiddenRowIds),
       debug: {
         trackVisible,
         allHidden,
@@ -5047,8 +5192,12 @@ function resolveEffectiveMontageOnScreenTextTimeline({
   const nextTimeline = Array.isArray(baseTimeline?.segments) && baseTimeline.segments.length
     ? {
       settings,
-      segments: baseTimeline.segments.filter(Boolean),
-      suppressFallbackFromEntries: false
+      segments: baseTimeline.segments
+        .filter(Boolean)
+        .filter((segment) => !hiddenRowIds.has(String(segment?.rowId || "").trim()))
+        .filter((segment) => segment?.hidden !== true),
+      suppressFallbackFromEntries: false,
+      hiddenRowIds: Array.from(hiddenRowIds)
     }
     : buildMontageFallbackOnScreenTextTimeline(baseTimeline, validEntries, geminiTimelineSegments);
   const sceneBoundedSegments = clampMontageOnScreenTextSegmentsToSceneWindows(nextTimeline.segments, validEntries);
@@ -5080,15 +5229,28 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
   }
   const prepared = buildMontageExportPayload(session);
   if (!prepared?.ok || !prepared?.payload) return prepared;
-  const timeline = prepared.payload.onScreenTextTimeline || null;
+  const timeline = sanitizeMontageExportOnScreenTextTimeline(activeSession, prepared.payload.onScreenTextTimeline || null);
+  if (timeline) {
+    prepared.payload.onScreenTextTimeline = {
+      ...timeline,
+      enabled: timeline?.settings?.enabled !== false && timeline?.settings?.showTrack !== false && timeline.segments.length > 0
+    };
+  }
+  const effectiveTimeline = prepared.payload.onScreenTextTimeline || null;
   const onScreenTextFrameExportId = `onscreen-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  prepared.payload.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && timeline?.segments?.length
+  const timelineHiddenRowIds = new Set(
+    (Array.isArray(effectiveTimeline?.hiddenRowIds) ? effectiveTimeline.hiddenRowIds : [])
+      .map((rowId) => String(rowId || "").trim())
+      .filter(Boolean)
+  );
+  prepared.payload.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && effectiveTimeline?.segments?.length
     ? await buildMontageOnScreenTextRenderedSegmentsForExport({
       activeSession,
-      timeline,
+      timeline: effectiveTimeline,
       dialogueAudioMap: prepared.payload.dialogueAudioMap || {},
       sessionId: prepared.payload.sessionId || "",
       exportId: onScreenTextFrameExportId,
+      partyKaraoke: prepared.payload.partyKaraoke !== false,
       resolution: prepared.payload.resolution || "source",
       sourceWidth: 1280,
       sourceHeight: 720
@@ -5101,7 +5263,11 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
     ? prepared.payload.onScreenTextRenderedSegments.filter(Boolean)
     : [];
   if (!renderedSegments.length && Array.isArray(prepared.payload.onScreenTextTimeline?.renderedSegments)) {
-    prepared.payload.onScreenTextRenderedSegments = prepared.payload.onScreenTextTimeline.renderedSegments.filter(Boolean);
+    prepared.payload.onScreenTextRenderedSegments = prepared.payload.onScreenTextTimeline.renderedSegments
+      .filter(Boolean)
+      .map((segment) => ({ ...segment }))
+      .filter((segment) => segment.hidden !== true)
+      .filter((segment) => !timelineHiddenRowIds.has(String(segment?.rowId || "").trim()));
   } else {
     prepared.payload.onScreenTextRenderedSegments = renderedSegments;
   }
@@ -5539,8 +5705,7 @@ export function buildMontageExportPayload(session = null) {
     validEntries,
     geminiTimelineSegments
   });
-  const shouldSendOnScreenTextTimeline = effectiveOnScreenTextTimeline.segments.length
-    || effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true;
+  const sanitizedOnScreenTextTimeline = sanitizeMontageExportOnScreenTextTimeline(activeSession, effectiveOnScreenTextTimeline);
   const stylizedTextTimeline = buildMontageStylizedTextTimeline(activeSession, runtimeEntries);
 
   const panelMusic = window.getPanelMontageMusicConfig();
@@ -5576,10 +5741,11 @@ export function buildMontageExportPayload(session = null) {
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
     filename: String(window.montageExportState.filename || defaultMontageExportFilename()).trim(),
-    onScreenTextTimeline: effectiveOnScreenTextTimeline ? {
-      enabled: effectiveOnScreenTextTimeline.settings?.enabled !== false && effectiveOnScreenTextTimeline.settings?.showTrack !== false && effectiveOnScreenTextTimeline.segments.length > 0,
-      settings: effectiveOnScreenTextTimeline.settings,
-      segments: effectiveOnScreenTextTimeline.segments,
+    onScreenTextTimeline: sanitizedOnScreenTextTimeline ? {
+      enabled: sanitizedOnScreenTextTimeline.settings?.enabled !== false && sanitizedOnScreenTextTimeline.settings?.showTrack !== false && sanitizedOnScreenTextTimeline.segments.length > 0,
+      settings: sanitizedOnScreenTextTimeline.settings,
+      segments: sanitizedOnScreenTextTimeline.segments,
+      hiddenRowIds: sanitizedOnScreenTextTimeline.hiddenRowIds,
       suppressFallbackFromEntries: effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true
     } : null,
     onScreenTextRenderedSegments: [],

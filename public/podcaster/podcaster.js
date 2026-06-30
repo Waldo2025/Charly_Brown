@@ -4411,6 +4411,10 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const includeHidden = options?.includeHidden === true;
   const clipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
   const clips = Object.values(clipMap || {});
+  const hiddenRowIds = clips
+    .filter((clip) => clip?.hidden === true)
+    .map((clip) => String(clip?.rowId || "").trim())
+    .filter(Boolean);
   const geminiByRowId = new Map(
     (Array.isArray(geminiTrack.segments) ? geminiTrack.segments : [])
       .map((segment) => [String(segment?.rowId || "").trim(), segment])
@@ -4425,7 +4429,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   });
   const suppressFallbackFromEntries = allHidden || !trackVisible;
   if ((!settings.enabled || settings.showTrack === false) && !includeHidden) {
-    return { settings, segments: [], suppressFallbackFromEntries };
+    return { settings, segments: [], suppressFallbackFromEntries, hiddenRowIds };
   }
   const layoutMap = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
   const runtimeByRowId = new Map((Array.isArray(runtimeEntries) ? runtimeEntries : []).map((entry) => [String(entry?.rowId || "").trim(), entry]));
@@ -4489,7 +4493,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
       layout: expandedLayout
     };
   }).filter(Boolean);
-  return { settings, segments, suppressFallbackFromEntries };
+  return { settings, segments, suppressFallbackFromEntries, hiddenRowIds };
 }
 
 function buildDefaultOnScreenTextClipsByRowId(session = null) {
@@ -14567,12 +14571,12 @@ function renderPodcastVideoShell(session = null) {
   if (els.podcastVideoShell) {
     els.podcastVideoShell.style.setProperty("--pod-studio-inspector-width", `${PodcasterResize.podcastStudioInspectorWidth}px`);
   }
-  ensureTimelineClipsByRowId(activeSession, { persist: !podcastVideoState.montageActive });
-  ensureOnScreenTextClipsByRowId(activeSession, { persist: !podcastVideoState.montageActive });
-  ensureOnScreenTextLayoutByRowId(activeSession, { persist: !podcastVideoState.montageActive });
-  // Normaliza una sola vez por sesión: duración fija (7s) y centrado respecto a la escena.
-  // Se guarda en config usando `timelineOnScreenTextDefaultsVersion`.
-  normalizeOnScreenTextClipsToSevenSecondsCentered(activeSession, { persist: !podcastVideoState.montageActive });
+  // El shell se renderiza con mucha frecuencia; aquí solo se hidrata en memoria para no
+  // disparar escrituras/re-normalizaciones pesadas mientras el usuario navega o inspecciona.
+  ensureTimelineClipsByRowId(activeSession, { persist: false });
+  ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
+  ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
+  normalizeOnScreenTextClipsToSevenSecondsCentered(activeSession, { persist: false });
   const cfg = getPodcastVideoConfig(activeSession);
   const audioOnlyPodcastMode = isAudioOnlyPodcastStudioMode(activeSession);
   const composerIsVideoMode = isCurrentModeVideo(activeSession);
@@ -15493,7 +15497,6 @@ function render() {
     el.textContent = sessionTitle;
   });
   syncCustomTooltips(document);
-  syncPodcastStudioInspector(session);
   setComposerGenerationMode(composerGenerationMode);
   setComposerVideoTableMode(composerVideoTableMode);
   document.querySelectorAll("[id^='sessionPublishToggle']").forEach(el => {
