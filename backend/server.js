@@ -3938,7 +3938,8 @@ function sanitizePodcasterSession(raw = {}) {
 
 async function verifyFirebaseBearer(req) {
   const authHeader = String(req.headers.authorization || "");
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const tokenMatch = authHeader.match(/^\s*Bearer\s+(.+)$/i);
+  const token = tokenMatch ? String(tokenMatch[1] || "").trim() : "";
   if (!token) {
     const err = new Error("AUTH_REQUIRED");
     err.status = 401;
@@ -3956,6 +3957,7 @@ async function verifyFirebaseBearer(req) {
   } catch (_) {
     const err = new Error("AUTH_INVALID");
     err.status = 401;
+    err.authErrorCode = String(_?.code || _?.message || "UNKNOWN_AUTH_ERROR").trim();
     throw err;
   }
 }
@@ -6655,6 +6657,23 @@ app.use("/api/podcaster", async (req, res, next) => {
     req.authContext = await verifyFirebaseBearer(req);
     return next();
   } catch (error) {
+    const authHeader = String(req.headers.authorization || "").trim();
+    const hasBearer = /^\s*bearer\s+/i.test(authHeader);
+    console.warn("[AUTH] podcaster middleware rejected request", {
+      method: req.method,
+      path: req.path,
+      originalUrl: req.originalUrl,
+      ip: req.ip,
+      origin: req.get("origin") || "",
+      userAgent: req.get("user-agent") || "",
+      hasAuthHeader: Boolean(req.headers.authorization),
+      hasBearerPrefix: hasBearer,
+      authTokenLength: authHeader ? Math.max(0, authHeader.length - (hasBearer ? 7 : 0)) : 0,
+      projectId: String(admin.app?.()?.options?.projectId || process.env.FIREBASE_PROJECT_ID || process.env.PROJECT_ID || "unknown"),
+      authError: String(error?.message || "AUTH_REQUIRED"),
+      authErrorCode: String(error?.authErrorCode || error?.code || "UNKNOWN"),
+      authErrorStatus: Number(error?.status || 401)
+    });
     return res.status(Number(error?.status || 401)).json({ error: String(error?.message || "AUTH_REQUIRED") });
   }
 });
@@ -9526,6 +9545,14 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
   if (!ensureGeminiKey(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) {
+      console.warn("[DialogueAudio] Missing authContext.uid on authenticated middleware path", {
+        method: req.method,
+        path: req.originalUrl,
+        sessionId: String(req.body?.sessionId || "").trim()
+      });
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
     const sessionId = clampText(req.body?.sessionId || "", 140);
     const rowId = clampText(req.body?.rowId || "", 120);
     const speakerLabel = clampText(req.body?.speakerLabel || "", 80);
@@ -9547,7 +9574,7 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const model = normalizeModel(req.body?.model || "gemini-3.1-flash-tts-preview");
 
-    console.log(`[DialogueAudio] Generating for session ${sessionId}, row ${rowId}, regenerate: ${regenerate}, previous: ${!!previousStoragePath}`);
+    console.log(`[DialogueAudio] Generating for session ${sessionId}, row ${rowId}, regenerate: ${regenerate}, uid: ${uid.slice(0, 8)}..., previous: ${!!previousStoragePath}`);
 
     if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
     if (!rowId) return res.status(400).json({ error: "Falta rowId." });
