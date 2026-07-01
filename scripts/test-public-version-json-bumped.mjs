@@ -12,6 +12,11 @@ const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes 
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
   (
+    String(changelog[0] || "").includes("audio Gemini inline")
+    && String(changelog[0] || "").includes("localMediaCacheKey")
+    && String(changelog[0] || "").includes("storagePath/downloadUrl")
+    && String(changelog[0] || "").includes("dataUrl/localDataUrl")
+  ) || (
     String(changelog[0] || "").includes("publicSceneVideoStoragePath")
     && String(changelog[0] || "").includes("publicSceneStoragePath")
     && String(changelog[0] || "").includes("downloadUrl")
@@ -41,7 +46,7 @@ assert.ok(
     && String(changelog[0] || "").includes("body en modo booting")
     && String(changelog[0] || "").includes("spinner")
   ),
-  "La nota más reciente debe reflejar la persistencia/rehidratación de publicSceneVideoStoragePath, la deduplicación por storagePath, el bypass por SDK, el fix de tokens vencidos de Firebase Storage o el splash screen inicial de Podcaster."
+  "La nota más reciente debe reflejar la conservación del audio Gemini inline, la persistencia/rehidratación de publicSceneVideoStoragePath, la deduplicación por storagePath, el bypass por SDK, el fix de tokens vencidos de Firebase Storage o el splash screen inicial de Podcaster."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("same-origin")

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.375",
-  "build": "2026-1.0.10.375",
+  "version": "1.0.10.376",
+  "build": "2026-1.0.10.376",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: export v2 conserva el audio Gemini inline cuando la pista trae localMediaCacheKey aunque también tenga storagePath/downloadUrl; así no se pierde el clip si Storage responde 404/403 y el backend puede mezclar desde dataUrl/localDataUrl.",
     "Corregido: Podcaster corta de forma explícita el path de backend para carga de media cuando proviene de Firebase (storage/sdk), evitando llamadas nuevas a `proxy-media` y dejando 404/403 solo si el asset no existe realmente en Storage; además, export no vuelve a reintentar por backend.",
     "Corregido: al abrir una sesión, Podcaster evita reintentar inmediatamente `getDownloadURL` sobre la misma referencia rota de Firebase y fuerza `storageLookupFailedAt` con timestamp real (antes quedaba vacío), lo que corta el loop de 403/404 de escenas públicas o clips con token vencido/asset inexistente.",
     "Corregido: al resolver escenas públicas y clips de `resolveSceneShareableVideoUrl`, no se reutilizan URLs tokenizadas de Firebase para `podcaster/library` o `podcaster/sessions` si no hay una fuente segura por `storagePath`; se limpian rutas `downloadUrl` vencidas antes de reintentar reproducción para evitar 403/404 repetitivos al abrir la sesión.",
@@ -344,5 +345,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.375"
+  "cache_version": "2026-1.0.10.376"
 }

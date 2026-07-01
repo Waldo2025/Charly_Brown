@@ -326,6 +326,51 @@ test("montage export preserves dataUrl when audio only has local cache keys", ()
   assert.equal(stripped.audioTimeline.backgroundSegments[0].localDataUrl, "data:audio/mpeg;base64,FFFF");
 });
 
+test("montage export preserves inline audio when storagePath coexists with local cache key", () => {
+  const payload = {
+    dialogueAudioMap: {
+      "row-1": {
+        storagePath: "podcaster/sessions/session-1/audio/row-1.wav",
+        downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media&token=abc",
+        localMediaCacheKey: "podcaster-local-media:session-1:row-1:audio",
+        dataUrl: "data:audio/wav;base64,AAAA",
+        localDataUrl: "data:audio/wav;base64,BBBB"
+      }
+    },
+    audioTimeline: {
+      geminiSegments: [
+        {
+          rowId: "row-1",
+          storagePath: "podcaster/sessions/session-1/audio/row-1.wav",
+          downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media&token=abc",
+          localMediaCacheKey: "podcaster-local-media:session-1:row-1:audio",
+          dataUrl: "data:audio/wav;base64,CCCC",
+          localDataUrl: "data:audio/wav;base64,DDDD"
+        }
+      ],
+      backgroundSegments: [
+        {
+          id: "bg-1",
+          storagePath: "podcaster/library/music/track.mp3",
+          downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/track.mp3?alt=media&token=abc",
+          localMediaCacheKey: "podcaster-local-media:session-1:bg-1:audio",
+          dataUrl: "data:audio/mpeg;base64,EEEE",
+          localDataUrl: "data:audio/mpeg;base64,FFFF"
+        }
+      ]
+    }
+  };
+
+  const stripped = context.stripMontageExportSubmissionPayload(payload);
+
+  assert.equal(stripped.dialogueAudioMap["row-1"].dataUrl, "data:audio/wav;base64,AAAA");
+  assert.equal(stripped.dialogueAudioMap["row-1"].localDataUrl, "data:audio/wav;base64,BBBB");
+  assert.equal(stripped.audioTimeline.geminiSegments[0].dataUrl, "data:audio/wav;base64,CCCC");
+  assert.equal(stripped.audioTimeline.geminiSegments[0].localDataUrl, "data:audio/wav;base64,DDDD");
+  assert.equal(stripped.audioTimeline.backgroundSegments[0].dataUrl, "data:audio/mpeg;base64,EEEE");
+  assert.equal(stripped.audioTimeline.backgroundSegments[0].localDataUrl, "data:audio/mpeg;base64,FFFF");
+});
+
 test("montage export normalizes relative proxy-media urls for backend submission", () => {
   const payload = {
     backgroundMusic: {

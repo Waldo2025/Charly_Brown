@@ -4802,12 +4802,21 @@ function stripInlineMontageMediaRecord(record = null) {
   const clean = { ...record };
   clean.url = normalizeMontageSubmissionMediaUrl(clean.url);
   clean.downloadUrl = normalizeMontageSubmissionMediaUrl(clean.downloadUrl);
+  const mimeType = String(clean.mimeType || "").trim().toLowerCase();
+  const kind = String(clean.kind || clean.mediaKind || "").trim().toLowerCase();
+  const isAudioLike = mimeType.startsWith("audio/")
+    || kind === "audio"
+    || kind === "timeline-audio"
+    || kind === "background-track"
+    || kind === "background"
+    || kind === "music";
+  const keepInlineAudio = isAudioLike && Boolean(String(clean.localMediaCacheKey || "").trim());
   const hasDurableSource = Boolean(
     String(clean.storagePath || "").trim()
     || isBackendResolvableMontageMediaSource(clean.downloadUrl)
     || isBackendResolvableMontageMediaSource(clean.url)
   );
-  if (hasDurableSource) {
+  if (hasDurableSource && !keepInlineAudio) {
     clean.dataUrl = "";
     clean.localDataUrl = "";
   }
