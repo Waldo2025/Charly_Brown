@@ -3,6 +3,10 @@
   "build": "2026-1.0.10.341",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: proxy-media ya no recibe storagePath con prefijo gs:// desde Podcaster; el cliente limpia la ruta a object path para evitar 404 al reproducir videos guardados.",
+    "Corregido: El arranque de Podcaster vuelve a listar solo metadatos/stubs de sesiones desde snoopy-export y deja la descarga completa para la sesión activa, reduciendo el tiempo de carga inicial.",
+    "Corregido: podcaster-chat-assistant.js carga antes de podcaster.js para evitar el error inicial PodcasterChatAssistant no está disponible durante renderChat.",
+    "Corregido: Podcaster lista sesiones desde Firestore directo para evitar dobles 401 de sessions/list en snoopy-export, y proxy-media/proxy-image vuelven a resolverse contra snoopy-export en vez de Gemini.",
     "Mejorado: Los cache-busters del frontend se controlan en runtime desde version.json mediante cache-version-loader.js; las paginas publicas migradas declaran assets con data-cache-src/data-cache-href y los imports internos locales dejan de fijar versiones antiguas.",
     "Mejorado: El botón Descargar MP4 del modal de export de montajes ahora guarda y muestra historial de exportaciones en un select (más reciente arriba), con marcador de más reciente.",
     "Corregido: El export de MP4 de Podcaster ya no renderiza texto en pantalla oculto por escena y respeta la tipografía seleccionada en sesión. Se incrementa podcaster-montage-export.js a la v2026-06-30.1 (estable).",

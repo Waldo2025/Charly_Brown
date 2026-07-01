@@ -56,12 +56,15 @@ const context = {
 
 vm.createContext(context);
 vm.runInContext([
+  "const DEFAULT_EXPORT_API_BASE = \"https://snoopy-export.onrender.com/api\";",
   extractFunction("getConfiguredApiBase"),
   extractFunction("getRemoteApiBase"),
+  extractFunction("getExportApiBase"),
   extractFunction("isLocalHostRuntime"),
   extractFunction("canUseSameOriginApi"),
   extractFunction("hasAvailableApiBase"),
   extractFunction("resolveApiBase"),
+  extractFunction("shouldUseExportApiPath"),
   extractFunction("buildApiUrl"),
   extractFunction("buildApiUrlFromBase"),
   extractFunction("buildApiUrlPreferRemote"),
@@ -70,11 +73,29 @@ vm.runInContext([
   extractFunction("buildVeoApiUrlPreferRemote")
 ].join("\n\n"), context);
 
-test("authenticated podcaster requests prefer the remote backend instead of the /api redirect", () => {
+test("montage export requests resolve to the dedicated export backend", () => {
   const resolved = context.buildApiUrlPreferRemote("/api/podcaster/montage/export");
   assert.equal(
     resolved,
-    "https://charly-brown-gemini-backend.onrender.com/api/podcaster/montage/export"
+    "https://snoopy-export.onrender.com/api/podcaster/montage/export"
+  );
+});
+
+test("proxy asset requests resolve to the dedicated export backend", () => {
+  assert.equal(
+    context.buildApiUrl("/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fscene.mp4"),
+    "https://snoopy-export.onrender.com/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fscene.mp4"
+  );
+  assert.equal(
+    context.buildApiUrlPreferRemote("/api/assets/proxy-image?storagePath=podcaster%2Flibrary%2Fthumb.jpg"),
+    "https://snoopy-export.onrender.com/api/assets/proxy-image?storagePath=podcaster%2Flibrary%2Fthumb.jpg"
+  );
+});
+
+test("podcaster session list resolves to the dedicated export backend", () => {
+  assert.equal(
+    context.buildApiUrl("/api/podcaster/sessions/list"),
+    "https://snoopy-export.onrender.com/api/podcaster/sessions/list"
   );
 });
 

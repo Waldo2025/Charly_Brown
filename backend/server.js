@@ -7163,10 +7163,17 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
     [...ownedSnap.docs, ...sharedSnap.docs].forEach((docSnap) => {
       const data = docSnap.data() || {};
       const sessionData = data.session && typeof data.session === "object" ? data.session : null;
-      if (!sessionData) return;
+      const sessionUpdatedAt = data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || null;
       merged.set(docSnap.id, {
-        ...sessionData,
+        id: docSnap.id,
+        title: data.title || sessionData?.title || "Sin título",
+        updatedAt: sessionUpdatedAt,
+        archived: data.archived === true,
         publicar: data.publicar === true,
+        isStub: true,
+        script: {
+          rows: []
+        },
         cloudMeta: {
           ownerId: String(data.ownerId || "").trim() || null,
           savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null

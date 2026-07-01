@@ -63,9 +63,17 @@ for (const exposure of requiredExposures) {
   }
 }
 
-// 4. Ensure script tag is present in podcaster.html
-if (!/<script type="module" src="podcaster\/podcaster-chat-assistant\.js\?v=[\d\.-]+"><\/script>/.test(htmlSource)) {
-  throw new Error("podcaster.html no carga el nuevo script podcaster-chat-assistant.js como un módulo.");
+// 4. Ensure script tag is present before podcaster.js in podcaster.html
+const chatScriptIndex = htmlSource.indexOf('<script data-cache-src="podcaster/podcaster-chat-assistant.js" data-cache-type="module"></script>');
+const podcasterScriptIndex = htmlSource.indexOf('<script data-cache-src="podcaster/podcaster.js" data-cache-type="module"></script>');
+if (chatScriptIndex === -1) {
+  throw new Error("podcaster.html no carga podcaster-chat-assistant.js con cache-version-loader.");
+}
+if (podcasterScriptIndex === -1) {
+  throw new Error("podcaster.html no carga podcaster.js con cache-version-loader.");
+}
+if (chatScriptIndex > podcasterScriptIndex) {
+  throw new Error("podcaster-chat-assistant.js debe cargar antes de podcaster.js para exponer window.PodcasterChatAssistant durante init.");
 }
 
 console.log("Chat Assistant modularization regression checks OK.");

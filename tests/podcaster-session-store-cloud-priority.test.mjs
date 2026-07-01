@@ -231,3 +231,85 @@ test("loadSessionsFromCloud falls back to Firestore when the API returns 401", a
   assert.equal(result[0].title, "shared");
   assert.equal(result[1].title, "firestore");
 });
+
+test("loadSessionsFromCloud can prefer Firestore directly to avoid noisy session auth redirects", async () => {
+  let apiCalls = 0;
+  let getDocsCallCount = 0;
+
+  const result = await loadSessionsFromCloud("uid-1", {
+    preferDirectSessionFirestore: true,
+    hasAvailableApiBase: () => true,
+    authFetchJson: async () => {
+      apiCalls += 1;
+      return { sessions: [] };
+    },
+    storageAdapter: {
+      readJson(key) {
+        if (String(key).startsWith("cb_podcaster_sessions_v2:deleted:")) return [];
+        return [];
+      },
+      writeJson() {},
+      getItem() { return ""; },
+      setItem() {},
+      removeItem() {}
+    },
+    firestoreDb: {},
+    collection: () => ({}),
+    query: (...parts) => parts,
+    where: () => ({}),
+    limit: () => ({}),
+    getDocs: async () => ({
+      docs: (getDocsCallCount++ === 0 ? [{
+        id: "s1",
+        title: "firestore",
+        updatedAt: "2026-06-15T00:00:00.000Z"
+      }] : []).map((session) => ({
+        id: session.id,
+        data: () => ({
+          session,
+          ownerId: "uid-1",
+          updatedAt: { toDate: () => new Date(session.updatedAt) }
+        })
+      }))
+    }),
+    nowIso: () => "2026-06-15T01:00:00.000Z"
+  });
+
+  assert.equal(apiCalls, 0);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].title, "firestore");
+});
+
+test("loadSessionsFromCloud preserves lightweight API stubs for lazy active-session hydration", async () => {
+  let apiCalls = 0;
+  const result = await loadSessionsFromCloud("uid-1", {
+    hasAvailableApiBase: () => true,
+    authFetchJson: async () => {
+      apiCalls += 1;
+      return {
+        sessions: [{
+          id: "s1",
+          title: "Solo metadata",
+          updatedAt: "2026-06-15T00:00:00.000Z",
+          isStub: true,
+          script: { rows: [] }
+        }]
+      };
+    },
+    storageAdapter: {
+      readJson(key) {
+        if (String(key).startsWith("cb_podcaster_sessions_v2:deleted:")) return [];
+        return [];
+      },
+      writeJson() {},
+      getItem() { return ""; },
+      setItem() {},
+      removeItem() {}
+    }
+  });
+
+  assert.equal(apiCalls, 1);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].isStub, true);
+  assert.deepEqual(result[0].script.rows, []);
+});

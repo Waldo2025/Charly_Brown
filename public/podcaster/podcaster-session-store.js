@@ -335,6 +335,10 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
 
 async function loadSessionsFromCloud(uid = "", deps = {}) {
   const deletedSessionIds = new Set(loadDeletedSessionIds(uid, deps, deps.storageAdapter));
+  if (deps.preferDirectSessionFirestore === true) {
+    const directSessions = await loadCloudSessionsDirect(uid, deps).catch(() => []);
+    return directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
+  }
   if (deps.hasAvailableApiBase?.()) {
     try {
       const response = await deps.authFetchJson("/api/podcaster/sessions/list", {
