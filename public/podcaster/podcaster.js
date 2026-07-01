@@ -3792,6 +3792,7 @@ function normalizeDialogueVideoMap(raw = {}) {
   Object.entries(raw).forEach(([rowId, clip]) => {
     const key = String(rowId || "").trim();
     if (!key || !clip || typeof clip !== "object") return;
+    const localMediaCacheKey = String(clip.localMediaCacheKey || "").trim();
     const mediaRef = normalizeMediaReferenceFromRecord(
       clip,
       mediaSourceKeys,
@@ -3800,11 +3801,12 @@ function normalizeDialogueVideoMap(raw = {}) {
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
     const storagePath = String(mediaRef.storagePath || "").trim();
     const dataUrl = String(clip.dataUrl || clip.localDataUrl || "").trim();
-    if (!storagePath && !downloadUrl && !dataUrl) return;
+    if (!storagePath && !downloadUrl && !dataUrl && !localMediaCacheKey) return;
     const rawSegments = Array.isArray(clip.segments) ? clip.segments : [];
     const segments = rawSegments
       .map((segment, idx) => {
         if (!segment || typeof segment !== "object") return null;
+        const segmentLocalMediaCacheKey = String(segment.localMediaCacheKey || localMediaCacheKey || "").trim();
         const segmentRef = normalizeMediaReferenceFromRecord(
           segment,
           mediaSourceKeys,
@@ -3812,7 +3814,7 @@ function normalizeDialogueVideoMap(raw = {}) {
         );
         const segUrl = String(segmentRef.downloadUrl || "").trim();
         const segPath = String(segmentRef.storagePath || "").trim();
-        if (!segPath && !segUrl) return null;
+        if (!segPath && !segUrl && !segmentLocalMediaCacheKey) return null;
         const segMimeType = String(segment.mimeType || "").trim().toLowerCase();
         const segType = String(segment.type || segment.mediaKind || "").trim().toLowerCase();
         return {
@@ -3821,6 +3823,7 @@ function normalizeDialogueVideoMap(raw = {}) {
           durationSec: Math.max(0, Number(segment.durationSec) || 0),
           downloadUrl: segUrl,
           storagePath: segPath,
+          localMediaCacheKey: segmentLocalMediaCacheKey,
           mimeType: segMimeType || (segType === "image" ? "image/jpeg" : "video/mp4"),
           variant: String(segment.variant || "").trim(),
           targetSpeechLine: String(segment.targetSpeechLine || "").trim()
@@ -3856,7 +3859,8 @@ function normalizeDialogueVideoMap(raw = {}) {
       segments,
       updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
       downloadUrl,
-      storagePath
+      storagePath,
+      localMediaCacheKey
     };
   });
   return next;
@@ -3999,10 +4003,12 @@ function hasStoredMediaSource(asset = null) {
     ["downloadUrl", "videoDownloadUrl", "videoUrl", "audioSrc", "url", "dataUrl", "localDataUrl"],
     ["storagePath", "videoStoragePath", "audioStoragePath", "path"]
   );
+  const localMediaCacheKey = String(asset?.localMediaCacheKey || "").trim();
   return Boolean(
     String(normalized.downloadUrl || "").trim()
     || String(normalized.storagePath || "").trim()
     || String(asset?.dataUrl || asset?.localDataUrl || "").trim()
+    || localMediaCacheKey
   );
 }
 
@@ -6603,10 +6609,19 @@ function getOrderedTimelineStartMarkers(entries = []) {
 function resolveDialogueVideoForRow(session = null, rowId = "") {
   const key = String(rowId || "").trim();
   if (!key) return null;
-  const existing = getDialogueVideoMap(session)[key] || null;
-  if (existing) return existing;
   const rows = getSessionRows(session);
   const row = rows.find((item) => String(item?.id || "").trim() === key) || null;
+  const existing = getDialogueVideoMap(session)[key] || null;
+  if (existing) {
+    const localMediaCacheKey = String(existing.localMediaCacheKey || row?.localMediaCacheKey || row?.video?.localMediaCacheKey || "").trim();
+    if (localMediaCacheKey && localMediaCacheKey !== String(existing.localMediaCacheKey || "").trim()) {
+      return {
+        ...existing,
+        localMediaCacheKey
+      };
+    }
+    return existing;
+  }
   if (!row || typeof row !== "object") return null;
   const mediaRef = normalizeMediaReferenceFromRecord(
     row,
@@ -6636,10 +6651,11 @@ function resolveDialogueVideoForRow(session = null, rowId = "") {
       "path"
     ]
   );
+  const localMediaCacheKey = String(row?.localMediaCacheKey || row?.video?.localMediaCacheKey || "").trim();
   const downloadUrl = String(mediaRef.downloadUrl || "").trim();
   const storagePath = String(mediaRef.storagePath || "").trim();
   const dataUrl = String(row?.dataUrl || row?.localDataUrl || row?.video?.dataUrl || row?.video?.localDataUrl || "").trim();
-  if (!downloadUrl && !storagePath && !dataUrl) return null;
+  if (!downloadUrl && !storagePath && !dataUrl && !localMediaCacheKey) return null;
   const mimeType = String(row?.mimeType || row?.publicSceneMimeType || "").trim().toLowerCase();
   const type = String(row?.type || row?.mediaKind || "").trim().toLowerCase()
     || (mimeType.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|avif)(?:\?|$)/i.test(downloadUrl) ? "image" : "video");
@@ -6659,6 +6675,7 @@ function resolveDialogueVideoForRow(session = null, rowId = "") {
     publicSceneVideoUrl: String(row?.publicSceneVideoUrl || row?.downloadUrl || "").trim(),
     dataUrl,
     localDataUrl: dataUrl,
+    localMediaCacheKey,
     videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
     scenePrompt: String(row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
     imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
@@ -6674,16 +6691,23 @@ function resolveDialogueVideoForRow(session = null, rowId = "") {
 function resolveDialogueVideoSegments(clip = null) {
   if (!clip || typeof clip !== "object") return [];
   const fromMap = Array.isArray(clip.segments) ? clip.segments.filter(Boolean) : [];
-  if (fromMap.length) return fromMap;
+  if (fromMap.length) {
+    return fromMap.map((segment) => ({
+      ...segment,
+      localMediaCacheKey: String(segment?.localMediaCacheKey || clip?.localMediaCacheKey || "").trim()
+    }));
+  }
   const downloadUrl = String(clip.downloadUrl || "").trim();
   const storagePath = String(clip.storagePath || "").trim();
-  if (!downloadUrl && !storagePath) return [];
+  const localMediaCacheKey = String(clip.localMediaCacheKey || "").trim();
+  if (!downloadUrl && !storagePath && !localMediaCacheKey) return [];
   return [{
     id: `${String(clip.rowId || "row").trim()}-seg-1`,
     index: 0,
     durationSec: Math.max(0, Number(clip.durationSec) || 0),
     downloadUrl,
     storagePath,
+    localMediaCacheKey,
     mimeType: String(clip.mimeType || "video/mp4").trim() || "video/mp4",
     variant: String(clip.variant || "").trim(),
     targetSpeechLine: String(clip.targetSpeechLine || "").trim()
@@ -6915,6 +6939,7 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
     let nextRecord = record;
     const rowId = String(context?.rowId || record?.rowId || "").trim();
     const mediaKind = String(context?.mediaKind || "").trim().toLowerCase();
+    const localMediaCacheKey = String(record?.localMediaCacheKey || "").trim();
     const priorLookupFailedAt = String(record.storageLookupFailedAt || "").trim();
     const priorLookupFailedAtMs = Date.parse(priorLookupFailedAt);
     const hasRecentLookupFailure = Number.isFinite(priorLookupFailedAtMs) && Date.now() - priorLookupFailedAtMs < 5 * 60 * 1000;
@@ -6940,7 +6965,8 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
     const hasPublicSceneDownloadToken = hasPublicSceneFields && hasFirebaseDownloadToken(normalizedDownloadUrl);
     const hasTokenizedFirebaseUrl = hasFirebaseUrl && hasFirebaseDownloadToken(normalizedDownloadUrl);
     const isPublicSceneTokenedUrl = hasPublicSceneDownloadToken && !normalizedStoragePath;
-    const shouldResolveDirectUrl = Boolean(
+    const shouldPreferLocalVideoCache = mediaKind === "video" && Boolean(localMediaCacheKey);
+    const shouldResolveDirectUrlBase = Boolean(
       normalizedStoragePath
       && (
         !normalizedDownloadUrl
@@ -6950,7 +6976,10 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
         || hasPublicSceneFields
         || shouldForceLibraryRefresh
       )
-    ) || (hasPublicSceneFields && hasPublicSceneDownloadToken) || hasTokenizedFirebaseUrl;
+      || (hasPublicSceneFields && hasPublicSceneDownloadToken)
+      || hasTokenizedFirebaseUrl
+    );
+    const shouldResolveDirectUrl = shouldResolveDirectUrlBase && !shouldPreferLocalVideoCache;
     if (hasRecentLookupFailure && shouldResolveDirectUrl && !hasTokenizedFirebaseUrl) {
       return nextRecord;
     }
@@ -7104,6 +7133,7 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
       "storagePath",
       "videoStoragePath",
       "path",
+      "localMediaCacheKey",
       "publicSceneVideoUrl",
       "publicSceneVideoStoragePath",
       "publicSceneThumbStoragePath"
@@ -7120,6 +7150,12 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
       });
       const nextRowMediaUrl = String(hydratedRowMedia?.downloadUrl || "").trim();
       const nextRowStoragePath = String(hydratedRowMedia?.storagePath || "").trim();
+      const nextLocalMediaCacheKey = String(
+        hydratedRowMedia?.localMediaCacheKey
+        || row?.localMediaCacheKey
+        || clip?.localMediaCacheKey
+        || ""
+      ).trim();
       const hasStoredRowMedia = rowMediaValueKeys.some((keyName) => String(row?.[keyName] || "").trim());
       const shouldSyncRowMedia = Boolean(
         hasStoredRowMedia
@@ -7170,27 +7206,29 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
         if (
           nextDownloadUrl !== String(nextRow?.downloadUrl || "").trim()
           || nextStoragePath !== String(nextRow?.storagePath || "").trim()
+          || nextLocalMediaCacheKey !== String(nextRow?.localMediaCacheKey || "").trim()
         ) {
           nextRow = {
             ...nextRow,
             downloadUrl: nextDownloadUrl,
-            storagePath: nextStoragePath
+            storagePath: nextStoragePath,
+            localMediaCacheKey: nextLocalMediaCacheKey
           };
         }
         if (shouldSyncPublicSceneRow) {
-        return {
+          return {
           ...nextRow,
           publicSceneVideoUrl: nextPublicSceneVideoUrl,
           publicSceneVideoStoragePath: nextPublicSceneStoragePath,
           publicSceneStoragePath: nextPublicSceneStoragePath
         };
-      }
+        }
         return nextRow;
       })();
       if (nextRow !== row) {
         rowsChanged = true;
         nextRows.push(nextRow);
-        return;
+        continue;
       }
       if (
         nextPublicSceneVideoUrl === String(row?.publicSceneVideoUrl || "").trim()

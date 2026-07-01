@@ -38,6 +38,19 @@ assert.ok(
 );
 
 assert.ok(
+  source.includes("const localMediaCacheKey = String(clip.localMediaCacheKey || \"\").trim();")
+    && source.includes("localMediaCacheKey")
+    && source.includes("if (!storagePath && !downloadUrl && !dataUrl && !localMediaCacheKey) return;"),
+  "El mapa de videos debe conservar localMediaCacheKey para que las escenas con caché local no dependan solo de Storage remoto."
+);
+
+assert.ok(
+  source.includes("const shouldPreferLocalVideoCache = mediaKind === \"video\" && Boolean(localMediaCacheKey);")
+    && source.includes("&& !shouldPreferLocalVideoCache;"),
+  "hydrateSessionDirectStorageMediaUrls debe evitar reintentar getDownloadURL cuando el clip de video ya tiene caché local disponible."
+);
+
+assert.ok(
   source.includes("publicSceneVideoStoragePath")
     && source.includes("publicSceneStoragePath")
     && source.includes("activeSession.script.rows = nextRows;"),

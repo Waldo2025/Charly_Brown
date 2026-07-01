@@ -3517,7 +3517,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     const clip = resolveVideo?.(activeSession, key);
     const firstSegment = resolvePrimarySeg?.(clip, { sessionId, rowId: key });
     const staleBaseClip = isStaleSource?.(sessionId, key, clip);
-    const src = resolveUrl?.(
+    const localMediaCacheKey = String(firstSegment?.localMediaCacheKey || clip?.localMediaCacheKey || "").trim();
+    const localVideoSrc = localMediaCacheKey ? await this.resolveLocalMediaObjectUrl(localMediaCacheKey) : "";
+    const remoteSrc = resolveUrl?.(
       firstSegment?.downloadUrl || (staleBaseClip ? "" : (clip?.downloadUrl || "")),
       firstSegment?.storagePath || (staleBaseClip ? "" : (clip?.storagePath || "")),
       {
@@ -3525,7 +3527,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         type: firstSegment?.type || clip?.type || "",
         mimeType: firstSegment?.mimeType || clip?.mimeType || ""
       }
-    );
+    ) || "";
+    const src = localVideoSrc || remoteSrc;
 
     const ensureClips = this.deps?.ensureTimelineClipsByRowId || window.ensureTimelineClipsByRowId;
     const clipMap = ensureClips?.(activeSession, { persist: false }) || {};
@@ -3538,6 +3541,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       String(src || "").trim(),
       String(firstSegment?.storagePath || clip?.storagePath || "").trim(),
       String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
+      String(firstSegment?.localMediaCacheKey || clip?.localMediaCacheKey || "").trim(),
       String(firstSegment?.type || clip?.type || "").trim().toLowerCase(),
       String(clipCfg?.backgroundColor || "").trim(),
       String(clipCfg?.visualLayoutMode || "").trim().toLowerCase(),
