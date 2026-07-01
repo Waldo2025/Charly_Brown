@@ -9,11 +9,11 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
   function buildMediaProxyUrl(path = "") {
     const clean = String(path || "").trim();
     if (!clean) return "";
-    if (typeof deps.buildApiUrl === "function") {
-      return deps.buildApiUrl(clean);
-    }
     if (typeof deps.buildApiUrlPreferRemote === "function") {
       return deps.buildApiUrlPreferRemote(clean);
+    }
+    if (typeof deps.buildApiUrl === "function") {
+      return deps.buildApiUrl(clean);
     }
     return clean;
   }
@@ -75,17 +75,6 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     if (!clean) return null;
     try {
       const parsed = new URL(clean, window.location.origin);
-      let storageUrlPathname = String(parsed.pathname || "").trim();
-      try {
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          if (!/%(?:2[fF]|25)/.test(storageUrlPathname)) break;
-          const decoded = decodeURIComponent(storageUrlPathname);
-          if (decoded === storageUrlPathname) break;
-          storageUrlPathname = decoded;
-        }
-      } catch (_) {
-        // keep original pathname if decode fails
-      }
       const host = String(parsed.hostname || "").toLowerCase();
       const isFirebaseStorageHost = (
         host === "firebasestorage.googleapis.com"
@@ -94,7 +83,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
       );
       if (!isFirebaseStorageHost) return null;
       if (host === "firebasestorage.googleapis.com") {
-        const match = String(storageUrlPathname).match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
+        const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
         if (!match) return null;
         const bucket = String(match[1] || "").trim();
         let objectPath = String(match[2] || "").trim();
@@ -113,8 +102,8 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
         const storagePath = parts.join("/").trim();
         return bucket && storagePath ? { bucket, storagePath } : null;
       }
-      const hostPath = String(parsed.pathname || "").replace(/^\/+/, "").trim();
-      return hostPath ? { bucket: host, storagePath: hostPath } : null;
+      const pathname = String(parsed.pathname || "").replace(/^\/+/, "").trim();
+      return pathname ? { bucket: host, storagePath: pathname } : null;
     } catch (_) {
       return null;
     }
@@ -146,31 +135,6 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     return String(parsed?.storagePath || "").trim();
   }
 
-  function normalizeStorageProxyPath(storagePath = "") {
-    const clean = String(storagePath || "").trim();
-    if (!clean) return "";
-    if (clean.startsWith("gs://")) {
-      const withoutScheme = clean.replace(/^gs:\/\//i, "");
-      const slashIndex = withoutScheme.indexOf("/");
-      return slashIndex >= 0 ? String(withoutScheme.slice(slashIndex + 1) || "").trim() : "";
-    }
-    const parsed = parseFirebaseStorageObjectUrl(clean);
-    if (parsed?.storagePath) {
-      return String(parsed.storagePath || "").trim();
-    }
-    try {
-      const proxyParsed = new URL(clean, window.location.origin);
-      const proxyPath = String(proxyParsed.pathname || "").toLowerCase();
-      if (proxyPath.includes("/api/assets/proxy-media") || proxyPath.includes("/api/assets/proxy-image")) {
-        const proxyStoragePath = String(proxyParsed.searchParams.get("storagePath") || "").trim();
-        if (proxyStoragePath) return normalizeStorageProxyPath(proxyStoragePath);
-      }
-    } catch (_) {
-      // noop
-    }
-    return clean;
-  }
-
   function normalizePersistedMediaReference(rawUrl = "", storagePath = "") {
     const cleanUrl = String(rawUrl || "").trim();
     const cleanStoragePath = deriveStoragePathFromMediaSource(cleanUrl, storagePath || "");
@@ -179,23 +143,6 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
         storagePath: cleanStoragePath,
         downloadUrl: ""
       };
-    }
-    try {
-      const parsedProxy = new URL(cleanUrl, window.location.origin);
-      const proxyPath = String(parsedProxy.pathname || "").toLowerCase();
-      if (proxyPath.includes("/api/assets/proxy-media") || proxyPath.includes("/api/assets/proxy-image")) {
-        const nestedUrl = String(parsedProxy.searchParams.get("url") || "").trim();
-        const proxyStoragePath = String(parsedProxy.searchParams.get("storagePath") || "").trim();
-        if (nestedUrl && nestedUrl !== cleanUrl) {
-          return normalizePersistedMediaReference(nestedUrl, cleanStoragePath || proxyStoragePath || "");
-        }
-        return {
-          storagePath: cleanStoragePath,
-          downloadUrl: ""
-        };
-      }
-    } catch (_) {
-      // noop
     }
     if (!cleanUrl && !cleanStoragePath) {
       return { downloadUrl: "", storagePath: "" };
@@ -246,61 +193,40 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     };
   }
 
-function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media", options = {}) {
+  function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media", options = {}) {
     const clean = String(rawUrl || "").trim();
     const cleanStoragePath = String(storagePath || "").trim();
-    const proxyStoragePath = normalizeStorageProxyPath(cleanStoragePath);
-  const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
-  const timestamp = options.updatedAt || options.timestamp || "";
-  const noRange = options.noRange === true;
-  if (clean) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-        const proxyPathname = String(parsed.pathname || "").toLowerCase();
-        const isTokenizedFirebase = /[?&]token=/.test(parsed.search || "");
-        const isFirebaseStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || "").toLowerCase());
-        if (proxyPathname.includes("/api/assets/proxy-image") || proxyPathname.includes("/api/assets/proxy-media")) {
-          const nestedStoragePath = normalizeStorageProxyPath(String(parsed.searchParams.get("storagePath") || "").trim() || proxyStoragePath);
-          const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
-          const nestedTimestamp = timestamp || String(parsed.searchParams.get("u") || "").trim();
-          if (nestedUrl && nestedUrl !== clean) {
-            const resolvedNestedUrl = resolveStaleAwareProxyMediaUrl(nestedUrl, nestedStoragePath, kind, {
-              ...options,
-              timestamp: nestedTimestamp || undefined
-            });
-            if (resolvedNestedUrl && resolvedNestedUrl !== clean) {
-              return resolvedNestedUrl;
+    const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
+    const timestamp = options.updatedAt || options.timestamp || "";
+    const noRange = options.noRange === true;
+    if (clean) {
+      if (clean.includes("/api/assets/proxy-image") || clean.includes("/api/assets/proxy-media")) {
+        return clean;
+      }
+      try {
+        const parsed = new URL(clean, window.location.origin);
+        const host = String(parsed.hostname || "").toLowerCase();
+        const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+        if (isFirebaseStorageUrl) {
+          if (kind === "image") {
+            const hasToken = clean.includes("token=") || clean.includes("downloadToken=");
+            if (hasToken) {
+              let directUrl = clean;
+              if (timestamp && !directUrl.includes("u=")) {
+                const separator = directUrl.includes("?") ? "&" : "?";
+                directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+              }
+              return directUrl;
             }
           }
-          if (nestedStoragePath) {
-            let rebuiltProxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(nestedStoragePath)}${noRange ? "&noRange=1" : ""}`);
-            if (nestedTimestamp && rebuiltProxyUrl.includes("/api/assets/proxy-")) {
-              const separator = rebuiltProxyUrl.includes("?") ? "&" : "?";
-              rebuiltProxyUrl = `${rebuiltProxyUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(nestedTimestamp) || nestedTimestamp)}`;
-            }
-            return isMarkedStaleProxyMediaUrl(rebuiltProxyUrl) ? nestedUrl || clean : rebuiltProxyUrl;
-          }
-          return clean;
-          }
-          if (isFirebaseStorageUrl) {
-            if (isTokenizedFirebase) {
-              return "";
-            }
-            return clean;
         }
       } catch (_) {
         // keep proxy fallback for non-URL media refs
       }
     }
-    try {
-      const cleanParsed = clean ? new URL(clean, window.location.origin) : null;
-      if (/[?&]token=/.test(String(cleanParsed?.search || ""))) {
-        return "";
-      }
-    } catch (_) { }
     let finalUrl = "";
-    if (proxyStoragePath) {
-      const proxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(proxyStoragePath)}${noRange ? "&noRange=1" : ""}`);
+    if (cleanStoragePath) {
+      const proxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}${noRange ? "&noRange=1" : ""}`);
       finalUrl = isMarkedStaleProxyMediaUrl(proxyUrl) ? clean : proxyUrl;
     }
     if (!finalUrl && clean) {
@@ -322,11 +248,10 @@ function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "m
   function markStaleDialogueVideoSource(sessionId = "", rowId = "", source = null, reason = "stale-scene-video-storage-path") {
     const normalized = normalizePersistedMediaReference(source?.downloadUrl || "", source?.storagePath || "");
     const storagePath = String(normalized.storagePath || "").trim();
-    const storageProxyPath = normalizeStorageProxyPath(storagePath);
     const downloadUrl = String(source?.downloadUrl || "").trim();
     const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
     if (key) staleDialogueVideoSourceKeys.add(key);
-    const storageProxyUrl = storageProxyPath ? buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storageProxyPath)}`) : "";
+    const storageProxyUrl = storagePath ? buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`) : "";
     const downloadProxyUrl = downloadUrl ? deps.resolveStorageVideoUrl?.(downloadUrl, "") : "";
     [storageProxyUrl, downloadProxyUrl].filter(Boolean).forEach((url) => {
       markStaleProxyMediaUrl(url, reason, {
@@ -373,7 +298,6 @@ function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "m
     resolveStaleAwareProxyMediaUrl,
     parseFirebaseStorageObjectUrl,
     deriveStoragePathFromMediaSource,
-    normalizeStorageProxyPath,
     normalizePersistedMediaReference,
     normalizeMediaReferenceFromRecord,
     isLikelyImageMediaRecord,

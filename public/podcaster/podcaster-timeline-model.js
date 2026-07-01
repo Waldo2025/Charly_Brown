@@ -1504,23 +1504,12 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
       sessionId: String(activeSession?.id || "").trim(),
       rowId
     });
-    const localMediaCacheKey = String(
-      primarySegment?.localMediaCacheKey
-      || sceneClip?.localMediaCacheKey
-      || clip?.localMediaCacheKey
-      || ""
-    ).trim();
     const videoSrc = resolveStorageVideoUrl(
       primarySegment?.downloadUrl || sceneClip?.downloadUrl || "",
-      primarySegment?.storagePath || sceneClip?.storagePath || "",
-      {
-        localMediaCacheKey
-      }
+      primarySegment?.storagePath || sceneClip?.storagePath || ""
     );
     const audioClip = resolveDialogueAudioForRow(activeSession, rowId);
-    const audioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "", {
-      localMediaCacheKey: String(audioClip?.localMediaCacheKey || "").trim()
-    });
+    const audioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
     const audioDurationMs = resolveRowAudioDurationMs(rowId, activeSession);
     const speakerKey = String(row?.speaker || "").trim();
     const isImageClip = (() => {

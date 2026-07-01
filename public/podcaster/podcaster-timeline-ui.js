@@ -686,30 +686,20 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (!rowId) return "";
         const nextRowId = String(rows[index + 1]?.id || "").trim();
         const generatedClip = dialogueMap[rowId] || null;
-        const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip, {
-          sessionId: String(activeSession?.id || "").trim(),
-          rowId
-        });
-        const timelineClip = clipMap[rowId] || null;
-        const localMediaCacheKey = String(
-          primarySegment?.localMediaCacheKey
-          || generatedClip?.localMediaCacheKey
-          || timelineClip?.localMediaCacheKey
-          || ""
-        ).trim();
+        const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
         const videoSrc = resolveStorageVideoUrl(
           primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
           primarySegment?.storagePath || generatedClip?.storagePath || "",
           {
             updatedAt: generatedClip?.updatedAt || "",
             type: primarySegment?.type || generatedClip?.type || "",
-            mimeType: primarySegment?.mimeType || generatedClip?.mimeType || "",
-            localMediaCacheKey
+            mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
           }
         );
         const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);
         const portraitSrc = resolvePodcastPortraitUrl(portrait?.downloadUrl || "");
         const previewPosterSrc = portraitSrc || "SnoopyPodcastCreator.png";
+        const timelineClip = clipMap[rowId] || null;
         const runtimeEntry = runtimeEntryByRowId.get(rowId) || null;
         const isActive = rowId === String(podcastVideoState.activeRowId || "").trim();
         const isGenerating = isTimelineSceneVideoGenerating(activeSession, rowId);
@@ -838,17 +828,10 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const explicitStoredAudio = hasExplicitDialogueAudioForRow(activeSession, rowId);
         const sceneClip = dialogueMap[rowId] || null;
         if (isPublicLibrarySceneRow(row, sceneClip) && !explicitStoredAudio) return "";
-        const storedAudioLocalMediaCacheKey = String(audioClip?.localMediaCacheKey || "").trim();
-        const segmentLocalMediaCacheKey = String(segment?.localMediaCacheKey || "").trim();
-        const storedAudioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "", {
-          localMediaCacheKey: storedAudioLocalMediaCacheKey
-        });
+        const storedAudioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
         const segmentAudioSrc = resolveStorageAudioUrl(
           String(segment?.downloadUrl || segment?.audioSrc || segment?.url || "").trim(),
-          String(segment?.storagePath || "").trim(),
-          {
-            localMediaCacheKey: segmentLocalMediaCacheKey
-          }
+          String(segment?.storagePath || "").trim()
         );
         const hasStoredAudio = Boolean(storedAudioSrc || segmentAudioSrc);
         if (!hasStoredAudio) return "";
@@ -1052,24 +1035,14 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           <div class="podcast-video-track-lane" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}"${laneHeightAttr}>
             ${trackItems.map(({ row, rowId, index, timelineClip, clipLeftPx, clipWidthPx }) => {
               const generatedClip = dialogueMap[rowId] || null;
-              const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip, {
-                sessionId: String(activeSession?.id || "").trim(),
-                rowId
-              });
-              const localMediaCacheKey = String(
-                primarySegment?.localMediaCacheKey
-                || generatedClip?.localMediaCacheKey
-                || timelineClip?.localMediaCacheKey
-                || ""
-              ).trim();
+              const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
               const videoSrc = resolveStorageVideoUrl(
                 primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
                 primarySegment?.storagePath || generatedClip?.storagePath || "",
                 {
                   updatedAt: generatedClip?.updatedAt || "",
                   type: primarySegment?.type || generatedClip?.type || "",
-                  mimeType: primarySegment?.mimeType || generatedClip?.mimeType || "",
-                  localMediaCacheKey
+                  mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
                 }
               );
               const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);
