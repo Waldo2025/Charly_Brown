@@ -5752,7 +5752,13 @@ export function buildMontageExportPayload(session = null) {
           || runtime?.audioSrc
           || ""
         ).trim();
-        const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
+        const localAudioKey = String(
+          storedAudio?.localMediaCacheKey
+          || segment?.localMediaCacheKey
+          || runtime?.localMediaCacheKey
+          || ""
+        ).trim();
+        const effectiveSrc = src || (localAudioKey ? `podcaster-local-media:${localAudioKey}` : "");
         if (!effectiveSrc) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime);
@@ -5779,7 +5785,7 @@ export function buildMontageExportPayload(session = null) {
           downloadUrl: String(storedAudio?.downloadUrl || "").trim(),
           dataUrl: String(storedAudio?.dataUrl || storedAudio?.localDataUrl || "").trim(),
           localDataUrl: String(storedAudio?.localDataUrl || storedAudio?.dataUrl || "").trim(),
-          localMediaCacheKey: String(storedAudio?.localMediaCacheKey || "").trim(),
+          localMediaCacheKey: localAudioKey,
           mimeType: String(storedAudio?.mimeType || "").trim(),
           startMs,
           durationMs,

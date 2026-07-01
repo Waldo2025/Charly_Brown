@@ -690,19 +690,26 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           sessionId: String(activeSession?.id || "").trim(),
           rowId
         });
+        const timelineClip = clipMap[rowId] || null;
+        const localMediaCacheKey = String(
+          primarySegment?.localMediaCacheKey
+          || generatedClip?.localMediaCacheKey
+          || timelineClip?.localMediaCacheKey
+          || ""
+        ).trim();
         const videoSrc = resolveStorageVideoUrl(
           primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
           primarySegment?.storagePath || generatedClip?.storagePath || "",
           {
             updatedAt: generatedClip?.updatedAt || "",
             type: primarySegment?.type || generatedClip?.type || "",
-            mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
+            mimeType: primarySegment?.mimeType || generatedClip?.mimeType || "",
+            localMediaCacheKey
           }
         );
         const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);
         const portraitSrc = resolvePodcastPortraitUrl(portrait?.downloadUrl || "");
         const previewPosterSrc = portraitSrc || "SnoopyPodcastCreator.png";
-        const timelineClip = clipMap[rowId] || null;
         const runtimeEntry = runtimeEntryByRowId.get(rowId) || null;
         const isActive = rowId === String(podcastVideoState.activeRowId || "").trim();
         const isGenerating = isTimelineSceneVideoGenerating(activeSession, rowId);
@@ -831,10 +838,17 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const explicitStoredAudio = hasExplicitDialogueAudioForRow(activeSession, rowId);
         const sceneClip = dialogueMap[rowId] || null;
         if (isPublicLibrarySceneRow(row, sceneClip) && !explicitStoredAudio) return "";
-        const storedAudioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
+        const storedAudioLocalMediaCacheKey = String(audioClip?.localMediaCacheKey || "").trim();
+        const segmentLocalMediaCacheKey = String(segment?.localMediaCacheKey || "").trim();
+        const storedAudioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "", {
+          localMediaCacheKey: storedAudioLocalMediaCacheKey
+        });
         const segmentAudioSrc = resolveStorageAudioUrl(
           String(segment?.downloadUrl || segment?.audioSrc || segment?.url || "").trim(),
-          String(segment?.storagePath || "").trim()
+          String(segment?.storagePath || "").trim(),
+          {
+            localMediaCacheKey: segmentLocalMediaCacheKey
+          }
         );
         const hasStoredAudio = Boolean(storedAudioSrc || segmentAudioSrc);
         if (!hasStoredAudio) return "";
@@ -1042,13 +1056,20 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                 sessionId: String(activeSession?.id || "").trim(),
                 rowId
               });
+              const localMediaCacheKey = String(
+                primarySegment?.localMediaCacheKey
+                || generatedClip?.localMediaCacheKey
+                || timelineClip?.localMediaCacheKey
+                || ""
+              ).trim();
               const videoSrc = resolveStorageVideoUrl(
                 primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
                 primarySegment?.storagePath || generatedClip?.storagePath || "",
                 {
                   updatedAt: generatedClip?.updatedAt || "",
                   type: primarySegment?.type || generatedClip?.type || "",
-                  mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
+                  mimeType: primarySegment?.mimeType || generatedClip?.mimeType || "",
+                  localMediaCacheKey
                 }
               );
               const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);

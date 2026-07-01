@@ -5279,6 +5279,7 @@ function buildDefaultTimelineTracks(session = null) {
 function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
   if (!raw || typeof raw !== "object") return null;
   const rowId = String(raw.rowId || "").trim();
+  const localMediaCacheKey = String(raw.localMediaCacheKey || "").trim();
   const normalizedMedia = normalizePersistedMediaReference(
     String(raw.audioSrc || raw.url || raw.downloadUrl || "").trim(),
     String(raw.storagePath || "").trim()
@@ -5286,7 +5287,9 @@ function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
   const downloadUrl = String(normalizedMedia.downloadUrl || "").trim();
   const storagePath = String(normalizedMedia.storagePath || "").trim();
   const audioSrc = String(resolveStorageAudioUrl(downloadUrl, storagePath) || downloadUrl || "").trim();
-  if (!rowId || (!audioSrc && !downloadUrl && !storagePath)) return null;
+  const localAudioSrc = localMediaCacheKey ? `podcaster-local-media:${localMediaCacheKey}` : "";
+  const resolvedAudioSrc = audioSrc || localAudioSrc;
+  if (!rowId || (!resolvedAudioSrc && !downloadUrl && !storagePath && !localMediaCacheKey)) return null;
 
   // Support seconds/milliseconds start fallbacks
   let startMs = 0;
@@ -5345,9 +5348,10 @@ function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
     rowId,
     sceneIndex: Math.max(1, Math.round(toFiniteNumber(raw.sceneIndex, index + 1))),
     speakerName: String(raw.speakerName || "").replace(/\s+/g, " ").trim(),
-    audioSrc,
+    audioSrc: resolvedAudioSrc,
     downloadUrl,
     storagePath,
+    localMediaCacheKey,
     startMs,
     anchorStartMs,
     endMs,
@@ -6835,7 +6839,9 @@ function buildPodcasterStorageGsUrl(storagePath = "") {
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
+  const localMediaCacheKey = String(options.localMediaCacheKey || "").trim();
   if (!clean && !cleanStoragePath) return "";
+  if (localMediaCacheKey) return `podcaster-local-media:${localMediaCacheKey}`;
   if (clean.startsWith("data:")) return clean;
   if (!hasAvailableApiBase()) return clean;
 
@@ -6897,7 +6903,9 @@ async function resolveFirebaseStorageUrl(gsUrl = "") {
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
+  const localMediaCacheKey = String(options.localMediaCacheKey || "").trim();
   if (!clean && !cleanStoragePath) return "";
+  if (localMediaCacheKey) return `podcaster-local-media:${localMediaCacheKey}`;
   if (!hasAvailableApiBase()) return clean;
   const isLibraryStoragePath = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
   const isTokenizedFirebase = hasFirebaseDownloadToken(clean);
@@ -6965,7 +6973,7 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
     const hasPublicSceneDownloadToken = hasPublicSceneFields && hasFirebaseDownloadToken(normalizedDownloadUrl);
     const hasTokenizedFirebaseUrl = hasFirebaseUrl && hasFirebaseDownloadToken(normalizedDownloadUrl);
     const isPublicSceneTokenedUrl = hasPublicSceneDownloadToken && !normalizedStoragePath;
-    const shouldPreferLocalVideoCache = mediaKind === "video" && Boolean(localMediaCacheKey);
+    const shouldPreferLocalMediaCache = Boolean(localMediaCacheKey);
     const shouldResolveDirectUrlBase = Boolean(
       normalizedStoragePath
       && (
@@ -6979,7 +6987,7 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
       || (hasPublicSceneFields && hasPublicSceneDownloadToken)
       || hasTokenizedFirebaseUrl
     );
-    const shouldResolveDirectUrl = shouldResolveDirectUrlBase && !shouldPreferLocalVideoCache;
+    const shouldResolveDirectUrl = shouldResolveDirectUrlBase && !shouldPreferLocalMediaCache;
     if (hasRecentLookupFailure && shouldResolveDirectUrl && !hasTokenizedFirebaseUrl) {
       return nextRecord;
     }
@@ -9545,7 +9553,11 @@ async function playStudioDialoguePreviewAudio(rowId = "") {
     return true;
   }
   const storedAudio = resolveDialogueAudioForRow(session, key);
-  const storedAudioSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
+  const localAudioKey = String(storedAudio?.localMediaCacheKey || "").trim();
+  const localAudioSrc = localAudioKey && typeof playbackController.resolveLocalMediaObjectUrl === "function"
+    ? await playbackController.resolveLocalMediaObjectUrl(localAudioKey)
+    : "";
+  const storedAudioSrc = localAudioSrc || resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
   if (!storedAudioSrc) return false;
   stopStudioDialoguePreviewAudio();
   studioDialoguePreviewRowId = key;
@@ -9697,7 +9709,11 @@ async function playRowAudio(rowId, options = {}) {
     const speedMultiplier = Math.max(0.5, Math.min(1.9, Number(options.speedMultiplier || 1)));
     const storedAudio = resolveDialogueAudioForRow(session, row.id);
     const clipPlaybackRate = resolveDialogueAudioPlaybackRate(session, row.id);
-    const storedAudioSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
+    const localAudioKey = String(storedAudio?.localMediaCacheKey || "").trim();
+    const localAudioSrc = localAudioKey && typeof playbackController.resolveLocalMediaObjectUrl === "function"
+      ? await playbackController.resolveLocalMediaObjectUrl(localAudioKey)
+      : "";
+    const storedAudioSrc = localAudioSrc || resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
     if (storedAudioSrc) {
       playingRowId = rowId;
       activePlaybackVoiceName = "stored-scene-audio";

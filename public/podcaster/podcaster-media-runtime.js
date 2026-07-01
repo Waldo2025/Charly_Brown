@@ -75,13 +75,13 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     if (!clean) return null;
     try {
       const parsed = new URL(clean, window.location.origin);
-      let pathname = String(parsed.pathname || "").trim();
+      let storageUrlPathname = String(parsed.pathname || "").trim();
       try {
         for (let attempt = 0; attempt < 3; attempt += 1) {
-          if (!/%(?:2[fF]|25)/.test(pathname)) break;
-          const decoded = decodeURIComponent(pathname);
-          if (decoded === pathname) break;
-          pathname = decoded;
+          if (!/%(?:2[fF]|25)/.test(storageUrlPathname)) break;
+          const decoded = decodeURIComponent(storageUrlPathname);
+          if (decoded === storageUrlPathname) break;
+          storageUrlPathname = decoded;
         }
       } catch (_) {
         // keep original pathname if decode fails
@@ -94,7 +94,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
       );
       if (!isFirebaseStorageHost) return null;
       if (host === "firebasestorage.googleapis.com") {
-        const match = String(pathname).match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
+        const match = String(storageUrlPathname).match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
         if (!match) return null;
         const bucket = String(match[1] || "").trim();
         let objectPath = String(match[2] || "").trim();
@@ -254,12 +254,12 @@ function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "m
   const timestamp = options.updatedAt || options.timestamp || "";
   const noRange = options.noRange === true;
   if (clean) {
-      try {
-        const parsed = new URL(clean, window.location.origin);
-        const pathname = String(parsed.pathname || "").toLowerCase();
+    try {
+      const parsed = new URL(clean, window.location.origin);
+        const proxyPathname = String(parsed.pathname || "").toLowerCase();
         const isTokenizedFirebase = /[?&]token=/.test(parsed.search || "");
         const isFirebaseStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || "").toLowerCase());
-        if (pathname.includes("/api/assets/proxy-image") || pathname.includes("/api/assets/proxy-media")) {
+        if (proxyPathname.includes("/api/assets/proxy-image") || proxyPathname.includes("/api/assets/proxy-media")) {
           const nestedStoragePath = normalizeStorageProxyPath(String(parsed.searchParams.get("storagePath") || "").trim() || proxyStoragePath);
           const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
           const nestedTimestamp = timestamp || String(parsed.searchParams.get("u") || "").trim();

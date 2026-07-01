@@ -20,8 +20,8 @@ assert.match(
 
 assert.match(
   source,
-  /if \(cleanStoragePath\) \{\s*if \(resolved\) .* return resolved;|return resolveStaleAwareProxyMediaUrl\(firebaseGsUrl,/s,
-  "resolveStorageVideoUrl/resolveStorageAudioUrl deben resolver primero por storagePath cuando exista para evitar reusar URLs tokenizadas."
+  /const shouldResolveDirectUrlBase = Boolean\([\s\S]*?const shouldResolveDirectUrl = shouldResolveDirectUrlBase && !shouldPreferLocalMediaCache;/,
+  "resolveStorageVideoUrl/resolveStorageAudioUrl deben resolver primero por storagePath cuando exista, pero ceder a la caché local si el clip ya la tiene."
 );
 
 assert.ok(
@@ -45,9 +45,9 @@ assert.ok(
 );
 
 assert.ok(
-  source.includes("const shouldPreferLocalVideoCache = mediaKind === \"video\" && Boolean(localMediaCacheKey);")
-    && source.includes("&& !shouldPreferLocalVideoCache;"),
-  "hydrateSessionDirectStorageMediaUrls debe evitar reintentar getDownloadURL cuando el clip de video ya tiene caché local disponible."
+  source.includes("const shouldPreferLocalMediaCache = Boolean(localMediaCacheKey);")
+    && source.includes("&& !shouldPreferLocalMediaCache;"),
+  "hydrateSessionDirectStorageMediaUrls debe evitar reintentar getDownloadURL cuando el clip ya tiene caché local disponible, sea video o audio."
 );
 
 assert.ok(
@@ -78,7 +78,7 @@ assert.ok(
 );
 
 assert.ok(
-  source.includes("if (hasRecentLookupFailure && shouldResolveDirectUrl)"),
+  source.includes("if (hasRecentLookupFailure && shouldResolveDirectUrl && !hasTokenizedFirebaseUrl)"),
   "Si media ya falló recientemente y la referencia debe resolverse por Storage, la hidratación debe saltarse la reconsulta."
 );
 

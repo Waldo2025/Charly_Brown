@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.377",
-  "build": "2026-1.0.10.377",
+  "version": "1.0.10.379",
+  "build": "2026-1.0.10.379",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: el timeline de Podcaster ahora pasa localMediaCacheKey al resolver escenas y audios, de modo que la caché local de Firebase Storage/IndexedDB se use antes que downloadUrl remoto en `podcaster-timeline-ui.js` y `podcaster-timeline-model.js`.",
+    "Corregido: la hidratación y reproducción de audio Gemini ahora respetan `localMediaCacheKey` como caché local preferente en sesiones, previsualización y export, evitando volver a consultar Firebase Storage cuando el clip ya está guardado localmente y cortando 404/403 repetidos.",
     "Corregido: el timeline de Podcaster conserva localMediaCacheKey en escenas de video, evita reconsultar Firebase Storage cuando el clip ya tiene caché local y usa esa caché como fuente preferente para no depender solo de objetos remotos que pueden devolver 404.",
     "Corregido: export v2 conserva el audio Gemini inline cuando la pista trae localMediaCacheKey aunque también tenga storagePath/downloadUrl; así no se pierde el clip si Storage responde 404/403 y el backend puede mezclar desde dataUrl/localDataUrl.",
     "Corregido: Podcaster corta de forma explícita el path de backend para carga de media cuando proviene de Firebase (storage/sdk), evitando llamadas nuevas a `proxy-media` y dejando 404/403 solo si el asset no existe realmente en Storage; además, export no vuelve a reintentar por backend.",
@@ -346,5 +348,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.377"
+  "cache_version": "2026-1.0.10.379"
 }

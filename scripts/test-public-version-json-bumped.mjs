@@ -12,6 +12,11 @@ const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes 
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
   (
+    String(changelog[0] || "").includes("audio Gemini")
+    && String(changelog[0] || "").includes("localMediaCacheKey")
+    && String(changelog[0] || "").includes("caché local")
+    && String(changelog[0] || "").includes("404/403")
+  ) || (
     String(changelog[0] || "").includes("timeline de Podcaster")
     && String(changelog[0] || "").includes("localMediaCacheKey")
     && String(changelog[0] || "").includes("caché local")
