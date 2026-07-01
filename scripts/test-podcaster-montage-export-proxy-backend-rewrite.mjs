@@ -45,9 +45,10 @@ const context = {
   buildApiUrlPreferRemote: (path = "") => `https://charly-brown-gemini-backend.onrender.com${path}`,
   buildExportApiUrl: (path = "") => `https://snoopy-export.onrender.com${path}`
 };
+context.window.resolveFirebaseStorageUrl = async (gsUrl = "") => `https://firebasestorage.googleapis.com/direct/${encodeURIComponent(gsUrl)}`;
 
 vm.createContext(context);
-vm.runInContext(`${extractFunction("normalizeMontageSubmissionMediaUrl")};async ${extractFunction("resolveMontageSceneMediaSourceUrl")};`, context);
+vm.runInContext(`${extractFunction("normalizeMontageSubmissionMediaUrl")};${extractFunction("buildMontageStorageGsUrl")};${extractFunction("parseMontageFirebaseStorageObjectUrl")};${extractFunction("deriveMontageStoragePathFromMediaSource")};${extractFunction("isMontageProxyMediaUrl")};async ${extractFunction("resolveMontageSceneMediaSourceUrl")};`, context);
 
 assert.equal(
   context.normalizeMontageSubmissionMediaUrl("/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"),
@@ -75,8 +76,43 @@ assert.equal(
   await context.resolveMontageSceneMediaSourceUrl({
     url: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fcharly-brown.firebasestorage.app%2Fo%2Fpodcaster%252Fsessions%252Fsession_omz5q1yf%252Fowners%252F9ifaac0zddou10egfq33owkuthx2%252Fvideos%252Frow_mjyqbopi-narrador%252Fcb38eb77-cd26-40bd-9040-1233c5976cba.mp4%3Falt%3Dmedia%26token%3DREDACTED"
   }, "video"),
-  "https://snoopy-export.onrender.com/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fcharly-brown.firebasestorage.app%2Fo%2Fpodcaster%252Fsessions%252Fsession_omz5q1yf%252Fowners%252F9ifaac0zddou10egfq33owkuthx2%252Fvideos%252Frow_mjyqbopi-narrador%252Fcb38eb77-cd26-40bd-9040-1233c5976cba.mp4%3Falt%3Dmedia%26token%3DREDACTED",
-  "La hidratación previa al POST también debe descargar proxy-media desde snoopy-export, no desde Gemini."
+  "https://firebasestorage.googleapis.com/direct/gs%3A%2F%2Fcharly-brown.firebasestorage.app%2Fpodcaster%2Fsessions%2Fsession_omz5q1yf%2Fowners%2F9ifaac0zddou10egfq33owkuthx2%2Fvideos%2Frow_mjyqbopi-narrador%2Fcb38eb77-cd26-40bd-9040-1233c5976cba.mp4",
+  "La hidratación previa al POST debe extraer la ruta Firebase anidada y resolver directo con Firebase Storage SDK."
+);
+
+assert.equal(
+  await context.resolveMontageSceneMediaSourceUrl({
+    storagePath: "podcaster/sessions/session_abc/owners/user/videos/row_1/scene.mp4",
+    url: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession_abc%2Fowners%2Fuser%2Fvideos%2Frow_1%2Fscene.mp4"
+  }, "video"),
+  "https://firebasestorage.googleapis.com/direct/gs%3A%2F%2Fcharly-brown.firebasestorage.app%2Fpodcaster%2Fsessions%2Fsession_abc%2Fowners%2Fuser%2Fvideos%2Frow_1%2Fscene.mp4",
+  "La hidratación del export debe preferir Firebase Storage directo cuando hay storagePath, aunque url/downloadUrl apunte a proxy-media viejo."
+);
+
+assert.equal(
+  await context.resolveMontageSceneMediaSourceUrl({
+    url: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?storagePath=gs%3A%2F%2Fcharly-brown.firebasestorage.app%2Fpodcaster%2Fsessions%2Fsession_cmmy944e%2Fowners%2F9ifaac0zddou10egfq33owkuthx2%2Fvideos%2Frow_pbuhgnrj-narrador%2F2af3c740-be88-424f-bd72-97f484ecb7ed.mp4&u=2026-05-05T03%3A17%3A36.691Z"
+  }, "video"),
+  "https://firebasestorage.googleapis.com/direct/gs%3A%2F%2Fcharly-brown.firebasestorage.app%2Fpodcaster%2Fsessions%2Fsession_cmmy944e%2Fowners%2F9ifaac0zddou10egfq33owkuthx2%2Fvideos%2Frow_pbuhgnrj-narrador%2F2af3c740-be88-424f-bd72-97f484ecb7ed.mp4",
+  "La hidratación del preview/export debe extraer storagePath desde proxy-media viejo y resolverlo con Firebase Storage SDK directo."
+);
+
+assert.match(
+  source,
+  /if \(isMontageProxyMediaUrl\(src\) && storagePath\) \{\s*src = "";\s*\}/,
+  "El preview de export no debe conservar un src proxy-media cuando hay storagePath."
+);
+
+assert.match(
+  source,
+  /if \(!src && !storagePath\) \{\s*src = String\(window\.resolveStorageVideoUrl\(rawUrl, storagePath\) \|\| ""\)\.trim\(\);\s*\}/,
+  "El preview de export solo puede caer a resolveStorageVideoUrl si no existe storagePath."
+);
+
+assert.ok(
+  source.includes("if (/^https?:\\/\\//i.test(cleanStorageCandidate)) {")
+    && source.includes("if (isMontageProxyMediaUrl(cleanStorageCandidate)) continue;"),
+  "El preview progresivo de export-status debe ignorar currentDownloadUrl proxy-media en vez de reutilizarlo."
 );
 
 console.log("Podcaster montage export rewrites proxy asset URLs to snoopy-export OK.");

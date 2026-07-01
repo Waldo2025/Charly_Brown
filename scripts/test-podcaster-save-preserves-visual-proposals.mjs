@@ -31,14 +31,14 @@ assert.match(
 
 assert.match(
   store,
-  /const rawPayload = deps\.buildCloudSessionPayload\(target\);[\s\S]*body: JSON\.stringify\(\{ session: payload \}\)/s,
-  "El guardado manual debe enviar el payload completo de sesión al backend."
+  /const rawPayload = deps\.buildCloudSessionPayload\(target\);[\s\S]*const response = await saveSessionDirectToCloud\(payload, deps\);/s,
+  "El guardado manual debe persistir directo en Firestore con el payload completo de sesión."
 );
 
 assert.match(
   store,
-  /: await saveSessionDirectToCloud\(payload, deps\)/,
-  "El fallback directo de guardado también debe vivir dentro de podcaster-session-store.js."
+  /async function saveSessionDirectToCloud\(payload = null, deps = \{\}\) \{/,
+  "El guardado directo debe vivir dentro de podcaster-session-store.js."
 );
 
 assert.match(

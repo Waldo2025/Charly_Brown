@@ -37,6 +37,11 @@ function extractFunction(name) {
 }
 
 const context = {
+  DEFAULT_LOCAL_API_BASE: "http://127.0.0.1:8787/api",
+  DEFAULT_REMOTE_API_BASE_SAFE: "/api",
+  DEFAULT_GEMINI_API_BASE: "https://charly-brown-gemini-backend.onrender.com/api",
+  DEFAULT_VEO_API_BASE: "https://gemini-veo.onrender.com/api",
+  DEFAULT_EXPORT_API_BASE: "https://snoopy-export.onrender.com/api",
   window: {
     location: {
       hostname: "charly-brown.web.app",
@@ -61,20 +66,51 @@ vm.runInContext([
   extractFunction("isLocalHostRuntime"),
   extractFunction("canUseSameOriginApi"),
   extractFunction("hasAvailableApiBase"),
+  extractFunction("shouldForceSameOriginApiPath"),
+  extractFunction("shouldForceRemotePodcasterAudioApiPath"),
+  extractFunction("shouldUseExportApiPath"),
   extractFunction("resolveApiBase"),
   extractFunction("buildApiUrl"),
   extractFunction("buildApiUrlFromBase"),
   extractFunction("buildApiUrlPreferRemote"),
+  extractFunction("getExportApiBase"),
   extractFunction("getVeoApiBase"),
+  extractFunction("buildExportApiUrl"),
   extractFunction("buildVeoApiUrl"),
   extractFunction("buildVeoApiUrlPreferRemote")
 ].join("\n\n"), context);
 
-test("authenticated podcaster requests prefer the remote backend instead of the /api redirect", () => {
+test("podcaster export requests resolve to the export backend", () => {
   const resolved = context.buildApiUrlPreferRemote("/api/podcaster/montage/export");
   assert.equal(
     resolved,
-    "https://charly-brown-gemini-backend.onrender.com/api/podcaster/montage/export"
+    "https://snoopy-export.onrender.com/api/podcaster/montage/export"
+  );
+});
+
+test("podcaster session requests stay on same-origin /api in production", () => {
+  assert.equal(
+    context.buildApiUrl("/api/podcaster/sessions/list"),
+    "/api/podcaster/sessions/list"
+  );
+  assert.equal(
+    context.buildApiUrl("/api/podcaster/sessions/save"),
+    "/api/podcaster/sessions/save"
+  );
+  assert.equal(
+    context.buildApiUrlPreferRemote("/api/podcaster/sessions/list"),
+    "/api/podcaster/sessions/list"
+  );
+});
+
+test("podcaster asset proxy requests stay on same-origin /api in production", () => {
+  assert.equal(
+    context.buildApiUrlPreferRemote("/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession-a%2Fvideos%2Fclip.mp4"),
+    "/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession-a%2Fvideos%2Fclip.mp4"
+  );
+  assert.equal(
+    context.buildApiUrlPreferRemote("/api/assets/proxy-image?storagePath=podcaster%2Fsessions%2Fsession-a%2Fimages%2Fthumb.png"),
+    "/api/assets/proxy-image?storagePath=podcaster%2Fsessions%2Fsession-a%2Fimages%2Fthumb.png"
   );
 });
 

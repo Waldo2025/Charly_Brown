@@ -6,7 +6,7 @@ const playback = readFileSync(new URL("../public/podcaster/podcaster-playback-co
 const exportSource = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
 const backend = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
-if (!/podcaster\/podcaster-scene-media-render-spec\.js\?v=/.test(html)) {
+if (!/data-cache-src="podcaster\/podcaster-scene-media-render-spec\.js"/.test(html)) {
   throw new Error("podcaster.html debe cargar podcaster-scene-media-render-spec.js antes del runtime principal.");
 }
 

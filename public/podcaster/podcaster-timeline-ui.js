@@ -686,7 +686,10 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (!rowId) return "";
         const nextRowId = String(rows[index + 1]?.id || "").trim();
         const generatedClip = dialogueMap[rowId] || null;
-        const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+        const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip, {
+          sessionId: String(activeSession?.id || "").trim(),
+          rowId
+        });
         const videoSrc = resolveStorageVideoUrl(
           primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
           primarySegment?.storagePath || generatedClip?.storagePath || "",
@@ -1035,7 +1038,10 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           <div class="podcast-video-track-lane" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}"${laneHeightAttr}>
             ${trackItems.map(({ row, rowId, index, timelineClip, clipLeftPx, clipWidthPx }) => {
               const generatedClip = dialogueMap[rowId] || null;
-              const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+              const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip, {
+                sessionId: String(activeSession?.id || "").trim(),
+                rowId
+              });
               const videoSrc = resolveStorageVideoUrl(
                 primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
                 primarySegment?.storagePath || generatedClip?.storagePath || "",

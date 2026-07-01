@@ -32,8 +32,15 @@ const {
   splitDialogueTextIntoSegments, createDefaultRows, sanitizeSpeakerMentionsInDialogue,
   makeId, nowIso, buildApiUrl, hasAvailableApiBase,
   stopPodcastPlayback, stopRowAudio, stopGeminiLiveSession, normalizeDisfluencyConfig,
-  secondsToClock, trimWords, escapeHtml: windowEscapeHtml, normalizeCreativeRow, buildShortSessionTitle
+  secondsToClock, trimWords: windowTrimWords, escapeHtml: windowEscapeHtml, normalizeCreativeRow, buildShortSessionTitle
 } = window;
+
+const trimWords = typeof windowTrimWords === "function" ? windowTrimWords : ((text = "", maxWords = 0) => {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  const safeMax = Math.max(0, Number(maxWords) || 0);
+  if (!safeMax || words.length <= safeMax) return words.join(" ");
+  return words.slice(0, safeMax).join(" ");
+});
 
 const escapeHtml = typeof windowEscapeHtml === "function" ? windowEscapeHtml : ((text) => String(text || '')
   .replace(/&/g, "&amp;")

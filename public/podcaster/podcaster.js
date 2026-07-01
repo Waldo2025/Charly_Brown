@@ -170,6 +170,12 @@ function openSceneVideoSelectorModal(...args) {
 function swapStageToImagePreview(...args) {
   return requirePodcasterMediaReplacementApiFunction("swapStageToImagePreview")(...args);
 }
+function listSessionStorageVideos(...args) {
+  return requirePodcasterMediaReplacementApiFunction("listSessionStorageVideos")(...args);
+}
+function listSessionStorageAudios(...args) {
+  return requirePodcasterMediaReplacementApiFunction("listSessionStorageAudios")(...args);
+}
 const resolveOnScreenTextExportCanvasSize = requireOnScreenTextApiFunction("resolveOnScreenTextExportCanvasSize");
 const resolveSharedOnScreenTextRenderSpec = requireOnScreenTextApiFunction("resolveOnScreenTextRenderSpec");
 const wrapSharedOnScreenTextRenderText = requireOnScreenTextApiFunction("wrapOnScreenTextRenderText");
@@ -2053,6 +2059,19 @@ function purgeSessionFromAllStorage(sessionId = "", uid = resolveCurrentUid()) {
   ].forEach((key) => purgeSessionFromStorageKey(key, cleanId));
 }
 
+function normalizePublicSceneVisualEffects(value = null) {
+  if (!value || typeof value !== "object") return null;
+  const effects = Array.isArray(value.effects)
+    ? value.effects
+      .map((effect) => String(effect || "").trim())
+      .filter(Boolean)
+      .slice(0, 8)
+    : [];
+  const speed = Math.max(1, Math.min(10, Math.round(Number(value.speed || 5) || 5)));
+  if (!effects.length) return null;
+  return { effects, speed };
+}
+
 function normalizePodcastSceneLibraryItem(item = null) {
   if (!item || typeof item !== "object") return null;
   const libraryId = String(item.libraryId || item.id || "").trim();
@@ -2086,6 +2105,7 @@ function normalizePodcastSceneLibraryItem(item = null) {
     thumbStoragePath: String(item.thumbStoragePath || item.thumbnailStoragePath || "").trim(),
     thumbMimeType: String(item.thumbMimeType || "image/jpeg").trim() || "image/jpeg",
     videoStoragePath: storagePath,
+    visualEffects: normalizePublicSceneVisualEffects(item.visualEffects),
     createdAt: String(item.createdAt || "").trim(),
     updatedAt: String(item.updatedAt || "").trim(),
     publicSceneLibraryId: libraryId,
@@ -6699,9 +6719,24 @@ function getOrderedDialogueVideoSegmentsForPlayback(clip = null, options = {}) {
 }
 
 function resolvePrimaryDialogueVideoSegment(clip = null, options = {}) {
-  const ordered = getOrderedDialogueVideoSegmentsForPlayback(clip, options);
+  if (!clip || typeof clip !== "object") return null;
+  const resolvedRowId = String(options?.rowId || clip?.rowId || "").trim();
+  const resolvedSessionId = String(
+    options?.sessionId
+    || (resolvedRowId ? String(getActiveSession()?.id || "").trim() : "")
+    || ""
+  ).trim();
+  const ordered = getOrderedDialogueVideoSegmentsForPlayback(clip, {
+    ...options,
+    sessionId: resolvedSessionId,
+    rowId: resolvedRowId
+  });
   const first = Array.isArray(ordered) ? (ordered[0] || null) : null;
-  return first || clip || null;
+  if (first) return first;
+  if (resolvedSessionId && resolvedRowId && isStaleDialogueVideoSource(resolvedSessionId, resolvedRowId, clip)) {
+    return null;
+  }
+  return clip || null;
 }
 
 function hasGeneratedDialogueVideoForRow(session = null, rowId = "") {
@@ -6712,7 +6747,10 @@ function hasGeneratedDialogueVideoForRow(session = null, rowId = "") {
   if (requirePodcasterGenerationApi().brokenDialogueVideoRows?.has(brokenKey)) return false;
   const clip = resolveDialogueVideoForRow(activeSession, key);
   if (!clip) return false;
-  const primarySegment = resolvePrimaryDialogueVideoSegment(clip);
+  const primarySegment = resolvePrimaryDialogueVideoSegment(clip, {
+    sessionId: String(activeSession?.id || "").trim(),
+    rowId: key
+  });
   return hasStoredMediaSource(primarySegment);
 }
 
@@ -6742,16 +6780,32 @@ function resolveStorageMediaUrl(rawUrl = "") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
   if (!hasAvailableApiBase()) return clean;
-  if (clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-image?")) return buildApiUrl(clean);
+  if (clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-image?")) {
+    return resolveStaleAwareProxyMediaUrl(clean, "", "image", { noRange: true });
+  }
   try {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
     const isStorageHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
     if (!isStorageHost) return clean;
-    return buildApiUrl(`/api/assets/proxy-image?url=${encodeURIComponent(clean)}&noRange=1`);
+    return resolveStaleAwareProxyMediaUrl(clean, "", "image", { noRange: true });
   } catch (_) {
     return clean;
   }
+}
+
+function hasFirebaseDownloadToken(url = "") {
+  const clean = String(url || "").trim();
+  if (!clean) return false;
+  return clean.includes("token=") || clean.includes("downloadToken=");
+}
+
+function buildPodcasterStorageGsUrl(storagePath = "") {
+  const clean = String(storagePath || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("gs://")) return clean;
+  const bucket = String(window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app").trim();
+  return bucket ? `gs://${bucket}/${clean.replace(/^\/+/, "")}` : "";
 }
 
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
@@ -6768,39 +6822,14 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const treatAsImage = explicitType === "image"
     || mimeType.startsWith("image/")
     || /\.(jpg|jpeg|png|webp|gif)(\?|$|\s)/i.test(combinedSource);
+  const isLibraryStoragePath = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
+  const isTokenizedFirebase = hasFirebaseDownloadToken(clean);
+  const isProxyMediaOrImage = clean.startsWith("/api/assets/proxy-media?") || clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-media?") || clean.includes("/api/assets/proxy-image?");
+  if (isProxyMediaOrImage && cleanStoragePath) return "";
+  if (isProxyMediaOrImage) return "";
+  if (isTokenizedFirebase && !cleanStoragePath) return "";
 
   try {
-    const firebaseGsUrl = (() => {
-      const gsSource = String(cleanStoragePath || clean || "").trim();
-      if (!gsSource.startsWith("gs://")) return "";
-      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
-      const slashIndex = withoutScheme.indexOf("/");
-      if (slashIndex < 0) return "";
-      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
-      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
-      if (!bucket || !objectPath) return "";
-      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
-    })();
-    if (firebaseGsUrl) {
-      return resolveStaleAwareProxyMediaUrl(firebaseGsUrl, cleanStoragePath, treatAsImage ? "image" : "media", options);
-    }
-    const isLibraryAsset = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
-    if (cleanStoragePath || isLibraryAsset) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, treatAsImage ? "image" : "media", options);
-    }
-
-    // Si ya es una URL de proxy, solo añadimos el timestamp si falta
-    if (clean.startsWith("/api/assets/proxy-media?") || clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-media?") || clean.includes("/api/assets/proxy-image?")) {
-      let proxyUrl = buildApiUrl(clean);
-      const timestamp = options.updatedAt || options.timestamp || "";
-      if (timestamp && !proxyUrl.includes("u=")) {
-        const sep = proxyUrl.includes("?") ? "&" : "?";
-        proxyUrl += `${sep}u=${encodeURIComponent(resolveDateIso(timestamp))}`;
-      }
-      return proxyUrl;
-    }
-
-    // Para URLs directas de Firebase o con extensión de video, usamos el resolver stale para tener fallback
     const parsed = new URL(clean, window.location.origin);
     const host = String(parsed.hostname || "").toLowerCase();
     const pathname = String(parsed.pathname || "").toLowerCase();
@@ -6808,13 +6837,18 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
     const hasVideoExt = /\.(mp4|webm|mov|m4v)(?:$|\?)/i.test(pathname);
     const hasImageExt = /\.(jpg|jpeg|png|webp|gif)(?:$|\?)/i.test(pathname);
 
+    if (isStorageUrl && cleanStoragePath) return "";
+    if (isStorageUrl && isLibraryStoragePath && isTokenizedFirebase) return "";
+    if (isTokenizedFirebase && !isStorageUrl) return "";
     if (isStorageUrl || hasVideoExt || hasImageExt || treatAsImage) {
-      return resolveStaleAwareProxyMediaUrl(clean, "", treatAsImage || hasImageExt ? "image" : "media", options);
+      return cleanStoragePath ? "" : clean;
     }
-
-    return clean;
+    return cleanStoragePath ? "" : clean;
   } catch (_) {
-    return clean;
+    if (/googleapis\.com|firebasestorage\.app/i.test(clean) && /[?&]token=/.test(clean)) {
+      return "";
+    }
+    return cleanStoragePath ? "" : clean;
   }
 }
 
@@ -6829,11 +6863,10 @@ async function resolveFirebaseStorageUrl(gsUrl = "") {
     return url;
   } catch (e) {
     if (e.code === 'storage/unauthorized' || e.code === 'storage/object-not-found') {
-      // Silence expected errors during fallback flows
-      return gsUrl;
+      return "";
     }
     void e;
-    return gsUrl;
+    return "";
   }
 }
 
@@ -6842,44 +6875,346 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
+  const isLibraryStoragePath = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
+  const isTokenizedFirebase = hasFirebaseDownloadToken(clean);
+  const isProxyMedia = clean.startsWith("/api/assets/proxy-media?") || clean.includes("/api/assets/proxy-media?");
+  if (isProxyMedia && cleanStoragePath) return "";
+  if (isProxyMedia) return "";
   try {
-    const firebaseGsUrl = (() => {
-      const gsSource = String(cleanStoragePath || clean || "").trim();
-      if (!gsSource.startsWith("gs://")) return "";
-      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
-      const slashIndex = withoutScheme.indexOf("/");
-      if (slashIndex < 0) return "";
-      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
-      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
-      if (!bucket || !objectPath) return "";
-      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
-    })();
-    if (firebaseGsUrl) {
-      return resolveStaleAwareProxyMediaUrl(firebaseGsUrl, cleanStoragePath, "media", options);
+    const parsedClean = clean ? new URL(clean, window.location.origin) : null;
+    const cleanIsStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsedClean?.hostname || ""));
+    if (isTokenizedFirebase && !cleanIsStorageUrl) {
+      return "";
     }
+    if (isLibraryStoragePath && cleanStoragePath && isTokenizedFirebase) return "";
+    if (clean && cleanIsStorageUrl) {
+      return cleanStoragePath ? "" : clean;
+    }
+    if (isTokenizedFirebase && cleanStoragePath) return "";
     if (cleanStoragePath) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media", options);
-    }
-    if (clean.startsWith("/api/assets/proxy-media?") || clean.includes("/api/assets/proxy-media?")) {
-      let proxyUrl = buildApiUrl(clean);
-      const timestamp = options.updatedAt || options.timestamp || "";
-      if (timestamp && !proxyUrl.includes("u=")) {
-        proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
-      }
-      return proxyUrl;
-    }
-    const parsed = new URL(clean, window.location.origin);
-    const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
-    if (isStorageUrl) {
-      let proxyUrl = buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}`);
-      const timestamp = options.updatedAt || options.timestamp || "";
-      if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
-      return proxyUrl;
+      return cleanStoragePath ? "" : clean;
     }
     return clean;
   } catch (_) {
-    return clean;
+    if (/googleapis\.com|firebasestorage\.app/i.test(clean) && /[?&]token=/.test(clean)) {
+      return "";
+    }
+    return cleanStoragePath ? "" : clean;
   }
+}
+
+async function hydrateSessionDirectStorageMediaUrls(session = null) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession || !window.firebaseStorage) return false;
+  let changed = false;
+  const activeSessionId = String(activeSession?.id || "").trim();
+  const resolvedStorageUrlCache = new Map();
+
+  const hydrateMediaRecord = async (record = null, context = {}) => {
+    if (!record || typeof record !== "object") return record;
+    let nextRecord = record;
+    const rowId = String(context?.rowId || record?.rowId || "").trim();
+    const mediaKind = String(context?.mediaKind || "").trim().toLowerCase();
+    const priorLookupFailedAt = String(record.storageLookupFailedAt || "").trim();
+    const priorLookupFailedAtMs = Date.parse(priorLookupFailedAt);
+    const hasRecentLookupFailure = Number.isFinite(priorLookupFailedAtMs) && Date.now() - priorLookupFailedAtMs < 5 * 60 * 1000;
+    const hasPublicSceneFields = Boolean(
+      String(record?.publicSceneVideoUrl || "").trim()
+      || String(record?.publicSceneVideoStoragePath || "").trim()
+      || String(record?.publicSceneStoragePath || "").trim()
+      || String(record?.publicSceneLibraryId || "").trim()
+    );
+    const publicSceneStorageFallback = String(
+      record?.publicSceneVideoStoragePath || record?.publicSceneStoragePath || record?.publicScenePath || ""
+    ).trim();
+    const normalized = normalizePersistedMediaReference(
+      String(record.downloadUrl || record.publicSceneVideoUrl || "").trim(),
+      String(record.storagePath || publicSceneStorageFallback || "").trim()
+    );
+    const normalizedStoragePath = String(normalized.storagePath || "").trim();
+    const normalizedDownloadUrl = String(normalized.downloadUrl || "").trim();
+    let persistedStoragePath = normalizedStoragePath;
+    const shouldForceLibraryRefresh = /(^|\/)podcaster\/library\//i.test(normalizedStoragePath);
+    const hasFirebaseUrl = /googleapis\.com|firebasestorage\.app/i.test(normalizedDownloadUrl);
+    const hasStorageLibraryPrefix = /(^|\/)podcaster\/library\//i.test(normalizedStoragePath);
+    const hasPublicSceneDownloadToken = hasPublicSceneFields && hasFirebaseDownloadToken(normalizedDownloadUrl);
+    const hasTokenizedFirebaseUrl = hasFirebaseUrl && hasFirebaseDownloadToken(normalizedDownloadUrl);
+    const isPublicSceneTokenedUrl = hasPublicSceneDownloadToken && !normalizedStoragePath;
+    const shouldResolveDirectUrl = Boolean(
+      normalizedStoragePath
+      && (
+        !normalizedDownloadUrl
+        || /\/api\/assets\/proxy-media|\/api\/assets\/proxy-image/i.test(normalizedDownloadUrl)
+        || hasFirebaseDownloadToken(normalizedDownloadUrl)
+        || hasFirebaseUrl
+        || hasPublicSceneFields
+        || shouldForceLibraryRefresh
+      )
+    ) || (hasPublicSceneFields && hasPublicSceneDownloadToken) || hasTokenizedFirebaseUrl;
+    if (hasRecentLookupFailure && shouldResolveDirectUrl && !hasTokenizedFirebaseUrl) {
+      return nextRecord;
+    }
+    let resolvedDownloadUrl = normalizedDownloadUrl;
+    if (shouldResolveDirectUrl) {
+      const gsUrl = buildPodcasterStorageGsUrl(normalizedStoragePath);
+      let resolved = "";
+      if (normalizedStoragePath && resolvedStorageUrlCache.has(normalizedStoragePath)) {
+        resolved = String(resolvedStorageUrlCache.get(normalizedStoragePath) || "").trim();
+      } else {
+        resolved = gsUrl ? String(await resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
+        if (normalizedStoragePath) {
+          resolvedStorageUrlCache.set(normalizedStoragePath, resolved);
+        }
+      }
+      if (resolved && /^https?:\/\//i.test(resolved) && !/\/api\/assets\/proxy-media|\/api\/assets\/proxy-image/i.test(resolved)) {
+        resolvedDownloadUrl = resolved;
+        if (priorLookupFailedAt) {
+          nextRecord = {
+            ...nextRecord,
+            storageLookupFailedAt: "",
+            missingStoragePath: ""
+          };
+          changed = true;
+        }
+      } else if (isPublicSceneTokenedUrl) {
+        const nextStorageLookupFailedAt = new Date().toISOString();
+        nextRecord = {
+          ...nextRecord,
+          publicSceneVideoUrl: "",
+          publicSceneVideoStoragePath: "",
+          publicSceneStoragePath: "",
+          downloadUrl: "",
+          storagePath: "",
+          storageLookupFailedAt: nextStorageLookupFailedAt,
+          missingStoragePath: "",
+          storageLookupReason: "public-scene-tokened-url-without-storage-path"
+        };
+        resolvedDownloadUrl = "";
+        persistedStoragePath = "";
+        changed = true;
+      } else if (hasStorageLibraryPrefix || hasPublicSceneFields) {
+        resolvedDownloadUrl = "";
+        const nowLookupFailedAt = new Date().toISOString();
+        nextRecord = {
+          ...nextRecord,
+          storagePath: normalizedStoragePath || persistedStoragePath || "",
+          downloadUrl: "",
+          storageLookupFailedAt: nowLookupFailedAt,
+          missingStoragePath: String(normalizedStoragePath || persistedStoragePath || "").trim()
+        };
+        persistedStoragePath = String(normalizedStoragePath || persistedStoragePath || "").trim();
+        changed = true;
+      } else if ((mediaKind === "video" || mediaKind === "audio") && activeSessionId && rowId) {
+        markStaleDialogueVideoSource(activeSessionId, rowId, {
+          ...record,
+          downloadUrl: normalizedDownloadUrl,
+          storagePath: normalizedStoragePath
+        }, "storage-sdk-object-not-found");
+        nextRecord = {
+          ...nextRecord,
+          downloadUrl: "",
+          storagePath: "",
+          missingStoragePath: normalizedStoragePath,
+          storageLookupFailedAt: new Date().toISOString()
+        };
+        resolvedDownloadUrl = "";
+        persistedStoragePath = "";
+        changed = true;
+      }
+    }
+    if (
+      resolvedDownloadUrl !== String(nextRecord.downloadUrl || "").trim()
+      || persistedStoragePath !== String(nextRecord.storagePath || "").trim()
+    ) {
+      nextRecord = {
+        ...nextRecord,
+        downloadUrl: resolvedDownloadUrl,
+        storagePath: persistedStoragePath
+      };
+      changed = true;
+    }
+    if (shouldForceLibraryRefresh || hasPublicSceneFields) {
+      const nextPublicSceneVideoUrl = resolvedDownloadUrl;
+      const nextPublicSceneStoragePath = persistedStoragePath;
+      if (
+        nextPublicSceneVideoUrl !== String(nextRecord.publicSceneVideoUrl || "").trim()
+        || nextPublicSceneStoragePath !== String(nextRecord.publicSceneVideoStoragePath || "").trim()
+        || nextPublicSceneStoragePath !== String(nextRecord.publicSceneStoragePath || "").trim()
+      ) {
+        nextRecord = {
+          ...nextRecord,
+          publicSceneVideoUrl: nextPublicSceneVideoUrl,
+          publicSceneVideoStoragePath: nextPublicSceneStoragePath,
+          publicSceneStoragePath: nextPublicSceneStoragePath
+        };
+        changed = true;
+      }
+    }
+    if (Array.isArray(record.segments)) {
+      const nextSegments = [];
+      let segmentsChanged = false;
+      for (const segment of record.segments) {
+        const hydratedSegment = await hydrateMediaRecord(segment, context);
+        nextSegments.push(hydratedSegment);
+        if (hydratedSegment !== segment) segmentsChanged = true;
+      }
+      if (segmentsChanged) {
+        nextRecord = {
+          ...nextRecord,
+          segments: nextSegments
+        };
+        changed = true;
+      }
+    }
+    return nextRecord;
+  };
+
+  const hydrateMap = async (inputMap = {}, context = {}) => {
+    const entries = Object.entries(inputMap || {});
+    if (!entries.length) return inputMap || {};
+    const nextEntries = [];
+    let mapChanged = false;
+    for (const [key, value] of entries) {
+      const hydratedValue = await hydrateMediaRecord(value, {
+        ...context,
+        rowId: String(key || "").trim()
+      });
+      nextEntries.push([key, hydratedValue]);
+      if (hydratedValue !== value) mapChanged = true;
+    }
+    return mapChanged ? Object.fromEntries(nextEntries) : (inputMap || {});
+  };
+
+  const nextDialogueVideoMap = await hydrateMap(activeSession.dialogueVideoMap || {}, { mediaKind: "video" });
+  const nextDialogueAudioMap = await hydrateMap(activeSession.dialogueAudioMap || {}, { mediaKind: "audio" });
+  if (nextDialogueVideoMap !== (activeSession.dialogueVideoMap || {}) || nextDialogueAudioMap !== (activeSession.dialogueAudioMap || {})) {
+    activeSession.dialogueVideoMap = nextDialogueVideoMap;
+    activeSession.dialogueAudioMap = nextDialogueAudioMap;
+    changed = true;
+  }
+  const currentRows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  if (currentRows.length) {
+    let rowsChanged = false;
+      const nextRows = [];
+    const rowMediaValueKeys = [
+      "downloadUrl",
+      "videoDownloadUrl",
+      "videoUrl",
+      "url",
+      "storagePath",
+      "videoStoragePath",
+      "path",
+      "publicSceneVideoUrl",
+      "publicSceneVideoStoragePath",
+      "publicSceneThumbStoragePath"
+    ];
+    for (const row of currentRows) {
+      const key = String(row?.id || "").trim();
+      if (!key) {
+        nextRows.push(row);
+        continue;
+      }
+      const clip = nextDialogueVideoMap?.[key] || null;
+      const hydratedRowMedia = await hydrateMediaRecord(row, {
+        ...{ mediaKind: "video", rowId: key }
+      });
+      const nextRowMediaUrl = String(hydratedRowMedia?.downloadUrl || "").trim();
+      const nextRowStoragePath = String(hydratedRowMedia?.storagePath || "").trim();
+      const hasStoredRowMedia = rowMediaValueKeys.some((keyName) => String(row?.[keyName] || "").trim());
+      const shouldSyncRowMedia = Boolean(
+        hasStoredRowMedia
+        || String(row?.publicSceneLibraryId || "").trim()
+        || String(row?.sourcePublicSceneLibraryId || "").trim()
+        || String(clip?.publicSceneLibraryId || "").trim()
+      );
+      const rowPublicSceneVideoUrl = String(row?.publicSceneVideoUrl || "").trim();
+      const hasPublicSceneFields = Boolean(
+        String(row?.publicSceneVideoUrl || "").trim()
+        || String(row?.publicSceneVideoStoragePath || "").trim()
+        || String(row?.publicSceneStoragePath || "").trim()
+        || String(row?.publicSceneLibraryId || "").trim()
+        || String(row?.sourcePublicSceneLibraryId || "").trim()
+        || String(clip?.publicSceneLibraryId || "").trim()
+      );
+      const hasPublicSceneStorage = Boolean(
+        String(row?.publicSceneStoragePath || row?.publicSceneVideoStoragePath || "").trim()
+      );
+      const nextPublicSceneVideoUrl = String(
+        hasPublicSceneFields
+          ? (String(hydratedRowMedia?.publicSceneVideoUrl || "").trim() || "")
+          : (hasPublicSceneStorage ? "" : rowPublicSceneVideoUrl)
+      ).trim();
+      const nextPublicSceneStoragePath = String(
+        String(hydratedRowMedia?.publicSceneVideoStoragePath || "").trim()
+        || String(hydratedRowMedia?.publicSceneStoragePath || "").trim()
+        || String(hydratedRowMedia?.storagePath || "").trim()
+        || String(row?.publicSceneStoragePath || "").trim()
+        || String(row?.publicSceneVideoStoragePath || "").trim()
+      ).trim();
+      const shouldSyncPublicSceneRow = Boolean(
+        String(row?.publicSceneVideoUrl || "").trim()
+        || String(row?.publicSceneVideoStoragePath || "").trim()
+        || String(row?.publicSceneStoragePath || "").trim()
+        || String(row?.publicSceneLibraryId || "").trim()
+        || String(row?.sourcePublicSceneLibraryId || "").trim()
+        || String(clip?.publicSceneLibraryId || "").trim()
+        || /(^|\/)podcaster\/library\//i.test(nextPublicSceneStoragePath)
+      );
+      const nextRow = (() => {
+        if (!shouldSyncRowMedia && !shouldSyncPublicSceneRow) {
+          return hydratedRowMedia || row;
+        }
+        const nextDownloadUrl = nextRowMediaUrl;
+        const nextStoragePath = nextRowStoragePath;
+        let nextRow = hydratedRowMedia || { ...row };
+        if (
+          nextDownloadUrl !== String(nextRow?.downloadUrl || "").trim()
+          || nextStoragePath !== String(nextRow?.storagePath || "").trim()
+        ) {
+          nextRow = {
+            ...nextRow,
+            downloadUrl: nextDownloadUrl,
+            storagePath: nextStoragePath
+          };
+        }
+        if (shouldSyncPublicSceneRow) {
+        return {
+          ...nextRow,
+          publicSceneVideoUrl: nextPublicSceneVideoUrl,
+          publicSceneVideoStoragePath: nextPublicSceneStoragePath,
+          publicSceneStoragePath: nextPublicSceneStoragePath
+        };
+      }
+        return nextRow;
+      })();
+      if (nextRow !== row) {
+        rowsChanged = true;
+        nextRows.push(nextRow);
+        return;
+      }
+      if (
+        nextPublicSceneVideoUrl === String(row?.publicSceneVideoUrl || "").trim()
+        && nextPublicSceneStoragePath === String(row?.publicSceneVideoStoragePath || "").trim()
+        && nextPublicSceneStoragePath === String(row?.publicSceneStoragePath || "").trim()
+      ) {
+        nextRows.push(row);
+        continue;
+      }
+      rowsChanged = true;
+      nextRows.push({
+        ...row,
+        publicSceneVideoUrl: nextPublicSceneVideoUrl,
+        publicSceneVideoStoragePath: nextPublicSceneStoragePath,
+        publicSceneStoragePath: nextPublicSceneStoragePath
+      });
+      continue;
+    }
+    if (rowsChanged) {
+      activeSession.script.rows = nextRows;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 
@@ -7552,7 +7887,8 @@ async function setActiveSession(sessionId) {
   try {
     const refsHydrated = await hydrateSessionReferenceMedia(nextSession);
     const musicHydrated = await hydratePanelMusicLocalCaches(nextSession);
-    if (refsHydrated || musicHydrated) {
+    const directMediaHydrated = await hydrateSessionDirectStorageMediaUrls(nextSession);
+    if (refsHydrated || musicHydrated || directMediaHydrated) {
       persistSessions();
     }
   } catch (_) {
@@ -12139,7 +12475,10 @@ function shouldUseNativeVideoAudioForRow(session = null, rowId = "") {
     ? activeSession.script.rows.find((item) => String(item?.id || "").trim() === key) || null
     : null;
   const clip = resolveDialogueVideoForRow(activeSession, key);
-  const primary = resolvePrimaryDialogueVideoSegment(clip);
+  const primary = resolvePrimaryDialogueVideoSegment(clip, {
+    sessionId: String(activeSession?.id || "").trim(),
+    rowId: key
+  });
   const fromSceneLibrary = Boolean(
     String(row?.sourcePublicSceneLibraryId || row?.publicSceneLibraryId || "").trim()
     || String(clip?.publicSceneLibraryId || primary?.publicSceneLibraryId || "").trim()
@@ -12879,7 +13218,10 @@ function syncTimelineEphemeralState(session = null) {
     const preview = itemEl.querySelector(".podcast-video-scene-preview, .podcast-video-clip-preview");
     if (!preview) return;
     const generatedClip = dialogueMap[rowId] || null;
-    const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+    const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip, {
+      sessionId: String(activeSession?.id || "").trim(),
+      rowId
+    });
     const videoSrc = resolveStorageVideoUrl(
       primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
       primarySegment?.storagePath || generatedClip?.storagePath || "",
@@ -13408,6 +13750,7 @@ playbackController.init(els, {
   buildOnScreenTextBubbleInlineStyle,
   escapeHtml,
   resolveFirebaseStorageUrl,
+  deriveStoragePathFromMediaSource,
   renderPodcastVideoTimeline,
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -13533,6 +13876,7 @@ exportPreviewController.init(exportPreviewEls, {
   buildOnScreenTextBubbleInlineStyle,
   escapeHtml,
   resolveFirebaseStorageUrl,
+  deriveStoragePathFromMediaSource,
   renderPodcastVideoTimeline: () => { },
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -16140,11 +16484,23 @@ function deleteSceneRowById(rowId = "") {
 function resolvePublicSceneVideoLink(rawUrl = "") {
   const cleanUrl = String(rawUrl || "").trim();
   if (!cleanUrl) return "";
+  if (
+    /googleapis\.com|firebasestorage\.app/i.test(cleanUrl)
+    && /(\/?podcaster(?:%2F|\/)|%2Fpodcaster(?:%2F|%))(?:library|sessions)(?:%2F|\/)/i.test(cleanUrl)
+    && hasFirebaseDownloadToken(cleanUrl)
+  ) {
+    return "";
+  }
   if (cleanUrl.startsWith("/api/assets/proxy-media") || cleanUrl.startsWith("/api/assets/proxy-image")) {
     try {
       const proxyUrl = new URL(cleanUrl, window.location.origin);
       const directUrl = String(proxyUrl.searchParams.get("url") || "").trim();
-      if (directUrl) return directUrl;
+      if (!directUrl) return "";
+      if (hasFirebaseDownloadToken(directUrl)) return "";
+      if (directUrl.startsWith("/api/assets/proxy-media") || directUrl.startsWith("/api/assets/proxy-image")) {
+        return "";
+      }
+      return directUrl;
     } catch (_) {
       // noop
     }
@@ -16158,7 +16514,33 @@ async function resolveSceneShareableVideoUrl(session = null, rowId = "") {
   if (!activeSession || !key) return "";
   const row = (activeSession?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
   const clip = resolveDialogueVideoForRow(activeSession, key);
-  const primarySegment = resolvePrimaryDialogueVideoSegment(clip);
+  const primarySegment = resolvePrimaryDialogueVideoSegment(clip, {
+    sessionId: String(activeSession?.id || "").trim(),
+    rowId: key
+  });
+    const resolveShareableVideoCandidate = async (source = null) => {
+      const normalized = normalizePersistedMediaReference(
+        String(source?.url || "").trim(),
+        String(source?.storagePath || "").trim()
+      );
+      const normalizedStoragePath = String(normalized?.storagePath || "").trim();
+      const isLibraryStoragePath = /(^|\/)podcaster\/library\//i.test(normalizedStoragePath);
+      if (normalizedStoragePath) {
+        const gsPath = normalizedStoragePath.startsWith("gs://") ? normalizedStoragePath : buildPodcasterStorageGsUrl(normalizedStoragePath);
+        const remoteUrl = gsPath ? await resolveFirebaseStorageUrl(gsPath) : "";
+        if (remoteUrl && /^https?:\/\//i.test(remoteUrl) && !/\/api\/assets\/proxy-media|\/api\/assets\/proxy-image/i.test(remoteUrl)) {
+          return remoteUrl;
+        }
+      }
+      const mediaUrl = resolvePublicSceneVideoLink(String(normalized?.downloadUrl || "").trim());
+      const hasFirebaseToken = hasFirebaseDownloadToken(mediaUrl);
+      const hasStoragePath = Boolean(normalizedStoragePath);
+      if (hasFirebaseToken && (isLibraryStoragePath || hasStoragePath)) {
+        return "";
+      }
+      if (mediaUrl) return mediaUrl;
+      return "";
+    };
   const candidateSources = [
     { url: String(primarySegment?.downloadUrl || "").trim(), storagePath: String(primarySegment?.storagePath || "").trim() },
     { url: String(clip?.downloadUrl || "").trim(), storagePath: String(clip?.storagePath || "").trim() },
@@ -16166,16 +16548,9 @@ async function resolveSceneShareableVideoUrl(session = null, rowId = "") {
     { url: String(row?.downloadUrl || "").trim(), storagePath: String(row?.storagePath || "").trim() }
   ];
   for (const source of candidateSources) {
-    const normalized = normalizePersistedMediaReference(
-      String(source?.url || "").trim(),
-      String(source?.storagePath || "").trim()
-    );
-    const mediaUrl = resolvePublicSceneVideoLink(String(normalized?.downloadUrl || "").trim());
-    if (mediaUrl) return mediaUrl;
-    const gsPath = String(normalized?.storagePath || "").trim();
-    if (gsPath.startsWith("gs://")) {
-      const remoteUrl = await resolveFirebaseStorageUrl(gsPath);
-      if (remoteUrl) return remoteUrl;
+    const mediaUrl = await resolveShareableVideoCandidate(source);
+    if (mediaUrl) {
+      return mediaUrl;
     }
   }
   return "";
@@ -17801,8 +18176,8 @@ function attachEvents() {
         session = getActiveSession(); // Obtener sesión reparada
 
         const [videosData, audiosData] = await Promise.all([
-          authFetchJson(`/api/podcaster/sessions/list-videos?sessionSlug=${encodeURIComponent(sessionSlug)}`),
-          authFetchJson(`/api/podcaster/sessions/list-audios?sessionSlug=${encodeURIComponent(sessionSlug)}`).catch(() => ({ ok: false, audios: [] }))
+          listSessionStorageVideos(sessionSlug),
+          listSessionStorageAudios(sessionSlug).catch(() => ({ ok: false, audios: [] }))
         ]);
 
         const videos = Array.isArray(videosData?.videos) ? videosData.videos : [];
@@ -19744,6 +20119,13 @@ window.buildSpeakerAliasMap = buildSpeakerAliasMap;
 window.resolveSpeakerFromAliases = resolveSpeakerFromAliases;
 window.splitDialogueTextIntoSegments = splitDialogueTextIntoSegments;
 
+function hideInitialPodcasterLoadingScreen() {
+  document.body?.classList?.remove("podcaster-booting");
+  const loader = document.getElementById("appLoadingScreen");
+  if (!loader || loader.classList.contains("is-hidden")) return;
+  loader.classList.add("is-hidden");
+}
+
 function init() {
   attachEvents();
   setupPodcastStudioInspectorResize();
@@ -19805,10 +20187,7 @@ function init() {
     consumeImportedVideoPromptBridge({ renderAfter: true, clearAfterRead: true });
 
     // Finalización de carga - Ocultar splash screen
-    const loader = document.getElementById("appLoadingScreen");
-    if (loader) {
-      setTimeout(() => loader.classList.add("is-hidden"), 300); // Pequeño delay para suavidad
-    }
+    setTimeout(() => hideInitialPodcasterLoadingScreen(), 300); // Pequeño delay para suavidad
   });
   window.addEventListener("beforeunload", (event) => {
     if (podcastVideoState.enabled === true) {
@@ -19826,10 +20205,7 @@ function init() {
 
   // Safety timeout para quitar el loader si algo falla catastróficamente
   setTimeout(() => {
-    const loader = document.getElementById("appLoadingScreen");
-    if (loader && !loader.classList.contains("is-hidden")) {
-      loader.classList.add("is-hidden");
-    }
+    hideInitialPodcasterLoadingScreen();
   }, 5000);
 }
 

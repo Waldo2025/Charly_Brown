@@ -1,4 +1,26 @@
-import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js";
+import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  limit,
+  orderBy,
+  query,
+  setDoc
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import {
+  deleteObject,
+  getDownloadURL,
+  getStorage,
+  ref as storageRef,
+  uploadBytesResumable,
+  uploadString
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import { firebaseWebConfig } from "../js/firebase-web-config.js";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
 const runtime = requirePodcasterPublicLibraryRuntime();
@@ -42,6 +64,11 @@ const VIDEO_SCENE_MAX_SEC = 600;
 const STUDIO_TIMELINE_MIN_CLIP_MS = 100;
 const STUDIO_TIMELINE_TRACK_VERSION = 1;
 const STUDIO_TIMELINE_VERSION = 1;
+const PODCASTER_SCENE_LIBRARY_COLLECTION = "podcaster_scene_library";
+
+const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseWebConfig);
+const firestoreDb = getFirestore(firebaseApp);
+const firebaseStorage = getStorage(firebaseApp);
 
 // --- Helpers ---
 function getPodcastLibraryTagColorMeta(color = "") {
@@ -92,14 +119,337 @@ function getSessionRows(session = null) {
   return Array.isArray(directRows) ? directRows : [];
 }
 
+function getCurrentUser() {
+  try {
+    return getAuth(firebaseApp).currentUser || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function nowIso() {
+  return typeof runtime.nowIso === "function" ? runtime.nowIso() : new Date().toISOString();
+}
+
+function normalizeStorageSegment(value = "", fallback = "item") {
+  const text = String(value || "").trim();
+  const normalized = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100);
+  return normalized || fallback;
+}
+
+function createLibraryId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `scene_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function clampText(value = "", max = 1000) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function getImageExtension(mimeType = "image/jpeg") {
+  const type = String(mimeType || "").toLowerCase();
+  if (type.includes("png")) return "png";
+  if (type.includes("webp")) return "webp";
+  if (type.includes("gif")) return "gif";
+  return "jpg";
+}
+
+function getVideoExtension(mimeType = "video/mp4", fileName = "") {
+  const type = String(mimeType || "").toLowerCase();
+  const ext = String(fileName || "").split("?")[0].split(".").pop().toLowerCase();
+  if (type.includes("webm")) return "webm";
+  if (type.includes("quicktime")) return "mov";
+  if (type.includes("matroska")) return "mkv";
+  if (["mp4", "webm", "mov", "mkv"].includes(ext)) return ext;
+  return "mp4";
+}
+
+function stripPublicSceneTokenizedUrl(rawUrl = "", storagePath = "") {
+  const cleanUrl = String(rawUrl || "").trim();
+  if (!cleanUrl) return "";
+  if (!/googleapis\.com|firebasestorage\.app/i.test(cleanUrl)) return cleanUrl;
+  if (!/[?&](?:token|downloadToken)=/.test(cleanUrl)) return cleanUrl;
+  return "";
+}
+
+function isImageLikeLibrarySource(value = "") {
+  return /\.(?:jpg|jpeg|png|webp|gif|avif)(?:$|\?)/i.test(String(value || "").trim());
+}
+
+function isPublicSceneLibraryImageItem(item = null) {
+  const mimeType = String(item?.mimeType || item?.thumbMimeType || "").trim().toLowerCase();
+  return mimeType.startsWith("image/")
+    || isImageLikeLibrarySource(item?.downloadUrl || "")
+    || isImageLikeLibrarySource(item?.storagePath || "")
+    || isImageLikeLibrarySource(item?.videoStoragePath || "");
+}
+
+async function resolvePublicSceneLibraryPlayableUrlDirect(item = null) {
+  const normalized = runtime.normalizePodcastSceneLibraryItem(item);
+  if (!normalized) return "";
+  const storagePath = clampText(normalized.storagePath || normalized.videoStoragePath || "", 900);
+  if (storagePath) {
+    const directUrl = await getDownloadURL(storageRef(firebaseStorage, storagePath)).catch(() => "");
+    if (directUrl) return directUrl;
+  }
+  const directDownloadUrl = clampText(normalized.downloadUrl || "", 3000);
+  if (directDownloadUrl && /[?&](?:token|downloadToken)=/.test(directDownloadUrl)) {
+    return "";
+  }
+  return directDownloadUrl;
+}
+
+function normalizePublicSceneVisualEffects(value = null) {
+  if (!value || typeof value !== "object") return null;
+  const effects = Array.isArray(value.effects)
+    ? value.effects
+      .map((effect) => clampText(effect || "", 60))
+      .filter(Boolean)
+      .slice(0, 8)
+    : [];
+  const speed = Math.max(1, Math.min(10, Math.round(Number(value.speed || 5) || 5)));
+  if (!effects.length) return null;
+  return { effects, speed };
+}
+
+function resolvePublicSceneVisualEffectsForRow(session = null, rowId = "") {
+  const key = String(rowId || "").trim();
+  if (!session || !key) return null;
+  return normalizePublicSceneVisualEffects(session?.visualEffectsMap?.[key]);
+}
+
+function normalizeLibraryDocData(data = {}, libraryId = "") {
+  return {
+    libraryId,
+    title: clampText(data.title || data.name || data.publicSceneTitle || "Escena pública", 180) || "Escena pública",
+    sourceSessionId: clampText(data.sourceSessionId || "", 140),
+    sourceRowId: clampText(data.sourceRowId || "", 120),
+    sourceRowNumber: Math.max(0, Number(data.sourceRowNumber || 0) || 0),
+    ownerId: clampText(data.ownerId || "", 140),
+    ownerEmail: clampText(data.ownerEmail || "", 180),
+    durationSec: Math.max(0, Math.min(VIDEO_SCENE_MAX_SEC, Number(data.durationSec || 0) || 0)),
+    downloadUrl: clampText(data.downloadUrl || "", 3000),
+    storagePath: clampText(data.storagePath || "", 900),
+    mimeType: clampText(data.mimeType || "video/mp4", 120) || "video/mp4",
+    thumbUrl: clampText(data.thumbUrl || data.thumbnailUrl || "", 3000),
+    thumbStoragePath: clampText(data.thumbStoragePath || data.thumbnailStoragePath || "", 900),
+    thumbMimeType: clampText(data.thumbMimeType || "image/jpeg", 120) || "image/jpeg",
+    sceneDescription: clampText(data.sceneDescription || "", 1200),
+    onScreenText: clampText(data.onScreenText || "", 500),
+    transition: clampText(data.transition || "", 500),
+    visualNotes: clampText(data.visualNotes || "", 1200),
+    videoDirective: clampText(data.videoDirective || "", 1400),
+    scenePrompt: clampText(data.scenePrompt || "", 1200),
+    voiceOverText: clampText(data.voiceOverText || "", 4000),
+    tagLabel: clampText(data.tagLabel || "", 120),
+    tagColor: clampText(data.tagColor || "slate", 40) || "slate",
+    imagePrompts: Array.isArray(data.imagePrompts)
+      ? data.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
+      : [],
+    visualEffects: normalizePublicSceneVisualEffects(data.visualEffects),
+    videoPreset: clampText(data.videoPreset || "creative", 40) || "creative",
+    sourceType: clampText(data.sourceType || "", 80),
+    originalName: clampText(data.originalName || "", 180),
+    size: Math.max(0, Number(data.size || 0) || 0),
+    createdAt: clampText(data.createdAt || "", 80),
+    updatedAt: clampText(data.updatedAt || "", 80),
+    publicSceneLibraryId: libraryId,
+    publicScenePublishedAt: clampText(data.publicScenePublishedAt || data.updatedAt || data.createdAt || "", 80)
+  };
+}
+
+async function fetchPodcastSceneLibraryDirect() {
+  const q = query(
+    collection(firestoreDb, PODCASTER_SCENE_LIBRARY_COLLECTION),
+    orderBy("updatedAt", "desc"),
+    limit(250)
+  );
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((docSnap) => normalizeLibraryDocData(docSnap.data() || {}, docSnap.id))
+    .map((item) => runtime.normalizePodcastSceneLibraryItem(item))
+    .filter(Boolean);
+}
+
+async function uploadSceneLibraryThumbDirect(thumbSource = "", libraryId = "") {
+  const source = String(thumbSource || "").trim();
+  if (!source) return { thumbUrl: "", thumbStoragePath: "", thumbMimeType: "image/jpeg" };
+  if (!source.startsWith("data:")) return { thumbUrl: source, thumbStoragePath: "", thumbMimeType: "image/jpeg" };
+  const mimeType = String(source.match(/^data:([^;,]+)/i)?.[1] || "image/jpeg").trim() || "image/jpeg";
+  const ext = getImageExtension(mimeType);
+  const path = `podcaster/library/scenes/${normalizeStorageSegment(libraryId, "scene")}/thumb.${ext}`;
+  const ref = storageRef(firebaseStorage, path);
+  await uploadString(ref, source, "data_url", {
+    contentType: mimeType,
+    customMetadata: {
+      kind: "podcaster_scene_library_thumb",
+      libraryId
+    }
+  });
+  return {
+    thumbUrl: await getDownloadURL(ref),
+    thumbStoragePath: path,
+    thumbMimeType: mimeType
+  };
+}
+
+async function resolveSceneLibraryVideoDirect(payload = {}, libraryId = "") {
+  const storagePath = clampText(payload.storagePath || "", 900);
+  const mimeType = clampText(payload.mimeType || "video/mp4", 120) || "video/mp4";
+  if (storagePath) {
+    const ref = storageRef(firebaseStorage, storagePath);
+    const downloadUrl = await getDownloadURL(ref).catch(() => clampText(payload.downloadUrl || "", 3000));
+    return {
+      downloadUrl: downloadUrl || clampText(payload.downloadUrl || "", 3000),
+      storagePath,
+      mimeType
+    };
+  }
+  const downloadUrl = clampText(payload.downloadUrl || "", 3000);
+  if (!downloadUrl) throw new Error("Falta video de la escena.");
+  return { downloadUrl, storagePath: "", mimeType };
+}
+
+async function publishPodcastSceneLibraryItemDirect(payload = {}) {
+  const user = getCurrentUser();
+  if (!user?.uid) throw new Error("AUTH_REQUIRED");
+  const libraryId = clampText(payload.libraryId || "", 140) || createLibraryId();
+  const ref = doc(firestoreDb, PODCASTER_SCENE_LIBRARY_COLLECTION, libraryId);
+  const existingSnap = await getDoc(ref).catch(() => null);
+  const existing = existingSnap?.exists?.() ? (existingSnap.data() || {}) : {};
+  const videoAsset = await resolveSceneLibraryVideoDirect(payload, libraryId);
+  const thumbAsset = await uploadSceneLibraryThumbDirect(payload.thumbDataUrl || payload.thumbUrl || "", libraryId);
+  const timestamp = nowIso();
+  const item = normalizeLibraryDocData({
+    ...existing,
+    sourceSessionId: payload.sessionId || payload.sourceSessionId || "",
+    sourceRowId: payload.rowId || payload.sourceRowId || "",
+    sourceRowNumber: Math.max(0, Number(payload.sourceRowNumber || 0) || 0),
+    ownerId: user.uid,
+    ownerEmail: user.email || existing.ownerEmail || "",
+    title: payload.title || existing.title || "Escena pública",
+    durationSec: Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(payload.durationSec || 0) || VIDEO_SCENE_MIN_SEC)),
+    downloadUrl: videoAsset.downloadUrl,
+    storagePath: videoAsset.storagePath,
+    mimeType: videoAsset.mimeType,
+    thumbUrl: thumbAsset.thumbUrl || payload.thumbUrl || existing.thumbUrl || "",
+    thumbStoragePath: thumbAsset.thumbStoragePath || existing.thumbStoragePath || "",
+    thumbMimeType: thumbAsset.thumbMimeType || existing.thumbMimeType || "image/jpeg",
+    sceneDescription: payload.sceneDescription || "",
+    onScreenText: payload.onScreenText || "",
+    transition: payload.transition || "",
+    visualNotes: payload.visualNotes || "",
+    videoDirective: payload.videoDirective || "",
+    scenePrompt: payload.scenePrompt || "",
+    voiceOverText: payload.voiceOverText || "",
+    tagLabel: existing.tagLabel || payload.tagLabel || "",
+    tagColor: existing.tagColor || payload.tagColor || "slate",
+    imagePrompts: Array.isArray(payload.imagePrompts) ? payload.imagePrompts : [],
+    visualEffects: payload.visualEffects || existing.visualEffects || null,
+    videoPreset: payload.videoPreset || "creative",
+    createdAt: existing.createdAt || timestamp,
+    updatedAt: timestamp
+  }, libraryId);
+  await setDoc(ref, item, { merge: true });
+  return runtime.normalizePodcastSceneLibraryItem(item);
+}
+
+async function uploadLocalPodcastSceneLibraryVideoDirect(file = null, measured = {}) {
+  const user = getCurrentUser();
+  if (!user?.uid) throw new Error("AUTH_REQUIRED");
+  if (!(file instanceof File)) throw new Error("No se recibió un video válido.");
+  const libraryId = createLibraryId();
+  const mimeType = String(file.type || "video/mp4").trim() || "video/mp4";
+  const ext = getVideoExtension(mimeType, file.name || "");
+  const path = `podcaster/library/scenes/${normalizeStorageSegment(libraryId, "scene")}/local-video.${ext}`;
+  const ref = storageRef(firebaseStorage, path);
+  await new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(ref, file, {
+      contentType: mimeType,
+      customMetadata: {
+        kind: "podcaster_scene_library_video",
+        source: "local_upload",
+        libraryId,
+        uid: user.uid,
+        originalName: String(file.name || "video-local").slice(0, 180),
+        size: String(Number(file.size || 0) || 0)
+      }
+    });
+    task.on("state_changed", null, reject, resolve);
+  });
+  const thumbAsset = await uploadSceneLibraryThumbDirect(String(measured?.thumbDataUrl || "").trim(), libraryId);
+  const timestamp = nowIso();
+  const item = normalizeLibraryDocData({
+    ownerId: user.uid,
+    ownerEmail: user.email || "",
+    title: String(file.name || "Video local").replace(/\.[^.]+$/, "").slice(0, 180) || "Video local",
+    durationSec: Math.max(0, Number(measured?.durationSec || 0) || 0),
+    downloadUrl: await getDownloadURL(ref),
+    storagePath: path,
+    mimeType,
+    thumbUrl: thumbAsset.thumbUrl || "",
+    thumbStoragePath: thumbAsset.thumbStoragePath || "",
+    thumbMimeType: thumbAsset.thumbMimeType || "image/jpeg",
+    tagLabel: "Local",
+    tagColor: "sky",
+    videoPreset: "local",
+    sourceType: "local_upload",
+    originalName: String(file.name || "video-local").slice(0, 180),
+    size: Math.max(0, Number(file.size || 0) || 0),
+    createdAt: timestamp,
+    updatedAt: timestamp
+  }, libraryId);
+  await setDoc(doc(firestoreDb, PODCASTER_SCENE_LIBRARY_COLLECTION, libraryId), item, { merge: true });
+  return runtime.normalizePodcastSceneLibraryItem(item);
+}
+
+async function updatePodcastSceneLibraryItemDirect({ libraryId = "", title = "", tagLabel = "", tagColor = "slate" } = {}) {
+  const user = getCurrentUser();
+  if (!user?.uid) throw new Error("AUTH_REQUIRED");
+  const ref = doc(firestoreDb, PODCASTER_SCENE_LIBRARY_COLLECTION, String(libraryId || "").trim());
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("La escena pública no existe.");
+  const data = snap.data() || {};
+  const updatedAt = nowIso();
+  const next = normalizeLibraryDocData({
+    ...data,
+    title,
+    tagLabel,
+    tagColor,
+    updatedAt
+  }, snap.id);
+  await setDoc(ref, next, { merge: true });
+  return runtime.normalizePodcastSceneLibraryItem(next);
+}
+
+async function deletePodcastSceneLibraryItemDirect(item = null) {
+  const normalized = runtime.normalizePodcastSceneLibraryItem(item);
+  const user = getCurrentUser();
+  if (!normalized?.libraryId || !user?.uid) throw new Error("AUTH_REQUIRED");
+  const ref = doc(firestoreDb, PODCASTER_SCENE_LIBRARY_COLLECTION, normalized.libraryId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return true;
+  const data = snap.data() || {};
+  await deleteDoc(ref);
+  await Promise.allSettled([data.storagePath, data.thumbStoragePath]
+    .map((path) => String(path || "").trim())
+    .filter(Boolean)
+    .map((path) => deleteObject(storageRef(firebaseStorage, path))));
+  return true;
+}
+
 async function fetchPodcastSceneLibrary(options = {}) {
   podcastSceneLibraryState.loading = true;
   if (options.render !== false) renderPodcastSceneLibrary(runtime.getActiveSession());
   try {
-    const response = await authFetchJson("/api/podcaster/scene-library/list", { method: "GET" });
-    podcastSceneLibraryState.items = Array.isArray(response?.items)
-      ? response.items.map((item) => runtime.normalizePodcastSceneLibraryItem(item)).filter(Boolean)
-      : [];
+    podcastSceneLibraryState.items = await fetchPodcastSceneLibraryDirect();
     podcastSceneLibraryState.loadedAt = runtime.nowIso();
     podcastSceneLibraryState.error = "";
   } catch (error) {
@@ -420,16 +770,12 @@ async function savePodcastSceneLibraryEdit() {
     runtime.addChatMessage("system", "El nombre de la escena no puede estar vacío.");
     return false;
   }
-  const response = await authFetchJson("/api/podcaster/scene-library/update", {
-    method: "POST",
-    body: JSON.stringify({
-      libraryId,
-      title,
-      tagLabel,
-      tagColor
-    })
+  const updated = await updatePodcastSceneLibraryItemDirect({
+    libraryId,
+    title,
+    tagLabel,
+    tagColor
   });
-  const updated = runtime.normalizePodcastSceneLibraryItem(response?.item || response?.scene || response?.libraryItem || null);
   if (!updated) throw new Error("No se pudo actualizar la escena pública.");
   podcastSceneLibraryState.items = podcastSceneLibraryState.items.map((scene) => (
     String(scene?.libraryId || "").trim() === libraryId ? updated : scene
@@ -447,10 +793,7 @@ async function deletePodcastSceneLibraryItem(item = null) {
   const libraryId = String(normalized.libraryId || "").trim();
   const confirmed = window.confirm(`Se eliminará "${normalized.title}" de la biblioteca pública. ¿Deseas continuar?`);
   if (!confirmed) return false;
-  await authFetchJson("/api/podcaster/scene-library/delete", {
-    method: "POST",
-    body: JSON.stringify({ libraryId })
-  });
+  await deletePodcastSceneLibraryItemDirect(normalized);
   podcastSceneLibraryState.items = podcastSceneLibraryState.items.filter((scene) => String(scene?.libraryId || "").trim() !== libraryId);
   renderPodcastSceneLibrary(runtime.getActiveSession());
   return true;
@@ -459,8 +802,28 @@ async function deletePodcastSceneLibraryItem(item = null) {
 async function playPodcastSceneLibraryPreview(item = null) {
   const normalized = runtime.normalizePodcastSceneLibraryItem(item);
   if (!normalized) return false;
-  const source = runtime.resolveStorageVideoUrl(normalized.downloadUrl || "", normalized.storagePath || "");
+  const source = await resolvePublicSceneLibraryPlayableUrlDirect(normalized);
   if (!source) return false;
+  if (isPublicSceneLibraryImageItem(normalized)) {
+    if (typeof window.PodcasterMediaReplacement?.swapStageToImagePreview === "function") {
+      const swapped = window.PodcasterMediaReplacement.swapStageToImagePreview(source, {
+        rowId: String(normalized.sourceRowId || normalized.libraryId || "").trim(),
+        fallbackUrl: String(normalized.downloadUrl || "").trim(),
+        afterSwap: () => runtime.setPodcastVideoStatus(`Reproduciendo vista previa: ${normalized.title}`)
+      });
+      if (swapped) return true;
+    }
+    const image = runtime.els.podcastActiveSpeakerImage || null;
+    if (!image) return false;
+    image.src = source;
+    image.dataset.src = source;
+    image.hidden = false;
+    image.style.opacity = "1";
+    image.style.visibility = "visible";
+    runtime.setPodcastVideoStatus(`Reproduciendo vista previa: ${normalized.title}`);
+    return true;
+  }
+  const videoSource = runtime.resolveStorageVideoUrl(source, "");
   const video = runtime.getActiveStageVideoEl?.() || runtime.els.podcastActiveSpeakerVideoAlt || runtime.els.podcastActiveSpeakerVideo || null;
   if (!video) return false;
   
@@ -469,8 +832,8 @@ async function playPodcastSceneLibraryPreview(item = null) {
   }
   await runtime.stopGeminiLiveSession().catch(() => { });
 
-  video.dataset.src = source;
-  video.src = source;
+  video.dataset.src = videoSource;
+  video.src = videoSource;
   video.load();
   
   const ok = await runtime.safeMediaPlay(video);
@@ -523,6 +886,7 @@ async function publishCurrentSceneToLibrary(rowId = "", options = {}) {
     scenePrompt: String(row.scenePrompt || "").trim(),
     voiceOverText: String(row.voiceOverText || row.text || "").trim(),
     imagePrompts: runtime.normalizeVideoImagePrompts(row.imagePrompts || []),
+    visualEffects: resolvePublicSceneVisualEffectsForRow(session, key),
     videoPreset: String(row.videoPreset || runtime.resolveActiveVideoPreset(session) || "creative").trim() || "creative"
   };
   if (options.loadingButton) {
@@ -531,12 +895,12 @@ async function publishCurrentSceneToLibrary(rowId = "", options = {}) {
     });
   }
   try {
-    const response = await authFetchJson("/api/podcaster/scene-library/publish", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    const published = runtime.normalizePodcastSceneLibraryItem(response?.item || response?.scene || response?.libraryItem || null);
+    const published = await publishPodcastSceneLibraryItemDirect(payload);
     if (!published) throw new Error("No se pudo publicar la escena.");
+    const persistedVideoUrl = stripPublicSceneTokenizedUrl(
+      String(published.downloadUrl || "").trim(),
+      String(published.storagePath || "").trim()
+    );
     podcastSceneLibraryState.items = [
       published,
       ...podcastSceneLibraryState.items.filter((item) => String(item?.libraryId || "").trim() !== published.libraryId)
@@ -555,7 +919,9 @@ async function publishCurrentSceneToLibrary(rowId = "", options = {}) {
               publicScenePublishedAt: published.updatedAt || published.createdAt || runtime.nowIso(),
               publicSceneTitle: published.title,
               publicSceneThumbUrl: published.thumbUrl || "",
-              publicSceneVideoUrl: published.downloadUrl || ""
+              publicSceneVideoUrl: persistedVideoUrl,
+              publicSceneVideoStoragePath: published.storagePath || "",
+              publicSceneStoragePath: published.storagePath || ""
             }
             : item
         )),
@@ -567,7 +933,9 @@ async function publishCurrentSceneToLibrary(rowId = "", options = {}) {
             publicScenePublishedAt: published.updatedAt || published.createdAt || runtime.nowIso(),
             publicSceneTitle: published.title,
             publicSceneThumbUrl: published.thumbUrl || "",
-            publicSceneVideoUrl: published.downloadUrl || ""
+            publicSceneVideoUrl: persistedVideoUrl,
+            publicSceneVideoStoragePath: published.storagePath || "",
+            publicSceneStoragePath: published.storagePath || ""
           }
         }
       }
@@ -591,26 +959,8 @@ async function uploadLocalPodcastSceneLibraryVideo(file = null) {
   podcastSceneLibraryState.loading = true;
   renderPodcastSceneLibrary(runtime.getActiveSession());
   try {
-    const [dataUrl, measured] = await Promise.all([
-      runtime.readDataUrlFromFile(file, {
-        maxChars: 40 * 1024 * 1024 * 10,
-        errorMessage: "No se pudo leer el video local."
-      }),
-      runtime.measureVideoFile(file)
-    ]);
-    const response = await authFetchJson("/api/podcaster/scene-library/upload-local", {
-      method: "POST",
-      body: JSON.stringify({
-        title: String(file.name || "Video local").replace(/\.[^.]+$/, "").slice(0, 180) || "Video local",
-        videoDataUrl: dataUrl,
-        mimeType: String(file.type || "video/mp4").trim() || "video/mp4",
-        durationSec: Math.max(0, Number(measured?.durationSec || 0) || 0),
-        thumbDataUrl: String(measured?.thumbDataUrl || "").trim(),
-        size: Math.max(0, Number(file.size || 0) || 0),
-        originalName: String(file.name || "video-local").slice(0, 180)
-      })
-    });
-    const item = runtime.normalizePodcastSceneLibraryItem(response?.item || null);
+    const measured = await runtime.measureVideoFile(file);
+    const item = await uploadLocalPodcastSceneLibraryVideoDirect(file, measured);
     if (!item) throw new Error("No se recibió el item de librería.");
     podcastSceneLibraryState.items = [
       item,
@@ -639,6 +989,11 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
   if (!row) return false;
   const rowId = String(row.id || "").trim();
   const videoSource = normalized.downloadUrl || normalized.storagePath || "";
+  const restoredVisualEffects = normalizePublicSceneVisualEffects(normalized.visualEffects);
+  const persistedVideoUrl = stripPublicSceneTokenizedUrl(
+    String(normalized.downloadUrl || "").trim(),
+    String(normalized.storagePath || "").trim()
+  );
   const clip = runtime.normalizeDialogueVideoMap({
     [rowId]: {
       rowId,
@@ -651,20 +1006,22 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
       publicScenePublishedAt: normalized.updatedAt || normalized.createdAt || runtime.nowIso(),
       publicSceneTitle: normalized.title,
       publicSceneThumbUrl: normalized.thumbUrl || "",
-      publicSceneVideoUrl: normalized.downloadUrl || "",
+      publicSceneVideoUrl: persistedVideoUrl,
+      publicSceneVideoStoragePath: normalized.storagePath || "",
+      publicSceneStoragePath: normalized.storagePath || "",
       videoDirective: row.videoDirective,
       scenePrompt: row.scenePrompt,
       imagePrompts: row.imagePrompts,
       durationSec: normalized.durationSec,
       targetSpeechLine: row.voiceOverText,
       updatedAt: runtime.nowIso(),
-      downloadUrl: normalized.downloadUrl || "",
+      downloadUrl: persistedVideoUrl,
       storagePath: normalized.storagePath || "",
       segments: [{
         id: `${rowId}-seg-1`,
         index: 0,
         durationSec: normalized.durationSec,
-        downloadUrl: normalized.downloadUrl || "",
+        downloadUrl: persistedVideoUrl,
         storagePath: normalized.storagePath || "",
         mimeType: normalized.mimeType || "video/mp4",
         variant: "creative",
@@ -680,7 +1037,9 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
       publicScenePublishedAt: normalized.updatedAt || normalized.createdAt || runtime.nowIso(),
       publicSceneTitle: normalized.title,
       publicSceneThumbUrl: normalized.thumbUrl || "",
-      publicSceneVideoUrl: normalized.downloadUrl || "",
+      publicSceneVideoUrl: persistedVideoUrl,
+      publicSceneVideoStoragePath: normalized.storagePath || "",
+      publicSceneStoragePath: normalized.storagePath || "",
       publicSceneLibraryId: "", 
       sourcePublicSceneLibraryId: normalized.libraryId,
       playbackRate: normalized.playbackRate || 1
@@ -695,6 +1054,9 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
         model: "veo-pro",
         variant: "creative",
         promptVersion: "copied_from_library_v1",
+        publicSceneVideoUrl: persistedVideoUrl,
+        publicSceneVideoStoragePath: normalized.storagePath || "",
+        publicSceneStoragePath: normalized.storagePath || "",
         videoDirective: row.videoDirective,
         scenePrompt: row.scenePrompt,
         imagePrompts: row.imagePrompts,
@@ -721,7 +1083,13 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
         ...current.script,
         rows
       },
-      dialogueVideoMap: nextDialogueVideoMap
+      dialogueVideoMap: nextDialogueVideoMap,
+      visualEffectsMap: restoredVisualEffects
+        ? {
+          ...(current.visualEffectsMap || {}),
+          [rowId]: restoredVisualEffects
+        }
+        : (current.visualEffectsMap || {})
     };
     const cfg = runtime.getPodcastVideoConfig(nextSessionSnapshot);
     let nextTracks = runtime.normalizeTimelineTracks(cfg.timelineTracks || []);
@@ -851,31 +1219,16 @@ async function clonePublicSceneLibraryVideoToSession({
   const safeSessionId = String(sessionId || activeSession?.id || "").trim();
   const safeRowId = String(rowId || "").trim();
   if (!safeSessionId || !safeRowId) return false;
-  if (!hasAvailableApiBase()) return false;
   const current = runtime.resolveDialogueVideoForRow(activeSession, safeRowId);
   const currentStoragePath = String(current?.storagePath || runtime.resolvePrimaryDialogueVideoSegment(current)?.storagePath || "").trim();
   if (/^podcaster\/sessions\//i.test(currentStoragePath)) return false;
-
-  let response = null;
-  try {
-    response = await authFetchJson("/api/podcaster/scene-library/clone-video", {
-      method: "POST",
-      body: {
-        sessionId: safeSessionId,
-        rowId: safeRowId,
-        speakerLabel: String(speakerLabel || "Narrador").trim() || "Narrador",
-        sourceStoragePath: String(sourceStoragePath || "").trim(),
-        sourceUrl: String(sourceUrl || "").trim(),
-        mimeType: String(mimeType || "video/mp4").trim() || "video/mp4"
-      }
-    });
-  } catch (_) {
-    return false;
-  }
-  const nextStoragePath = String(response?.video?.storagePath || "").trim();
-  const nextDownloadUrl = String(response?.video?.downloadUrl || "").trim();
-  const nextMimeType = String(response?.video?.mimeType || mimeType || "video/mp4").trim() || "video/mp4";
-  if (!nextStoragePath || !nextDownloadUrl) return false;
+  const nextStoragePath = String(sourceStoragePath || currentStoragePath || "").trim();
+  const nextDownloadUrl = stripPublicSceneTokenizedUrl(
+    String(sourceUrl || current?.downloadUrl || runtime.resolvePrimaryDialogueVideoSegment(current)?.downloadUrl || "").trim(),
+    nextStoragePath
+  );
+  const nextMimeType = String(mimeType || current?.mimeType || "video/mp4").trim() || "video/mp4";
+  if (!nextStoragePath || (!nextDownloadUrl && !sourceUrl && !current?.downloadUrl && !runtime.resolvePrimaryDialogueVideoSegment(current)?.downloadUrl)) return false;
 
   runtime.upsertActiveSession((base) => {
     const map = { ...runtime.getDialogueVideoMap(base) };
@@ -913,15 +1266,32 @@ async function clonePublicSceneLibraryVideoToSession({
         ...prev,
         mimeType: nextMimeType,
         model: "public-scene-library-clone",
+        publicSceneVideoUrl: nextDownloadUrl,
+        publicSceneVideoStoragePath: nextStoragePath,
+        publicSceneStoragePath: nextStoragePath,
         storagePath: nextStoragePath,
         downloadUrl: nextDownloadUrl,
         updatedAt: runtime.nowIso(),
         segments: nextSegments
       }
     })[safeRowId] || prev;
+    const rows = Array.isArray(base?.script?.rows) ? base.script.rows.map((row) => (
+      String(row?.id || "").trim() === safeRowId
+        ? {
+          ...row,
+          publicSceneVideoUrl: nextDownloadUrl,
+          publicSceneVideoStoragePath: nextStoragePath,
+          publicSceneStoragePath: nextStoragePath
+        }
+        : row
+    )) : [];
     return {
       ...base,
-      dialogueVideoMap: map
+      dialogueVideoMap: map,
+      script: {
+        ...base.script,
+        rows
+      }
     };
   }, { render: false });
   runtime.renderPodcastVideoShell(runtime.getActiveSession());

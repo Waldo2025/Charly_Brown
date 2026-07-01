@@ -8,14 +8,20 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /const requestHasBody = Object\.prototype\.hasOwnProperty\.call\(options \|\| \{\}, "body"\) && options\.body != null;/,
+  /const requestHasBody = Object\.prototype\.hasOwnProperty\.call\(requestOptions, "body"\) && requestOptions\.body != null;/,
   "authFetchJson debe detectar si la request realmente lleva body."
 );
 
 assert.match(
   source,
-  /const headers = await getAuthHeaders\(requestHasBody \? \{ "Content-Type": "application\/json" \} : \{\}\);/,
+  /const baseHeaders = requestHasBody \? \{ "Content-Type": "application\/json" \} : \{\};/,
   "authFetchJson no debe mandar Content-Type en GET/HEAD sin body para evitar preflight CORS innecesario."
+);
+
+assert.match(
+  source,
+  /const headers = auth \? await getAuthHeadersWithRefresh\(baseHeaders, forceRefresh\) : baseHeaders;/,
+  "authFetchJson debe construir headers autenticados sin agregar Content-Type cuando no hay body."
 );
 
 console.log("api-client GET Content-Type avoidance OK.");

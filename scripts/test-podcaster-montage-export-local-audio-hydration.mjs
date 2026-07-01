@@ -31,8 +31,8 @@ assert.match(
 
 assert.match(
   exportSource,
-  /const hasStorageBackedRemoteSource = Boolean\(String\(asset\?\.storagePath \|\| ""\)\.trim\(\)\) && !cachedPlaybackBlobUrl;[\s\S]*if \(hasStorageBackedRemoteSource\) \{[\s\S]*url: sourceUrl,[\s\S]*downloadUrl: sourceUrl/,
-  "La hidratación del export no debe descargar desde el frontend assets remotos que ya tienen storagePath; el worker los resuelve server-side."
+  /const resolvedStoragePath = deriveMontageStoragePathFromMediaSource\([\s\S]*const hasStorageBackedRemoteSource = Boolean\(resolvedStoragePath\) && !cachedPlaybackBlobUrl;[\s\S]*if \(hasStorageBackedRemoteSource\) \{[\s\S]*storagePath: resolvedStoragePath \|\| String\(asset\?\.storagePath \|\| ""\)\.trim\(\),[\s\S]*url: sourceUrl,[\s\S]*downloadUrl: sourceUrl/,
+  "La hidratación del export no debe descargar desde el frontend assets remotos que ya tienen storagePath explícito o anidado en proxy-media; el worker los resuelve server-side."
 );
 
 assert.match(

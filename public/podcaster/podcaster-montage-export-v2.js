@@ -5,13 +5,15 @@ import {
   continueMontageExportPolling,
   getMontagePreviewRowId,
   logMontageExportDevtools,
+  persistMontageExportActiveJob,
   pollMontageExportJob,
   resetMontageExportJobState,
   setMontageExportBusy,
   setMontageExportContinueButton,
   setMontageExportDownloadButton,
   setMontageExportProgress,
-  setMontageExportStatus
+  setMontageExportStatus,
+  stripMontageExportSubmissionPayload
 } from "./podcaster-montage-export.js";
 
 let montageExportV2SubmitLocked = false;
@@ -214,10 +216,11 @@ export async function runMontageExportV2() {
       renderPipeline: payload.renderPipeline,
       entries: Array.isArray(payload.entries) ? payload.entries.length : 0
     });
+    const submissionPayload = stripMontageExportSubmissionPayload(payload);
     const data = await authFetchJson(exportV2Endpoint, {
       method: "POST",
       preferRemote: false,
-      body: payload
+      body: submissionPayload
     });
     logMontageExportDevtools("ffmpeg_preview_runtime_v2_response", {
       jobId: String(data?.jobId || data?.id || "").trim(),
@@ -234,10 +237,50 @@ export async function runMontageExportV2() {
     activeJobState.lastHint = String(data?.hint || "").trim();
     activeJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
     window.montageExportJobState = activeJobState;
+    persistMontageExportActiveJob(jobId, Date.now());
     setMontageExportProgress(activeJobState.lastProgress);
     setMontageExportStatus("Exportación FFmpeg v2 iniciada…", activeJobState.lastHint || "Renderizando con la ruta nueva.", { tone: "neutral" });
     pollMontageExportJob(jobId).catch(() => {});
   } catch (error) {
+    const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
+    const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
+    const activeJobId = String(detail?.activeJobId || apiPayload?.activeJobId || "").trim();
+    const activeJobKind = String(detail?.kind || apiPayload?.kind || "").trim();
+    const status = Number(apiPayload?.status || error?.status || 0) || 0;
+    const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
+    if (status === 429 || code === "backend_busy_with_export") {
+      console.warn("[podcaster][montage-export-v2] export already active or backend busy", {
+        status: status || undefined,
+        code: code || undefined,
+        kind: activeJobKind || undefined,
+        activeJobId: activeJobId || undefined
+      });
+      if (activeJobId && activeJobKind === "montage_export") {
+        const activeJobState = window.montageExportJobState || {};
+        activeJobState.jobId = activeJobId;
+        activeJobState.recoverySource = "busy_handoff";
+        activeJobState.startedAtMs = Date.now();
+        window.montageExportJobState = activeJobState;
+        persistMontageExportActiveJob(activeJobId, Date.now());
+        setMontageExportContinueButton({ visible: true, label: "Seguir exportación" });
+        setMontageExportStatus(
+          "Ya hay una exportación activa.",
+          "Estamos retomando el seguimiento del job en curso.",
+          { tone: "warning" }
+        );
+        await continueMontageExportPolling();
+        return;
+      }
+      setMontageExportProgress(null);
+      setMontageExportContinueButton({ visible: false });
+      setMontageExportStatus(
+        "Ya hay una exportación activa.",
+        "Espera a que termine el job activo antes de iniciar otra exportación.",
+        { tone: "warning" }
+      );
+      setMontageExportBusy(false, { label: "Exportar" });
+      return;
+    }
     console.error("[podcaster][montage-export-v2] failed", error);
     setMontageExportStatus(
       "No pudimos exportar tu video con FFmpeg v2.",

@@ -144,6 +144,9 @@ service firebase.storage {
       allow read: if true;
       allow write: if isSignedIn() && isSafePublicAsset(fileName);
     }
+    match /podcaster/library/scenes/{libraryId}/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
     // Authenticated users can read and upload safe Firebase Storage assets.
     match /{allPaths=**} {
       allow read: if isSignedIn();
