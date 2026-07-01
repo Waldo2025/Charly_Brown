@@ -102,15 +102,6 @@ test("PodcasterPlaybackController.getBlobUrlSync returns correct streaming proxy
   assert.equal(controller.getBlobUrlSync(fbUrl), proxyUrl);
 });
 
-test("PodcasterPlaybackController.getBlobUrlSync keeps tokenized Firebase URLs direct in streaming mode", () => {
-  const controller = new PodcasterPlaybackController();
-  controller.state.config = { mediaLoadMode: "streaming" };
-
-  const directUrl = "https://firebasestorage.googleapis.com/v0/b/bucket/o/video.mp4?alt=media&token=abc123";
-  assert.equal(controller.getBlobUrlSync(directUrl), directUrl);
-  assert.equal(controller.getBlobUrlSync(directUrl), directUrl);
-});
-
 test("PodcasterPlaybackController prefers the remote proxy-media base when available", () => {
   const controller = new PodcasterPlaybackController();
   controller.state.config = { mediaLoadMode: "streaming" };

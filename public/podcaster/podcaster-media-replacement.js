@@ -1,8 +1,7 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, doc, updateDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import { getStorage, ref as storageRef, listAll, getMetadata, getDownloadURL, uploadBytesResumable } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
+import { buildApiUrl, getAuthHeaders, authFetchJson } from "../js/api-client-podcaster.js";
 
 function escapeHtml(unsafe = "") {
     return String(unsafe || "")
@@ -14,7 +13,6 @@ function escapeHtml(unsafe = "") {
 }
 
 let db;
-let storage;
 let pond = null;
 let currentEditingRowId = null;
 let uploadedMediaUrl = null;
@@ -89,241 +87,10 @@ function logSceneReplacement(step = "", rowId = "", details = {}) {
 function initFirebase() {
     try {
         const app = !getApps().length ? initializeApp(firebaseWebConfig) : getApp();
-        db = getFirestore(app);
-        storage = getStorage(app);
+        db = getFirestore();
     } catch (e) {
         void e;
     }
-}
-
-function ensureFirebaseStorage() {
-    if (storage) return storage;
-    const app = !getApps().length ? initializeApp(firebaseWebConfig) : getApp();
-    storage = getStorage(app);
-    return storage;
-}
-
-function normalizeStorageSegment(value = "", fallback = "item") {
-    const text = String(value || "").trim();
-    const normalized = text
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-zA-Z0-9._-]+/g, "_")
-        .replace(/^_+|_+$/g, "")
-        .slice(0, 80);
-    return normalized || fallback;
-}
-
-function getCurrentStorageUid() {
-    try {
-        return String(getAuth()?.currentUser?.uid || "").trim();
-    } catch (_) {
-        return "";
-    }
-}
-
-function inferMediaTypeFromStoragePath(path = "", metadata = null) {
-    const contentType = String(metadata?.contentType || "").trim().toLowerCase();
-    if (contentType.startsWith("image/")) return "image";
-    if (contentType.startsWith("video/")) return "video";
-    if (contentType.startsWith("audio/")) return "audio";
-    const ext = String(path || "").split("?")[0].split(".").pop().toLowerCase();
-    if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
-    if (["wav", "mp3", "ogg", "m4a", "flac", "aac", "webm"].includes(ext)) return "audio";
-    return "video";
-}
-
-function getRowFolderFromStoragePath(path = "", folderName = "videos") {
-    const parts = String(path || "").split("/").filter(Boolean);
-    const folderIndex = parts.indexOf(folderName);
-    if (folderIndex >= 0 && parts[folderIndex + 1]) return parts[folderIndex + 1];
-    const fileName = parts[parts.length - 1] || "";
-    return (fileName.match(/^(row_[^_/]+?)(?:[-_]|$)/)?.[1] || "");
-}
-
-function getFileBaseName(fileName = "", fallback = "media") {
-    const clean = String(fileName || "").trim().split(/[\\/]/).pop() || "";
-    return clean.replace(/\.[^.]+$/, "") || fallback;
-}
-
-function getSceneMediaExtension(mimeType = "", fileName = "") {
-    const cleanMime = String(mimeType || "").trim().toLowerCase();
-    const fileExt = String(fileName || "").trim().split("?")[0].split(".").pop().toLowerCase();
-    if (cleanMime.startsWith("image/")) {
-        if (cleanMime.includes("jpeg") || cleanMime.includes("jpg")) return "jpg";
-        if (cleanMime.includes("webp")) return "webp";
-        if (cleanMime.includes("gif")) return "gif";
-        return "png";
-    }
-    if (cleanMime.includes("webm")) return "webm";
-    if (cleanMime.includes("quicktime")) return "mov";
-    if (cleanMime.includes("matroska")) return "mkv";
-    if (["mp4", "webm", "mov", "mkv", "png", "jpg", "jpeg", "webp", "gif"].includes(fileExt)) {
-        return fileExt === "jpeg" ? "jpg" : fileExt;
-    }
-    return cleanMime.startsWith("image/") ? "png" : "mp4";
-}
-
-function buildSceneMediaStoragePath(sessionId = "", rowId = "", file = null) {
-    const sessionSlug = normalizeStorageSegment(sessionId, "session");
-    const ownerSlug = normalizeStorageSegment(getCurrentStorageUid(), "anon");
-    const rowSlug = normalizeStorageSegment(rowId, "row");
-    const fileName = String(file?.name || "scene-media").trim() || "scene-media";
-    const mimeType = String(file?.type || "application/octet-stream").trim() || "application/octet-stream";
-    const fileSlug = normalizeStorageSegment(getFileBaseName(fileName, "media"), "media");
-    const ext = getSceneMediaExtension(mimeType, fileName);
-    const uniqueId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/videos/${rowSlug}_${Date.now()}_${fileSlug}_${uniqueId}.${ext}`;
-}
-
-function uploadSceneMediaReplacementDirect(file = null, options = {}) {
-    if (!file) return Promise.reject(new Error("No se recibió archivo."));
-    const sessionId = String(options.sessionId || "").trim();
-    const rowId = String(options.rowId || "").trim();
-    if (!sessionId) return Promise.reject(new Error("Falta sessionId."));
-    if (!rowId) return Promise.reject(new Error("Falta rowId."));
-    const mimeType = String(file.type || "application/octet-stream").trim() || "application/octet-stream";
-    const isImage = mimeType.startsWith("image/");
-    const storagePath = buildSceneMediaStoragePath(sessionId, rowId, file);
-    const ref = storageRef(ensureFirebaseStorage(), storagePath);
-    const uploadTask = uploadBytesResumable(ref, file, {
-        contentType: mimeType,
-        customMetadata: {
-            uid: normalizeStorageSegment(getCurrentStorageUid(), "anon"),
-            sessionId,
-            rowId,
-            fileName: String(file.name || "scene-media").trim() || "scene-media",
-            kind: isImage ? "scene_image_replacement" : "scene_video_replacement"
-        }
-    });
-    const completion = new Promise((resolve, reject) => {
-        uploadTask.on("state_changed", (snapshot) => {
-            if (typeof options.onProgress === "function") {
-                options.onProgress(Number(snapshot?.bytesTransferred || 0), Number(snapshot?.totalBytes || file.size || 1) || 1);
-            }
-        }, reject, async () => {
-            try {
-                const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-                resolve({
-                    name: String(file.name || "scene-media").trim() || "scene-media",
-                    mimeType,
-                    size: Number(file.size || 0),
-                    type: isImage ? "image" : "video",
-                    downloadUrl,
-                    storagePath,
-                    updatedAt: new Date().toISOString()
-                });
-            } catch (error) {
-                reject(error);
-            }
-        });
-    });
-    completion.cancel = () => uploadTask.cancel();
-    return completion;
-}
-
-function isSessionStorageMediaPath(path = "", sessionId = "", mediaKind = "videos") {
-    const cleanPath = String(path || "").trim();
-    const cleanSessionId = normalizeStorageSegment(sessionId, "session");
-    const cleanKind = String(mediaKind || "videos").trim() === "audio" ? "audio" : "videos";
-    if (!cleanPath || !cleanSessionId) return false;
-    const sessionPrefix = `podcaster/sessions/${cleanSessionId}/`;
-    if (!cleanPath.startsWith(sessionPrefix)) return false;
-    return cleanPath.includes(`/owners/`) && cleanPath.includes(`/${cleanKind}/`)
-        || cleanPath.startsWith(`${sessionPrefix}${cleanKind}/`);
-}
-
-async function collectStorageFilesRecursively(folderRef, options = {}) {
-    const maxDepth = Math.max(0, Math.min(8, Number(options.maxDepth || 0) || 0));
-    const listed = await listAll(folderRef);
-    const files = [...listed.items];
-    if (maxDepth > 0) {
-        const nestedResults = await Promise.allSettled(
-            listed.prefixes.map((prefixRef) => collectStorageFilesRecursively(prefixRef, { maxDepth: maxDepth - 1 }))
-        );
-        nestedResults.forEach((result) => {
-            if (result.status === "fulfilled" && Array.isArray(result.value)) {
-                files.push(...result.value);
-            }
-        });
-    }
-    return files;
-}
-
-async function listSessionStorageMediaDirect(sessionId = "", options = {}) {
-    const cleanSessionId = normalizeStorageSegment(sessionId, "session");
-    const mediaKind = String(options.mediaKind || "videos").trim() === "audio" ? "audio" : "videos";
-    const uid = normalizeStorageSegment(options.uid || getCurrentStorageUid(), "anon");
-    const root = ensureFirebaseStorage();
-    const prefixes = [
-        `podcaster/sessions/${cleanSessionId}/owners/${uid}/${mediaKind}`,
-        `podcaster/sessions/${cleanSessionId}/owners`,
-        `podcaster/sessions/${cleanSessionId}/${mediaKind}`
-    ];
-    const allowedExts = mediaKind === "audio"
-        ? new Set(["wav", "mp3", "ogg", "m4a", "flac", "aac", "webm"])
-        : new Set(["mp4", "webm", "mov", "mkv", "png", "jpg", "jpeg", "webp", "gif"]);
-    const byPath = new Map();
-    const settled = await Promise.allSettled(prefixes.map(async (prefix) => {
-        const folder = storageRef(root, prefix);
-        const files = await collectStorageFilesRecursively(folder, { maxDepth: prefix.endsWith("/owners") ? 5 : 3 });
-        await Promise.allSettled(files.map(async (fileRef) => {
-            const fullPath = String(fileRef?.fullPath || "").trim();
-            if (!fullPath || byPath.has(fullPath)) return;
-            if (!isSessionStorageMediaPath(fullPath, cleanSessionId, mediaKind)) return;
-            const fileName = String(fileRef?.name || fullPath.split("/").pop() || "").trim();
-            const ext = String(fileName.split(".").pop() || "").toLowerCase();
-            if (!allowedExts.has(ext)) return;
-            const [metadata, downloadUrl] = await Promise.all([
-                getMetadata(fileRef).catch(() => ({})),
-                getDownloadURL(fileRef).catch(() => "")
-            ]);
-            const cleanUrl = String(downloadUrl || "").trim();
-            if (!cleanUrl) return;
-            const mimeType = String(metadata?.contentType || "").trim().toLowerCase()
-                || (mediaKind === "audio" ? `audio/${ext === "m4a" ? "mp4" : ext}` : (["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ? `image/${ext === "jpg" ? "jpeg" : ext}` : "video/mp4"));
-            const type = inferMediaTypeFromStoragePath(fullPath, { contentType: mimeType });
-            const parts = fullPath.split("/");
-            const ownerIndex = parts.indexOf("owners");
-            byPath.set(fullPath, {
-                id: fullPath,
-                name: fileName,
-                ownerFolder: ownerIndex >= 0 && parts[ownerIndex + 1] ? parts[ownerIndex + 1] : "",
-                rowFolder: getRowFolderFromStoragePath(fullPath, mediaKind),
-                storagePath: fullPath,
-                path: fullPath,
-                downloadUrl: cleanUrl,
-                mimeType,
-                contentType: mimeType,
-                type,
-                size: Number(metadata?.size || 0),
-                updatedAt: String(metadata?.updated || metadata?.timeCreated || "").trim() || null
-            });
-        }));
-    }));
-    settled.forEach((result) => {
-        if (result.status === "rejected") {
-            logSceneReplacement("storage-list:error", cleanSessionId, { mediaKind, message: result.reason?.message || String(result.reason || "") });
-        }
-    });
-    const items = Array.from(byPath.values()).sort((a, b) => {
-        if (a.rowFolder < b.rowFolder) return -1;
-        if (a.rowFolder > b.rowFolder) return 1;
-        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
-    });
-    return mediaKind === "audio"
-        ? { ok: true, audios: items, prefixes }
-        : { ok: true, videos: items, prefixes };
-}
-
-function listSessionStorageVideos(sessionId = "", options = {}) {
-    return listSessionStorageMediaDirect(sessionId, { ...options, mediaKind: "videos" });
-}
-
-function listSessionStorageAudios(sessionId = "", options = {}) {
-    return listSessionStorageMediaDirect(sessionId, { ...options, mediaKind: "audio" });
 }
 
 function initElements() {
@@ -484,17 +251,9 @@ function swapStageToImagePreview(src = "", options = {}) {
     return true;
 }
 
-function publishPodcasterMediaReplacementApi() {
-    window.PodcasterMediaReplacement = {
-        swapStageToImagePreview,
-        onLibraryMediaSelected,
-        openSceneVideoSelectorModal,
-        listSessionStorageVideos,
-        listSessionStorageAudios
-    };
-}
-
-publishPodcasterMediaReplacementApi();
+window.PodcasterMediaReplacement = {
+    swapStageToImagePreview
+};
 
 function initFilePond() {
     if (pond) return;
@@ -518,7 +277,7 @@ function initFilePond() {
             process: (fieldName, file, metadata, load, error, progress, abort) => {
                 const session = window.PodcasterState?.activeSession || {};
                 const sessionId = session.id || 'unknown';
-                let uploadRequest = null;
+                const controller = new AbortController();
                 progress(true, 0, file.size || 1);
                 logSceneReplacement("upload:start", currentEditingRowId, {
                     fileName: String(file?.name || "").trim(),
@@ -529,13 +288,44 @@ function initFilePond() {
 
                 (async () => {
                     try {
-                        uploadRequest = uploadSceneMediaReplacementDirect(file, {
-                            sessionId,
-                            rowId: currentEditingRowId,
-                            onProgress: (loaded, total) => progress(true, loaded, total)
+                        const headers = await getAuthHeaders({
+                            "Content-Type": String(file.type || "application/octet-stream").trim() || "application/octet-stream",
+                            "X-Session-Id": String(sessionId || "").trim(),
+                            "X-Row-Id": String(currentEditingRowId || "").trim(),
+                            "X-File-Name": String(file.name || "scene-media").trim() || "scene-media",
+                            "X-Mime-Type": String(file.type || "application/octet-stream").trim() || "application/octet-stream"
                         });
-                        const media = await uploadRequest;
+                        const uploadUrl = buildApiUrl("/api/podcaster/scene-media/upload");
+                        let response;
+                        try {
+                            response = await fetch(uploadUrl, {
+                                method: "POST",
+                                headers,
+                                body: file,
+                                signal: controller.signal
+                            });
+                        } catch (fetchErr) {
+                            // Fallback para desarrollo local (127.0.0.1 vs localhost)
+                            const altUrl = uploadUrl.includes("127.0.0.1") ? uploadUrl.replace("127.0.0.1", "localhost") : uploadUrl.includes("localhost") ? uploadUrl.replace("localhost", "127.0.0.1") : null;
+                            if (altUrl) {
+                                response = await fetch(altUrl, {
+                                    method: "POST",
+                                    headers,
+                                    body: file,
+                                    signal: controller.signal
+                                });
+                            } else {
+                                throw fetchErr;
+                            }
+                        }
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                            console.error("[MediaReplacement] Scene media upload failed. Status:", response.status, "Error data:", data);
+                            throw new Error(String(data?.error || `Error del servidor (status ${response.status})`));
+                        }
+                        const media = data?.media && typeof data.media === "object" ? data.media : null;
                         if (!media?.downloadUrl) {
+                            console.error("[MediaReplacement] Scene media upload response missing downloadUrl. Response data:", data);
                             throw new Error("Upload sin downloadUrl.");
                         }
                         uploadedMediaUrl = String(media.downloadUrl || "").trim();
@@ -563,9 +353,7 @@ function initFilePond() {
 
                 return {
                     abort: () => {
-                        if (uploadRequest && typeof uploadRequest.cancel === "function") {
-                            uploadRequest.cancel();
-                        }
+                        controller.abort();
                         abort();
                     }
                 };
@@ -918,7 +706,7 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
   }
 
   try {
-    const data = await listSessionStorageVideos(sessionSlug);
+    const data = await authFetchJson(`/api/podcaster/sessions/list-videos?sessionSlug=${encodeURIComponent(sessionSlug)}`);
     const allVideos = Array.isArray(data?.videos) ? data.videos : (Array.isArray(data) ? data : []);
 
     const normalizedRowId = key.toLowerCase();
@@ -1013,17 +801,16 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
   }
 }
 
-function initPodcasterMediaReplacementModule() {
+document.addEventListener('DOMContentLoaded', () => {
     initElements();
-    publishPodcasterMediaReplacementApi();
     if (!els.modal) return;
     initFirebase();
     initMovementOptions();
     setupEventListeners();
-}
-
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initPodcasterMediaReplacementModule, { once: true });
-} else {
-    initPodcasterMediaReplacementModule();
-}
+    
+    window.PodcasterMediaReplacement = {
+        swapStageToImagePreview,
+        onLibraryMediaSelected,
+        openSceneVideoSelectorModal
+    };
+});

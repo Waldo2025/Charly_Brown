@@ -2724,27 +2724,6 @@ body:not(.sidebar-collapsed) .home-wrapper {
   gap: 1rem;
 }
 
-.player-export-download-select {
-  min-width: 160px;
-  max-width: min(240px, 42vw);
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(15, 23, 42, 0.86);
-  color: #ffffff;
-  padding: 0 2.25rem 0 0.9rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-  outline: none;
-}
-
-.player-export-download-select:hover,
-.player-export-download-select:focus {
-  border-color: rgba(56, 189, 248, 0.7);
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
-}
-
 .player-action-btn {
   background: transparent;
   border: none;

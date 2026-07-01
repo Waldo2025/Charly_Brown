@@ -9,8 +9,7 @@ assert.ok(
 );
 
 assert.ok(
-  source.includes("function isBackendAuthError(response, data)") &&
-    source.includes("const backendAuthError = isBackendAuthError(response, data);"),
+  source.includes("const backendAuthError = response.status === 401 || (response.status === 403 && /^AUTH_/i.test(String(data?.error || data?.code || \"\").trim()));"),
   "authFetchJson debe detectar fallos de auth para reintentar."
 );
 

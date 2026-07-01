@@ -8,7 +8,7 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /export function stripMontageExportSubmissionPayload\(payload = \{\}\)/,
+  /function stripMontageExportSubmissionPayload\(payload = \{\}\)/,
   "El payload final del export debe tener una rutina de limpieza explícita."
 );
 
@@ -26,7 +26,7 @@ assert.match(
 
 assert.match(
   source,
-  /if \(!renderedSegments\.length && Array\.isArray\(prepared\.payload\.onScreenTextTimeline\?\.renderedSegments\)\)[\s\S]*prepared\.payload\.onScreenTextRenderedSegments = prepared\.payload\.onScreenTextTimeline\.renderedSegments[\s\S]*\.filter\(Boolean\)[\s\S]*\.filter\(\(segment\) => segment\.hidden !== true\)/,
+  /if \(!renderedSegments\.length && Array\.isArray\(prepared\.payload\.onScreenTextTimeline\?\.renderedSegments\)\)[\s\S]*prepared\.payload\.onScreenTextRenderedSegments = prepared\.payload\.onScreenTextTimeline\.renderedSegments\.filter\(Boolean\);/,
   "El submit del export debe promover renderedSegments del timeline al nivel superior cuando falten en el payload."
 );
 

@@ -8,8 +8,8 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /import \{[\s\S]*buildApiUrl[\s\S]*hasAvailableApiBase[\s\S]*\} from "\.\/api-client\.js";/,
-  "home.js debe importar buildApiUrl y hasAvailableApiBase para resolver media del dashboard."
+  /import \{ authFetchJson, buildApiUrl, hasAvailableApiBase \} from "\.\/api-client\.js";/,
+  "home.js debe importar buildApiUrl y hasAvailableApiBase para resolver media sin filtrar gs://."
 );
 
 assert.match(
@@ -20,26 +20,21 @@ assert.match(
 
 assert.match(
   source,
-  /function resolveStorageVideoUrl\(downloadUrl, storagePath\) \{[\s\S]*const cleanStoragePath = deriveStoragePathFromMediaSource\(clean, storagePath \|\| ""\);[\s\S]*if \(clean && cleanIsStorageUrl && hasFirebaseDownloadToken\(clean\)\) \{[\s\S]*return resolveStaleAwareProxyMediaUrl\(clean, cleanStoragePath, "media"\);[\s\S]*if \(cleanStoragePath\) \{[\s\S]*return resolveStaleAwareProxyMediaUrl\(clean, cleanStoragePath, "media"\);[\s\S]*if \(isStorageUrl \|\| hasVideoExt\) \{[\s\S]*return resolveStaleAwareProxyMediaUrl\(parsed\.toString\(\), "", "media"\);/s,
-  "El video del dashboard debe preferir URLs tokenizadas directas y usar proxy-media same-origin solo como fallback."
+  /function resolveStorageVideoUrl\(downloadUrl, storagePath\) \{[\s\S]*const cleanStoragePath = deriveStoragePathFromMediaSource\(clean, storagePath \|\| ""\);[\s\S]*if \(cleanStoragePath\) \{[\s\S]*return resolveStaleAwareProxyMediaUrl\(clean, cleanStoragePath, "media"\);[\s\S]*return buildApiUrl\(`\/api\/assets\/proxy-media\?url=\$\{encodeURIComponent\(parsed\.toString\(\)\)\}`\);/,
+  "El video del dashboard debe usar proxy-media y fallback por URL en lugar de devolver gs://."
+);
+
+assert.ok(
+  source.includes("const firebaseGsUrl = (() => {")
+  && source.includes('if (firebaseGsUrl) {')
+  && source.includes('/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}&noRange=1'),
+  "El audio del dashboard debe convertir gs:// en una URL proxyable por URL."
 );
 
 assert.match(
   source,
-  /function resolveStaleAwareProxyMediaUrl\(rawUrl = "", storagePath = "", kind = "media"\) \{[\s\S]*const storageProxyUrl = buildApiUrl\(`\$\{proxyPath\}\?storagePath=\$\{encodeURIComponent\(proxyStoragePath\)\}`\);[\s\S]*return buildApiUrl\(`\$\{proxyPath\}\?url=\$\{encodeURIComponent\(parsed\.toString\(\)\)\}`\);/s,
-  "Los fallbacks proxy-media del dashboard deben quedar same-origin con buildApiUrl."
-);
-
-assert.match(
-  source,
-  /async function resolveFirebaseStorageUrl\(gsPath = ""\) \{[\s\S]*return await getDownloadURL\(ref\(storage, objectPath\)\);[\s\S]*\}/s,
-  "home.js debe resolver rutas gs:// con Firebase Storage SDK directo."
-);
-
-assert.match(
-  source,
-  /resolveFirebaseStorageUrl: async \(gsPath\) => \{\s*return resolveFirebaseStorageUrl\(gsPath\);\s*\}/,
-  "El playback controller del dashboard debe delegar la resolución de Storage al helper directo por SDK."
+  /resolveStorageAudioUrl: \(url, path\) => resolveStorageAudioUrl\(url, path\),[\s\S]*markStaleProxyMediaUrl,/,
+  "El playback controller del dashboard debe poder marcar proxies stale para evitar loops con la misma URL rota."
 );
 
 console.log("Home media proxy fallback OK.");

@@ -23,12 +23,9 @@ function preloadAllDialogueAudios(session = null) {
   if (!keys.length) return;
 
   keys.forEach((rowId) => {
-    const audioClip = window.resolveDialogueAudioForRow?.(activeSession, rowId) || audioMap[rowId];
+    const audioClip = audioMap[rowId];
     if (!audioClip) return;
-    const localMediaCacheKey = String(audioClip.localMediaCacheKey || "").trim();
-    const audioSrc = localMediaCacheKey && window?.playbackController?.resolveLocalMediaObjectUrl
-      ? `podcaster-local-media:${localMediaCacheKey}`
-      : window.resolveStorageAudioUrl(audioClip.downloadUrl || "", audioClip.storagePath || "");
+    const audioSrc = window.resolveStorageAudioUrl(audioClip.downloadUrl || "", audioClip.storagePath || "");
     if (!audioSrc) return;
 
     const resolvePlayableAudioSrc = async (src = "") => {

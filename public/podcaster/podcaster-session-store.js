@@ -335,6 +335,19 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
 
 async function loadSessionsFromCloud(uid = "", deps = {}) {
   const deletedSessionIds = new Set(loadDeletedSessionIds(uid, deps, deps.storageAdapter));
+  if (deps.hasAvailableApiBase?.()) {
+    try {
+      const response = await deps.authFetchJson("/api/podcaster/sessions/list", {
+        method: "GET",
+        preferRemote: false
+      });
+      const apiSessions = Array.isArray(response?.sessions) ? response.sessions : [];
+      return apiSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
+    } catch (_) {
+      const directSessions = await loadCloudSessionsDirect(uid, deps).catch(() => []);
+      return directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
+    }
+  }
   const directSessions = await loadCloudSessionsDirect(uid, deps);
   return directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
 }
@@ -581,7 +594,13 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     };
     throw error;
   }
-  const response = await saveSessionDirectToCloud(payload, deps);
+  const response = deps.hasAvailableApiBase?.()
+    ? await deps.authFetchJson("/api/podcaster/sessions/save", {
+      method: "POST",
+      preferRemote: false,
+      body: JSON.stringify({ session: payload })
+    })
+    : await saveSessionDirectToCloud(payload, deps);
   const savedAt = String(response?.savedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
   const nextSessions = getSessions().map((session) => (

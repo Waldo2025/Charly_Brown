@@ -262,7 +262,7 @@ function loadPersistedMontageExportActiveJob() {
   }
 }
 
-export function persistMontageExportActiveJob(jobId = "", startedAtMs = 0) {
+function persistMontageExportActiveJob(jobId = "", startedAtMs = 0) {
   const cleanJobId = String(jobId || "").trim();
   try {
     if (!cleanJobId) {
@@ -1620,11 +1620,7 @@ function persistMontageExportReferenceToSession(reference = null) {
     ...current,
     podcastVideoConfig: {
       ...(current.podcastVideoConfig || {}),
-      latestMontageExport: normalized,
-      montageExportHistory: normalizeMontageExportDownloadHistory([
-        normalized,
-        ...(Array.isArray(current.podcastVideoConfig?.montageExportHistory) ? current.podcastVideoConfig.montageExportHistory : [])
-      ])
+      latestMontageExport: normalized
     }
   }), {
     persist: true,
@@ -2408,28 +2404,6 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     }
   }
   if (!src) src = directDownloadUrl || rawUrl;
-  const isTokenizedFirebaseUrl = /(?:firebasestorage\.(?:googleapis\.com|app)|firebasestorage\.googleapis\.com)/i.test(src)
-    && /(?:[?&](?:token|downloadtoken)=)/i.test(src);
-  if (isTokenizedFirebaseUrl) {
-    if (storagePath && typeof window.resolveFirebaseStorageUrl === "function") {
-      try {
-        const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app";
-        const gsUrl = storagePath.startsWith("gs://")
-          ? storagePath
-          : `gs://${bucket}/${storagePath}`;
-        const resolved = gsUrl ? String(await window.resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
-        if (resolved && /^https?:\/\//i.test(resolved) && !isMontageProxyMediaUrl(resolved)) {
-          src = resolved;
-        } else {
-          src = "";
-        }
-      } catch (_) {
-        src = "";
-      }
-    } else {
-      src = "";
-    }
-  }
   if (
     isMontageProxyMediaUrl(src)
     && storagePath
@@ -2454,9 +2428,6 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
       // fallback below
     }
   }
-  if (isMontageProxyMediaUrl(src) && storagePath) {
-    src = "";
-  }
   const shouldResolveDirectly = !src || src.startsWith("gs://");
   if (shouldResolveDirectly && typeof window.resolveFirebaseStorageUrl === "function") {
     try {
@@ -2472,17 +2443,10 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
       // fallback below
     }
   }
-  if (!src && !storagePath) {
-    if (rawUrl && !rawUrl.startsWith("gs://") && !isMontageProxyMediaUrl(rawUrl)) {
-      src = normalizeMontageSubmissionMediaUrl(rawUrl);
-      if (/\/api\/assets\/proxy-(?:media|image)\?/i.test(src || "")) {
-        src = "";
-      }
-    }
+  if (!src) {
+    src = String(window.resolveStorageVideoUrl(rawUrl, storagePath) || "").trim();
   }
-  const isFinalTokenizedFirebaseUrl = /(?:firebasestorage\.(?:googleapis\.com|app)|firebasestorage\.googleapis\.com)/i.test(src)
-    && /(?:[?&](?:token|downloadtoken)=)/i.test(src);
-  if (!src || isMontageProxyMediaUrl(src) || isFinalTokenizedFirebaseUrl) return null;
+  if (!src) return null;
   const mediaKind = String(video?.mediaKind || video?.type || "").trim().toLowerCase();
   const mimeType = String(video?.mimeType || "").trim().toLowerCase();
   const isImage = mediaKind === "image" || mimeType.startsWith("image/");
@@ -3057,76 +3021,6 @@ function buildMontageStorageGsUrl(storagePath = "") {
   const bucket = String(window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app").trim();
   if (!bucket) return "";
   return `gs://${bucket}/${cleanStoragePath}`;
-}
-
-function parseMontageFirebaseStorageObjectUrl(rawUrl = "") {
-  const clean = String(rawUrl || "").trim();
-  if (!clean || clean.startsWith("data:")) return null;
-  try {
-    const parsed = new URL(clean, window.location.origin);
-    const host = String(parsed.hostname || "").toLowerCase();
-    const isFirebaseStorageHost = host === "firebasestorage.googleapis.com"
-      || host === "storage.googleapis.com"
-      || host.endsWith(".firebasestorage.app")
-      || host.endsWith(".appspot.com");
-    if (!isFirebaseStorageHost) return null;
-    if (host === "firebasestorage.googleapis.com") {
-      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
-      if (!match) return null;
-      const bucket = String(match[1] || "").trim();
-      let objectPath = String(match[2] || "").trim();
-      if (!bucket || !objectPath) return null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        if (!/%[0-9a-f]{2}/i.test(objectPath)) break;
-        try {
-          const decoded = decodeURIComponent(objectPath);
-          if (decoded === objectPath) break;
-          objectPath = decoded;
-        } catch (_) {
-          break;
-        }
-      }
-      objectPath = objectPath.replace(/^\/+/, "").trim();
-      return objectPath ? { bucket, storagePath: objectPath } : null;
-    }
-    if (host === "storage.googleapis.com") {
-      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
-      if (parts.length < 2) return null;
-      const bucket = String(parts.shift() || "").trim();
-      const storagePath = parts.join("/").trim();
-      return bucket && storagePath ? { bucket, storagePath } : null;
-    }
-    const pathname = String(parsed.pathname || "").replace(/^\/+/, "").trim();
-    return pathname ? { bucket: host, storagePath: pathname } : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function deriveMontageStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
-  const cleanStoragePath = String(storagePath || "").trim();
-  if (cleanStoragePath.startsWith("gs://")) return cleanStoragePath;
-  const parsed = parseMontageFirebaseStorageObjectUrl(rawUrl);
-  if (parsed?.bucket && parsed?.storagePath) {
-    return `gs://${parsed.bucket}/${parsed.storagePath}`;
-  }
-  try {
-    const proxyParsed = new URL(String(rawUrl || "").trim(), window.location.origin);
-    const proxyPath = String(proxyParsed.pathname || "").toLowerCase();
-    if (proxyPath.includes("/api/assets/proxy-media") || proxyPath.includes("/api/assets/proxy-image")) {
-      const proxyStoragePath = String(proxyParsed.searchParams.get("storagePath") || "").trim();
-      if (proxyStoragePath) return proxyStoragePath;
-      const nestedUrl = String(proxyParsed.searchParams.get("url") || "").trim();
-      const nestedParsed = parseMontageFirebaseStorageObjectUrl(nestedUrl);
-      if (nestedParsed?.bucket && nestedParsed?.storagePath) {
-        return `gs://${nestedParsed.bucket}/${nestedParsed.storagePath}`;
-      }
-    }
-  } catch (_) {
-    // noop
-  }
-  if (cleanStoragePath) return cleanStoragePath;
-  return String(parsed?.storagePath || "").trim();
 }
 
 function selectFrontendMontageExportMimeType() {
@@ -4405,7 +4299,15 @@ async function fetchMontageMediaBlob(sourceUrl = "") {
     if (!looksLikeProxy || !(status === 404 || status === 403 || status === 0)) {
       throw error;
     }
-    throw error;
+    try {
+      const parsed = new URL(cleanUrl, window.location.origin);
+      const originalUrl = parsed.searchParams.get("url") || "";
+      const cleanedOriginalUrl = String(originalUrl || "").trim();
+      if (!cleanedOriginalUrl) throw error;
+      return await tryFetch(cleanedOriginalUrl);
+    } catch (fallbackError) {
+      throw fallbackError;
+    }
   }
 }
 
@@ -4414,53 +4316,43 @@ async function resolveMontageSceneMediaSourceUrl(asset = {}, kind = "video") {
   if (directDataUrl.startsWith("data:")) return directDataUrl;
 
   const directDownloadUrl = String(asset?.downloadUrl || asset?.url || "").trim();
-  const explicitStoragePath = String(asset?.storagePath || "").trim();
-  const storagePath = deriveMontageStoragePathFromMediaSource(directDownloadUrl, explicitStoragePath)
-    || deriveMontageStoragePathFromMediaSource(String(asset?.url || "").trim(), explicitStoragePath);
+  if (directDownloadUrl && !directDownloadUrl.startsWith("gs://")) {
+    return normalizeMontageSubmissionMediaUrl(directDownloadUrl);
+  }
+
+  const storagePath = String(asset?.storagePath || "").trim();
   const storageGsUrl = directDownloadUrl.startsWith("gs://")
     ? directDownloadUrl
     : (storagePath.startsWith("gs://") ? storagePath : buildMontageStorageGsUrl(storagePath));
-  const directDownloadIsFirebase = /googleapis\.com|firebasestorage\.app/i.test(directDownloadUrl);
-  const directDownloadIsTokenizedFirebase = directDownloadIsFirebase && /[?&]token=/i.test(directDownloadUrl);
-  const shouldAvoidTokenizedFallback = Boolean(storageGsUrl && directDownloadIsTokenizedFirebase);
-
   if (storageGsUrl && typeof window.resolveFirebaseStorageUrl === "function") {
     try {
       const resolved = String(await window.resolveFirebaseStorageUrl(storageGsUrl) || "").trim();
-      if (resolved && /^https?:\/\//i.test(resolved) && !isMontageProxyMediaUrl(resolved)) {
-        return resolved;
-      }
-      if (resolved.startsWith("gs://")) {
-        return "";
-      }
+      if (resolved) return resolved;
     } catch (_) {
       // fallback below
     }
   }
-  if (storageGsUrl && isMontageProxyMediaUrl(directDownloadUrl)) {
-    return "";
-  }
 
-  if (directDownloadUrl && directDownloadIsTokenizedFirebase) {
-    return "";
-  }
-  if (directDownloadUrl && !shouldAvoidTokenizedFallback && !directDownloadUrl.startsWith("gs://")) {
-    return normalizeMontageSubmissionMediaUrl(directDownloadUrl);
-  }
-  if (storageGsUrl) return "";
-  return "";
+  const resolveCandidate = (value = "") => {
+    const clean = String(value || "").trim();
+    return clean && !clean.startsWith("gs://") ? clean : "";
+  };
+  const preferredResolver = kind === "audio"
+    ? window.resolveStorageAudioUrl?.(directDownloadUrl, storagePath)
+    : window.resolveStorageVideoUrl?.(directDownloadUrl, storagePath);
+  const fallbackResolver = kind === "audio"
+    ? window.resolveStorageVideoUrl?.(directDownloadUrl, storagePath)
+    : window.resolveStorageAudioUrl?.(directDownloadUrl, storagePath);
+  const resolvedProxyUrl = resolveCandidate(preferredResolver) || resolveCandidate(fallbackResolver);
+  if (resolvedProxyUrl) return normalizeMontageSubmissionMediaUrl(resolvedProxyUrl);
+
+  if (storageGsUrl) return storageGsUrl;
+  return directDownloadUrl;
 }
 
 async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
   if (!asset || typeof asset !== "object") return asset;
   const directDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
-  const resolvedStoragePath = deriveMontageStoragePathFromMediaSource(
-    String(asset?.downloadUrl || asset?.url || "").trim(),
-    String(asset?.storagePath || "").trim()
-  ) || deriveMontageStoragePathFromMediaSource(
-    String(asset?.url || "").trim(),
-    String(asset?.storagePath || "").trim()
-  );
   const cacheKey = String(asset?.localMediaCacheKey || buildMontageSceneMediaCacheKey(asset, kind) || "").trim();
   const mimeType = String(asset?.mimeType || (kind === "audio" ? "audio/mpeg" : "video/mp4")).trim() || (kind === "audio" ? "audio/mpeg" : "video/mp4");
   const directDataUrlBytes = estimateMontageDataUrlBytes(directDataUrl);
@@ -4486,8 +4378,8 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
     return {
       ...asset,
       localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-      url: "",
-      downloadUrl: ""
+      url: String(asset?.url || asset?.downloadUrl || "").trim(),
+      downloadUrl: String(asset?.downloadUrl || asset?.url || "").trim()
     };
   }
 
@@ -4500,46 +4392,33 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
         dataUrl: cachedDataUrl,
         localDataUrl: cachedDataUrl,
         localMediaCacheKey: cacheKey,
-        url: "",
-        downloadUrl: ""
+        url: String(asset?.url || asset?.downloadUrl || "").trim(),
+        downloadUrl: String(asset?.downloadUrl || asset?.url || "").trim()
       };
     }
   }
 
   const sourceUrl = await resolveMontageSceneMediaSourceUrl(asset, kind);
-  const legacySourceUrl = String(asset?.url || asset?.downloadUrl || "").trim();
-  const isSourceTokenizedFirebase = /(?:firebasestorage\.(?:googleapis\.com|app)|firebasestorage\.googleapis\.com)/i.test(sourceUrl)
-    && /(?:[?&](?:token|downloadtoken)=)/i.test(sourceUrl);
-  const isLegacySourceTokenizedFirebase = /(?:firebasestorage\.(?:googleapis\.com|app)|firebasestorage\.googleapis\.com)/i.test(legacySourceUrl)
-    && /(?:[?&](?:token|downloadtoken)=)/i.test(legacySourceUrl);
-  const isLegacyProxyMedia = isMontageProxyMediaUrl(legacySourceUrl);
-  const finalSourceUrl = isSourceTokenizedFirebase && !resolvedStoragePath && !sourceUrl.startsWith("gs://")
-    ? ""
-    : sourceUrl;
-  const safeLegacySourceUrl = (isLegacySourceTokenizedFirebase || isLegacyProxyMedia) ? "" : legacySourceUrl;
-  const cachedPlaybackBlobUrl = finalSourceUrl && typeof window.playbackController?.getBlobUrlSync === "function"
-    ? String(window.playbackController.getBlobUrlSync(finalSourceUrl) || "").trim()
+  const cachedPlaybackBlobUrl = sourceUrl && typeof window.playbackController?.getBlobUrlSync === "function"
+    ? String(window.playbackController.getBlobUrlSync(sourceUrl) || "").trim()
     : "";
-  const effectiveFetchUrl = cachedPlaybackBlobUrl || finalSourceUrl;
-  const hasStorageBackedRemoteSource = Boolean(resolvedStoragePath) && !cachedPlaybackBlobUrl;
-  const hasSafeSourceUrl = Boolean(finalSourceUrl);
+  const effectiveFetchUrl = cachedPlaybackBlobUrl || sourceUrl;
+  const hasStorageBackedRemoteSource = Boolean(String(asset?.storagePath || "").trim()) && !cachedPlaybackBlobUrl;
 
-  if (!hasSafeSourceUrl || safeLegacySourceUrl.startsWith("gs://")) {
+  if (!sourceUrl || sourceUrl.startsWith("gs://")) {
     return {
       ...asset,
       localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-      storagePath: resolvedStoragePath || String(asset?.storagePath || "").trim(),
-      url: finalSourceUrl || safeLegacySourceUrl,
-      downloadUrl: finalSourceUrl || safeLegacySourceUrl
+      url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
+      downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
     };
   }
   if (hasStorageBackedRemoteSource) {
     return {
       ...asset,
       localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-      storagePath: resolvedStoragePath || String(asset?.storagePath || "").trim(),
-      url: finalSourceUrl,
-      downloadUrl: finalSourceUrl
+      url: sourceUrl,
+      downloadUrl: sourceUrl
     };
   }
 
@@ -4549,8 +4428,8 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
       return {
         ...asset,
         localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-        url: finalSourceUrl || safeLegacySourceUrl,
-        downloadUrl: finalSourceUrl || safeLegacySourceUrl
+        url: sourceUrl,
+        downloadUrl: sourceUrl
       };
     }
     if (cacheKey) {
@@ -4569,7 +4448,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
           montageExportHydratedMediaCache.set(cacheKey, dataUrl);
           void putPodcasterLocalMediaDataUrl(cacheKey, dataUrl, {
             mimeType: String(blob.type || mimeType || "").trim() || mimeType,
-            sourceUrl: finalSourceUrl,
+            sourceUrl: effectiveFetchUrl,
             storagePath: String(asset?.storagePath || "").trim(),
             kind
           }).catch(() => { });
@@ -4579,16 +4458,16 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
           dataUrl,
           localDataUrl: dataUrl,
           localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-          url: finalSourceUrl,
-          downloadUrl: finalSourceUrl
+          url: sourceUrl,
+          downloadUrl: sourceUrl
         };
       }
     }
     return {
       ...asset,
       localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-      url: finalSourceUrl,
-      downloadUrl: finalSourceUrl
+      url: sourceUrl,
+      downloadUrl: sourceUrl
     };
   } catch (_) {
     if (cacheKey) {
@@ -4599,16 +4478,16 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
           dataUrl: cachedDataUrl,
           localDataUrl: cachedDataUrl,
           localMediaCacheKey: cacheKey,
-          url: finalSourceUrl || safeLegacySourceUrl,
-          downloadUrl: finalSourceUrl || safeLegacySourceUrl
+          url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
+          downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
         };
       }
     }
     return {
       ...asset,
       localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
-      url: finalSourceUrl || safeLegacySourceUrl,
-      downloadUrl: finalSourceUrl || safeLegacySourceUrl
+      url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
+      downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
     };
   }
 }
@@ -4789,34 +4668,18 @@ async function inlineMontageExportPayloadMedia(payload = {}) {
   return payload;
 }
 
-function isBackendResolvableMontageMediaSource(value = "") {
-  const clean = String(value || "").trim();
-  if (!clean) return false;
-  if (/^(?:https?:\/\/|gs:\/\/|data:)/i.test(clean)) return true;
-  if (clean.startsWith("/api/")) return true;
-  return false;
-}
-
 function stripInlineMontageMediaRecord(record = null) {
   if (!record || typeof record !== "object") return record;
   const clean = { ...record };
   clean.url = normalizeMontageSubmissionMediaUrl(clean.url);
   clean.downloadUrl = normalizeMontageSubmissionMediaUrl(clean.downloadUrl);
-  const mimeType = String(clean.mimeType || "").trim().toLowerCase();
-  const kind = String(clean.kind || clean.mediaKind || "").trim().toLowerCase();
-  const isAudioLike = mimeType.startsWith("audio/")
-    || kind === "audio"
-    || kind === "timeline-audio"
-    || kind === "background-track"
-    || kind === "background"
-    || kind === "music";
-  const keepInlineAudio = isAudioLike && Boolean(String(clean.localMediaCacheKey || "").trim());
   const hasDurableSource = Boolean(
     String(clean.storagePath || "").trim()
-    || isBackendResolvableMontageMediaSource(clean.downloadUrl)
-    || isBackendResolvableMontageMediaSource(clean.url)
+    || String(clean.downloadUrl || "").trim()
+    || String(clean.url || "").trim()
+    || String(clean.localMediaCacheKey || "").trim()
   );
-  if (hasDurableSource && !keepInlineAudio) {
+  if (hasDurableSource) {
     clean.dataUrl = "";
     clean.localDataUrl = "";
   }
@@ -4827,18 +4690,28 @@ function normalizeMontageSubmissionMediaUrl(value = "") {
   const cleanValue = String(value || "").trim();
   if (!cleanValue) return "";
   if (/^(?:data:|gs:\/\/)/i.test(cleanValue)) return cleanValue;
+  const buildExportProxyUrl = (path = "") => {
+    const cleanPath = String(path || "").trim();
+    if (!cleanPath) return "";
+    try {
+      if (typeof buildExportApiUrl === "function") {
+        const absolute = String(buildExportApiUrl(cleanPath) || "").trim();
+        if (absolute) return absolute;
+      }
+    } catch (_) {
+      // fallback below
+    }
+    try {
+      return new URL(cleanPath, window.location.origin).toString();
+    } catch (_) {
+      return cleanPath;
+    }
+  };
   try {
     const parsed = new URL(cleanValue, window.location.origin);
     const proxyPath = `${parsed.pathname || ""}${parsed.search || ""}`;
     const isProxyAssetRoute = /^\/api\/assets\/proxy-(?:media|image)\?/i.test(proxyPath);
-    if (isProxyAssetRoute) {
-      const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
-      if (nestedUrl && nestedUrl !== cleanValue) {
-        return normalizeMontageSubmissionMediaUrl(nestedUrl);
-      }
-      const nestedStoragePath = String(parsed.searchParams.get("storagePath") || "").trim();
-      return nestedStoragePath || "";
-    }
+    if (isProxyAssetRoute) return buildExportProxyUrl(proxyPath);
   } catch (_) {
     // keep legacy handling below
   }
@@ -4911,25 +4784,6 @@ async function resolveMontageExportStatusPreviewMedia(data = null) {
     if (!cleanStorageCandidate || seenStorageCandidates.has(cleanStorageCandidate)) continue;
     seenStorageCandidates.add(cleanStorageCandidate);
     if (/^https?:\/\//i.test(cleanStorageCandidate)) {
-      if (isMontageProxyMediaUrl(cleanStorageCandidate)) continue;
-      const parsedCandidate = parseMontageFirebaseStorageObjectUrl(cleanStorageCandidate);
-      if (parsedCandidate?.bucket && parsedCandidate?.storagePath && typeof window.resolveFirebaseStorageUrl === "function") {
-        try {
-          const gsCandidate = `gs://${String(parsedCandidate.bucket || "").trim()}/${String(parsedCandidate.storagePath || "").trim()}`.replace(/^gs:\/\/\/+/, "gs://");
-          const resolved = String(await window.resolveFirebaseStorageUrl(gsCandidate) || "").trim();
-          const normalizedResolved = normalizeMontageSubmissionMediaUrl(resolved);
-          if (normalizedResolved) {
-            return {
-              dataUrl: normalizedResolved,
-              mediaType: inferMontageExportMediaTypeFromUrl(normalizedResolved) || "video/mp4"
-            };
-          }
-        } catch (_) {
-          // noop
-        }
-      }
-      const isFirebaseStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(cleanStorageCandidate);
-      if (isFirebaseStorageUrl) continue;
       const normalizedStorageUrl = normalizeMontageSubmissionMediaUrl(cleanStorageCandidate);
       if (normalizedStorageUrl) {
         return {
@@ -4954,9 +4808,18 @@ async function resolveMontageExportStatusPreviewMedia(data = null) {
       } catch (_) {
         // fallback below
       }
-      continue;
     }
 
+    const fallbackUrl = typeof window.resolveStorageVideoUrl === "function"
+      ? String(window.resolveStorageVideoUrl(cleanStorageCandidate, cleanStorageCandidate) || "").trim()
+      : "";
+    const normalizedFallback = fallbackUrl ? normalizeMontageSubmissionMediaUrl(fallbackUrl) : "";
+    if (normalizedFallback) {
+      return {
+        dataUrl: normalizedFallback,
+        mediaType: inferMontageExportMediaTypeFromUrl(normalizedFallback) || "video/mp4"
+      };
+    }
   }
 
   const downloadCandidate = String(source.currentDownloadUrl || "").trim();
@@ -4974,7 +4837,7 @@ async function resolveMontageExportStatusPreviewMedia(data = null) {
   return null;
 }
 
-export function stripMontageExportSubmissionPayload(payload = {}) {
+function stripMontageExportSubmissionPayload(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const next = { ...payload };
   if (Array.isArray(next.entries)) {
@@ -5752,13 +5615,7 @@ export function buildMontageExportPayload(session = null) {
           || runtime?.audioSrc
           || ""
         ).trim();
-        const localAudioKey = String(
-          storedAudio?.localMediaCacheKey
-          || segment?.localMediaCacheKey
-          || runtime?.localMediaCacheKey
-          || ""
-        ).trim();
-        const effectiveSrc = src || (localAudioKey ? `podcaster-local-media:${localAudioKey}` : "");
+        const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
         if (!effectiveSrc) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime);
@@ -5785,7 +5642,7 @@ export function buildMontageExportPayload(session = null) {
           downloadUrl: String(storedAudio?.downloadUrl || "").trim(),
           dataUrl: String(storedAudio?.dataUrl || storedAudio?.localDataUrl || "").trim(),
           localDataUrl: String(storedAudio?.localDataUrl || storedAudio?.dataUrl || "").trim(),
-          localMediaCacheKey: localAudioKey,
+          localMediaCacheKey: String(storedAudio?.localMediaCacheKey || "").trim(),
           mimeType: String(storedAudio?.mimeType || "").trim(),
           startMs,
           durationMs,
@@ -5919,10 +5776,7 @@ export function buildMontageExportPayload(session = null) {
       const rows = Array.isArray(window.getSessionRows?.(activeSession)) ? window.getSessionRows(activeSession) : [];
       const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
       const clip = window.resolveDialogueVideoForRow?.(activeSession, rowId) || null;
-      const primarySegment = window.resolvePrimaryDialogueVideoSegment?.(clip, {
-        sessionId,
-        rowId
-      }) || null;
+      const primarySegment = window.resolvePrimaryDialogueVideoSegment?.(clip) || null;
       const audio = window.resolveDialogueAudioForRow?.(activeSession, rowId) || null;
       const videoStoragePath = String(primarySegment?.storagePath || clip?.storagePath || "").trim();
       const videoDownloadUrl = String(primarySegment?.downloadUrl || clip?.downloadUrl || "").trim();

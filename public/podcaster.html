@@ -21,88 +21,6 @@
   <link href="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.css"
     rel="stylesheet">
   <style>
-    body.podcaster-booting {
-      background: #101827;
-      overflow: hidden;
-    }
-
-    body.podcaster-booting > :not(#appLoadingScreen) {
-      visibility: hidden;
-    }
-
-    #appLoadingScreen {
-      position: fixed;
-      inset: 0;
-      z-index: 999999;
-      background: #101827;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 24px;
-      transition: opacity 0.5s ease, visibility 0.5s ease;
-    }
-
-    #appLoadingScreen.is-hidden {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-
-    .loading-spinner-snoopy {
-      width: 110px;
-      height: auto;
-      filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1));
-      animation: snoopy-float 2.4s ease-in-out infinite;
-    }
-
-    .loading-dots {
-      display: flex;
-      gap: 8px;
-    }
-
-    .loading-dots span {
-      width: 10px;
-      height: 10px;
-      background: #38bdf8;
-      border-radius: 50%;
-      animation: dot-pulse 1.4s infinite;
-    }
-
-    .loading-dots span:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-
-    .loading-dots span:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-
-    @keyframes snoopy-float {
-
-      0%,
-      100% {
-        transform: translateY(0) scale(1);
-      }
-
-      50% {
-        transform: translateY(-20px) scale(1.05);
-      }
-    }
-
-    @keyframes dot-pulse {
-
-      0%,
-      100% {
-        opacity: 0.3;
-        transform: scale(0.8);
-      }
-
-      50% {
-        opacity: 1;
-        transform: scale(1.2);
-      }
-    }
-
     .movement-options-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -502,7 +420,7 @@
   <link rel="stylesheet" href="/podcaster/css/podcaster-media-editor.css">
 </head>
 
-<body class="podcaster-booting">
+<body>
   <div id="appLoadingScreen">
     <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="loading-spinner-snoopy">
     <div class="loading-dots">
@@ -2541,10 +2459,10 @@
   <script data-cache-src="podcaster/podcaster-script-generator.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster-script-editor.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster-montage-export-v2.js" data-cache-type="module"></script>
-  <script data-cache-src="podcaster/podcaster-chat-assistant.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster.js" data-cache-type="module"></script>
   <script type="module" src="podcaster/podcaster-reels.js"></script>
   <script data-cache-src="podcaster/podcaster-public-library.js" data-cache-type="module"></script>
+  <script data-cache-src="podcaster/podcaster-chat-assistant.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster-audioGemini-timeline.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster-video-generator.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster-montage-export.js" data-cache-type="module"></script>

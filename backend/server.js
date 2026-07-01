@@ -273,11 +273,6 @@ const BACKEND_BOOT_ISO = new Date().toISOString();
 const BACKEND_BOOT_SIGNATURE = `backend/server.js@${BACKEND_BOOT_ISO}`;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const PRIMARY_GEMINI_BACKEND_BASE = String(
-  process.env.PRIMARY_GEMINI_BACKEND_BASE
-  || process.env.GEMINI_BACKEND_PUBLIC_BASE_URL
-  || "https://charly-brown-gemini-backend.onrender.com"
-).trim().replace(/\/+$/, "");
 // Montage exports can carry sizable JSON payloads when they include cached
 // inline media or rendered text snapshots. Keep the global parser roomy enough
 // for those requests, and fail cleanly when a payload still exceeds the limit.
@@ -3790,8 +3785,7 @@ function sanitizePodcasterSession(raw = {}) {
     montageDefaultVeoVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultVeoVolumePct, 0, 100, 0),
     montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100),
     reelModeEnabled: raw?.podcastVideoConfig?.reelModeEnabled === true,
-    latestMontageExport: sanitizeMontageExportReference(raw?.podcastVideoConfig?.latestMontageExport || null),
-    montageExportHistory: sanitizeMontageExportHistory(raw?.podcastVideoConfig?.montageExportHistory || [])
+    latestMontageExport: sanitizeMontageExportReference(raw?.podcastVideoConfig?.latestMontageExport || null)
   };
   const panelMusicConfigRaw = raw?.panelMusicConfig && typeof raw.panelMusicConfig === "object" ? raw.panelMusicConfig : {};
   const panelMusicTrackRaw = panelMusicConfigRaw?.track && typeof panelMusicConfigRaw.track === "object" ? panelMusicConfigRaw.track : null;
@@ -7188,7 +7182,6 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
 
 app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
   try {
-    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     const uid = String(req.authContext?.uid || "").trim();
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
@@ -7272,7 +7265,6 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
 
 app.get("/api/podcaster/sessions/list-audios", async (req, res) => {
   try {
-    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     const uid = String(req.authContext?.uid || "").trim();
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
@@ -9935,73 +9927,6 @@ function coerceReadableStream(body = null) {
   return null;
 }
 
-function shouldForwardMisroutedEditorRequestToGemini(req) {
-  if (!EXPORT_SERVICE_ONLY) return false;
-  const pathName = String(req?.path || req?.originalUrl || "").trim();
-  return pathName === "/api/assets/proxy-media"
-    || pathName === "/api/assets/proxy-image"
-    || pathName === "/api/podcaster/sessions/list"
-    || pathName === "/api/podcaster/sessions/list-videos"
-    || pathName === "/api/podcaster/sessions/list-audios"
-    || pathName.startsWith("/api/podcaster/scene-library/");
-}
-
-async function forwardMisroutedEditorRequestToGemini(req, res) {
-  if (!shouldForwardMisroutedEditorRequestToGemini(req) || !PRIMARY_GEMINI_BACKEND_BASE) {
-    return false;
-  }
-  const targetUrl = `${PRIMARY_GEMINI_BACKEND_BASE}${String(req.originalUrl || req.url || "").trim()}`;
-  const headers = {};
-  [
-    "authorization",
-    "range",
-    "accept",
-    "if-none-match",
-    "if-modified-since",
-    "user-agent"
-  ].forEach((name) => {
-    const value = req.headers?.[name];
-    if (!value) return;
-    headers[name] = Array.isArray(value) ? value.join(", ") : String(value);
-  });
-  try {
-    console.info("[backend][misroute-forward]", {
-      serviceRole: BACKEND_SERVICE_ROLE,
-      path: String(req.path || "").trim(),
-      targetUrl
-    });
-    const upstream = await fetchCompat(targetUrl, {
-      method: String(req.method || "GET").toUpperCase(),
-      headers
-    });
-    applyAssetCorsHeaders(req, res);
-    res.status(upstream.status);
-    upstream.headers.forEach((value, key) => {
-      const headerName = String(key || "").trim().toLowerCase();
-      if (!headerName || headerName === "transfer-encoding" || headerName === "connection") return;
-      try {
-        res.setHeader(key, value);
-      } catch (_) {}
-    });
-    const stream = coerceReadableStream(upstream.body);
-    if (stream) {
-      await safePipeline(stream, res);
-      return true;
-    }
-    const buffer = Buffer.from(await upstream.arrayBuffer().catch(() => new ArrayBuffer(0)));
-    res.send(buffer);
-    return true;
-  } catch (error) {
-    console.error("[backend][misroute-forward][error]", {
-      serviceRole: BACKEND_SERVICE_ROLE,
-      path: String(req.path || "").trim(),
-      targetUrl,
-      message: String(error?.message || error)
-    });
-    return false;
-  }
-}
-
 function parseFirebaseStorageGoogleApisObjectUrl(url = "") {
   const clean = String(url || "").trim();
   if (!clean) return null;
@@ -11494,21 +11419,6 @@ function sanitizeMontageExportReference(value = null) {
   };
 }
 
-function sanitizeMontageExportHistory(value = []) {
-  const normalized = (Array.isArray(value) ? value : [])
-    .map((entry) => sanitizeMontageExportReference(entry))
-    .filter(Boolean);
-  const deduped = [];
-  const seen = new Set();
-  for (const entry of normalized) {
-    const key = entry.downloadUrl || entry.storagePath || `${entry.filename}__${entry.createdAtIso}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(entry);
-  }
-  return deduped.slice(0, 20);
-}
-
 function buildMontageExportFirebaseDownloadUrl(bucket = null, storagePath = "", token = "") {
   const bucketName = String(bucket?.name || "").trim();
   const cleanPath = normalizeStorageFilePath(String(storagePath || "").trim());
@@ -11535,11 +11445,7 @@ async function persistMontageExportLatestSessionMetadata({
       "session.podcastVideoConfig.latestMontageExport": {
         ...normalized,
         bucketName: String(bucket?.name || "").trim()
-      },
-      "session.podcastVideoConfig.montageExportHistory": admin.firestore.FieldValue.arrayUnion({
-        ...normalized,
-        bucketName: String(bucket?.name || "").trim()
-      })
+      }
     });
     console.info("[backend][montage-export][persist-session-latest-result]", {
       sessionId: cleanSessionId,
@@ -13735,7 +13641,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const exportedEntries = [];
-    const montageWarnings = [];
     let globalCanvas = null;
     const resolvedInlineBrandOverlayPath = input.brandOverlay?.enabled === true
       ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath)
@@ -13770,16 +13675,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       jobId,
       sceneCount: Array.isArray(input.entries) ? input.entries.length : 0
     });
-    const pushMontageWarning = (code = "montage_export_warning", message = "", detail = {}) => {
-      const warning = {
-        code: String(code || "montage_export_warning").trim() || "montage_export_warning",
-        message: String(message || "").trim() || "Se aplicó una degradación de export.",
-        detail: detail && typeof detail === "object" ? detail : {}
-      };
-      montageWarnings.push(warning);
-      console.warn("[backend][montage-export][warning]", warning);
-      return warning;
-    };
 
     for (let i = 0; i < input.entries.length; i += 1) {
       throwIfCancelled("download_assets");
@@ -13905,55 +13800,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           inputVisualPath = path.join(tmpDir, `scene-bg-${sceneIndex}-${Date.now()}.ppm`);
           fs.writeFileSync(inputVisualPath, ppmContent, "utf8");
         } else {
-          try {
-            inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
-          } catch (downloadError) {
-            const downloadCode = String(downloadError?.code || downloadError?.message || "").trim().toLowerCase();
-            const isMissingStorageAsset = downloadCode === "storage_not_found" || downloadCode.includes("no such object");
-            if (!isMissingStorageAsset) {
-              throw downloadError;
-            }
-            const placeholderDetail = {
-              sceneIndex,
-              rowId,
-              storagePath: videoStoragePath || undefined,
-              kind: isImageAsset ? "image" : "video",
-              reason: "storage_not_found"
-            };
-            pushMontageWarning(
-              "montage_export_missing_scene_asset",
-              `La escena ${sceneIndex} no existe en Storage. Se exportará un placeholder.`,
-              placeholderDetail
-            );
-            console.warn("[backend][montage-export][scene-missing-asset-placeholder]", {
-              jobId,
-              sceneIndex,
-              rowId,
-              storagePath: videoStoragePath || null,
-              kind: isImageAsset ? "image" : "video"
-            });
-            if (isImageAsset) {
-              const placeholderWidth = Math.max(2, Math.round(Number(globalCanvas?.width || input?.resolutionWidth || 1280) || 1280));
-              const placeholderHeight = Math.max(2, Math.round(Number(globalCanvas?.height || input?.resolutionHeight || 720) || 720));
-              inputVisualPath = path.join(tmpDir, `scene-missing-${sceneIndex}-${Date.now()}.ppm`);
-              fs.writeFileSync(inputVisualPath, generateSolidPpm("#000000", placeholderWidth, placeholderHeight), "utf8");
-            } else {
-              const placeholderCanvas = resolveMontageCanvasSize(
-                1280,
-                720,
-                input?.resolution || "source",
-                input?.reelModeEnabled === true
-              );
-              inputVisualPath = await renderMontageGapFillerClip({
-                tmpDir,
-                outExt,
-                params: intermediateParams,
-                canvas: placeholderCanvas,
-                gapDurationMs: durationMs,
-                gapIndex: sceneIndex - 1
-              });
-            }
-          }
+          inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
         }
         throwIfCancelled(`scene_${sceneIndex}_after_download`);
         const downloadedVisualStat = await fs.promises.stat(inputVisualPath).catch(() => null);
@@ -13972,36 +13819,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           }
         }));
         const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
-        inputAudioPath = "";
-        if (!forceSilentAudio && !useNativeVideoAudio && audioAsset) {
-          try {
-            inputAudioPath = await downloadInput(audioAsset, "audio", i);
-          } catch (audioError) {
-            const audioCode = String(audioError?.code || audioError?.message || "").trim().toLowerCase();
-            const isMissingStorageAsset = audioCode === "storage_not_found" || audioCode.includes("no such object");
-            if (!isMissingStorageAsset) {
-              throw audioError;
-            }
-            pushMontageWarning(
-              "montage_export_missing_audio_asset",
-              `La pista de audio de la escena ${sceneIndex} no existe en Storage. Se usará silencio.`,
-              {
-                sceneIndex,
-                rowId,
-                storagePath: clampText(audioAsset?.storagePath || "", 900) || undefined,
-                kind: "audio",
-                reason: "storage_not_found"
-              }
-            );
-            console.warn("[backend][montage-export][scene-missing-audio-placeholder]", {
-              jobId,
-              sceneIndex,
-              rowId,
-              storagePath: clampText(audioAsset?.storagePath || "", 900) || null
-            });
-            inputAudioPath = "";
-          }
-        }
+        inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
         const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
         const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
           ? "blur-backdrop"
@@ -15037,11 +14855,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         sizeBytes: stored.sizeBytes,
         createdAt: stored.createdAtIso,
         expiresAt: stored.expiresAtIso,
-        exportId: stored.exportId,
-        warnings: montageWarnings
+        exportId: stored.exportId
       },
       downloadUrl: stored.downloadUrl,
-      warnings: montageWarnings,
       exportedEntries
     };
   } finally {
@@ -17153,7 +16969,6 @@ app.post("/api/gemini/live-token", async (req, res) => {
 
 app.get("/api/assets/proxy-image", async (req, res) => {
   try {
-    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     applyAssetCorsHeaders(req, res);
     const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
     if (storagePath) {
@@ -17381,7 +17196,6 @@ app.get("/api/assets/montage-download", async (req, res) => {
 app.get("/api/assets/proxy-media", async (req, res) => {
   const requestId = randomUUID().slice(0, 8);
   try {
-    if (await forwardMisroutedEditorRequestToGemini(req, res)) return;
     applyAssetCorsHeaders(req, res);
     const ignoreRange = String(req.query?.noRange || "").trim() === "1" || String(req.query?.noRange || "").trim().toLowerCase() === "true";
     const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));

@@ -2967,106 +2967,17 @@ function parseFirebaseStorageObjectUrl(rawUrl = "") {
 
 function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
   const cleanStoragePath = String(storagePath || "").trim();
-  if (cleanStoragePath.startsWith("gs://")) return cleanStoragePath;
-  try {
-    const proxyParsed = new URL(String(rawUrl || "").trim(), window.location.origin);
-    const proxyPath = String(proxyParsed.pathname || "").toLowerCase();
-    if (proxyPath.includes("/api/assets/proxy-media") || proxyPath.includes("/api/assets/proxy-image")) {
-      const proxyStoragePath = String(proxyParsed.searchParams.get("storagePath") || "").trim();
-      if (proxyStoragePath) return proxyStoragePath;
-      const nestedUrl = String(proxyParsed.searchParams.get("url") || "").trim();
-      const nestedParsed = parseFirebaseStorageObjectUrl(nestedUrl);
-      if (nestedParsed?.bucket && nestedParsed?.storagePath) {
-        return `gs://${nestedParsed.bucket}/${nestedParsed.storagePath}`;
-      }
-    }
-  } catch (_) {
-    // noop
-  }
   if (cleanStoragePath) return cleanStoragePath;
   const parsed = parseFirebaseStorageObjectUrl(rawUrl);
-  if (parsed?.bucket && parsed?.storagePath) {
-    return `gs://${parsed.bucket}/${parsed.storagePath}`;
-  }
   return String(parsed?.storagePath || "").trim();
-}
-
-function normalizeStorageProxyPath(storagePath = "") {
-  const clean = String(storagePath || "").trim();
-  if (!clean) return "";
-  if (clean.startsWith("gs://")) {
-    const withoutScheme = clean.replace(/^gs:\/\//i, "");
-    const slashIndex = withoutScheme.indexOf("/");
-    return slashIndex >= 0 ? String(withoutScheme.slice(slashIndex + 1) || "").trim() : "";
-  }
-  const parsed = parseFirebaseStorageObjectUrl(clean);
-  if (parsed?.storagePath) return String(parsed.storagePath || "").trim();
-  return clean;
-}
-
-function hasFirebaseDownloadToken(url = "") {
-  const clean = String(url || "").trim();
-  if (!clean) return false;
-  return clean.includes("token=") || clean.includes("downloadToken=");
-}
-
-function buildHomeStorageGsUrl(storagePath = "") {
-  const clean = String(storagePath || "").trim();
-  if (!clean) return "";
-  if (clean.startsWith("gs://")) return clean;
-  const bucket = String(window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app").trim();
-  return bucket ? `gs://${bucket}/${clean.replace(/^\/+/, "")}` : "";
-}
-
-async function resolveFirebaseStorageUrl(gsPath = "") {
-  const clean = String(gsPath || "").trim();
-  if (!clean) return "";
-  if (/^https?:\/\//i.test(clean) && hasFirebaseDownloadToken(clean)) return clean;
-  const normalizedGsPath = buildHomeStorageGsUrl(clean);
-  if (!normalizedGsPath.startsWith("gs://")) return clean;
-  try {
-    const objectPath = normalizedGsPath.replace(/^gs:\/\/[^/]+\//, "");
-    if (!objectPath) return "";
-    return await getDownloadURL(ref(storage, objectPath));
-  } catch (_) {
-    return "";
-  }
 }
 
 function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media") {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = String(storagePath || "").trim();
-  const proxyStoragePath = normalizeStorageProxyPath(cleanStoragePath);
   const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
-  if (clean) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-      const pathname = String(parsed.pathname || "").toLowerCase();
-      if (pathname.includes("/api/assets/proxy-image") || pathname.includes("/api/assets/proxy-media")) {
-        const nestedStoragePath = normalizeStorageProxyPath(String(parsed.searchParams.get("storagePath") || "").trim() || proxyStoragePath);
-        const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
-        if (nestedUrl && nestedUrl !== clean) {
-          return resolveStaleAwareProxyMediaUrl(nestedUrl, nestedStoragePath, kind);
-        }
-        if (nestedStoragePath) {
-          const storageProxyUrl = buildApiUrl(`${proxyPath}?storagePath=${encodeURIComponent(nestedStoragePath)}`);
-          if (!isMarkedStaleProxyMediaUrl(storageProxyUrl)) {
-            return storageProxyUrl;
-          }
-          return nestedUrl || clean;
-        }
-      }
-      const host = String(parsed.hostname || "").toLowerCase();
-      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-      if (isFirebaseStorageUrl && hasFirebaseDownloadToken(clean)) {
-        return clean;
-      }
-    } catch (_) {
-      // noop
-    }
-  }
-  if (proxyStoragePath) {
-    const storageProxyUrl = buildApiUrl(`${proxyPath}?storagePath=${encodeURIComponent(proxyStoragePath)}`);
+  if (cleanStoragePath) {
+    const storageProxyUrl = buildApiUrlPreferRemote(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}`);
     if (!isMarkedStaleProxyMediaUrl(storageProxyUrl)) {
       return storageProxyUrl;
     }
@@ -3074,7 +2985,7 @@ function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "m
   if (!clean) return "";
   try {
     const parsed = new URL(clean, window.location.origin);
-    return buildApiUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`);
+    return buildApiUrlPreferRemote(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`);
   } catch (_) {
     return clean;
   }
@@ -3086,27 +2997,21 @@ function resolveStorageVideoUrl(downloadUrl, storagePath) {
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
   try {
-    const parsedClean = clean ? new URL(clean, window.location.origin) : null;
-    const cleanHost = String(parsedClean?.hostname || "").toLowerCase();
-    const cleanIsStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(cleanHost);
-    if (clean && cleanIsStorageUrl && hasFirebaseDownloadToken(clean)) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
-    }
     if (cleanStoragePath) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
-    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
+    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrlPreferRemote(clean);
     if (clean.startsWith("/api/assets/proxy-image?")) {
-      const parsedProxy = new URL(buildApiUrl(clean), window.location.origin);
+      const parsedProxy = new URL(buildApiUrlPreferRemote(clean), window.location.origin);
       const nested = String(parsedProxy.searchParams.get("url") || "").trim();
-      return nested ? resolveStaleAwareProxyMediaUrl(nested, "", "media") : buildApiUrl(clean);
+      return nested ? buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(nested)}`) : buildApiUrlPreferRemote(clean);
     }
     const parsed = new URL(clean, window.location.origin);
     const pathname = String(parsed.pathname || "").toLowerCase();
     const hasVideoExt = /\.(mp4|webm|mov|m4v)(?:$|\?)/i.test(pathname);
     const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
     if (isStorageUrl || hasVideoExt) {
-      return resolveStaleAwareProxyMediaUrl(parsed.toString(), "", "media");
+      return buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
     }
     return clean;
   } catch (_) {
@@ -3120,27 +3025,35 @@ function resolveStorageAudioUrl(downloadUrl, storagePath) {
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
   try {
-    const parsedClean = clean ? new URL(clean, window.location.origin) : null;
-    const cleanHost = String(parsedClean?.hostname || "").toLowerCase();
-    const cleanIsStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(cleanHost);
-    if (clean && cleanIsStorageUrl && hasFirebaseDownloadToken(clean)) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
+    const firebaseGsUrl = (() => {
+      const gsSource = String(cleanStoragePath || clean || "").trim();
+      if (!gsSource.startsWith("gs://")) return "";
+      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
+      const slashIndex = withoutScheme.indexOf("/");
+      if (slashIndex < 0) return "";
+      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
+      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
+      if (!bucket || !objectPath) return "";
+      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
+    })();
+    if (firebaseGsUrl) {
+      return buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}`);
     }
     if (cleanStoragePath) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
-    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
+    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrlPreferRemote(clean);
     if (clean.startsWith("/api/assets/proxy-image?")) {
-      const parsedProxy = new URL(buildApiUrl(clean), window.location.origin);
+      const parsedProxy = new URL(buildApiUrlPreferRemote(clean), window.location.origin);
       const nested = String(parsedProxy.searchParams.get("url") || "").trim();
-      return nested ? resolveStaleAwareProxyMediaUrl(nested, "", "media") : buildApiUrl(clean);
+      return nested ? buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(nested)}`) : buildApiUrlPreferRemote(clean);
     }
     const parsed = new URL(clean, window.location.origin);
     const pathname = String(parsed.pathname || "").toLowerCase();
     const hasAudioExt = /\.(wav|mp3|ogg|m4a|flac)(?:$|\?)/i.test(pathname);
     const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
     if (isStorageUrl || hasAudioExt) {
-      return resolveStaleAwareProxyMediaUrl(parsed.toString(), "", "media");
+      return buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
     }
     return clean;
   } catch (_) {
@@ -3981,7 +3894,16 @@ const multimediaPlaybackDeps = {
     return finalEntries;
   },
   resolveFirebaseStorageUrl: async (gsPath) => {
-    return resolveFirebaseStorageUrl(gsPath);
+    if (!gsPath) return "";
+    try {
+      const proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`);
+      if (proxyUrl) {
+        return proxyUrl;
+      }
+      return gsPath;
+    } catch (e) {
+      return gsPath;
+    }
   },
   setPodcastStageVideoSourceForElement: async (el, url, options = {}) => {
     if (!el || !url) return false;
@@ -4754,7 +4676,6 @@ async function abrirReproductorMultimedia(session) {
 
           if (!modal.classList.contains("hidden")) {
             syncReelModeUi(currentMultimediaSession);
-            renderDashboardExportDownloadSelect(currentMultimediaSession);
             multimediaPlaybackDeps.updatePodcastVideoTransportUi();
           }
         }
@@ -4780,7 +4701,6 @@ async function abrirReproductorMultimedia(session) {
             if (freshSession) {
               console.log("[Dashboard] Sesión fresca cargada con éxito. Sincronizando controlador...");
               currentMultimediaSession = freshSession;
-              renderDashboardExportDownloadSelect(currentMultimediaSession);
               
               // Importante: invalidar caches de filas que pudieran haber cambiado su audio
               const rows = extractDashboardSessionRows(freshSession);
@@ -4802,7 +4722,6 @@ async function abrirReproductorMultimedia(session) {
     }
 
     if (title) title.textContent = session.title || "Sin título";
-    renderDashboardExportDownloadSelect(session);
     if (sidePanel) sidePanel.classList.remove("is-open");
     if (btnToggle) btnToggle.classList.remove("active");
 
@@ -5223,130 +5142,6 @@ let exportJobState = {
   pollTimer: null,
   isBusy: false
 };
-const DASHBOARD_MONTAGE_EXPORT_HISTORY_MAX_ENTRIES = 20;
-
-function normalizeDashboardMontageExportReference(raw = null) {
-  if (!raw || typeof raw !== "object") return null;
-  const nestedExport = raw?.export && typeof raw.export === "object" ? raw.export : null;
-  const nestedResult = raw?.result && typeof raw.result === "object" ? raw.result : null;
-  const downloadUrl = String(
-    raw?.downloadUrl
-    || raw?.currentDownloadUrl
-    || raw?.url
-    || nestedExport?.downloadUrl
-    || nestedResult?.downloadUrl
-    || nestedExport?.url
-    || nestedResult?.url
-    || ""
-  ).trim();
-  const storagePath = String(raw?.storagePath || raw?.currentStoragePath || raw?.path || nestedExport?.storagePath || nestedResult?.storagePath || "").trim();
-  if (!downloadUrl && !storagePath) return null;
-  const rawCreatedAtIso = String(raw?.createdAtIso || raw?.createdAt || nestedExport?.createdAt || nestedResult?.createdAt || "").trim();
-  const createdAtMsValue = Number.isFinite(Number(raw?.createdAtMs))
-    ? Number(raw.createdAtMs)
-    : Number.isFinite(Date.parse(rawCreatedAtIso))
-      ? Date.parse(rawCreatedAtIso)
-      : Date.now();
-  const exportId = String(raw?.exportId || raw?.jobId || raw?.id || raw?.recordId || nestedExport?.exportId || nestedResult?.exportId || "").trim();
-  const filename = String(raw?.filename || nestedExport?.filename || nestedResult?.filename || "").trim() || "montage.mp4";
-  return {
-    exportId,
-    downloadUrl,
-    storagePath,
-    filename,
-    mimeType: String(raw?.mimeType || nestedExport?.mimeType || nestedResult?.mimeType || "").trim().toLowerCase() || "video/mp4",
-    createdAtMs: createdAtMsValue > 0 ? createdAtMsValue : Date.now(),
-    createdAtIso: rawCreatedAtIso || new Date(createdAtMsValue > 0 ? createdAtMsValue : Date.now()).toISOString(),
-    expiresAtIso: String(raw?.expiresAtIso || raw?.expiresAt || nestedExport?.expiresAt || nestedResult?.expiresAt || "").trim(),
-    bucketName: String(raw?.bucketName || nestedExport?.bucketName || nestedResult?.bucketName || "").trim(),
-    id: exportId || `${downloadUrl || storagePath || filename}`
-  };
-}
-
-function normalizeDashboardMontageExportHistory(raw = null) {
-  const normalized = (Array.isArray(raw) ? raw : [])
-    .map((entry) => normalizeDashboardMontageExportReference(entry))
-    .filter((entry) => Boolean(entry?.downloadUrl));
-  const deduped = [];
-  const seen = new Set();
-  for (const entry of normalized) {
-    const key = entry.downloadUrl || entry.storagePath || `${entry.filename}__${entry.createdAtMs}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    entry.id = String(entry.id || "").trim() || key;
-    deduped.push(entry);
-  }
-  deduped.sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
-  return deduped.slice(0, DASHBOARD_MONTAGE_EXPORT_HISTORY_MAX_ENTRIES);
-}
-
-function resolveDashboardMontageExportHistory(session = null) {
-  const source = session?.session && typeof session.session === "object" ? session.session : (session || {});
-  const cfg = {
-    ...(source?.script?.podcastVideoConfig || {}),
-    ...(source?.podcastVideoConfig || {})
-  };
-  const history = normalizeDashboardMontageExportHistory(cfg?.montageExportHistory || []);
-  const latest = normalizeDashboardMontageExportReference(cfg?.latestMontageExport || null);
-  return normalizeDashboardMontageExportHistory(latest ? [latest, ...history] : history);
-}
-
-function getDashboardMontageExportOptionLabel(entry = null, index = 0) {
-  const name = String(entry?.filename || "montage.mp4").trim() || "montage.mp4";
-  const filename = name.toLowerCase().endsWith(".mp4") ? name : `${name}.mp4`;
-  return index === 0 ? `${filename} (Más reciente)` : filename;
-}
-
-function renderDashboardExportDownloadSelect(session = null) {
-  const select = document.getElementById("playerExportDownloadSelect");
-  if (!select) return;
-  const history = resolveDashboardMontageExportHistory(session);
-  select.innerHTML = "";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Descargar MP4";
-  select.appendChild(placeholder);
-  if (!history.length) {
-    select.hidden = true;
-    select.disabled = true;
-    return;
-  }
-  history.forEach((entry, index) => {
-    const option = document.createElement("option");
-    option.value = String(entry.id || entry.downloadUrl || `${index}`);
-    option.textContent = getDashboardMontageExportOptionLabel(entry, index);
-    option.dataset.downloadUrl = String(entry.downloadUrl || "").trim();
-    option.dataset.filename = String(entry.filename || "montage.mp4").trim() || "montage.mp4";
-    select.appendChild(option);
-  });
-  select.hidden = false;
-  select.disabled = false;
-  select.value = "";
-}
-
-function downloadDashboardMontageExportSelection(selectionValue = "") {
-  const select = document.getElementById("playerExportDownloadSelect");
-  if (!select) return;
-  const value = String(selectionValue || "").trim();
-  if (!value) return;
-  const option = Array.from(select.options).find((candidate) => String(candidate.value || "").trim() === value);
-  const url = String(option?.dataset?.downloadUrl || "").trim();
-  if (!url) {
-    showNotification("El enlace de descarga no está disponible.", "warning");
-    select.value = "";
-    return;
-  }
-  const filename = String(option?.dataset?.filename || option?.textContent || "montage.mp4").trim() || "montage.mp4";
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.target = "_blank";
-  anchor.rel = "noopener noreferrer";
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  select.value = "";
-}
 
 function buildDashboardBrandOverlay() {
   return {
@@ -5360,9 +5155,9 @@ function buildDashboardBrandOverlay() {
 }
 
 function initExportUiEvents() {
+  const btnOpen = document.getElementById("btnOpenExportModal");
   const modal = document.getElementById("videoExportModal");
   const btnConfirm = document.getElementById("btnConfirmExport");
-  const playerExportDownloadSelect = document.getElementById("playerExportDownloadSelect");
 
   const rangeBitrate = document.getElementById("exportBitrateMbps");
   const labelBitrate = document.getElementById("exportBitrateValue");
@@ -5373,8 +5168,9 @@ function initExportUiEvents() {
   const groupBitrateValue = document.getElementById("exportBitrateValueGroup");
   const groupCrfValue = document.getElementById("exportCrfValueGroup");
 
-  playerExportDownloadSelect?.addEventListener("change", (event) => {
-    downloadDashboardMontageExportSelection(event?.target?.value || "");
+  btnOpen?.addEventListener("click", () => {
+    if (!currentMultimediaSession) return;
+    modal?.classList.remove("hidden");
   });
 
   rangeBitrate?.addEventListener("input", (e) => {

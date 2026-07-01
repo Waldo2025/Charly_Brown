@@ -48,16 +48,4 @@ if (/console\.log\(\s*"\[SceneReplacement\]/.test(mediaReplacementSource) || /co
   throw new Error("podcaster-media-replacement.js no debe seguir emitiendo console.log ruidosos del flujo de reemplazo de escena.");
 }
 
-if (!/function initPodcasterMediaReplacementModule\(/.test(mediaReplacementSource)) {
-  throw new Error("podcaster-media-replacement.js debe inicializar su API completa desde una función reutilizable.");
-}
-
-if (!/document\.readyState === ['"]loading['"][\s\S]*document\.addEventListener\(['"]DOMContentLoaded['"],\s*initPodcasterMediaReplacementModule,\s*\{\s*once:\s*true\s*\}\s*\);[\s\S]*else[\s\S]*initPodcasterMediaReplacementModule\(\);/m.test(mediaReplacementSource)) {
-  throw new Error("podcaster-media-replacement.js debe ejecutar init inmediatamente si DOMContentLoaded ya pasó para exponer openSceneVideoSelectorModal.");
-}
-
-if (/document\.addEventListener\(['"]DOMContentLoaded['"],\s*\(\)\s*=>/.test(mediaReplacementSource)) {
-  throw new Error("podcaster-media-replacement.js no debe depender de un listener inline de DOMContentLoaded que puede registrarse demasiado tarde.");
-}
-
 console.log("Podcaster modular runtime and spinner regressions OK.");

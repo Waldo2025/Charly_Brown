@@ -80,12 +80,7 @@ export function canUseSameOriginApi() {
 function shouldForceSameOriginApiPath(path = "") {
   if (isLocalHostRuntime()) return false;
   const clean = String(path || "").trim();
-  return clean === "/api/podcaster"
-    || clean.startsWith("/api/podcaster/")
-    || clean === "/api/assets/proxy-media"
-    || clean.startsWith("/api/assets/proxy-media?")
-    || clean === "/api/assets/proxy-image"
-    || clean.startsWith("/api/assets/proxy-image?");
+  return clean === "/api/podcaster" || clean.startsWith("/api/podcaster/");
 }
 
 function shouldForceRemotePodcasterAudioApiPath(path = "") {

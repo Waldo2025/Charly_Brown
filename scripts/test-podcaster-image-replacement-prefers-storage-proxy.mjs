@@ -8,7 +8,7 @@ const runtimeSource = fs.readFileSync(
 
 assert.match(
   runtimeSource,
-  /function resolveStaleAwareProxyMediaUrl\(rawUrl = "", storagePath = "", kind = "media", options = \{\}\) \{[\s\S]*const proxyStoragePath = normalizeStorageProxyPath\(cleanStoragePath\);[\s\S]*if \(proxyStoragePath\) \{[\s\S]*const proxyUrl = buildMediaProxyUrl\(`\$\{proxyPath\}\?storagePath=\$\{encodeURIComponent\(proxyStoragePath\)\}/,
+  /function resolveStaleAwareProxyMediaUrl\(rawUrl = "", storagePath = "", kind = "media", options = \{\}\) \{[\s\S]*if \(cleanStoragePath\) \{[\s\S]*const proxyUrl = deps\.buildApiUrl\?\.?\(`\$\{proxyPath\}\?storagePath=\$\{encodeURIComponent\(cleanStoragePath\)\}`\)/,
   "Las imágenes y videos del podcaster deben poder resolverse por storagePath en el proxy."
 );
 

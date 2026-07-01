@@ -3,34 +3,7 @@ import assert from "node:assert/strict";
 
 const store = await import("../public/podcaster/podcaster-session-store.js");
 
-const {
-  mergeCloudVsLocalSessions,
-  bootstrapSessions,
-  loadSessionsFromCloud,
-  saveSessionManuallyToCloud
-} = store;
-
-function createFirestoreCloudDeps(ownedSessions = [], sharedSessions = []) {
-  let getDocsCallCount = 0;
-  return {
-    firestoreDb: {},
-    collection: () => ({}),
-    query: (...parts) => parts,
-    where: () => ({}),
-    limit: () => ({}),
-    getDocs: async () => ({
-      docs: (getDocsCallCount++ === 0 ? ownedSessions : sharedSessions).map((session) => ({
-        id: session.id,
-        data: () => ({
-          session,
-          ownerId: "uid-1",
-          sharedWithIds: [],
-          updatedAt: { toDate: () => new Date(session.updatedAt || "2026-06-30T00:00:00.000Z") }
-        })
-      }))
-    })
-  };
-}
+const { mergeCloudVsLocalSessions, bootstrapSessions, loadSessionsFromCloud } = store;
 
 test("mergeCloudVsLocalSessions prefers full cloud rows over stale local rows", () => {
   const cloudSessions = [{
@@ -135,11 +108,8 @@ test("bootstrapSessions prefers cloud snapshot when local and cloud differ", asy
       return [...primary, ...secondary];
     },
     forceCloud: false,
-    authFetchJson: async () => {
-      throw new Error("sessions API should not be called");
-    },
-    hasAvailableApiBase: () => true,
-    ...createFirestoreCloudDeps(cloud)
+    authFetchJson: async () => ({ sessions: cloud }),
+    hasAvailableApiBase: () => true
   }, storageAdapter);
 
   assert.equal(result.sessions[0].title, "cloud");
@@ -194,11 +164,8 @@ test("bootstrapSessions persists merged local cloud session instead of raw cloud
       return [...primary, ...secondary];
     },
     forceCloud: false,
-    authFetchJson: async () => {
-      throw new Error("sessions API should not be called");
-    },
-    hasAvailableApiBase: () => true,
-    ...createFirestoreCloudDeps(cloud)
+    authFetchJson: async () => ({ sessions: cloud }),
+    hasAvailableApiBase: () => true
   }, storageAdapter);
 
   assert.equal(result.sessions[0].dialogueAudioMap["row-1"].playbackRate, 4.5);
@@ -208,7 +175,7 @@ test("bootstrapSessions persists merged local cloud session instead of raw cloud
   assert.equal(persistedSession.dialogueAudioMap["row-1"].playbackRate, 4.5);
 });
 
-test("loadSessionsFromCloud reads directly from Firestore without calling the sessions API", async () => {
+test("loadSessionsFromCloud falls back to Firestore when the API returns 401", async () => {
   const firestoreOwnedSessions = [{
     id: "s1",
     title: "firestore",
@@ -224,7 +191,9 @@ test("loadSessionsFromCloud reads directly from Firestore without calling the se
   const result = await loadSessionsFromCloud("uid-1", {
     hasAvailableApiBase: () => true,
     authFetchJson: async () => {
-      throw new Error("sessions API should not be called");
+      const error = new Error("AUTH_INVALID");
+      error.status = 401;
+      throw error;
     },
     storageAdapter: {
       readJson(key) {
@@ -261,68 +230,4 @@ test("loadSessionsFromCloud reads directly from Firestore without calling the se
   assert.equal(result[1].id, "s1");
   assert.equal(result[0].title, "shared");
   assert.equal(result[1].title, "firestore");
-});
-
-test("saveSessionManuallyToCloud writes directly to Firestore without calling the sessions API", async () => {
-  const session = {
-    id: "s1",
-    title: "Manual save",
-    updatedAt: "2026-06-30T12:00:00.000Z",
-    script: { rows: [{ id: "row-1", text: "Hola" }] }
-  };
-  const writtenDocs = [];
-  const persistedSessions = [];
-  const persistedMeta = [];
-  const storageAdapter = {
-    readJson(key, fallback) {
-      if (String(key).startsWith("test_sessions:sync:")) return {};
-      return fallback;
-    },
-    writeJson(key, value) {
-      if (String(key).startsWith("test_sessions:sync:")) persistedMeta.push({ key, value });
-    },
-    getItem() { return ""; },
-    setItem(key, value) {
-      persistedSessions.push({ key, value });
-    },
-    removeItem() {}
-  };
-
-  const response = await saveSessionManuallyToCloud("s1", { silent: true }, {
-    STORAGE_KEY_BASE: "test_sessions",
-    SESSION_SYNC_META_KEY_BASE: "test_sessions:sync",
-    MAX_CLOUD_SESSION_PAYLOAD_BYTES: 2000000,
-    resolveCurrentUid: () => "uid-1",
-    getSessions: () => [session],
-    setSessions: (sessions) => persistedSessions.push({ key: "state", value: sessions }),
-    getActiveSession: () => session,
-    buildCloudSessionPayload: (target) => ({ ...target }),
-    compactCloudSessionPayload: (payload) => ({
-      payload,
-      bytes: 256,
-      strippedReferenceMedia: false,
-      trimmedChat: false
-    }),
-    hasAvailableApiBase: () => true,
-    authFetchJson: async () => {
-      throw new Error("sessions API should not be called");
-    },
-    firestoreDb: {},
-    doc: (...parts) => parts,
-    getDoc: async () => ({ exists: () => false, data: () => ({}) }),
-    setDoc: async (ref, data, options) => {
-      writtenDocs.push({ ref, data, options });
-    },
-    serverTimestamp: () => "server-time",
-    nowIso: () => "2026-06-30T12:00:00.000Z",
-    normalizePodcastVideoConfig: (value) => value || {}
-  }, storageAdapter);
-
-  assert.equal(response.ok, true);
-  assert.equal(response.ownerId, "uid-1");
-  assert.equal(writtenDocs.length, 1);
-  assert.equal(writtenDocs[0].data.session.id, "s1");
-  assert.equal(writtenDocs[0].data.ownerId, "uid-1");
-  assert.ok(persistedSessions.some((entry) => entry.key === "state"));
-  assert.ok(persistedMeta.length > 0);
 });
