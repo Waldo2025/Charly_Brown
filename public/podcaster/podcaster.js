@@ -7132,7 +7132,7 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
   const currentRows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
   if (currentRows.length) {
     let rowsChanged = false;
-      const nextRows = [];
+    const nextRows = [];
     const rowMediaValueKeys = [
       "downloadUrl",
       "videoDownloadUrl",
@@ -7225,11 +7225,11 @@ async function hydrateSessionDirectStorageMediaUrls(session = null) {
         }
         if (shouldSyncPublicSceneRow) {
           return {
-          ...nextRow,
-          publicSceneVideoUrl: nextPublicSceneVideoUrl,
-          publicSceneVideoStoragePath: nextPublicSceneStoragePath,
-          publicSceneStoragePath: nextPublicSceneStoragePath
-        };
+            ...nextRow,
+            publicSceneVideoUrl: nextPublicSceneVideoUrl,
+            publicSceneVideoStoragePath: nextPublicSceneStoragePath,
+            publicSceneStoragePath: nextPublicSceneStoragePath
+          };
         }
         return nextRow;
       })();
@@ -12654,9 +12654,13 @@ async function playPodcastStageVideo(options = {}) {
           const sessionId = String(getActiveSession()?.id || "").trim();
           const clip = rowId ? resolveDialogueVideoForRow(getActiveSession(), rowId) : null;
           const attemptedSegment = resolveDialogueVideoSegments(clip).find((segment) => {
+            const localMediaCacheKey = String(segment?.localMediaCacheKey || clip?.localMediaCacheKey || "").trim();
             const candidateSrc = resolveStorageVideoUrl(
               segment?.downloadUrl || clip?.downloadUrl || "",
-              segment?.storagePath || clip?.storagePath || ""
+              segment?.storagePath || clip?.storagePath || "",
+              {
+                localMediaCacheKey
+              }
             );
             return candidateSrc && candidateSrc === fallbackSrc;
           }) || clip;
@@ -13276,13 +13280,20 @@ function syncTimelineEphemeralState(session = null) {
       sessionId: String(activeSession?.id || "").trim(),
       rowId
     });
+    const localMediaCacheKey = String(
+      primarySegment?.localMediaCacheKey
+      || generatedClip?.localMediaCacheKey
+      || clipMap?.[rowId]?.localMediaCacheKey
+      || ""
+    ).trim();
     const videoSrc = resolveStorageVideoUrl(
       primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
       primarySegment?.storagePath || generatedClip?.storagePath || "",
       {
         updatedAt: generatedClip?.updatedAt || "",
         type: primarySegment?.type || generatedClip?.type || "",
-        mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
+        mimeType: primarySegment?.mimeType || generatedClip?.mimeType || "",
+        localMediaCacheKey
       }
     );
     if (!videoSrc) return;
@@ -18441,7 +18452,10 @@ function attachEvents() {
       if (!key) return;
       if (podcastVideoState.busy && String(studioDialoguePreviewRowId || "").trim() !== key) return;
       const storedAudio = resolveDialogueAudioForRow(session, key);
-      const storedAudioSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
+      const localAudioKey = String(storedAudio?.localMediaCacheKey || "").trim();
+      const storedAudioSrc = localAudioKey
+        ? `podcaster-local-media:${localAudioKey}`
+        : resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
       if (!storedAudioSrc) {
         setGenerationStatus("Esta escena no tiene voz guardada. Genera la voz primero.", "");
         addChatMessage("system", `La escena ${resolveSceneNumberByRowId(key, session)} no tiene audio guardado todavía.`);
