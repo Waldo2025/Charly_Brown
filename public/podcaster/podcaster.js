@@ -1821,6 +1821,15 @@ function loadSessions(uid = resolveCurrentUid()) {
   return sessionStore.loadSessionsFromLocalCache(uid);
 }
 
+function getRequestedSessionIdFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return String(params.get("sessionId") || params.get("id") || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
 function persistSessions(uid = resolveCurrentUid(), sessions = state.sessions) {
   return sessionStore.persistSessionsToLocalCache(uid, Array.isArray(sessions) ? sessions : state.sessions);
 }
@@ -7442,7 +7451,33 @@ function resetPodcastStudioSessionUiState(session = null) {
   podcastVideoState.timelineGapSelection = null;
 }
 
-async function setActiveSession(sessionId) {
+function hasHydratableSessionContent(session = null) {
+  if (!session || typeof session !== "object") return false;
+  if (getSessionRows(session).length > 0) return true;
+  if (Array.isArray(session.chat) && session.chat.length > 0) return true;
+  if (session.dialogueVideoMap && typeof session.dialogueVideoMap === "object" && Object.keys(session.dialogueVideoMap).length > 0) return true;
+  if (session.dialogueAudioMap && typeof session.dialogueAudioMap === "object" && Object.keys(session.dialogueAudioMap).length > 0) return true;
+  const cfg = session.podcastVideoConfig && typeof session.podcastVideoConfig === "object" ? session.podcastVideoConfig : {};
+  if (cfg.timelineClipsByRowId && typeof cfg.timelineClipsByRowId === "object" && Object.keys(cfg.timelineClipsByRowId).length > 0) return true;
+  if (Array.isArray(cfg.geminiDialogueTrack?.segments) && cfg.geminiDialogueTrack.segments.length > 0) return true;
+  return false;
+}
+
+function shouldHydrateSessionFromCloud(session = null) {
+  if (!session || typeof session !== "object") return false;
+  if (session.isStub === true) return true;
+  if (hasHydratableSessionContent(session)) return false;
+  const cloudMeta = session.cloudMeta && typeof session.cloudMeta === "object" ? session.cloudMeta : {};
+  return Boolean(
+    String(cloudMeta.ownerId || "").trim()
+    || String(cloudMeta.savedAt || "").trim()
+    || String(session.sessionUpdatedAt || "").trim()
+    || String(session.updatedAt || "").trim()
+    || String(session.id || "").trim()
+  );
+}
+
+async function setActiveSession(sessionId, options = {}) {
   window.backgroundDialogueAudioWarmupToken = 0;
   playbackController.stop({ keepStatus: true });
   podcastVideoState.enabled = false;
@@ -7457,17 +7492,22 @@ async function setActiveSession(sessionId) {
 
   const nextSession = getActiveSession();
 
-  // Solo hidratar desde cloud cuando la sesión local es un stub.
-  if (nextSession?.isStub) {
+  // Hidratar desde cloud cuando la lista trajo un stub o cuando una caché previa
+  // quedó como metadata vacía sin el flag isStub.
+  if (options.forceHydrate === true || shouldHydrateSessionFromCloud(nextSession)) {
     try {
       setGenerationStatus("Descargando contenido de la sesión...", "is-busy");
       const cloudSession = await loadCloudSessionDocumentDirect(sessionId);
       if (cloudSession) {
-        const mergedSession = mergeCloudSessionOverLocalCache(cloudSession, nextSession);
-        Object.assign(nextSession, {
+        const targetSession = getActiveSession() || nextSession;
+        const mergedSession = mergeCloudSessionOverLocalCache(cloudSession, targetSession);
+        Object.assign(targetSession, {
           ...mergedSession,
           isStub: false
         });
+        if (window.PodcasterThreads?.syncActiveThreadToSession) {
+          window.PodcasterThreads.syncActiveThreadToSession(targetSession, { repairEmptyThreads: true });
+        }
 
         persistSessions();
         setGenerationStatus("Listo", "");
@@ -15558,6 +15598,9 @@ function render() {
   if (!podcastVideoState.montageActive) {
     syncPanelMusicStateFromSession(session);
   }
+  if (window.PodcasterThreads?.syncActiveThreadToSession) {
+    window.PodcasterThreads.syncActiveThreadToSession(session);
+  }
   setPromptInputContent(session.prompt || "", { html: session.promptHtml || "" });
   renderChat(session);
   renderScript(session);
@@ -19788,17 +19831,28 @@ function init() {
     state.sessions = finalSessions;
     persistSessions(nextUid, finalSessions);
 
-    // Recuperar la última sesión activa de LocalStorage
+    const requestedSessionId = getRequestedSessionIdFromUrl();
+    if (requestedSessionId && !state.sessions.some((session) => String(session?.id || "").trim() === requestedSessionId)) {
+      state.sessions = [{
+        id: requestedSessionId,
+        title: "Cargando sesión...",
+        isStub: true,
+        script: { rows: [] },
+        updatedAt: nowIso()
+      }, ...state.sessions];
+    }
+
+    // Recuperar la sesión solicitada por URL o la última sesión activa de LocalStorage
     let lastActiveId = null;
     try {
       lastActiveId = window.localStorage.getItem(ACTIVE_SESSION_ID_KEY);
     } catch (_) { }
 
-    state.activeSessionId = lastActiveId;
+    state.activeSessionId = requestedSessionId || lastActiveId;
     ensureSession();
 
     if (state.activeSessionId) {
-      await setActiveSession(state.activeSessionId);
+      await setActiveSession(state.activeSessionId, { forceHydrate: Boolean(requestedSessionId) });
     } else {
       render();
     }

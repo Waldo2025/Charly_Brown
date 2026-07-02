@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 const store = await import("../public/podcaster/podcaster-session-store.js");
 
-const { mergeCloudVsLocalSessions, bootstrapSessions, loadSessionsFromCloud } = store;
+const { mergeCloudVsLocalSessions, bootstrapSessions, loadSessionsFromCloud, loadSessionsFromLocalCache, loadSingleSessionFromCloud } = store;
 
 test("mergeCloudVsLocalSessions prefers full cloud rows over stale local rows", () => {
   const cloudSessions = [{
@@ -69,6 +69,113 @@ test("mergeCloudVsLocalSessions keeps local fallback rows for stub cloud session
   assert.equal(merged.script.rows[0].visualNotesProposal, "keep me");
   assert.equal(merged.podcastVideoConfig.local, true);
   assert.equal(merged.podcastVideoConfig.reelModeEnabled, false);
+});
+
+test("mergeCloudVsLocalSessions keeps local content when cloud document is empty metadata", () => {
+  const cloudSessions = [{
+    id: "s1",
+    title: "cloud title",
+    updatedAt: "2026-07-02T12:00:00.000Z",
+    isStub: false,
+    script: { rows: [] },
+    cloudMeta: { ownerId: "uid-1" }
+  }];
+  const localSessions = [{
+    id: "s1",
+    title: "local full title",
+    updatedAt: "2026-07-02T11:00:00.000Z",
+    chat: [{ role: "assistant", content: "local chat" }],
+    script: { rows: [{ id: "row-1", text: "local row" }] },
+    podcastVideoConfig: { timelineClipsByRowId: { "row-1": [{ id: "clip-1" }] } }
+  }];
+
+  const [merged] = mergeCloudVsLocalSessions(cloudSessions, localSessions, {});
+
+  assert.equal(merged.title, "cloud title");
+  assert.equal(merged.chat[0].content, "local chat");
+  assert.equal(merged.script.rows[0].text, "local row");
+  assert.equal(merged.cloudMeta.ownerId, "uid-1");
+  assert.equal(merged.isStub, false);
+});
+
+test("loadSessionsFromLocalCache recovers full legacy session over scoped empty stub", () => {
+  const writes = [];
+  const storageAdapter = {
+    readJson(key) {
+      if (String(key).startsWith("test_sessions:deleted:")) return [];
+      if (key === "test_sessions:uid-1") {
+        return [{
+          id: "s1",
+          title: "stub scoped",
+          isStub: true,
+          script: { rows: [] },
+          cloudMeta: { ownerId: "uid-1" }
+        }];
+      }
+      if (key === "test_legacy_sessions") {
+        return [{
+          id: "s1",
+          title: "legacy full",
+          chat: [{ id: "m1", role: "assistant", text: "hola" }],
+          script: { rows: [{ id: "r1", text: "contenido" }] }
+        }];
+      }
+      return [];
+    },
+    writeJson(key, value) { writes.push({ key, value }); },
+    getItem() { return ""; },
+    setItem() {},
+    removeItem() {}
+  };
+
+  const sessions = loadSessionsFromLocalCache("uid-1", {
+    STORAGE_KEY_BASE: "test_sessions",
+    LEGACY_STORAGE_KEY: "test_legacy_sessions"
+  }, storageAdapter);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].title, "legacy full");
+  assert.equal(sessions[0].script.rows[0].text, "contenido");
+  assert.equal(sessions[0].cloudMeta.ownerId, "uid-1");
+  assert.equal(sessions[0].isStub, false);
+  assert.ok(writes.some((entry) => entry.key === "test_sessions:uid-1"));
+});
+
+test("loadSingleSessionFromCloud merges top-level video session data when data.session is empty", async () => {
+  const session = await loadSingleSessionFromCloud("s1", "uid-1", {
+    hasAvailableApiBase: () => false,
+    firestoreDb: {},
+    doc(_db, collectionName, id) {
+      return { collectionName, id };
+    },
+    async getDoc(ref) {
+      assert.equal(ref.collectionName, "podcaster_sessions");
+      assert.equal(ref.id, "s1");
+      return {
+        exists: () => true,
+        data: () => ({
+          ownerId: "uid-1",
+          title: "12 de octubre",
+          session: {
+            id: "s1",
+            title: "12 de octubre",
+            script: { rows: [] },
+            dialogueVideoMap: {}
+          },
+          script: {
+            rows: [{ id: "row-1", text: "top-level scene" }]
+          },
+          dialogueVideoMap: {
+            "row-1": [{ storagePath: "podcaster/sessions/s1/owners/uid-1/videos/row-1/video.mp4" }]
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal(session.id, "s1");
+  assert.equal(session.script.rows[0].text, "top-level scene");
+  assert.equal(session.dialogueVideoMap["row-1"][0].storagePath.includes("video.mp4"), true);
 });
 
 test("bootstrapSessions prefers cloud snapshot when local and cloud differ", async () => {
@@ -309,6 +416,33 @@ test("loadSessionsFromCloud preserves lightweight API stubs for lazy active-sess
   });
 
   assert.equal(apiCalls, 1);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].isStub, true);
+  assert.deepEqual(result[0].script.rows, []);
+});
+
+test("loadSessionsFromCloud infers API metadata-only sessions as stubs when flag is missing", async () => {
+  const result = await loadSessionsFromCloud("uid-1", {
+    hasAvailableApiBase: () => true,
+    authFetchJson: async () => ({
+      sessions: [{
+        id: "s1",
+        title: "Metadata sin flag",
+        updatedAt: "2026-06-15T00:00:00.000Z"
+      }]
+    }),
+    storageAdapter: {
+      readJson(key) {
+        if (String(key).startsWith("cb_podcaster_sessions_v2:deleted:")) return [];
+        return [];
+      },
+      writeJson() {},
+      getItem() { return ""; },
+      setItem() {},
+      removeItem() {}
+    }
+  });
+
   assert.equal(result.length, 1);
   assert.equal(result[0].isStub, true);
   assert.deepEqual(result[0].script.rows, []);

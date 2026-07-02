@@ -99,6 +99,13 @@ test("podcaster session list resolves to the dedicated export backend", () => {
   );
 });
 
+test("podcaster active session get resolves to the dedicated export backend", () => {
+  assert.equal(
+    context.buildApiUrl("/api/podcaster/sessions/get?sessionId=session_1"),
+    "https://snoopy-export.onrender.com/api/podcaster/sessions/get?sessionId=session_1"
+  );
+});
+
 test("veo requests resolve to the dedicated gemini-veo backend", () => {
   assert.equal(context.getVeoApiBase(), "https://gemini-veo.onrender.com/api");
   assert.equal(

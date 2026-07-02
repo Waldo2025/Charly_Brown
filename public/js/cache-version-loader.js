@@ -2,7 +2,7 @@
   if (window.__cbCacheVersionLoaderInit) return;
   window.__cbCacheVersionLoaderInit = true;
 
-  const fallbackVersion = "dev";
+  const fallbackVersion = "2026-1.0.10.350";
 
   function resolveCacheVersion() {
     return fetch("version.json?ts=" + encodeURIComponent(String(Date.now())), { cache: "no-store" })

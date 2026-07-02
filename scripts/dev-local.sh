@@ -327,7 +327,7 @@ open_browser() {
 
 start_frontend() {
   echo "[dev-local] starting live-server on ${WEB_URL}"
-  npx live-server public --host=127.0.0.1 --port="${WEB_PORT}" --no-browser &
+  node scripts/live-server-no-store.mjs public "${WEB_PORT}" &
   WEB_PID=$!
 }
 

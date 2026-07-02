@@ -24,8 +24,8 @@ assert.match(
 
 assert.match(
   source,
-  /if \(nextSession\?\.isStub\) \{/,
-  "setActiveSession solo debe rehidratar sesiones stub."
+  /function shouldHydrateSessionFromCloud\(session = null\)[\s\S]*session\.isStub === true[\s\S]*hasHydratableSessionContent\(session\)[\s\S]*String\(session\.id \|\| ""\)\.trim\(\)/,
+  "setActiveSession debe rehidratar stubs y cachés vacías persistidas por id."
 );
 
 assert.match(

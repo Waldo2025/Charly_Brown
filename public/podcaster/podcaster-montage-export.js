@@ -43,6 +43,7 @@ const MONTAGE_EXPORT_ACTIVE_JOB_KEY = "cb_podcast_montage_export_active_job_v1";
 const MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY = "cb_podcast_montage_export_history_v1";
 const MONTAGE_EXPORT_DOWNLOAD_HISTORY_MAX_ENTRIES = 20;
 let montageExportDownloadHistory = [];
+let montageExportDownloadHistorySessionId = "";
 const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   enabled: true,
   assetPath: "public/podcaster/logo.png",
@@ -813,6 +814,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     let hintText = "";
     const readyExportReference = {
       exportId: String(readyExport?.exportId || data?.export?.exportId || data?.result?.exportId || "").trim(),
+      sessionId: getActiveMontageExportSessionId(),
       downloadUrl: url,
       storagePath: String(readyExport?.storagePath || data?.export?.storagePath || data?.result?.storagePath || data?.currentStoragePath || "").trim(),
       filename: name,
@@ -1408,6 +1410,63 @@ export function setMontageExportDownloadButton({ visible = false, url = "", file
   });
 }
 
+function getActiveMontageExportSessionId(session = null) {
+  const activeSession = session || window.getActiveSession?.() || null;
+  return String(activeSession?.id || "").trim();
+}
+
+function buildMontageExportDownloadHistoryKey(sessionId = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  return cleanSessionId
+    ? `${MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY}:${cleanSessionId}`
+    : MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY;
+}
+
+function decodeMontageExportReferenceText(value = "") {
+  let candidate = String(value || "").trim();
+  if (!candidate) return "";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (!/%[0-9a-fA-F]{2}/.test(candidate)) break;
+    try {
+      const decoded = decodeURIComponent(candidate);
+      if (decoded === candidate) break;
+      candidate = decoded;
+    } catch (_) {
+      break;
+    }
+  }
+  return candidate;
+}
+
+function inferMontageExportReferenceSessionId(raw = null, downloadUrl = "", storagePath = "") {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const nestedExport = source?.export && typeof source.export === "object" ? source.export : null;
+  const nestedResult = source?.result && typeof source.result === "object" ? source.result : null;
+  const explicit = String(
+    source?.sessionId
+    || source?.projectId
+    || nestedExport?.sessionId
+    || nestedResult?.sessionId
+    || ""
+  ).trim();
+  if (explicit) return explicit;
+  const haystack = decodeMontageExportReferenceText([
+    storagePath,
+    downloadUrl,
+    source?.currentStoragePath,
+    source?.currentDownloadUrl,
+    nestedExport?.storagePath,
+    nestedResult?.storagePath,
+    nestedExport?.downloadUrl,
+    nestedResult?.downloadUrl
+  ].filter(Boolean).join(" "));
+  const sessionPathMatch = /podcaster\/sessions\/([^/\s?#]+)/i.exec(haystack);
+  if (sessionPathMatch?.[1]) return String(sessionPathMatch[1] || "").trim();
+  const exportPathMatch = /podcaster\/exports\/[^/\s?#]+\/([^/\s?#]+)/i.exec(haystack);
+  if (exportPathMatch?.[1]) return String(exportPathMatch[1] || "").trim();
+  return "";
+}
+
 function normalizeMontageExportReference(raw = null) {
   if (!raw || typeof raw !== "object") return null;
   const nestedExport = raw?.export && typeof raw.export === "object" ? raw.export : null;
@@ -1441,8 +1500,10 @@ function normalizeMontageExportReference(raw = null) {
   ).trim();
   const filename = String(raw?.filename || nestedExport?.filename || nestedResult?.filename || "").trim() || "montage.mp4";
   const storageBucket = String(raw?.bucketName || nestedExport?.bucketName || nestedResult?.bucketName || "").trim();
+  const sessionId = inferMontageExportReferenceSessionId(raw, downloadUrl, storagePath);
   return {
     exportId: normalizedExportId,
+    sessionId,
     downloadUrl,
     storagePath,
     filename,
@@ -1455,11 +1516,13 @@ function normalizeMontageExportReference(raw = null) {
   };
 }
 
-function normalizeMontageExportDownloadHistory(raw = null) {
+function normalizeMontageExportDownloadHistory(raw = null, options = {}) {
   if (!Array.isArray(raw)) return [];
+  const sessionId = String(options?.sessionId || "").trim();
   const normalized = raw
     .map((entry) => normalizeMontageExportReference(entry))
-    .filter((entry) => Boolean(entry && (entry.downloadUrl || entry.storagePath)));
+    .filter((entry) => Boolean(entry && (entry.downloadUrl || entry.storagePath)))
+    .filter((entry) => !sessionId || String(entry.sessionId || "").trim() === sessionId);
   const deduped = [];
   const seen = new Set();
   for (const entry of normalized) {
@@ -1473,34 +1536,59 @@ function normalizeMontageExportDownloadHistory(raw = null) {
   return deduped.slice(0, MONTAGE_EXPORT_DOWNLOAD_HISTORY_MAX_ENTRIES);
 }
 
-function loadMontageExportDownloadHistory() {
+function loadMontageExportDownloadHistory(sessionId = "") {
+  const cleanSessionId = String(sessionId || getActiveMontageExportSessionId() || "").trim();
+  const storageKey = buildMontageExportDownloadHistoryKey(cleanSessionId);
   try {
-    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY) || "[]");
-    montageExportDownloadHistory = normalizeMontageExportDownloadHistory(Array.isArray(parsed) ? parsed : []);
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    montageExportDownloadHistory = normalizeMontageExportDownloadHistory(Array.isArray(parsed) ? parsed : [], { sessionId: cleanSessionId });
+    montageExportDownloadHistorySessionId = cleanSessionId;
+    if (!montageExportDownloadHistory.length && cleanSessionId) {
+      const legacyParsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY) || "[]");
+      const migrated = normalizeMontageExportDownloadHistory(Array.isArray(legacyParsed) ? legacyParsed : [], { sessionId: cleanSessionId });
+      if (migrated.length) {
+        montageExportDownloadHistory = migrated;
+        localStorage.setItem(storageKey, JSON.stringify(migrated));
+      }
+    }
     return montageExportDownloadHistory;
   } catch (_error) {
     montageExportDownloadHistory = [];
+    montageExportDownloadHistorySessionId = cleanSessionId;
     return [];
   }
 }
 
-function persistMontageExportDownloadHistory(history = null) {
-  const normalized = normalizeMontageExportDownloadHistory(Array.isArray(history) ? history : []);
+function persistMontageExportDownloadHistory(history = null, sessionId = "") {
+  const cleanSessionId = String(sessionId || getActiveMontageExportSessionId() || "").trim();
+  const normalized = normalizeMontageExportDownloadHistory(Array.isArray(history) ? history : [], { sessionId: cleanSessionId });
   montageExportDownloadHistory = normalized;
+  montageExportDownloadHistorySessionId = cleanSessionId;
   try {
-    localStorage.setItem(MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY, JSON.stringify(normalized));
+    localStorage.setItem(buildMontageExportDownloadHistoryKey(cleanSessionId), JSON.stringify(normalized));
   } catch (_error) {
     // noop
   }
 }
 
 function getMontageExportDownloadHistory() {
-  if (Array.isArray(montageExportDownloadHistory) && montageExportDownloadHistory.length) return montageExportDownloadHistory;
-  return loadMontageExportDownloadHistory();
+  const sessionId = getActiveMontageExportSessionId();
+  if (
+    Array.isArray(montageExportDownloadHistory)
+    && montageExportDownloadHistory.length
+    && montageExportDownloadHistorySessionId === sessionId
+  ) {
+    return montageExportDownloadHistory;
+  }
+  return loadMontageExportDownloadHistory(sessionId);
 }
 
 function upsertMontageExportDownloadHistory(reference = null) {
-  const normalized = normalizeMontageExportReference(reference);
+  const sessionId = getActiveMontageExportSessionId();
+  const normalized = normalizeMontageExportReference({
+    ...(reference && typeof reference === "object" ? reference : {}),
+    sessionId
+  });
   if (!normalized?.downloadUrl && !normalized?.storagePath) return null;
   const history = getMontageExportDownloadHistory();
   const current = normalizeMontageExportDownloadHistory([
@@ -1511,8 +1599,8 @@ function upsertMontageExportDownloadHistory(reference = null) {
       filename: String(normalized.filename || "montage.mp4").trim() || "montage.mp4"
     },
     ...history
-  ]);
-  persistMontageExportDownloadHistory(current);
+  ], { sessionId });
+  persistMontageExportDownloadHistory(current, sessionId);
   renderMontageExportDownloadHistory({
     selectedUrl: current[0]?.downloadUrl || "",
     selectedFilename: current[0]?.filename || "montage.mp4"
@@ -1613,8 +1701,11 @@ function getPersistedMontageExportReference(session = null) {
 }
 
 function persistMontageExportReferenceToSession(reference = null) {
-  const normalized = normalizeMontageExportReference(reference);
   const session = window.getActiveSession?.() || null;
+  const normalized = normalizeMontageExportReference({
+    ...(reference && typeof reference === "object" ? reference : {}),
+    sessionId: String(session?.id || "").trim()
+  });
   if (!normalized || !session?.id || typeof window.upsertActiveSession !== "function") return normalized;
   window.upsertActiveSession((current) => ({
     ...current,
@@ -1637,7 +1728,7 @@ function hydrateMontageExportDownloadButtonFromSession() {
   const reference = getPersistedMontageExportReference();
   const history = getMontageExportDownloadHistory();
   const latestHistoryItem = history[0] || null;
-  const referenceCandidate = latestHistoryItem?.downloadUrl ? latestHistoryItem : reference;
+  const referenceCandidate = reference?.downloadUrl ? reference : latestHistoryItem;
   if (!referenceCandidate?.downloadUrl) {
     if (!window.montageExportJobState?.readyDownloadUrl) {
       setMontageExportDownloadButton({ visible: false });

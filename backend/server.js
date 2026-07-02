@@ -7187,6 +7187,120 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
   }
 });
 
+function isPodcasterPlainRecord(value = null) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasPodcasterRecordEntries(value = null) {
+  return isPodcasterPlainRecord(value) && Object.keys(value).length > 0;
+}
+
+function mergePodcasterRowsPreservingFallback(primaryRows = [], fallbackRows = []) {
+  const primary = Array.isArray(primaryRows) ? primaryRows : [];
+  const fallback = Array.isArray(fallbackRows) ? fallbackRows : [];
+  if (!primary.length) return fallback.slice();
+  if (!fallback.length) return primary.slice();
+  const fallbackById = new Map(
+    fallback
+      .map((row) => [String(row?.id || "").trim(), row])
+      .filter(([rowId]) => rowId)
+  );
+  const merged = primary.map((row) => {
+    const rowId = String(row?.id || "").trim();
+    const fallbackRow = rowId ? fallbackById.get(rowId) : null;
+    if (rowId) fallbackById.delete(rowId);
+    return fallbackRow && typeof fallbackRow === "object" && row && typeof row === "object"
+      ? { ...fallbackRow, ...row }
+      : row;
+  });
+  fallbackById.forEach((row) => merged.push(row));
+  return merged;
+}
+
+function buildPodcasterSessionFromDocData(data = null, sessionId = "") {
+  const docData = isPodcasterPlainRecord(data) ? data : {};
+  const nested = isPodcasterPlainRecord(docData.session) ? docData.session : {};
+  const topLevel = { ...docData };
+  delete topLevel.session;
+  const session = {
+    ...topLevel,
+    ...nested,
+    id: String(sessionId || nested.id || topLevel.id || "").trim()
+  };
+  const nestedRows = mergePodcasterRowsPreservingFallback(
+    Array.isArray(nested?.script?.rows) ? nested.script.rows : [],
+    Array.isArray(nested?.rows) ? nested.rows : []
+  );
+  const topRows = mergePodcasterRowsPreservingFallback(
+    Array.isArray(topLevel?.script?.rows) ? topLevel.script.rows : [],
+    Array.isArray(topLevel?.rows) ? topLevel.rows : []
+  );
+  const rows = mergePodcasterRowsPreservingFallback(nestedRows, topRows);
+  if (rows.length) {
+    session.script = {
+      ...(isPodcasterPlainRecord(topLevel.script) ? topLevel.script : {}),
+      ...(isPodcasterPlainRecord(nested.script) ? nested.script : {}),
+      rows
+    };
+    session.rows = rows;
+  }
+  [
+    "dialogueVideoMap",
+    "dialogueAudioMap",
+    "podcastVideoConfig",
+    "podcastStudioUiState",
+    "rowReferenceImageMap",
+    "rowReferenceImageListMap",
+    "rowReferenceVideoMap",
+    "rowReferenceModeByRowId"
+  ].forEach((key) => {
+    if (!hasPodcasterRecordEntries(nested[key]) && hasPodcasterRecordEntries(topLevel[key])) {
+      session[key] = topLevel[key];
+    }
+  });
+  return session;
+}
+
+app.get("/api/podcaster/sessions/get", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.query?.sessionId || req.query?.id || "", 120);
+    if (!sessionId) {
+      return res.status(400).json({ error: "Falta sessionId." });
+    }
+    const sessionSnap = await db.collection("podcaster_sessions").doc(sessionId).get();
+    if (!sessionSnap.exists) {
+      return res.status(404).json({ error: "Sesión no encontrada." });
+    }
+    const data = sessionSnap.data() || {};
+    const ownerId = String(data.ownerId || "").trim();
+    const sharedWithIds = Array.isArray(data.sharedWithIds)
+      ? data.sharedWithIds.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    if (ownerId && ownerId !== uid && !sharedWithIds.includes(uid)) {
+      return res.status(403).json({ error: "No tienes acceso a esta sesión." });
+    }
+    const sessionData = buildPodcasterSessionFromDocData(data, sessionSnap.id);
+    const sessionUpdatedAt = data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || null;
+    const session = {
+      ...(sessionData && typeof sessionData === "object" ? sessionData : {}),
+      id: sessionSnap.id,
+      title: data.title || sessionData?.title || "Sin título",
+      updatedAt: sessionUpdatedAt || sessionData?.updatedAt || new Date().toISOString(),
+      archived: data.archived === true,
+      publicar: data.publicar === true,
+      isStub: false,
+      cloudMeta: {
+        ownerId: ownerId || null,
+        savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null
+      }
+    };
+    return res.status(200).json({ ok: true, session });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo cargar la sesión.") });
+  }
+});
+
 app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();

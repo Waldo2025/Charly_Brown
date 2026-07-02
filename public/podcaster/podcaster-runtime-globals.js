@@ -174,6 +174,13 @@
     }
   }
 
+  function trimWords(text, maxWords) {
+    const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+    const safeMax = Math.max(0, Number(maxWords) || 0);
+    if (!safeMax || words.length <= safeMax) return words.join(" ");
+    return words.slice(0, safeMax).join(" ");
+  }
+
   defineRuntimeNumber("STUDIO_TIMELINE_VERSION", 3);
   defineRuntimeNumber("STUDIO_TIMELINE_TRACK_VERSION", 1);
   defineRuntimeNumber("STUDIO_TIMELINE_PIXELS_PER_SEC", 52);
@@ -188,6 +195,7 @@
   global.generateDialogueAudioForRow = generateDialogueAudioForRow;
   global.measureVideoFile = measureVideoFile;
   global.setButtonLoadingState = setButtonLoadingState;
+  global.trimWords = typeof global.trimWords === "function" ? global.trimWords : trimWords;
 
   // --- Montage Export Placeholders ---
   const defaultMontageExportSettings = {
@@ -226,6 +234,7 @@
     globalThis.generateDialogueAudioForRow = generateDialogueAudioForRow;
     globalThis.measureVideoFile = measureVideoFile;
     globalThis.setButtonLoadingState = setButtonLoadingState;
+    globalThis.trimWords = typeof globalThis.trimWords === "function" ? globalThis.trimWords : global.trimWords;
 
     globalThis.montageExportState = globalThis.montageExportState || global.montageExportState;
     globalThis.montageExportBusy = globalThis.montageExportBusy || global.montageExportBusy;

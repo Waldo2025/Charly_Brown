@@ -7,8 +7,8 @@ const exportSource = readFileSync(new URL("../public/podcaster/podcaster-montage
 
 assert.match(
   htmlSource,
-  /<div class="montage-export-actions">[\s\S]*?<button id="montageExportDownloadBtn"[\s\S]*?hidden[\s\S]*?<i class="fas fa-download"/,
-  "El modal de export debe incluir un boton oculto de descarga dentro de montage-export-actions."
+  /<div class="montage-export-actions">[\s\S]*?<select id="montageExportDownloadBtn"[\s\S]*?hidden[\s\S]*?<option value="">Seleccionar exportación<\/option>/,
+  "El modal de export debe incluir un select oculto de descargas dentro de montage-export-actions."
 );
 
 assert.match(
@@ -25,8 +25,8 @@ assert.match(
 
 assert.match(
   exportSource,
-  /window\.els\.montageExportDownloadBtn\.hidden = !shouldShow;/,
-  "El boton solo debe mostrarse cuando hay una URL de descarga lista."
+  /select\.hidden = true;[\s\S]*?select\.hidden = false;/,
+  "El select solo debe mostrarse cuando hay una URL de descarga lista o historial de la sesión."
 );
 
 assert.match(
@@ -37,14 +37,32 @@ assert.match(
 
 assert.match(
   exportSource,
+  /function buildMontageExportDownloadHistoryKey\(sessionId = ""\)[\s\S]*?\$\{MONTAGE_EXPORT_DOWNLOAD_HISTORY_KEY\}:\$\{cleanSessionId\}/,
+  "El historial de descargas MP4 debe guardarse por sessionId para no mezclar exports de otras sesiones."
+);
+
+assert.match(
+  exportSource,
+  /normalizeMontageExportDownloadHistory\([\s\S]*?\{ sessionId: cleanSessionId \}/,
+  "La carga del historial de descargas MP4 debe filtrar entradas por la sesión activa."
+);
+
+assert.match(
+  exportSource,
+  /const referenceCandidate = reference\?\.downloadUrl \? reference : latestHistoryItem;/,
+  "Al abrir el modal, el export persistido en la sesión activa debe tener prioridad sobre el historial."
+);
+
+assert.match(
+  exportSource,
   /resetMontageExportJobState\(\)[\s\S]*?setMontageExportDownloadButton\(\{ visible: false \}\);/,
   "Al iniciar o resetear un export nuevo, el boton de descarga debe ocultarse."
 );
 
 assert.match(
   podcasterSource,
-  /montageExportDownloadBtn\.addEventListener\("click",\s*\(\) => \{[\s\S]*?downloadReadyMontageExport\(\);/,
-  "El boton listo debe tener un handler explicito para descargar el MP4."
+  /montageExportDownloadBtn\.addEventListener\("change",\s*\(event\) => \{[\s\S]*?downloadReadyMontageExport\(value\);/,
+  "El select de descargas debe descargar explícitamente el MP4 seleccionado."
 );
 
 console.log("ok - montage export ready download button contract");

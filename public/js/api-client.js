@@ -96,6 +96,7 @@ function shouldUseExportApiPath(path = "") {
   if (clean === "/api/assets/proxy-image" || clean.startsWith("/api/assets/proxy-image?")) return true;
   if (clean === "/api/assets/montage-download" || clean.startsWith("/api/assets/montage-download?")) return true;
   if (clean === "/api/podcaster/sessions/list" || clean.startsWith("/api/podcaster/sessions/list?")) return true;
+  if (clean === "/api/podcaster/sessions/get" || clean.startsWith("/api/podcaster/sessions/get?")) return true;
   if (clean.startsWith("/api/podcaster/montage/")) return true;
   return false;
 }

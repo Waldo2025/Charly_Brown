@@ -30,28 +30,65 @@
         return maxVersion + 1;
     }
 
+    function hasScriptRows(script) {
+        return Array.isArray(script?.rows) && script.rows.length > 0;
+    }
+
+    function hasThreadPayloadContent(thread) {
+        if (!thread || typeof thread !== "object") return false;
+        if (Array.isArray(thread.chat) && thread.chat.length > 0) return true;
+        if (hasScriptRows(thread.script)) return true;
+        if (String(thread.prompt || "").trim()) return true;
+        if (thread.videoConfig && typeof thread.videoConfig === "object" && Object.keys(thread.videoConfig).length > 0) return true;
+        return false;
+    }
+
+    function hasSessionPayloadContent(session) {
+        if (!session || typeof session !== "object") return false;
+        if (Array.isArray(session.chat) && session.chat.length > 0) return true;
+        if (hasScriptRows(session.script)) return true;
+        if (String(session.prompt || "").trim()) return true;
+        if (session.dialogueVideoMap && typeof session.dialogueVideoMap === "object" && Object.keys(session.dialogueVideoMap).length > 0) return true;
+        if (session.dialogueAudioMap && typeof session.dialogueAudioMap === "object" && Object.keys(session.dialogueAudioMap).length > 0) return true;
+        return false;
+    }
+
+    function buildThreadFromSession(session, seed = null) {
+        const source = seed && typeof seed === "object" ? seed : {};
+        return {
+            id: String(source.id || "").trim() || createThreadId(session),
+            name: String(source.name || "").trim() || 'Versión 1',
+            chat: cloneValue(session.chat || [], []),
+            script: session.script ? cloneValue(session.script, null) : null,
+            prompt: session.prompt || '',
+            videoConfig: session.videoConfig ? cloneValue(session.videoConfig, null) : null,
+            createdAt: source.createdAt || Date.now(),
+            updatedAt: Date.now()
+        };
+    }
+
     /**
      * Sincroniza el estado actual de la sesión hacia el thread activo.
      * Realiza migración automática si la sesión no tiene threads.
      */
-    function syncActiveThreadToSession(session) {
+    function syncActiveThreadToSession(session, options = {}) {
         if (!session) return;
         if (!Array.isArray(session.threads)) session.threads = [];
 
         // Migración: Crear el primer thread con la data actual si no existe ninguno
         if (session.threads.length === 0) {
-            const initialThread = {
-                id: createThreadId(session),
-                name: 'Versión 1',
-                chat: cloneValue(session.chat || [], []),
-                script: session.script ? cloneValue(session.script, null) : null,
-                prompt: session.prompt || '',
-                videoConfig: session.videoConfig ? cloneValue(session.videoConfig, null) : null,
-                createdAt: Date.now(),
-                updatedAt: Date.now()
-            };
+            const initialThread = buildThreadFromSession(session);
             session.threads.push(initialThread);
             session.activeThreadId = initialThread.id;
+        }
+
+        const shouldRepairEmptyThreads = (options.repairEmptyThreads === true || hasSessionPayloadContent(session))
+            && !session.threads.some(hasThreadPayloadContent);
+        if (shouldRepairEmptyThreads) {
+            const seed = session.threads[0] || null;
+            const repairedThread = buildThreadFromSession(session, seed);
+            session.threads = [repairedThread];
+            session.activeThreadId = repairedThread.id;
         }
 
         if (!session.activeThreadId || !session.threads.some(t => t.id === session.activeThreadId)) {
@@ -61,6 +98,10 @@
         // Sincronizar data actual de la raíz al objeto thread activo
         const activeThread = session.threads.find(t => t.id === session.activeThreadId);
         if (activeThread) {
+            if (!hasSessionPayloadContent(session) && hasThreadPayloadContent(activeThread)) {
+                restoreThreadToSession(session, activeThread);
+                return;
+            }
             activeThread.chat = cloneValue(session.chat || [], []);
             activeThread.script = session.script ? cloneValue(session.script, null) : null;
             activeThread.prompt = session.prompt || '';
