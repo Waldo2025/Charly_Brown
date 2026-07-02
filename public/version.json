@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.359",
-  "build": "2026-1.0.10.359",
+  "version": "1.0.10.360",
+  "build": "2026-1.0.10.360",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Podcaster limita a 3 las referencias finales enviadas a Veo, incluyendo continuidad o retrato, para que generar con 2 imágenes de referencia no falle por exceder el máximo del proveedor.",
     "Corregido: El export MP4 de Podcaster sincroniza el audio Gemini con el texto en pantalla estilo karaoke al respetar playbackRate en la mezcla FFmpeg del timeline.",
     "Corregido: El export MP4 de Podcaster mantiene escala y tipografía del texto en pantalla en 1920x1080 y evita que las transiciones de escenas con fondo de color revelen una base negra.",
     "Corregido: Podcaster mantiene el texto en pantalla visible durante toda la ventana real del audio Gemini al reproducir el timeline y al reducir la velocidad de voz, usando la duración efectiva medida del audio para el preview, el overlay y el export.",
@@ -341,5 +342,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.359"
+  "cache_version": "2026-1.0.10.360"
 }

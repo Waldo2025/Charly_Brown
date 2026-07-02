@@ -12,11 +12,19 @@ const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes 
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
   String(changelog[0] || "").includes("Podcaster")
-    && String(changelog[0] || "").includes("audio Gemini")
-    && String(changelog[0] || "").includes("karaoke")
-    && String(changelog[0] || "").includes("playbackRate")
-    && String(changelog[0] || "").includes("FFmpeg"),
-  "La nota más reciente debe reflejar el fix de sincronía Gemini/karaoke en export MP4."
+    && String(changelog[0] || "").includes("3")
+    && String(changelog[0] || "").includes("referencias")
+    && String(changelog[0] || "").includes("Veo")
+    && String(changelog[0] || "").includes("2 imágenes"),
+  "La nota más reciente debe reflejar el fix del límite de referencias de Veo."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("audio Gemini")
+    && String(note || "").includes("karaoke")
+    && String(note || "").includes("playbackRate")
+    && String(note || "").includes("FFmpeg")),
+  "Las release notes deben conservar el fix de sincronía Gemini/karaoke en export MP4."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("Podcaster")

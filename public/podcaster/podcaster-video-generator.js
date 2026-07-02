@@ -7,7 +7,7 @@ import { isReelModeEnabled } from "./podcaster-reels.js";
 const runtime = requirePodcasterGenerationRuntime();
 
 // --- Constants ---
-const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 4;
+const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 3;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
 const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
   "veo-3.1-generate-preview",

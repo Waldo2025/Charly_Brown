@@ -8052,7 +8052,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT)
       : [];
     const referenceImageNames = referenceMode === "image" && Array.isArray(req.body?.referenceImageNames)
-      ? req.body.referenceImageNames.map((item) => clampText(item || "", 180)).filter(Boolean).slice(0, 4)
+      ? req.body.referenceImageNames.map((item) => clampText(item || "", 180)).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT)
       : [];
     const referenceImageDataUrl = referenceMode === "image" ? String(req.body?.referenceImageDataUrl || "").trim() : "";
     const continuityReferenceImageDataUrl = String(inlineReferenceBudget?.continuityReferenceImageDataUrl || "").trim();
@@ -8768,6 +8768,14 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         referenceType: "asset"
       }
       : null;
+    const buildVeoReferenceImages = (...groups) => groups
+      .flatMap((group) => (Array.isArray(group) ? group : (group ? [group] : [])))
+      .filter(Boolean)
+      .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
+    const sceneContinuityReferenceImages = buildVeoReferenceImages(
+      sceneReferenceAssets,
+      continuityReferenceImage
+    );
     const referenceDurationSec = (sceneReferenceAssets.length || continuityReferenceImage || hasPortraitAsset)
       ? 8
       : inferredTargetDurationSec;
@@ -8779,7 +8787,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           body: {
             instances: [{
               prompt: veoPrompt,
-              referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              referenceImages: sceneContinuityReferenceImages
             }],
             parameters: {
               aspectRatio: "16:9",
@@ -8792,7 +8800,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           body: {
             instances: [{
               prompt: veoPrompt,
-              referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              referenceImages: sceneContinuityReferenceImages
             }],
             parameters: {
               aspectRatio: "16:9"
@@ -8844,7 +8852,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
             }],
             parameters: {
               aspectRatio: "16:9",
@@ -8863,7 +8871,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
             }],
             parameters: {
               aspectRatio: "16:9"
@@ -8885,7 +8893,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
             }],
             parameters: {
               aspectRatio: "16:9",
@@ -8904,7 +8912,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
             }],
             parameters: {
               aspectRatio: "16:9"
