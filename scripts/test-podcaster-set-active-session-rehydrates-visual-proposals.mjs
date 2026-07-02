@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const storeSource = readFileSync(new URL("../public/podcaster/podcaster-session-store.js", import.meta.url), "utf8");
+const backendSource = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 if (!source.includes("async function setActiveSession(sessionId, options = {})")) {
   throw new Error("No existe setActiveSession.");
@@ -29,6 +30,22 @@ if (!source.includes("mergeCloudSessionOverLocalCache(cloudSession, targetSessio
 
 if (!source.includes("Object.assign(targetSession,")) {
   throw new Error("La sesión activa vigente debe recibir los datos hidratados.");
+}
+
+if (!source.includes("let activatedSession = nextSession;")
+  || !source.includes("activatedSession = getActiveSession() || activatedSession || nextSession;")
+  || !source.includes("normalizePodcastStudioUiState(activatedSession?.podcastStudioUiState || null, activatedSession)")
+  || !source.includes("playbackController.sync(activatedSession, getPodcastVideoConfig(activatedSession))")) {
+  throw new Error("setActiveSession debe restaurar UI y playback desde la sesión hidratada vigente.");
+}
+
+if (!source.includes("composerVideoTableMode: String(source.composerVideoTableMode || composerVideoTableMode || \"compose\").trim() === \"create\" ? \"create\" : \"compose\"")) {
+  throw new Error("normalizePodcastStudioUiState debe conservar el modo Componer/Crear por sesión.");
+}
+
+if (!backendSource.includes("podcastStudioUiState: sessionUiState")
+  || !backendSource.includes("videoContentType: sessionVideoContentType || null")) {
+  throw new Error("El listado backend debe incluir metadatos de modo para clasificar stubs de video.");
 }
 
 console.log("setActiveSession keeps visual fallback while hydrating empty cloud cache OK.");

@@ -1246,7 +1246,8 @@ function normalizePodcastStudioUiState(raw = null, session = null) {
     showMontageAudioSubtracks: source.showMontageAudioSubtracks === true,
     lastActiveRowId: validRowIds.has(lastActiveRowId) ? lastActiveRowId : "",
     collapsedRowIds,
-    composerGenerationMode: String(source.composerGenerationMode || composerGenerationMode || "script").trim() === "video" ? "video" : "script"
+    composerGenerationMode: String(source.composerGenerationMode || composerGenerationMode || "script").trim() === "video" ? "video" : "script",
+    composerVideoTableMode: String(source.composerVideoTableMode || composerVideoTableMode || "compose").trim() === "create" ? "create" : "compose"
   };
 }
 
@@ -6963,7 +6964,7 @@ function createSession(overrides = {}) {
     trimestre: "",
     unidad: "",
     updatedAt: nowIso(),
-    podcastStudioUiState: normalizePodcastStudioUiState({ composerGenerationMode }),
+    podcastStudioUiState: normalizePodcastStudioUiState({ composerGenerationMode, composerVideoTableMode }),
     chat: [
       {
         id: makeId("msg"),
@@ -7491,6 +7492,7 @@ async function setActiveSession(sessionId, options = {}) {
   setupActivityListener(sessionId);
 
   const nextSession = getActiveSession();
+  let activatedSession = nextSession;
 
   // Hidratar desde cloud cuando la lista trajo un stub o cuando una caché previa
   // quedó como metadata vacía sin el flag isStub.
@@ -7510,6 +7512,7 @@ async function setActiveSession(sessionId, options = {}) {
         }
 
         persistSessions();
+        activatedSession = targetSession;
         setGenerationStatus("Listo", "");
       } else {
         setGenerationStatus("No se encontró el contenido en la nube.", "is-error");
@@ -7520,11 +7523,12 @@ async function setActiveSession(sessionId, options = {}) {
     }
   }
 
-  resetPodcastStudioSessionUiState(nextSession);
+  activatedSession = getActiveSession() || activatedSession || nextSession;
+  resetPodcastStudioSessionUiState(activatedSession);
   // Restaurar estado visual del Studio desde la sesión (Firebase/localStorage fallback).
   try {
     suppressPodcastStudioUiStateSync = true;
-    const ui = normalizePodcastStudioUiState(nextSession?.podcastStudioUiState || null, nextSession);
+    const ui = normalizePodcastStudioUiState(activatedSession?.podcastStudioUiState || null, activatedSession);
     const localInspectorCollapsed = (() => {
       try {
         const raw = window.localStorage.getItem(PODCAST_STUDIO_INSPECTOR_COLLAPSED_KEY);
@@ -7550,8 +7554,8 @@ async function setActiveSession(sessionId, options = {}) {
       } catch (_) { }
       return null;
     })();
-    const hasExplicitSessionLibraryCollapsed = !!nextSession?.podcastStudioUiState
-      && Object.prototype.hasOwnProperty.call(nextSession.podcastStudioUiState, "libraryCollapsed");
+    const hasExplicitSessionLibraryCollapsed = !!activatedSession?.podcastStudioUiState
+      && Object.prototype.hasOwnProperty.call(activatedSession.podcastStudioUiState, "libraryCollapsed");
     const shouldDefaultCollapseLibraryOnMobile = window.innerWidth <= 768
       && localLibraryCollapsed === null
       && !hasExplicitSessionLibraryCollapsed;
@@ -7562,7 +7566,7 @@ async function setActiveSession(sessionId, options = {}) {
       { persist: false }
     );
     // Sincronizar todos los switches de publicación (header y footer)
-    const isPublished = nextSession?.publicar === true;
+    const isPublished = activatedSession?.publicar === true;
     document.querySelectorAll("[id^='sessionPublishToggle']").forEach(el => {
       if (el) el.checked = isPublished;
     });
@@ -7590,8 +7594,8 @@ async function setActiveSession(sessionId, options = {}) {
     suppressPodcastStudioUiStateSync = false;
   }
   try {
-    const refsHydrated = await hydrateSessionReferenceMedia(nextSession);
-    const musicHydrated = await hydratePanelMusicLocalCaches(nextSession);
+    const refsHydrated = await hydrateSessionReferenceMedia(activatedSession);
+    const musicHydrated = await hydratePanelMusicLocalCaches(activatedSession);
     if (refsHydrated || musicHydrated) {
       persistSessions();
     }
@@ -7599,9 +7603,9 @@ async function setActiveSession(sessionId, options = {}) {
     // noop
   }
   try {
-    const repairedAudio = rehydrateGeminiDialogueAudioMap(nextSession, { defaultPlaybackRate: 1 });
+    const repairedAudio = rehydrateGeminiDialogueAudioMap(activatedSession, { defaultPlaybackRate: 1 });
     if (repairedAudio.changed) {
-      Object.assign(nextSession, {
+      Object.assign(activatedSession, {
         dialogueAudioMap: repairedAudio.dialogueAudioMap
       });
       syncGeminiDialogueTrackWithRuntime({
@@ -7615,7 +7619,7 @@ async function setActiveSession(sessionId, options = {}) {
     console.error("[podcaster] Error reparando audios Gemini al cargar:", error);
   }
   if (typeof playbackController?.sync === "function") {
-    playbackController.sync(nextSession, getPodcastVideoConfig(nextSession));
+    playbackController.sync(activatedSession, getPodcastVideoConfig(activatedSession));
   }
   try {
     // Estas funciones forzaban los chips al inicio de la escena si detectaban offsets antiguos.

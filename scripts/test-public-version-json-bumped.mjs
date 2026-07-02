@@ -13,8 +13,8 @@ const notes = [...changelog, ...releaseNotes];
 assert.ok(
   String(changelog[0] || "").includes("Podcaster")
     && /sesi[oó]n/.test(String(changelog[0] || ""))
-    && String(changelog[0] || "").includes("chat-stage")
-    && String(changelog[0] || "").includes("#podcasterSidepanel"),
+    && String(changelog[0] || "").includes("Podcast/Activa video")
+    && String(changelog[0] || "").includes("Componer/Crear"),
   "La nota más reciente debe reflejar la restauración de datos de sesión en Podcaster."
 );
 assert.ok(

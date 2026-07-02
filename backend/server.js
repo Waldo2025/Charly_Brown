@@ -7163,6 +7163,14 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
     [...ownedSnap.docs, ...sharedSnap.docs].forEach((docSnap) => {
       const data = docSnap.data() || {};
       const sessionData = data.session && typeof data.session === "object" ? data.session : null;
+      const sessionUiState = sessionData?.podcastStudioUiState && typeof sessionData.podcastStudioUiState === "object"
+        ? sessionData.podcastStudioUiState
+        : null;
+      const sessionVideoContentType = String(
+        sessionData?.script?.videoContentType
+        || sessionData?.videoContentType
+        || ""
+      ).trim().toLowerCase();
       const sessionUpdatedAt = data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || null;
       merged.set(docSnap.id, {
         id: docSnap.id,
@@ -7170,9 +7178,12 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
         updatedAt: sessionUpdatedAt,
         archived: data.archived === true,
         publicar: data.publicar === true,
+        podcastStudioUiState: sessionUiState,
+        videoContentType: sessionVideoContentType || null,
         isStub: true,
         script: {
-          rows: []
+          rows: [],
+          videoContentType: sessionVideoContentType || null
         },
         cloudMeta: {
           ownerId: String(data.ownerId || "").trim() || null,
