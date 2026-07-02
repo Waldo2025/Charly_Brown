@@ -362,6 +362,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
     const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
     const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
+    const rowId = String(segment?.rowId || "").trim();
+    const safeRate = this.clampPlaybackRate(clipPlaybackRate, 0.5, 10);
     const rawVisibleMs = Math.max(
       500,
       trimmedVisibleMs
@@ -369,7 +371,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
       || 500
     );
-    return Math.max(500, Math.round(rawVisibleMs / this.clampPlaybackRate(clipPlaybackRate, 0.5, 10)));
+    const segmentTimelineMs = Math.max(500, Math.round(rawVisibleMs / safeRate));
+    const measuredAudioVisibleMs = rowId
+      ? Math.max(0, Math.round(Number(this.deps?.resolveRowAudioDurationMs?.(rowId, this.state?.session) || 0) || 0) - Math.round(trimInMs / safeRate))
+      : 0;
+    return Math.max(500, segmentTimelineMs, measuredAudioVisibleMs);
   }
   resolveGeminiSegmentWindowForRow(session = null, cfg = null, rowId = "", currentMs = 0) {
     const key = String(rowId || "").trim();
@@ -2834,7 +2840,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       const clipEndMs = clipStartMs + this.deps.getOnScreenTextClipEffectiveDurationMs(clip);
       const geminiWindow = this.resolveGeminiSegmentWindowForRow(session, cfg, rowId, currentMs);
       const effectiveStartMs = geminiWindow ? Math.max(clipStartMs, geminiWindow.startMs) : clipStartMs;
-      const effectiveEndMs = geminiWindow ? Math.min(clipEndMs, geminiWindow.endMs) : clipEndMs;
+      const effectiveEndMs = geminiWindow ? geminiWindow.endMs : clipEndMs;
       const effectiveDurationMs = Math.max(0, effectiveEndMs - effectiveStartMs);
       const isTimeActive = effectiveDurationMs > 0
         && (currentMs + 1) >= effectiveStartMs

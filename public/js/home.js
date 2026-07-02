@@ -2764,6 +2764,130 @@ function cloneDashboardSessionPayload(session = null) {
   }
 }
 
+function isDashboardPlainRecord(value = null) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasDashboardRecordEntries(value = null) {
+  return isDashboardPlainRecord(value) && Object.keys(value).length > 0;
+}
+
+function mergeDashboardRecordValue(topValue = null, nestedValue = null) {
+  const top = isDashboardPlainRecord(topValue) ? topValue : {};
+  const nested = isDashboardPlainRecord(nestedValue) ? nestedValue : {};
+  if (!hasDashboardRecordEntries(top)) return nestedValue;
+  if (!hasDashboardRecordEntries(nested)) return topValue;
+  return { ...top, ...nested };
+}
+
+function mergeDashboardPanelMusicConfig(fallbackConfig = null, primaryConfig = null) {
+  const fallback = isDashboardPlainRecord(fallbackConfig) ? fallbackConfig : {};
+  const primary = isDashboardPlainRecord(primaryConfig) ? primaryConfig : {};
+  const merged = {
+    ...fallback,
+    ...primary,
+    trackLibrary: {
+      ...(isDashboardPlainRecord(fallback.trackLibrary) ? fallback.trackLibrary : {}),
+      ...(isDashboardPlainRecord(primary.trackLibrary) ? primary.trackLibrary : {})
+    }
+  };
+  if (!Array.isArray(primary.sourceItems) && Array.isArray(fallback.sourceItems)) {
+    merged.sourceItems = fallback.sourceItems;
+  }
+  return merged;
+}
+
+function buildDashboardSessionFromPodcasterDoc(data = null, sessionId = "", fallbackSession = null) {
+  const docData = isDashboardPlainRecord(data) ? data : {};
+  const nested = isDashboardPlainRecord(docData.session) ? docData.session : {};
+  const topLevel = { ...docData };
+  delete topLevel.session;
+
+  const fallback = cloneDashboardSessionPayload(fallbackSession) || {};
+  const session = {
+    ...fallback,
+    ...topLevel,
+    ...nested,
+    id: String(sessionId || nested.id || topLevel.id || fallback.id || "").trim()
+  };
+
+  const mergedRows = mergeDashboardRows(
+    mergeDashboardRows(extractDashboardSessionRows(nested), extractDashboardSessionRows(topLevel)),
+    extractDashboardSessionRows(fallback)
+  );
+  if (mergedRows.length) {
+    session.script = {
+      ...(isDashboardPlainRecord(fallback.script) ? fallback.script : {}),
+      ...(isDashboardPlainRecord(topLevel.script) ? topLevel.script : {}),
+      ...(isDashboardPlainRecord(nested.script) ? nested.script : {}),
+      rows: mergedRows
+    };
+    session.rows = mergedRows;
+  }
+
+  const topVideoConfig = isDashboardPlainRecord(topLevel.podcastVideoConfig) ? topLevel.podcastVideoConfig : {};
+  const nestedVideoConfig = isDashboardPlainRecord(nested.podcastVideoConfig) ? nested.podcastVideoConfig : {};
+  const fallbackVideoConfig = isDashboardPlainRecord(fallback.podcastVideoConfig) ? fallback.podcastVideoConfig : {};
+  session.podcastVideoConfig = mergeHomePodcastVideoConfig(
+    mergeHomePodcastVideoConfig(fallbackVideoConfig, topVideoConfig),
+    nestedVideoConfig
+  );
+
+  const topUi = isDashboardPlainRecord(topLevel.podcastStudioUiState) ? topLevel.podcastStudioUiState : {};
+  const nestedUi = isDashboardPlainRecord(nested.podcastStudioUiState) ? nested.podcastStudioUiState : {};
+  const fallbackUi = isDashboardPlainRecord(fallback.podcastStudioUiState) ? fallback.podcastStudioUiState : {};
+  session.podcastStudioUiState = {
+    ...fallbackUi,
+    ...topUi,
+    ...nestedUi,
+    podcastVideoConfig: mergeHomePodcastVideoConfig(
+      mergeHomePodcastVideoConfig(fallbackUi.podcastVideoConfig || {}, topUi.podcastVideoConfig || {}),
+      nestedUi.podcastVideoConfig || {}
+    )
+  };
+
+  [
+    "dialogueVideoMap",
+    "dialogueAudioMap",
+    "timelineClipMap",
+    "panelMusicConfig",
+    "rowReferenceImageMap",
+    "rowReferenceImageListMap",
+    "rowReferenceVideoMap",
+    "rowReferenceModeByRowId",
+    "visualEffectsMap"
+  ].forEach((key) => {
+    const mergedValue = mergeDashboardRecordValue(
+      mergeDashboardRecordValue(fallback[key], topLevel[key]),
+      nested[key]
+    );
+    if (hasDashboardRecordEntries(mergedValue)) {
+      session[key] = mergedValue;
+    }
+  });
+
+  if (session.panelMusicConfig && !hasDashboardRecordEntries(session.podcastVideoConfig.panelMusicConfig)) {
+    session.podcastVideoConfig = mergeHomePodcastVideoConfig(session.podcastVideoConfig, {
+      panelMusicConfig: session.panelMusicConfig
+    });
+  } else if (session.panelMusicConfig) {
+    session.podcastVideoConfig = mergeHomePodcastVideoConfig(session.podcastVideoConfig, {
+      panelMusicConfig: mergeDashboardPanelMusicConfig(session.panelMusicConfig, session.podcastVideoConfig.panelMusicConfig)
+    });
+  }
+
+  if (docData.publicar === true) session.publicar = true;
+  if (docData.archived === true) session.archived = true;
+  if (docData.ownerId || docData.updatedAt?.toDate) {
+    session.cloudMeta = {
+      ownerId: String(docData.ownerId || "").trim() || null,
+      savedAt: docData.updatedAt?.toDate ? docData.updatedAt.toDate().toISOString() : null
+    };
+  }
+
+  return session;
+}
+
 function findDashboardActiveRowIndex(rows = [], activeRowId = "", activeEntry = null) {
   const key = String(activeRowId || "").trim();
   const list = Array.isArray(rows) ? rows : [];
@@ -2786,27 +2910,8 @@ async function loadFullDashboardPodcasterSession(sessionId = "", fallbackSession
     const sessionSnap = await getDoc(sessionRef);
     if (!sessionSnap.exists()) return fallbackSession || null;
     const data = sessionSnap.data() || {};
-    const sessionData = data?.session && typeof data.session === "object" ? data.session : data;
-    const base = cloneDashboardSessionPayload(sessionData) || cloneDashboardSessionPayload(fallbackSession) || {};
-    const fallbackClone = cloneDashboardSessionPayload(fallbackSession) || {};
+    const base = buildDashboardSessionFromPodcasterDoc(data, cleanId, fallbackSession);
     if (!base || typeof base !== "object") return fallbackSession || null;
-    base.id = cleanId;
-    if (data.publicar === true) base.publicar = true;
-    if (data.archived === true) base.archived = true;
-    if (data.ownerId || data.updatedAt?.toDate) {
-      base.cloudMeta = {
-        ownerId: String(data.ownerId || "").trim() || null,
-        savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null
-      };
-    }
-    const mergedRows = mergeDashboardRows(
-      extractDashboardSessionRows(base),
-      extractDashboardSessionRows(fallbackClone)
-    );
-    if (mergedRows.length) {
-      base.script = { ...(base.script || {}), rows: mergedRows };
-      base.rows = mergedRows;
-    }
     return base;
   } catch (error) {
     console.warn("[Dashboard] No se pudo cargar la sesión completa desde podcaster_sessions:", error);
@@ -2815,22 +2920,9 @@ async function loadFullDashboardPodcasterSession(sessionId = "", fallbackSession
 }
 
 function createDashboardSessionFallback(data = null, sessionId = "") {
-  const source = data && typeof data === "object" ? data : {};
-  const nested = source?.session && typeof source.session === "object" ? source.session : {};
-  const base = cloneDashboardSessionPayload(nested) || cloneDashboardSessionPayload(source) || {};
+  const base = buildDashboardSessionFromPodcasterDoc(data, sessionId);
   if (!base || typeof base !== "object") {
     return { id: String(sessionId || "").trim() };
-  }
-  const mergedRows = mergeDashboardRows(
-    extractDashboardSessionRows(nested),
-    extractDashboardSessionRows(source)
-  );
-  if (mergedRows.length) {
-    if (!base.script || typeof base.script !== "object") {
-      base.script = {};
-    }
-    base.script.rows = mergedRows;
-    base.rows = mergedRows;
   }
   base.id = String(sessionId || base.id || "").trim();
   return base;
@@ -4621,12 +4713,8 @@ async function abrirReproductorMultimedia(session) {
       const updateFn = (snap) => {
         if (!snap.exists()) return;
         const data = snap.data() || {};
-        const sessionData = data?.session && typeof data.session === "object" ? data.session : data;
-        const incomingSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+        const incomingSession = buildDashboardSessionFromPodcasterDoc(data, sessionId, currentMultimediaSession);
         if (!incomingSession) return;
-        incomingSession.id = String(incomingSession.id || sessionId).trim() || sessionId;
-        if (data.publicar === true) incomingSession.publicar = true;
-        if (data.archived === true) incomingSession.archived = true;
         
         // Aviso de cambios si detectamos versión nueva
         const getMs = (val) => {

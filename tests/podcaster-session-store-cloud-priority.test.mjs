@@ -178,6 +178,147 @@ test("loadSingleSessionFromCloud merges top-level video session data when data.s
   assert.equal(session.dialogueVideoMap["row-1"][0].storagePath.includes("video.mp4"), true);
 });
 
+test("loadSingleSessionFromCloud preserves full timeline maps when nested session has partial video config", async () => {
+  const session = await loadSingleSessionFromCloud("s2", "uid-1", {
+    hasAvailableApiBase: () => false,
+    firestoreDb: {},
+    doc(_db, collectionName, id) {
+      return { collectionName, id };
+    },
+    async getDoc(ref) {
+      assert.equal(ref.collectionName, "podcaster_sessions");
+      assert.equal(ref.id, "s2");
+      return {
+        exists: () => true,
+        data: () => ({
+          ownerId: "uid-1",
+          title: "Timeline completo",
+          podcastVideoConfig: {
+            timelineClipsByRowId: {
+              "row-1": { rowId: "row-1", type: "color", backgroundColor: "#112233", startMs: 0, durationMs: 2500 },
+              "row-2": { rowId: "row-2", type: "video", videoSrc: "https://cdn.example.test/row-2.mp4", startMs: 2500, durationMs: 3000 }
+            },
+            timelineSceneAudioMixByRowId: {
+              "row-1": { backgroundMusicVolumePct: 80 }
+            },
+            geminiDialogueTrack: {
+              enabled: true,
+              segments: [
+                { rowId: "row-1", startMs: 300, durationMs: 1800 },
+                { rowId: "row-2", startMs: 2800, durationMs: 2200 }
+              ]
+            }
+          },
+          dialogueVideoMap: {
+            "row-2": [{ downloadUrl: "https://cdn.example.test/row-2.mp4" }]
+          },
+          session: {
+            id: "s2",
+            title: "Timeline completo",
+            script: {
+              rows: [
+                { id: "row-1", text: "Escena con fondo" },
+                { id: "row-2", text: "Escena con video" }
+              ]
+            },
+            podcastVideoConfig: {
+              reelModeEnabled: true,
+              timelineClipsByRowId: {
+                "row-2": { rowId: "row-2", mediaScale: 1.2 }
+              },
+              geminiDialogueTrack: {
+                enabled: true,
+                segments: []
+              }
+            },
+            dialogueVideoMap: {}
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal(session.podcastVideoConfig.reelModeEnabled, true);
+  assert.equal(session.podcastVideoConfig.timelineClipsByRowId["row-1"].backgroundColor, "#112233");
+  assert.equal(session.podcastVideoConfig.timelineClipsByRowId["row-2"].videoSrc, "https://cdn.example.test/row-2.mp4");
+  assert.equal(session.podcastVideoConfig.timelineClipsByRowId["row-2"].mediaScale, 1.2);
+  assert.equal(session.podcastVideoConfig.timelineSceneAudioMixByRowId["row-1"].backgroundMusicVolumePct, 80);
+  assert.equal(session.podcastVideoConfig.geminiDialogueTrack.segments.length, 2);
+  assert.equal(session.dialogueVideoMap["row-2"][0].downloadUrl, "https://cdn.example.test/row-2.mp4");
+});
+
+test("saveManual falls back to direct Firestore save when API rejects Firebase auth", async () => {
+  const writes = [];
+  const storageWrites = [];
+  let nextSessions = [];
+  const sessionStore = store.createPodcasterSessionStore({
+    STORAGE_KEY_BASE: "test_sessions",
+    SESSION_SYNC_META_KEY_BASE: "test_sync",
+    nowIso: () => "2026-07-02T16:00:00.000Z",
+    hasAvailableApiBase: () => true,
+    async authFetchJson() {
+      const error = new Error("AUTH_FORBIDDEN");
+      error.status = 401;
+      error.detail = { error: "AUTH_INVALID" };
+      throw error;
+    },
+    firestoreDb: {},
+    doc(_db, collectionName, id) {
+      return { collectionName, id };
+    },
+    async getDoc(ref) {
+      assert.equal(ref.collectionName, "podcaster_sessions");
+      return {
+        exists: () => false,
+        data: () => null
+      };
+    },
+    async setDoc(ref, data, options) {
+      writes.push({ ref, data, options });
+    },
+    serverTimestamp() {
+      return { __serverTimestamp: true };
+    },
+    resolveCurrentUid: () => "uid-1",
+    getSessions: () => [{
+      id: "s-save",
+      title: "Guardar",
+      updatedAt: "2026-07-02T15:59:00.000Z",
+      script: { rows: [{ id: "row-1", text: "Hola" }] }
+    }],
+    getActiveSession: () => ({
+      id: "s-save",
+      title: "Guardar",
+      updatedAt: "2026-07-02T15:59:00.000Z",
+      script: { rows: [{ id: "row-1", text: "Hola" }] }
+    }),
+    buildCloudSessionPayload: (session) => session,
+    compactCloudSessionPayload: (payload) => ({ payload, bytes: 128 }),
+    MAX_CLOUD_SESSION_PAYLOAD_BYTES: 1024 * 1024,
+    getDialogueVideoMap: () => ({}),
+    getDialogueAudioMap: () => ({}),
+    setSessions(next) {
+      nextSessions = Array.isArray(next) ? next : [];
+    },
+    storage: {
+      getItem() { return ""; },
+      setItem(key, value) { storageWrites.push({ key, value }); },
+      removeItem() {}
+    }
+  });
+
+  await sessionStore.saveManual("s-save", { silent: true, render: false });
+
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].ref.collectionName, "podcaster_sessions");
+  assert.equal(writes[0].ref.id, "s-save");
+  assert.equal(writes[0].data.ownerId, "uid-1");
+  assert.equal(writes[0].data.session.id, "s-save");
+  assert.equal(writes[0].options.merge, true);
+  assert.equal(nextSessions[0].cloudMeta.ownerId, "uid-1");
+  assert.ok(storageWrites.some((entry) => String(entry.key || "").startsWith("test_sessions:uid-1")));
+});
+
 test("bootstrapSessions prefers cloud snapshot when local and cloud differ", async () => {
   const written = [];
   const local = [{

@@ -2875,6 +2875,19 @@ function parseBackgroundGradient(bgString) {
   return null;
 }
 
+function resolveMontageCompositionBaseColor(entries = []) {
+  const candidates = (Array.isArray(entries) ? entries : [])
+    .map((entry) => String(entry?.backgroundColor || "").trim())
+    .filter(Boolean);
+  for (const candidate of candidates) {
+    const gradient = parseBackgroundGradient(candidate);
+    const color = gradient?.color1 || candidate;
+    const hex = parseHexColor(color, "");
+    if (hex) return `0x${hex}`;
+  }
+  return "0x020617";
+}
+
 function hasGeminiKey() {
   return !!GEMINI_API_KEY;
 }
@@ -12367,6 +12380,7 @@ async function renderMontageOverlapComposition({
     const totalSec = Math.max(0.25, chunkPlan.totalDurationMs / 1000);
     const colorInputIndex = sortedPaths.length;
     const silentAudioInputIndex = sortedPaths.length + 1;
+    const baseColor = resolveMontageCompositionBaseColor(chunkPlan.entries);
     const filters = [`[${colorInputIndex}:v]format=rgba[base0]`];
     const audioLabels = [];
     let baseLabel = "base0";
@@ -12450,7 +12464,7 @@ async function renderMontageOverlapComposition({
     await runFfmpegCommand([
       "-y", "-hide_banner", "-loglevel", "warning",
       ...sortedPaths.flatMap((p) => ["-i", p]),
-      "-f", "lavfi", "-i", `color=c=black:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
+      "-f", "lavfi", "-i", `color=c=${baseColor}:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
       "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalSec.toFixed(3)}`,
       "-filter_complex", filters.join(";"),
       "-map", `[${baseLabel}]`,
@@ -14356,6 +14370,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           rowId,
           intermediatePath,
           syntheticVisualOnly: hasCustomBg && !hasVideoAssetSource,
+          backgroundColor: hasCustomBg ? clampText(entry?.backgroundColor || "", 150) : "",
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
           durationSec: durSec,
           durationMs,

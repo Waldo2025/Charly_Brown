@@ -24,7 +24,7 @@ assert.match(
 
 assert.match(
   source,
-  /const mergedSession = mergeCloudSessionOverLocalCache\(cloudSession, nextSession\);/,
+  /const targetSession = getActiveSession\(\) \|\| nextSession;[\s\S]*const mergedSession = mergeCloudSessionOverLocalCache\(cloudSession, targetSession\);/,
   "Las sesiones stub deben seguir pudiendo completarse desde cloud."
 );
 

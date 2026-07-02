@@ -18,14 +18,16 @@ if (!/if \(\(endMs - startMs\) < STUDIO_TIMELINE_MIN_CLIP_MS\) return null;/.tes
 const exportGeminiDurationBlock = exportSource.match(/const resolveGeminiSegmentTimelineDurationMs = \(segment = null, rowId = "", runtime = null\) => \{[\s\S]*?\n  \};/)?.[0] || "";
 if (!exportGeminiDurationBlock.includes("trimOutMs > trimInMs")
   || !exportGeminiDurationBlock.includes("window.resolveDialogueAudioPlaybackRate")
-  || !exportGeminiDurationBlock.includes("Math.round((trimmedVisibleMs || declaredDurationMs) / playbackRate)")) {
-  throw new Error("La duración Gemini del payload debe respetar trimIn/trimOut y playbackRate.");
+  || !exportGeminiDurationBlock.includes("window.resolveRowAudioDurationMs")
+  || !exportGeminiDurationBlock.includes("measuredAudioVisibleMs")) {
+  throw new Error("La duración Gemini del payload debe respetar trimIn/trimOut, playbackRate y duración real medida.");
 }
 
 const previewGeminiDurationBlock = podcasterSource.match(/function resolveGeminiDialogueSegmentTimelineDurationMs\(segment = null, playbackRate = 1\) \{[\s\S]*?\n\}/)?.[0] || "";
 if (!previewGeminiDurationBlock.includes("trimOutMs > trimInMs")
-  || !previewGeminiDurationBlock.includes("Math.round((trimmedVisibleMs || declaredDurationMs) / safeRate)")) {
-  throw new Error("Los segmentos de texto del montaje deben usar la misma duración efectiva de Gemini que el preview.");
+  || !previewGeminiDurationBlock.includes("resolveRowAudioDurationMs")
+  || !previewGeminiDurationBlock.includes("measuredAudioVisibleMs")) {
+  throw new Error("Los segmentos de texto del montaje deben usar la misma duración efectiva de Gemini y la medición real del audio.");
 }
 
 console.log("Podcaster on-screen text export timing contract OK.");

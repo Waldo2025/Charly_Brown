@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const homeSource = readFileSync(new URL("../public/home.js", import.meta.url), "utf8");
-const podcasterSource = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const homeSource = readFileSync(new URL("../public/js/home.js", import.meta.url), "utf8");
+const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const podcasterPanelMusicSource = readFileSync(new URL("../public/podcaster/podcaster-panel-music.js", import.meta.url), "utf8");
 
 function extractConst(source, name) {
   const match = source.match(new RegExp(`const ${name} = [^;]+;`));
@@ -90,17 +91,23 @@ const homeContext = createContext();
 });
 
 const podcasterContext = createContext();
+podcasterContext.minClipMs = 500;
+podcasterContext.maxLocalMusicDataUrlChars = 1_800_000;
+podcasterContext.resolvePanelMusicSessionCacheKey = (sessionId, key) => `podcaster:${sessionId}:${key}`;
 [
   extractConst(podcasterSource, "MAX_LOCAL_MUSIC_DATA_URL_CHARS"),
   extractConst(podcasterSource, "STUDIO_TIMELINE_MIN_CLIP_MS"),
   "normalizePanelMusicMutedLoopIndexes",
   "normalizePanelMusicLoopSettings",
+  "resolvePanelMusicEffectiveSourceDurationMs",
   "normalizePanelMusicTrack",
   "getPanelMusicLoopSetting",
+  "getEnabledPanelMusicUploadedTracks",
   "getPanelMusicTrackDurationSec",
+  "getPanelMusicLoopVisibleDurationMs",
   "buildUploadedPanelMusicSegments"
 ].forEach((snippet) => {
-  const code = snippet.startsWith("const ") ? snippet : extractFunction(podcasterSource, snippet);
+  const code = snippet.startsWith("const ") ? snippet : extractFunction(podcasterPanelMusicSource, snippet);
   vm.runInContext(`${code};`, podcasterContext);
 });
 

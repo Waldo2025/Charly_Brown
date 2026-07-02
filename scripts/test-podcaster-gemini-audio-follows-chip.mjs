@@ -12,7 +12,7 @@ if (!syncBlockMatch) {
 }
 const syncBlock = syncBlockMatch[0];
 
-if (!/const activeSegments = segments\.filter\(\(segment\) => \{[\s\S]*resolveSegmentTimelineDurationMs\(segment, clipPlaybackRate\)[\s\S]*currentMs >= segment\.startMs && currentMs < \(segment\.startMs \+ visibleDurationMs\)/m.test(syncBlock)) {
+if (!/const activeSegments = segments\.filter\(\(segment\) => \{[\s\S]*resolveSegmentTimelineDurationMs\(segment, clipPlaybackRate\)[\s\S]*const segmentStartMs = Math\.max\(0, Number\(segment\?\.startMs \|\| 0\)\);[\s\S]*const segmentEndMs = segmentStartMs \+ Math\.max\(1, visibleDurationMs\);[\s\S]*this\.isTimelineMsInRange\(currentMs, segmentStartMs, segmentEndMs/m.test(syncBlock)) {
   throw new Error("El audio Gemini debe seguir los segmentos activos del timeline de audio, no los límites del video VEO.");
 }
 

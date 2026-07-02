@@ -131,6 +131,83 @@ function hasRecordEntries(value = null) {
   return isPlainRecord(value) && Object.keys(value).length > 0;
 }
 
+function mergeRecordMaps(base = null, incoming = null) {
+  const currentBase = isPlainRecord(base) ? base : {};
+  const nextIncoming = isPlainRecord(incoming) ? incoming : {};
+  return {
+    ...currentBase,
+    ...nextIncoming
+  };
+}
+
+function mergeRecordMapsByEntry(base = null, incoming = null) {
+  const merged = mergeRecordMaps(base, incoming);
+  const currentBase = isPlainRecord(base) ? base : {};
+  const nextIncoming = isPlainRecord(incoming) ? incoming : {};
+  Object.keys(merged).forEach((key) => {
+    if (isPlainRecord(currentBase[key]) && isPlainRecord(nextIncoming[key])) {
+      merged[key] = {
+        ...currentBase[key],
+        ...nextIncoming[key]
+      };
+    }
+  });
+  return merged;
+}
+
+function mergeArrayByPresence(base = null, incoming = null) {
+  return Array.isArray(incoming) && incoming.length ? incoming : (Array.isArray(base) ? base : []);
+}
+
+function mergeGeminiDialogueTrackForLoad(base = null, incoming = null) {
+  const currentBase = isPlainRecord(base) ? base : {};
+  const nextIncoming = isPlainRecord(incoming) ? incoming : {};
+  const baseSegments = Array.isArray(currentBase.segments) ? currentBase.segments : [];
+  const incomingSegments = Array.isArray(nextIncoming.segments) ? nextIncoming.segments : [];
+  return {
+    ...currentBase,
+    ...nextIncoming,
+    segments: incomingSegments.length ? incomingSegments : baseSegments,
+    missingRowIds: mergeArrayByPresence(currentBase.missingRowIds, nextIncoming.missingRowIds),
+    excludedRowIds: mergeArrayByPresence(currentBase.excludedRowIds, nextIncoming.excludedRowIds)
+  };
+}
+
+function mergePanelMusicConfigForLoad(base = null, incoming = null) {
+  const currentBase = isPlainRecord(base) ? base : {};
+  const nextIncoming = isPlainRecord(incoming) ? incoming : {};
+  const baseSourceItems = Array.isArray(currentBase.sourceItems) ? currentBase.sourceItems : [];
+  const incomingSourceItems = Array.isArray(nextIncoming.sourceItems) ? nextIncoming.sourceItems : [];
+  return {
+    ...currentBase,
+    ...nextIncoming,
+    trackLibrary: mergeRecordMaps(currentBase.trackLibrary, nextIncoming.trackLibrary),
+    sourceItems: incomingSourceItems.length ? incomingSourceItems : baseSourceItems
+  };
+}
+
+function mergePodcastVideoConfigRecords(base = null, incoming = null) {
+  const currentBase = isPlainRecord(base) ? base : {};
+  const nextIncoming = isPlainRecord(incoming) ? incoming : {};
+  return {
+    ...currentBase,
+    ...nextIncoming,
+    timelineTracks: mergeArrayByPresence(currentBase.timelineTracks, nextIncoming.timelineTracks),
+    timelineClipsByRowId: mergeRecordMapsByEntry(currentBase.timelineClipsByRowId, nextIncoming.timelineClipsByRowId),
+    timelineOnScreenTextClipsByRowId: mergeRecordMapsByEntry(currentBase.timelineOnScreenTextClipsByRowId, nextIncoming.timelineOnScreenTextClipsByRowId),
+    timelineOnScreenTextLayoutByRowId: mergeRecordMapsByEntry(currentBase.timelineOnScreenTextLayoutByRowId, nextIncoming.timelineOnScreenTextLayoutByRowId),
+    timelineOverlayCardsById: mergeRecordMapsByEntry(currentBase.timelineOverlayCardsById, nextIncoming.timelineOverlayCardsById),
+    timelineSceneAudioMixByRowId: mergeRecordMapsByEntry(currentBase.timelineSceneAudioMixByRowId, nextIncoming.timelineSceneAudioMixByRowId),
+    timelineTrackHeightsById: mergeRecordMaps(currentBase.timelineTrackHeightsById, nextIncoming.timelineTrackHeightsById),
+    transitionsByEdge: mergeRecordMaps(currentBase.transitionsByEdge, nextIncoming.transitionsByEdge),
+    frameHoldsByRowId: mergeRecordMaps(currentBase.frameHoldsByRowId, nextIncoming.frameHoldsByRowId),
+    speedRangesByRowId: mergeRecordMaps(currentBase.speedRangesByRowId, nextIncoming.speedRangesByRowId),
+    onScreenTextTrack: mergeRecordMaps(currentBase.onScreenTextTrack, nextIncoming.onScreenTextTrack),
+    panelMusicConfig: mergePanelMusicConfigForLoad(currentBase.panelMusicConfig, nextIncoming.panelMusicConfig),
+    geminiDialogueTrack: mergeGeminiDialogueTrackForLoad(currentBase.geminiDialogueTrack, nextIncoming.geminiDialogueTrack)
+  };
+}
+
 function mergeRowsPreservingFallback(primaryRows = [], fallbackRows = []) {
   const primary = Array.isArray(primaryRows) ? primaryRows : [];
   const fallback = Array.isArray(fallbackRows) ? fallbackRows : [];
@@ -183,22 +260,41 @@ function buildSessionFromPodcasterDoc(data = null, sessionId = "") {
     session.rows = rows;
   }
 
+  session.podcastVideoConfig = mergePodcastVideoConfigRecords(topLevel.podcastVideoConfig, nested.podcastVideoConfig);
+  session.podcastStudioUiState = {
+    ...(isPlainRecord(topLevel.podcastStudioUiState) ? topLevel.podcastStudioUiState : {}),
+    ...(isPlainRecord(nested.podcastStudioUiState) ? nested.podcastStudioUiState : {}),
+    podcastVideoConfig: mergePodcastVideoConfigRecords(
+      topLevel.podcastStudioUiState?.podcastVideoConfig,
+      nested.podcastStudioUiState?.podcastVideoConfig
+    )
+  };
+
   [
     "dialogueVideoMap",
     "dialogueAudioMap",
-    "podcastVideoConfig",
-    "podcastStudioUiState",
     "rowReferenceImageMap",
     "rowReferenceImageListMap",
     "rowReferenceVideoMap",
-    "rowReferenceModeByRowId"
+    "rowReferenceModeByRowId",
+    "timelineClipMap",
+    "panelMusicConfig",
+    "visualEffectsMap",
+    "stylizedTextMap"
   ].forEach((key) => {
     const nestedValue = nested[key];
     const topValue = topLevel[key];
-    if (!hasRecordEntries(nestedValue) && hasRecordEntries(topValue)) {
-      session[key] = topValue;
+    const merged = mergeRecordMaps(topValue, nestedValue);
+    if (hasRecordEntries(merged)) {
+      session[key] = merged;
     }
   });
+
+  if (hasRecordEntries(session.panelMusicConfig)) {
+    session.podcastVideoConfig = mergePodcastVideoConfigRecords(session.podcastVideoConfig, {
+      panelMusicConfig: session.panelMusicConfig
+    });
+  }
 
   return session;
 }
@@ -540,11 +636,10 @@ function mergePodcastVideoConfigForLoad(cloudConfig = null, localConfig = null, 
   const normalizePodcastVideoConfig = deps.normalizePodcastVideoConfig || ((value) => (value && typeof value === "object" ? value : {}));
   const local = localConfig && typeof localConfig === "object" ? localConfig : {};
   const cloud = cloudConfig && typeof cloudConfig === "object" ? cloudConfig : {};
-  return normalizePodcastVideoConfig({
-    ...local,
+  return normalizePodcastVideoConfig(mergePodcastVideoConfigRecords(local, {
     ...cloud,
     reelModeEnabled: local.reelModeEnabled === true ? true : cloud.reelModeEnabled === true
-  });
+  }));
 }
 
 function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps = {}) {
@@ -653,19 +748,20 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
         : mergeDialogueAudioMapByEntryUpdatedAt(cloudSession?.dialogueAudioMap || {}, localSession?.dialogueAudioMap || {}),
       dialogueVideoMap: isShallow && localSession?.dialogueVideoMap && Object.keys(localSession.dialogueVideoMap).length > 0 
         ? localSession.dialogueVideoMap 
-        : (cloudSession?.dialogueVideoMap || localSession?.dialogueVideoMap || {}),
+        : mergeRecordMaps(localSession?.dialogueVideoMap || {}, cloudSession?.dialogueVideoMap || {}),
       rowReferenceImageMap: isShallow && localSession?.rowReferenceImageMap && Object.keys(localSession.rowReferenceImageMap).length > 0
         ? localSession.rowReferenceImageMap
-        : (cloudSession?.rowReferenceImageMap || localSession?.rowReferenceImageMap || {}),
+        : mergeRecordMaps(localSession?.rowReferenceImageMap || {}, cloudSession?.rowReferenceImageMap || {}),
       rowReferenceImageListMap: isShallow && localSession?.rowReferenceImageListMap && Object.keys(localSession.rowReferenceImageListMap).length > 0
         ? localSession.rowReferenceImageListMap
-        : (cloudSession?.rowReferenceImageListMap || localSession?.rowReferenceImageListMap || {}),
+        : mergeRecordMaps(localSession?.rowReferenceImageListMap || {}, cloudSession?.rowReferenceImageListMap || {}),
       rowReferenceVideoMap: isShallow && localSession?.rowReferenceVideoMap && Object.keys(localSession.rowReferenceVideoMap).length > 0
         ? localSession.rowReferenceVideoMap
-        : (cloudSession?.rowReferenceVideoMap || localSession?.rowReferenceVideoMap || {}),
+        : mergeRecordMaps(localSession?.rowReferenceVideoMap || {}, cloudSession?.rowReferenceVideoMap || {}),
       rowReferenceModeByRowId: isShallow && localSession?.rowReferenceModeByRowId && Object.keys(localSession.rowReferenceModeByRowId).length > 0
         ? localSession.rowReferenceModeByRowId
-        : (cloudSession?.rowReferenceModeByRowId || localSession?.rowReferenceModeByRowId || {}),
+        : mergeRecordMaps(localSession?.rowReferenceModeByRowId || {}, cloudSession?.rowReferenceModeByRowId || {}),
+      timelineClipMap: mergeRecordMaps(localSession?.timelineClipMap || {}, cloudSession?.timelineClipMap || {}),
       script: {
         ...(localSession?.script || {}),
         ...(cloudSession?.script || {}),
@@ -738,6 +834,16 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
   };
 }
 
+function isRecoverableSessionSaveAuthError(error = null) {
+  const message = String(error?.message || error?.code || "").trim();
+  const status = Number(error?.status || 0);
+  const detailError = String(error?.detail?.error || error?.detail?.code || "").trim();
+  return status === 401
+    || status === 403
+    || /^AUTH_/i.test(message)
+    || /^AUTH_/i.test(detailError);
+}
+
 async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {}, storageAdapter = null) {
   const uid = String(deps.resolveCurrentUid?.() || "").trim();
   const getSessions = deps.getSessions || (() => []);
@@ -778,13 +884,26 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     };
     throw error;
   }
-  const response = deps.hasAvailableApiBase?.()
-    ? await deps.authFetchJson("/api/podcaster/sessions/save", {
-      method: "POST",
-      preferRemote: false,
-      body: JSON.stringify({ session: payload })
-    })
-    : await saveSessionDirectToCloud(payload, deps);
+  let response = null;
+  if (deps.hasAvailableApiBase?.()) {
+    try {
+      response = await deps.authFetchJson("/api/podcaster/sessions/save", {
+        method: "POST",
+        preferRemote: false,
+        body: JSON.stringify({ session: payload })
+      });
+    } catch (error) {
+      if (!isRecoverableSessionSaveAuthError(error)) throw error;
+      deps.logPodcastRenderDebug?.("cloud-session-save-api-auth-fallback", {
+        sessionId: String(payload?.id || "").trim(),
+        status: Number(error?.status || 0),
+        error: String(error?.message || error?.detail?.error || "AUTH_FORBIDDEN")
+      });
+      response = await saveSessionDirectToCloud(payload, deps);
+    }
+  } else {
+    response = await saveSessionDirectToCloud(payload, deps);
+  }
   const savedAt = String(response?.savedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
   const nextSessions = getSessions().map((session) => (

@@ -222,3 +222,69 @@ test("home playback deps wire transition helpers for overlap playback", () => {
   assert.match(source, /getTransitionForEdge:\s*\(session,\s*fromRowId,\s*toRowId\)\s*=>\s*getTransitionForEdge\(session,\s*fromRowId,\s*toRowId\)/);
   assert.match(source, /resolveTimelineRuntimeOverlapPairAtMs:\s*\(session,\s*currentMs,\s*runtimeEntries\)\s*=>\s*\{/);
 });
+
+test("home builds playback sessions from top-level and nested podcaster doc state", () => {
+  const context = {
+    console
+  };
+  vm.createContext(context);
+  [
+    "normalizeDashboardProposalState",
+    "pickDashboardRowValue",
+    "mergeDashboardRowData",
+    "mergeDashboardRows",
+    "extractDashboardSessionRows",
+    "cloneDashboardSessionPayload",
+    "isDashboardPlainRecord",
+    "hasDashboardRecordEntries",
+    "mergeDashboardRecordValue",
+    "mergeDashboardPanelMusicConfig",
+    "mergeHomePodcastVideoConfig",
+    "buildDashboardSessionFromPodcasterDoc"
+  ].forEach((name) => {
+    vm.runInContext(`${extractFunction(name)};`, context);
+  });
+
+  const session = context.buildDashboardSessionFromPodcasterDoc({
+    title: "Top title",
+    panelMusicConfig: {
+      sourceType: "track",
+      montageVolume: 72,
+      sourceItems: [{
+        sourceUrl: "https://cdn.example.test/bed.mp3",
+        startOffsetMs: 0,
+        endOffsetMs: 2400
+      }]
+    },
+    podcastVideoConfig: {
+      panelMusicConfig: {
+        sourceType: "track",
+        montageVolume: 72
+      },
+      timelineSceneAudioMixByRowId: {
+        "row-1": { backgroundMusicVolumePct: 80 }
+      }
+    },
+    dialogueAudioMap: {
+      "row-1": { downloadUrl: "https://cdn.example.test/dialogue.wav" }
+    },
+    session: {
+      title: "Nested title",
+      script: {
+        rows: [{ id: "row-1", text: "Hola" }]
+      },
+      podcastVideoConfig: {
+        reelModeEnabled: true,
+        panelMusicConfig: {}
+      }
+    }
+  }, "session-home-top-level-audio");
+
+  assert.equal(session.title, "Nested title");
+  assert.equal(session.rows.length, 1);
+  assert.equal(session.podcastVideoConfig.reelModeEnabled, true);
+  assert.equal(session.podcastVideoConfig.panelMusicConfig.montageVolume, 72);
+  assert.equal(session.podcastVideoConfig.panelMusicConfig.sourceItems.length, 1);
+  assert.equal(session.dialogueAudioMap["row-1"].downloadUrl, "https://cdn.example.test/dialogue.wav");
+  assert.equal(session.podcastVideoConfig.timelineSceneAudioMixByRowId["row-1"].backgroundMusicVolumePct, 80);
+});

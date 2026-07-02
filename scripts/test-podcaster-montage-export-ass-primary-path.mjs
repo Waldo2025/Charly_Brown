@@ -11,14 +11,14 @@ assert.match(
 
 assert.match(
   backendSource,
-  /let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\);/,
+  /let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\)(?:\s*&&\s*![^;]+)?;/,
   "El export normal debe decidir el texto en pantalla antes del render por escena."
 );
 
 assert.match(
   backendSource,
-  /const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;/,
-  "La entrega final debe determinar el browser visual pass dinámicamente."
+  /const hasFinalVisualPass = Boolean\([\s\S]*?\);[\s\S]*?const finalShouldAttemptBrowserRenderer = false;[\s\S]*?const hasBrowserVisualPass = false;/,
+  "La entrega final debe mantener desactivado el browser visual pass cuando el texto normal se quema por escena."
 );
 
 assert.match(

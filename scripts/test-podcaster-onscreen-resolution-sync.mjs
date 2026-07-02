@@ -33,4 +33,10 @@ if (!/const spec = resolveOnScreenTextRenderSpec\(\{[\s\S]*resolution,[\s\S]*sou
   throw new Error("El backend debe usar la misma spec compartida para posicionar los subtítulos exportados.");
 }
 
+if (!/buildSnapshotPlan\(\{[\s\S]*previewWidthPx: sourceWidth,[\s\S]*previewHeightPx: sourceHeight,[\s\S]*sourceWidth,[\s\S]*sourceHeight,[\s\S]*resolution/m.test(
+  readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8")
+)) {
+  throw new Error("Los snapshots raster de export deben usar el canvas real de export como preview para mantener escala tipográfica.");
+}
+
 console.log("Podcast onscreen resolution sync OK.");

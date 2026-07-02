@@ -5218,6 +5218,8 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
             wordTimings,
             activeWordIndex: frame.wordIndex,
             activeOnly: frame.activeOnly,
+            previewWidthPx: sourceWidth,
+            previewHeightPx: sourceHeight,
             sourceWidth,
             sourceHeight,
             resolution
@@ -5645,9 +5647,17 @@ export function buildMontageExportPayload(session = null) {
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS)
     );
-    return Math.max(
+    const segmentTimelineMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Math.round((trimmedVisibleMs || declaredDurationMs) / playbackRate)
+    );
+    const measuredAudioVisibleMs = rowId
+      ? Math.max(0, Math.round(Number(window.resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0) - Math.round(trimInMs / playbackRate))
+      : 0;
+    return Math.max(
+      STUDIO_TIMELINE_MIN_CLIP_MS,
+      segmentTimelineMs,
+      measuredAudioVisibleMs
     );
   };
 

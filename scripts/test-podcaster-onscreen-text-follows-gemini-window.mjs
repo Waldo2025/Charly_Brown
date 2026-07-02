@@ -18,8 +18,8 @@ if (!/const geminiWindow = this\.resolveGeminiSegmentWindowForRow\(session, cfg,
 }
 
 if (!/const effectiveStartMs = geminiWindow \? Math\.max\(clipStartMs, geminiWindow\.startMs\) : clipStartMs;/.test(playbackSource)
-  || !/const effectiveEndMs = geminiWindow \? Math\.min\(clipEndMs, geminiWindow\.endMs\) : clipEndMs;/.test(playbackSource)) {
-  throw new Error("El overlay debe recortar el texto al inicio y fin del chip Gemini.");
+  || !/const effectiveEndMs = geminiWindow \? geminiWindow\.endMs : clipEndMs;/.test(playbackSource)) {
+  throw new Error("El overlay debe mantener el texto hasta el fin real del chip Gemini.");
 }
 
 if (!/currentMs >= geminiWindow\.startMs && currentMs < geminiWindow\.endMs/.test(playbackSource)) {
@@ -30,7 +30,7 @@ if (!/function clampMontageOnScreenTextSegmentsToGeminiTimeline\(segments = \[\]
   throw new Error("El export debe recortar los segmentos de texto contra la línea de audio Gemini.");
 }
 
-if (!/const boundedSegments = clampMontageOnScreenTextSegmentsToGeminiTimeline\(nextTimeline\.segments, geminiTimelineSegments\);/.test(exportSource)
+if (!/const sceneBoundedSegments = clampMontageOnScreenTextSegmentsToSceneWindows\(nextTimeline\.segments, validEntries\);[\s\S]*const boundedSegments = clampMontageOnScreenTextSegmentsToGeminiTimeline\(sceneBoundedSegments, geminiTimelineSegments\);/.test(exportSource)
   || !/segments: boundedSegments,/.test(exportSource)) {
   throw new Error("resolveEffectiveMontageOnScreenTextTimeline debe enviar segmentos de texto ya recortados.");
 }

@@ -4394,6 +4394,7 @@ function getOnScreenTextClipEffectiveDurationMs(clip = null) {
 
 function resolveGeminiDialogueSegmentTimelineDurationMs(segment = null, playbackRate = 1) {
   const safeRate = Math.max(0.5, Math.min(10, Number(playbackRate || 1) || 1));
+  const rowId = String(segment?.rowId || "").trim();
   const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
   const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
   const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
@@ -4404,9 +4405,17 @@ function resolveGeminiDialogueSegmentTimelineDurationMs(segment = null, playback
     || (Number(segment?.endMs || 0) - startMs)
     || STUDIO_TIMELINE_MIN_CLIP_MS
   );
-  return Math.max(
+  const segmentTimelineMs = Math.max(
     STUDIO_TIMELINE_MIN_CLIP_MS,
     Math.round((trimmedVisibleMs || declaredDurationMs) / safeRate)
+  );
+  const measuredAudioVisibleMs = rowId
+    ? Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, getActiveSession()) || 0) || 0) - Math.round(trimInMs / safeRate))
+    : 0;
+  return Math.max(
+    STUDIO_TIMELINE_MIN_CLIP_MS,
+    segmentTimelineMs,
+    measuredAudioVisibleMs
   );
 }
 
@@ -13435,6 +13444,7 @@ playbackController.init(els, {
   resolveDialogueAudioForRow,
   resolveFallbackDialogueAudioForRow,
   resolveDialogueAudioPlaybackRate,
+  resolveRowAudioDurationMs,
   resolveStorageAudioUrl,
   resolvePodcastStageAudioSrc,
   markStaleProxyMediaUrl,
@@ -13553,6 +13563,7 @@ exportPreviewController.init(exportPreviewEls, {
   shouldKeepNativeVideoAudioForRow,
   resolveDialogueAudioForRow,
   resolveDialogueAudioPlaybackRate,
+  resolveRowAudioDurationMs,
   resolveStorageAudioUrl,
   resolvePodcastStageAudioSrc,
   markStaleProxyMediaUrl,

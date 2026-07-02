@@ -1,8 +1,12 @@
 {
-  "version": "1.0.10.353",
-  "build": "2026-1.0.10.353",
+  "version": "1.0.10.358",
+  "build": "2026-1.0.10.358",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export MP4 de Podcaster mantiene escala y tipografía del texto en pantalla en 1920x1080 y evita que las transiciones de escenas con fondo de color revelen una base negra.",
+    "Corregido: Podcaster mantiene el texto en pantalla visible durante toda la ventana real del audio Gemini al reproducir el timeline y al reducir la velocidad de voz, usando la duración efectiva medida del audio para el preview, el overlay y el export.",
+    "Corregido: Podcaster rehidrata profundamente los mapas del timeline al mezclar campos top-level y session, preservando clips por rowId, fondos de color, segmentos Gemini y mapas de video/audio para que el editor Snoopy cargue y reproduzca el montaje completo.",
+    "Corregido: Home mezcla correctamente el estado top-level y session de podcaster_sessions al abrir podcasts, preservando panelMusicConfig/sourceItems del timeline para que el reproductor del dashboard escuche el audio de fondo configurado en podcaster.html.",
     "Corregido: El preview del editor Snoopy reaplica el layout de video al cambiar de escena y al cargar metadata/data, evitando que algunas escenas se vean pequeñas hasta presionar Stop.",
     "Corregido: El preview del modal Export MP4 usa proxy-media para videos de Firebase Storage y deja de cambiar URLs proxy por enlaces directos que fallaban con CORS 206 al abrir el modal.",
     "Corregido: Podcaster conserva por sesión el switch Podcast/Activa video y el modo Componer/Crear al abrir sesiones hidratadas desde cloud; el listado de stubs ahora incluye metadatos de modo para no clasificar sesiones de video como podcast.",
@@ -336,5 +340,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.353"
+  "cache_version": "2026-1.0.10.358"
 }
