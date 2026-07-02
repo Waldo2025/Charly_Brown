@@ -5702,6 +5702,7 @@ export function buildMontageExportPayload(session = null) {
         const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
         if (!effectiveSrc) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+        const playbackRate = Math.max(0.5, Math.min(10, Number(window.resolveDialogueAudioPlaybackRate?.(activeSession, rowId) || 1) || 1));
         const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime);
         const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
         const trimOutMsRaw = Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0);
@@ -5730,6 +5731,7 @@ export function buildMontageExportPayload(session = null) {
           mimeType: String(storedAudio?.mimeType || "").trim(),
           startMs,
           durationMs,
+          playbackRate,
           trimInMs,
           trimOutMs,
           fadeInMs: Math.max(0, Math.min(durationMs, Number(segment?.fadeInMs || 0) || 0)),

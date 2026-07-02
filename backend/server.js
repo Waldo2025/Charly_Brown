@@ -10645,6 +10645,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     const localMediaCacheKey = clampText(String(segment?.localMediaCacheKey || "").trim(), 400);
     const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
+    const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
     const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
     const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
     const fadeInMs = Math.max(0, Math.min(durationMs, Math.round(Number(segment?.fadeInMs || 0) || 0)));
@@ -10672,6 +10673,7 @@ function normalizeMontageExportRequestBody(body = {}) {
       mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
       startMs,
       durationMs,
+      playbackRate,
       trimInMs,
       trimOutMs,
       fadeInMs,
@@ -13595,6 +13597,7 @@ async function finalizeMontageExportAudioTrack({
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
         const durationSec = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
+        const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
         const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
         const fadeInSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
         const fadeOutSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
@@ -13618,6 +13621,7 @@ async function finalizeMontageExportAudioTrack({
           finalDurationSec = Math.max(0.1, finalDurationSec - shiftSec);
           finalAdjustedStartMs = 0;
         }
+        const sourceDurationSec = Math.max(0.1, finalDurationSec * playbackRate);
 
         const fadeParts = [volume.toFixed(3)];
         const effectiveFadeInSec = Math.max(0, Math.min(finalDurationSec, fadeInSec));
@@ -13629,7 +13633,10 @@ async function finalizeMontageExportAudioTrack({
           fadeParts.push(`if(gt(t,${Math.max(0, finalDurationSec - effectiveFadeOutSec).toFixed(3)}),(${finalDurationSec.toFixed(3)}-t)/${effectiveFadeOutSec.toFixed(3)},1)`);
         }
         const localVolumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
-        const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${localVolumeExpr}':eval=frame,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
+        const retimeFilters = Math.abs(playbackRate - 1) > 0.0001
+          ? `,${buildFfmpegAtempoFilterChain(playbackRate)}`
+          : "";
+        const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${sourceDurationSec.toFixed(3)},asetpts=PTS-STARTPTS${retimeFilters},atrim=start=0:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${localVolumeExpr}':eval=frame,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
         const segmentAutomationWindows = isBackgroundSegment ? getSceneAutomationWindowsForSegment(segment, input.sceneBackgroundAutomation) : [];
         const automationExprEscaped = segmentAutomationWindows.length
           ? escapeFfmpegExpr(buildFfmpegAutomationVolumeExpr(segmentAutomationWindows, 1))

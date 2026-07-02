@@ -12,11 +12,19 @@ const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes 
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
   String(changelog[0] || "").includes("Podcaster")
-    && String(changelog[0] || "").includes("texto en pantalla")
-    && String(changelog[0] || "").includes("1920x1080")
-    && String(changelog[0] || "").includes("fondo de color")
-    && String(changelog[0] || "").includes("base negra"),
-  "La nota más reciente debe reflejar el fix del export MP4 con texto y fondos de color."
+    && String(changelog[0] || "").includes("audio Gemini")
+    && String(changelog[0] || "").includes("karaoke")
+    && String(changelog[0] || "").includes("playbackRate")
+    && String(changelog[0] || "").includes("FFmpeg"),
+  "La nota más reciente debe reflejar el fix de sincronía Gemini/karaoke en export MP4."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("texto en pantalla")
+    && String(note || "").includes("1920x1080")
+    && String(note || "").includes("fondo de color")
+    && String(note || "").includes("base negra")),
+  "Las release notes deben conservar el fix del export MP4 con texto y fondos de color."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("Podcaster")

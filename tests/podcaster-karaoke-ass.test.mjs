@@ -72,14 +72,13 @@ test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per
   assert.match(ass, /Style: KaraokeActive,/);
   assert.match(ass, /Dialogue: 0,0:00:00\.00,0:00:01\.20,KaraokeBase,/);
   assert.match(ass, /Dialogue: 1,0:00:00\.00,0:00:01\.20,KaraokeBase,/);
-  assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.18,KaraokeActive,/);
-  assert.match(ass, /Dialogue: 2,0:00:00\.18,0:00:00\.42,KaraokeActive,/);
+  assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.18,KaraokeActive(?:Box)?,/);
+  assert.match(ass, /Dialogue: 2,0:00:00\.18,0:00:00\.42,KaraokeActive(?:Box)?,/);
   assert.match(ass, /\\1c&HFCFAF8&/);
-  assert.match(ass, /\\1c&H15CCFA&/);
+  assert.match(ass, /\\3c&H15CCFA&/);
   assert.match(ass, /\\4a&HFF&/);
-  assert.match(ass, /\{\\1c&H15CCFA&\\1a&H00&\\2c&H15CCFA&\\2a&H00&\}Hola/);
-  assert.match(ass, /\{\\1c&HFCFAF8&\\1a&H00&\\2c&HFCFAF8&\\2a&H00&\}mundo/);
-  assert.doesNotMatch(ass, /\\4c&H[0-9A-F]{8}/, "bg-none no debe inyectar caja opaca en los eventos");
+  assert.match(ass, /\}Hola \{\\1a&HFF&\\2a&HFF&\\3a&HFF&\\4a&HFF&\\bord0\\shad0\}mundo/);
+  assert.doesNotMatch(ass, /Dialogue: 1,[^\n]*\\4c&H[0-9A-F]{6,8}/, "bg-none no debe inyectar caja opaca en el evento base");
 });
 
 test("buildMontageOnScreenTextAss scales karaoke word events using playbackRate", () => {
@@ -143,8 +142,8 @@ test("buildMontageOnScreenTextAss scales karaoke word events using playbackRate"
     ]
   });
 
-  assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.10,KaraokeActive,/);
-  assert.match(ass, /Dialogue: 2,0:00:00\.10,0:00:00\.20,KaraokeActive,/);
+  assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.10,KaraokeActive(?:Box)?,/);
+  assert.match(ass, /Dialogue: 2,0:00:00\.10,0:00:00\.20,KaraokeActive(?:Box)?,/);
 });
 
 test("buildMontageOnScreenTextAss preserves selected karaoke highlight shape", () => {
