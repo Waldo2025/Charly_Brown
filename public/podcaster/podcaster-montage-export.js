@@ -2494,31 +2494,14 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
       src = "";
     }
   }
-  if (!src) src = directDownloadUrl || rawUrl;
-  if (
-    isMontageProxyMediaUrl(src)
-    && storagePath
-    && typeof window.resolveFirebaseStorageUrl === "function"
-  ) {
-    try {
-      const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app";
-      const gsUrl = storagePath.startsWith("gs://")
-        ? storagePath
-        : `gs://${bucket}/${storagePath}`;
-      const resolved = gsUrl ? String(await window.resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
-      if (resolved && /^https?:\/\//i.test(resolved) && !isMontageProxyMediaUrl(resolved)) {
-        console.info("[podcaster][montage-export][preview-media-source]", {
-          rowId: String(selected?.rowId || "").trim() || undefined,
-          sceneIndex: Math.max(1, Number(selected?.sceneIndex || 1) || 1),
-          source: "firebase_direct",
-          reason: "proxy_media_bypassed"
-        });
-        src = resolved;
-      }
-    } catch (_) {
-      // fallback below
-    }
+  if (!src && typeof window.resolveStorageVideoUrl === "function") {
+    src = String(window.resolveStorageVideoUrl(directDownloadUrl || rawUrl, storagePath, {
+      type: video?.type || video?.mediaKind || "video",
+      mimeType: video?.mimeType || "video/mp4",
+      name: video?.name || ""
+    }) || "").trim();
   }
+  if (!src) src = directDownloadUrl || rawUrl;
   const shouldResolveDirectly = !src || src.startsWith("gs://");
   if (shouldResolveDirectly && typeof window.resolveFirebaseStorageUrl === "function") {
     try {
@@ -2535,7 +2518,7 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     }
   }
   if (!src) {
-    src = String(window.resolveStorageVideoUrl(rawUrl, storagePath) || "").trim();
+    src = String(window.resolveStorageVideoUrl?.(rawUrl || directDownloadUrl, storagePath) || "").trim();
   }
   if (!src) return null;
   const mediaKind = String(video?.mediaKind || video?.type || "").trim().toLowerCase();

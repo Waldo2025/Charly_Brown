@@ -281,6 +281,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
     surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
   }
+  reapplyEntryVisualLayout(entry = null, surfaceEl = null) {
+    if (!surfaceEl) return;
+    const sourceWidth = Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoWidth : surfaceEl.naturalWidth) || 0;
+    const sourceHeight = Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoHeight : surfaceEl.naturalHeight) || 0;
+    const refreshedSpec = this.resolveSceneMediaRenderSpec(entry, surfaceEl, sourceWidth, sourceHeight);
+    if (refreshedSpec) this.applyComputedSceneMediaLayout(surfaceEl, refreshedSpec);
+  }
   applyEntryVisualStateToSurface(entry = null, surfaceEl = null) {
     if (!surfaceEl) return;
     const state = this.resolveEntryVisualState(entry);
@@ -313,17 +320,20 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.setProperty("--pod-scene-media-y", `${(nextY * 100).toFixed(3)}%`);
     surfaceEl.dataset.sceneMediaMotionPreset = nextMotion;
     surfaceEl.dataset.sceneMediaLayout = String(state.visualLayoutMode || "default");
-    if (!(sourceWidth > 0 && sourceHeight > 0)) {
-      const eventName = surfaceEl.tagName === "VIDEO" ? "loadedmetadata" : "load";
-      surfaceEl.addEventListener(eventName, () => {
-        const refreshedSpec = this.resolveSceneMediaRenderSpec(
-          entry,
-          surfaceEl,
-          Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoWidth : surfaceEl.naturalWidth) || 0,
-          Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoHeight : surfaceEl.naturalHeight) || 0
-        );
-        if (refreshedSpec) this.applyComputedSceneMediaLayout(surfaceEl, refreshedSpec);
-      }, { once: true });
+    if (sourceWidth > 0 && sourceHeight > 0) {
+      requestAnimationFrame(() => this.reapplyEntryVisualLayout(entry, surfaceEl));
+    } else {
+      const refresh = () => this.reapplyEntryVisualLayout(entry, surfaceEl);
+      const eventNames = surfaceEl.tagName === "VIDEO"
+        ? ["loadedmetadata", "loadeddata", "canplay"]
+        : ["load", "decode"];
+      eventNames.forEach((eventName) => {
+        surfaceEl.addEventListener(eventName, refresh, { once: true });
+      });
+      requestAnimationFrame(() => {
+        refresh();
+        requestAnimationFrame(refresh);
+      });
     }
   }
   resetEntryVisualStateOnSurface(surfaceEl = null) {
@@ -3582,6 +3592,12 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const visualLayoutMode = normalizeLayout?.(clipCfg?.visualLayoutMode) || clipCfg?.visualLayoutMode || "default";
     const mediaScale = normalizeScale?.(clipCfg?.mediaScale) ?? 1;
+    const stageEntry = {
+      rowId: key,
+      videoSrc: src,
+      clip: clipCfg || {},
+      durationMs: Number(clipCfg?.durationMs || firstSegment?.durationMs || clip?.durationMs || 0) || 0
+    };
     applyScale?.({
       rowId: key,
       mediaScale,
@@ -3660,6 +3676,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         }
       }
       stageVideo.hidden = false;
+      this.applyEntryVisualStateToSurface(stageEntry, stageVideo);
       this.applyStageVideoBundleLayout(activeBundle, visualLayoutMode);
       if (stageBackdrop) {
         const currentBackdropSrc = String(stageBackdrop.dataset.src || "").trim();
@@ -3674,6 +3691,11 @@ export class PodcasterPlaybackController extends EventEmitter {
           });
         }
         stageBackdrop.hidden = visualLayoutMode !== "blur-backdrop";
+        if (visualLayoutMode === "blur-backdrop") {
+          this.applyEntryVisualStateToSurface(stageEntry, stageBackdrop);
+        } else {
+          this.resetEntryVisualStateOnSurface(stageBackdrop);
+        }
         stageBackdrop.muted = true;
         stageBackdrop.volume = 0;
         stageBackdrop.playbackRate = Math.max(0.5, Math.min(1.8, Number(this.els?.podcastVideoSpeedSelect?.value || window.els?.podcastVideoSpeedSelect?.value || 1)));

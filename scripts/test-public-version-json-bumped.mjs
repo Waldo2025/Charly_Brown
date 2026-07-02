@@ -11,10 +11,9 @@ const changelog = Array.isArray(version.changelog) ? version.changelog : [];
 const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes : [];
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
-  String(changelog[0] || "").includes("Podcaster")
-    && /sesi[oó]n/.test(String(changelog[0] || ""))
-    && String(changelog[0] || "").includes("Podcast/Activa video")
-    && String(changelog[0] || "").includes("Componer/Crear"),
+  String(changelog[0] || "").includes("editor Snoopy")
+    && String(changelog[0] || "").includes("metadata/data")
+    && String(changelog[0] || "").includes("Stop"),
   "La nota más reciente debe reflejar la restauración de datos de sesión en Podcaster."
 );
 assert.ok(

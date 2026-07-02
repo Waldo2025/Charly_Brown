@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.351",
-  "build": "2026-1.0.10.351",
+  "version": "1.0.10.353",
+  "build": "2026-1.0.10.353",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El preview del editor Snoopy reaplica el layout de video al cambiar de escena y al cargar metadata/data, evitando que algunas escenas se vean pequeñas hasta presionar Stop.",
+    "Corregido: El preview del modal Export MP4 usa proxy-media para videos de Firebase Storage y deja de cambiar URLs proxy por enlaces directos que fallaban con CORS 206 al abrir el modal.",
     "Corregido: Podcaster conserva por sesión el switch Podcast/Activa video y el modo Componer/Crear al abrir sesiones hidratadas desde cloud; el listado de stubs ahora incluye metadatos de modo para no clasificar sesiones de video como podcast.",
     "Corregido: Podcaster aplica la hidratación cloud sobre la sesión activa vigente después del await, evitando que la lista de stubs reemplace el objeto y deje chat-stage, #podcasterSidepanel y el editor Snoopy en blanco.",
     "Corregido: Podcaster mantiene la carga de sesión desde home.html y aisla por sessionId el historial local de MP4 exportados; al abrir el modal prioriza latestMontageExport de la sesión activa, evitando que una sesión muestre exports de otra.",
@@ -334,5 +336,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.351"
+  "cache_version": "2026-1.0.10.353"
 }
