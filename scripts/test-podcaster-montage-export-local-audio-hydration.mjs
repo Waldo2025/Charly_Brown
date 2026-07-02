@@ -25,13 +25,13 @@ assert.match(
 
 assert.match(
   exportSource,
-  /const cachedPlaybackBlobUrl = sourceUrl && typeof window\.playbackController\?\.getBlobUrlSync === "function"[\s\S]*const effectiveFetchUrl = cachedPlaybackBlobUrl \|\| sourceUrl;[\s\S]*const blob = await fetchMontageMediaBlob\(effectiveFetchUrl\);/,
-  "La hidratación del export debe intentar reutilizar el blob ya cacheado por playbackController antes de volver a descargar el audio."
+  /const hasStorageBackedRemoteSource = Boolean\(String\(asset\?\.storagePath \|\| ""\)\.trim\(\)\);[\s\S]*const cachedPlaybackBlobUrl = sourceUrl && !hasStorageBackedRemoteSource && typeof window\.playbackController\?\.getBlobUrlSync === "function"[\s\S]*const effectiveFetchUrl = cachedPlaybackBlobUrl \|\| sourceUrl;[\s\S]*const blob = await fetchMontageMediaBlob\(effectiveFetchUrl\);/,
+  "La hidratación del export debe reutilizar playbackController solo para assets sin storagePath; los remotos durables los resuelve el worker."
 );
 
 assert.match(
   exportSource,
-  /const hasStorageBackedRemoteSource = Boolean\(String\(asset\?\.storagePath \|\| ""\)\.trim\(\)\) && !cachedPlaybackBlobUrl;[\s\S]*if \(hasStorageBackedRemoteSource\) \{[\s\S]*url: sourceUrl,[\s\S]*downloadUrl: sourceUrl/,
+  /const hasStorageBackedRemoteSource = Boolean\(String\(asset\?\.storagePath \|\| ""\)\.trim\(\)\);[\s\S]*if \(hasStorageBackedRemoteSource\) \{[\s\S]*url: sourceUrl,[\s\S]*downloadUrl: sourceUrl/,
   "La hidratación del export no debe descargar desde el frontend assets remotos que ya tienen storagePath; el worker los resuelve server-side."
 );
 

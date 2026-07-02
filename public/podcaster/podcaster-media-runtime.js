@@ -18,6 +18,26 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     return clean;
   }
 
+  function normalizeProxyMediaStaleKey(url = "") {
+    const clean = String(url || "").trim();
+    if (!clean) return "";
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      const pathname = String(parsed.pathname || "");
+      if (!/\/api\/assets\/proxy-(?:media|image)$/i.test(pathname)) {
+        return clean;
+      }
+      parsed.searchParams.delete("u");
+      const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
+      if (storagePath) {
+        parsed.searchParams.set("storagePath", normalizeStoragePathForProxy(storagePath));
+      }
+      return `${parsed.origin}${parsed.pathname}?${parsed.searchParams.toString()}`;
+    } catch (_) {
+      return clean.replace(/([?&])u=[^&]*&?/i, "$1").replace(/[?&]$/, "");
+    }
+  }
+
   function isLocalProxyMediaUrl(url = "") {
     const src = String(url || "").trim();
     if (!src) return false;
@@ -53,6 +73,8 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const clean = String(url || "").trim();
     if (!clean) return;
     staleProxyMediaUrls.add(clean);
+    const staleKey = normalizeProxyMediaStaleKey(clean);
+    if (staleKey) staleProxyMediaUrls.add(staleKey);
     if (staleMediaReRenderTimer) clearTimeout(staleMediaReRenderTimer);
     staleMediaReRenderTimer = setTimeout(() => {
       if (typeof deps.renderPodcastVideoTimeline === "function") {
@@ -67,7 +89,8 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
 
   function isMarkedStaleProxyMediaUrl(url = "") {
     const clean = String(url || "").trim();
-    return clean ? staleProxyMediaUrls.has(clean) : false;
+    if (!clean) return false;
+    return staleProxyMediaUrls.has(clean) || staleProxyMediaUrls.has(normalizeProxyMediaStaleKey(clean));
   }
 
   function parseFirebaseStorageObjectUrl(rawUrl = "") {
@@ -256,6 +279,9 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     if (finalUrl && timestamp && finalUrl.includes("/api/assets/proxy-")) {
       const separator = finalUrl.includes("?") ? "&" : "?";
       finalUrl = `${finalUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+      if (isMarkedStaleProxyMediaUrl(finalUrl)) {
+        finalUrl = clean;
+      }
     }
     return finalUrl || clean || "";
   }

@@ -4399,11 +4399,11 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
   }
 
   const sourceUrl = await resolveMontageSceneMediaSourceUrl(asset, kind);
-  const cachedPlaybackBlobUrl = sourceUrl && typeof window.playbackController?.getBlobUrlSync === "function"
+  const hasStorageBackedRemoteSource = Boolean(String(asset?.storagePath || "").trim());
+  const cachedPlaybackBlobUrl = sourceUrl && !hasStorageBackedRemoteSource && typeof window.playbackController?.getBlobUrlSync === "function"
     ? String(window.playbackController.getBlobUrlSync(sourceUrl) || "").trim()
     : "";
   const effectiveFetchUrl = cachedPlaybackBlobUrl || sourceUrl;
-  const hasStorageBackedRemoteSource = Boolean(String(asset?.storagePath || "").trim()) && !cachedPlaybackBlobUrl;
 
   if (!sourceUrl || sourceUrl.startsWith("gs://")) {
     return {
@@ -4837,7 +4837,7 @@ async function resolveMontageExportStatusPreviewMedia(data = null) {
   return null;
 }
 
-function stripMontageExportSubmissionPayload(payload = {}) {
+export function stripMontageExportSubmissionPayload(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const next = { ...payload };
   if (Array.isArray(next.entries)) {

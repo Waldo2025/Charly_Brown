@@ -150,6 +150,26 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!cleanUrl) return "";
     return this.buildMediaProxyUrl(`/api/assets/proxy-${kind}?url=${encodeURIComponent(cleanUrl)}`);
   }
+  normalizeProxyMediaComparableUrl(url = "") {
+    const clean = String(url || "").trim();
+    if (!clean) return "";
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      if (/\/api\/assets\/proxy-(?:media|image)$/i.test(String(parsed.pathname || ""))) {
+        parsed.searchParams.delete("u");
+      }
+      return `${parsed.origin}${parsed.pathname}${parsed.search || ""}`;
+    } catch (_) {
+      return clean.replace(/([?&])u=[^&]*&?/i, "$1").replace(/[?&]$/, "");
+    }
+  }
+  doesMediaSourceMatchFailedUrl(candidateSrc = "", failedSrc = "") {
+    const candidate = String(candidateSrc || "").trim();
+    const failed = String(failedSrc || "").trim();
+    if (!candidate || !failed) return false;
+    if (candidate === failed) return true;
+    return this.normalizeProxyMediaComparableUrl(candidate) === this.normalizeProxyMediaComparableUrl(failed);
+  }
   resolveStageMediaScaleContainer() {
     return this.els?.podcastActiveSpeakerVideo?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
       || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
@@ -3190,19 +3210,35 @@ export class PodcasterPlaybackController extends EventEmitter {
 
           const clip = resolveVideo?.(activeSession, activeRowId);
           const referenceAsset = resolveRef?.(activeRowId, activeSession);
+          const failedStoragePath = (() => {
+            try {
+              const parsed = new URL(failedSrc, window.location.origin);
+              return String(parsed.searchParams.get("storagePath") || "").trim();
+            } catch (_) {
+              return "";
+            }
+          })();
           const attemptedSegment = (resolveSegments?.(clip) || []).find((segment) => {
+            const segmentStoragePath = String(segment?.storagePath || clip?.storagePath || "").trim();
+            if (failedStoragePath && segmentStoragePath === failedStoragePath) return true;
             const candidateSrc = resolveUrl?.(
               segment?.downloadUrl || clip?.downloadUrl || "",
               segment?.storagePath || clip?.storagePath || ""
             );
-            return candidateSrc && candidateSrc === failedSrc;
+            return this.doesMediaSourceMatchFailedUrl(candidateSrc, failedSrc);
           }) || (
             referenceAsset?.kind === "video"
-              && resolveUrl?.(referenceAsset?.downloadUrl || "", referenceAsset?.storagePath || "") === failedSrc
+              && (
+                (failedStoragePath && String(referenceAsset?.storagePath || "").trim() === failedStoragePath)
+                || this.doesMediaSourceMatchFailedUrl(resolveUrl?.(referenceAsset?.downloadUrl || "", referenceAsset?.storagePath || ""), failedSrc)
+              )
               ? referenceAsset
               : null
           ) || (
-            clip && resolveUrl?.(clip?.downloadUrl || "", clip?.storagePath || "") === failedSrc
+            clip && (
+              (failedStoragePath && String(clip?.storagePath || "").trim() === failedStoragePath)
+              || this.doesMediaSourceMatchFailedUrl(resolveUrl?.(clip?.downloadUrl || "", clip?.storagePath || ""), failedSrc)
+            )
               ? clip
               : null
           );

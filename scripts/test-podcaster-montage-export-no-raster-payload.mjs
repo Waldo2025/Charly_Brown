@@ -26,7 +26,7 @@ assert.match(
 
 assert.match(
   source,
-  /if \(!renderedSegments\.length && Array\.isArray\(prepared\.payload\.onScreenTextTimeline\?\.renderedSegments\)\)[\s\S]*prepared\.payload\.onScreenTextRenderedSegments = prepared\.payload\.onScreenTextTimeline\.renderedSegments\.filter\(Boolean\);/,
+  /if \(!renderedSegments\.length && Array\.isArray\(prepared\.payload\.onScreenTextTimeline\?\.renderedSegments\)\)[\s\S]*prepared\.payload\.onScreenTextRenderedSegments = prepared\.payload\.onScreenTextTimeline\.renderedSegments[\s\S]*\.filter\(Boolean\)/,
   "El submit del export debe promover renderedSegments del timeline al nivel superior cuando falten en el payload."
 );
 

@@ -36,7 +36,7 @@ assert.match(
 
 assert.match(
   frontendSource,
-  /prepared\.payload\.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && timeline\?\.segments\?\.length[\s\S]*buildMontageOnScreenTextRenderedSegmentsForExport/,
+  /prepared\.payload\.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && effectiveTimeline\?\.segments\?\.length[\s\S]*buildMontageOnScreenTextRenderedSegmentsForExport/,
   "El submit del export debe generar y adjuntar renderedFrames de texto en pantalla antes del POST."
 );
 

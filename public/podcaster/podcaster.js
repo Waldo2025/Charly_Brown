@@ -7460,7 +7460,7 @@ async function setActiveSession(sessionId) {
   // Solo hidratar desde cloud cuando la sesión local es un stub.
   if (nextSession?.isStub) {
     try {
-      setGenerationStatus("Cargando...", "Descargando contenido de la sesión...");
+      setGenerationStatus("Descargando contenido de la sesión...", "is-busy");
       const cloudSession = await loadCloudSessionDocumentDirect(sessionId);
       if (cloudSession) {
         const mergedSession = mergeCloudSessionOverLocalCache(cloudSession, nextSession);
@@ -7472,11 +7472,11 @@ async function setActiveSession(sessionId) {
         persistSessions();
         setGenerationStatus("Listo", "");
       } else {
-        setGenerationStatus("Error", "No se encontró el contenido en la nube.");
+        setGenerationStatus("No se encontró el contenido en la nube.", "is-error");
       }
     } catch (error) {
       console.error("[podcaster] Error activando sesión stub:", error);
-      setGenerationStatus("Error", "Error de red al cargar sesión.");
+      setGenerationStatus("Error de red al cargar sesión.", "is-error");
     }
   }
 
@@ -9434,7 +9434,7 @@ function renderGenerationStatus(session = null) {
   const status = getSessionGenerationStatus(session || getActiveSession());
   els.generationStatus.textContent = status.text || "";
   els.generationStatus.className = "composer-chip";
-  if (status.tone) els.generationStatus.classList.add(status.tone);
+  if (/^[a-z0-9_-]+$/i.test(status.tone)) els.generationStatus.classList.add(status.tone);
 }
 
 function setGenerationStatus(text, tone = "", options = {}) {

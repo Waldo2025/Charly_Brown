@@ -11,7 +11,8 @@ import {
   setMontageExportContinueButton,
   setMontageExportDownloadButton,
   setMontageExportProgress,
-  setMontageExportStatus
+  setMontageExportStatus,
+  stripMontageExportSubmissionPayload
 } from "./podcaster-montage-export.js";
 
 let montageExportV2SubmitLocked = false;
@@ -214,10 +215,11 @@ export async function runMontageExportV2() {
       renderPipeline: payload.renderPipeline,
       entries: Array.isArray(payload.entries) ? payload.entries.length : 0
     });
+    const submissionPayload = stripMontageExportSubmissionPayload(payload);
     const data = await authFetchJson(exportV2Endpoint, {
       method: "POST",
       preferRemote: false,
-      body: payload
+      body: submissionPayload
     });
     logMontageExportDevtools("ffmpeg_preview_runtime_v2_response", {
       jobId: String(data?.jobId || data?.id || "").trim(),

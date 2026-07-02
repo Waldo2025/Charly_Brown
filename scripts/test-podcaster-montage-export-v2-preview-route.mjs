@@ -20,8 +20,8 @@ const restartRecoverySource = readSource("../backend/montage-export/restart-reco
 const renderSource = readSource("../render.yaml");
 
 test("podcaster loads the preview-faithful montage export v2 module", () => {
-  assert.match(htmlSource, /podcaster\/podcaster-montage-export-v2\.js\?v=/);
-  assert.match(podcasterSource, /podcaster-montage-export-v2\.js\?v=/);
+  assert.match(htmlSource, /data-cache-src="podcaster\/podcaster-montage-export-v2\.js"/);
+  assert.match(podcasterSource, /podcaster-montage-export-v2\.js/);
   assert.match(podcasterSource, /handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick/);
 });
 
@@ -48,6 +48,7 @@ test("export v2 submits the preview runtime contract to a new FFmpeg route", () 
   assert.match(exportV2Source, /renderOnScreenTextFrames:\s*true/);
   assert.match(exportV2Source, /renderedTextFrameCount\s*<\s*1/);
   assert.match(exportV2Source, /onScreenTextMode:\s*"rendered_png_overlay"/);
+  assert.match(exportV2Source, /const submissionPayload = stripMontageExportSubmissionPayload\(payload\);[\s\S]*body: submissionPayload/);
   assert.doesNotMatch(exportV2Source, /onScreenTextMode:\s*"ass"/);
 });
 
@@ -64,7 +65,8 @@ test("export v2 imports only exported montage-export helpers", () => {
     "setMontageExportContinueButton",
     "setMontageExportDownloadButton",
     "setMontageExportProgress",
-    "setMontageExportStatus"
+    "setMontageExportStatus",
+    "stripMontageExportSubmissionPayload"
   ].forEach((name) => {
     assert.match(exportV2Source, new RegExp(`\\b${name}\\b`));
     assert.match(legacyExportSource, new RegExp(`export (?:async )?(?:function|let|const) ${name}\\b`));

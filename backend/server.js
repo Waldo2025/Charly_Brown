@@ -13789,7 +13789,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           downloadUrl: videoDownloadUrl,
           substage: currentSceneSubstage
         }));
-        if (hasCustomBg && !hasVideoAssetSource) {
+        const writeGeneratedSceneBackground = () => {
           const bgCanvas = resolveMontageCanvasSize(
             1280,
             720,
@@ -13797,17 +13797,40 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             input?.reelModeEnabled === true
           );
           isGeneratedBackgroundVisual = true;
-          const grad = parseBackgroundGradient(entry.backgroundColor);
+          const backgroundColor = String(entry.backgroundColor || "#020617").trim() || "#020617";
+          const grad = parseBackgroundGradient(backgroundColor);
           let ppmContent = "";
           if (grad) {
             ppmContent = generateGradientPpm(grad.color1, grad.color2, bgCanvas.width, bgCanvas.height);
           } else {
-            ppmContent = generateSolidPpm(entry.backgroundColor, bgCanvas.width, bgCanvas.height);
+            ppmContent = generateSolidPpm(backgroundColor, bgCanvas.width, bgCanvas.height);
           }
           inputVisualPath = path.join(tmpDir, `scene-bg-${sceneIndex}-${Date.now()}.ppm`);
           fs.writeFileSync(inputVisualPath, ppmContent, "utf8");
+          return inputVisualPath;
+        };
+        if (hasCustomBg && !hasVideoAssetSource) {
+          writeGeneratedSceneBackground();
         } else {
-          inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+          try {
+            inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+          } catch (downloadError) {
+            const missingVisualCode = String(downloadError?.code || downloadError?.message || "").trim();
+            const canUseMissingVideoPlaceholder = !isImageAsset && missingVisualCode === "storage_not_found";
+            if (!canUseMissingVideoPlaceholder) throw downloadError;
+            console.warn("[backend][montage-export][scene-missing-video-placeholder]", {
+              jobId,
+              sceneIndex,
+              rowId,
+              storagePath: videoStoragePath,
+              downloadUrl: redactUrlForLogs(videoDownloadUrl),
+              code: missingVisualCode,
+              fallback: "generated_background"
+            });
+            isImageAsset = true;
+            currentSceneSubstage = "scene_missing_video_placeholder";
+            writeGeneratedSceneBackground();
+          }
         }
         throwIfCancelled(`scene_${sceneIndex}_after_download`);
         const downloadedVisualStat = await fs.promises.stat(inputVisualPath).catch(() => null);

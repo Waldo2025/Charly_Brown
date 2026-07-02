@@ -3,6 +3,11 @@
   "build": "2026-1.0.10.341",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: snoopy-export ya no aborta todo el MP4 cuando un video de escena falta en Storage; genera un fondo de reemplazo para esa escena y continúa el render.",
+    "Corregido: Podcaster normaliza las URLs proxy-media stale ignorando cache-busters y marca por storagePath el segmento de video roto, evitando reintentos infinitos contra objetos 404 en snoopy-export.",
+    "Corregido: export-v2 limpia dataUrl/localDataUrl antes del POST igual que la ruta legacy, evitando payload_too_large cuando hay muchos frames PNG o medios inline.",
+    "Corregido: La hidratación del export MP4 ya no descarga desde el frontend videos con storagePath aunque playbackController tenga un proxy cacheado, evitando 403/404 de tokens antiguos al abrir el modal.",
+    "Corregido: La hidratación de sesiones stub usa tonos CSS válidos en setGenerationStatus y protege generationStatus contra tokens inválidos.",
     "Corregido: proxy-media ya no recibe storagePath con prefijo gs:// desde Podcaster; el cliente limpia la ruta a object path para evitar 404 al reproducir videos guardados.",
     "Corregido: El arranque de Podcaster vuelve a listar solo metadatos/stubs de sesiones desde snoopy-export y deja la descarga completa para la sesión activa, reduciendo el tiempo de carga inicial.",
     "Corregido: podcaster-chat-assistant.js carga antes de podcaster.js para evitar el error inicial PodcasterChatAssistant no está disponible durante renderChat.",
