@@ -12,11 +12,60 @@ const releaseNotes = Array.isArray(version.releaseNotes) ? version.releaseNotes 
 const notes = [...changelog, ...releaseNotes];
 assert.ok(
   String(changelog[0] || "").includes("Podcaster")
-    && String(changelog[0] || "").includes("3")
-    && String(changelog[0] || "").includes("referencias")
-    && String(changelog[0] || "").includes("Veo")
-    && String(changelog[0] || "").includes("2 imágenes"),
-  "La nota más reciente debe reflejar el fix del límite de referencias de Veo."
+    && String(changelog[0] || "").includes("montageExportIncludeLogo")
+    && String(changelog[0] || "").includes("includeLogo:false")
+    && String(changelog[0] || "").includes("brandOverlay"),
+  "La nota más reciente debe reflejar el fix del toggle de logo en export MP4."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("openSceneVideoSelectorModal")
+    && String(note || "").includes("PodcasterMediaReplacement")
+    && String(note || "").includes("DOMContentLoaded")),
+  "Las release notes deben conservar el fix del API runtime de media replacement."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("música")
+    && String(note || "").includes("same-origin")
+    && String(note || "").includes("snoopy-export")),
+  "Las release notes deben conservar el fix de rutas de música por same-origin."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("No modificar guión")
+    && String(note || "").includes("Guion")
+    && String(note || "").includes("Elemento visual")),
+  "Las release notes deben conservar el modo No modificar guión para tablas pegadas."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("els.scriptModelSelect")
+    && String(note || "").includes("runtime")
+    && String(note || "").includes("podcaster-script-generator")),
+  "Las release notes deben conservar el fix de DOM/state runtime en podcaster-script-generator."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("chat/status/logger")
+    && String(note || "").includes("runtime")
+    && String(note || "").includes("división de escenas")),
+  "Las release notes deben conservar el fix de callbacks runtime en podcaster-script-generator."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("getActiveSession")
+    && String(note || "").includes("runtime")
+    && String(note || "").includes("división de escenas")),
+  "Las release notes deben conservar el fix de getActiveSession en podcaster-script-generator."
+);
+assert.ok(
+  notes.some((note) => String(note || "").includes("Podcaster")
+    && String(note || "").includes("3")
+    && String(note || "").includes("referencias")
+    && String(note || "").includes("Veo")
+    && String(note || "").includes("2 imágenes")),
+  "Las release notes deben conservar el fix del límite de referencias de Veo."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("Podcaster")

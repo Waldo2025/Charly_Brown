@@ -2,6 +2,7 @@ export {
   authFetchJson,
   buildApiUrl,
   buildApiUrlFromBase,
+  buildSameOriginApiUrl,
   buildExportApiUrl,
   buildApiUrlPreferRemote,
   buildVeoApiUrl,

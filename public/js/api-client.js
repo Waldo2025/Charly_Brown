@@ -147,6 +147,18 @@ export function buildApiUrl(path = "") {
   return `${base}/${input.replace(/^\/+/, "")}`;
 }
 
+export function buildSameOriginApiUrl(path = "") {
+  const input = String(path || "").trim();
+  if (!input) return isLocalHostRuntime() ? DEFAULT_LOCAL_API_BASE : DEFAULT_REMOTE_API_BASE_SAFE;
+  if (/^https?:\/\//i.test(input)) return input;
+  const base = isLocalHostRuntime() ? DEFAULT_LOCAL_API_BASE : DEFAULT_REMOTE_API_BASE_SAFE;
+  if (input.startsWith("/api/")) {
+    return base.endsWith("/api") ? `${base}${input.slice(4)}` : `${base}${input}`;
+  }
+  if (input.startsWith("/")) return `${base}${input}`;
+  return `${base}/${input.replace(/^\/+/, "")}`;
+}
+
 export function buildApiUrlPreferRemote(path = "") {
   const input = String(path || "").trim();
   if (!input) return getRemoteApiBase();
@@ -253,8 +265,8 @@ export async function authFetch(url, options = {}) {
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, preferRemote = false, ...requestOptions } = options || {};
-  const finalUrl = auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url);
+  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
+  const finalUrl = sameOrigin ? buildSameOriginApiUrl(url) : (auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url));
   const baseHeaders = { ...(requestOptions.headers || {}) };
   const buildRequestInit = async (forceRefresh = false) => {
     const headers = auth ? await getAuthHeadersWithRefresh(baseHeaders, forceRefresh) : baseHeaders;
@@ -281,8 +293,8 @@ export async function authFetchJson(url, options = {}) {
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, preferRemote = false, ...requestOptions } = options || {};
-  const finalUrl = auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url);
+  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
+  const finalUrl = sameOrigin ? buildSameOriginApiUrl(url) : (auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url));
   const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};
   const buildRequestInit = async (forceRefresh = false) => {

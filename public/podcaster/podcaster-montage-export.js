@@ -985,10 +985,19 @@ export function buildDefaultMontageBrandOverlay() {
   return { ...DEFAULT_MONTAGE_BRAND_OVERLAY };
 }
 
+function isMontageExportLogoEnabled() {
+  const checkbox = window.els?.montageExportIncludeLogo || null;
+  if (checkbox) {
+    window.montageExportState.includeLogo = checkbox.checked === true;
+  }
+  return window.montageExportState.includeLogo !== false;
+}
+
 function buildMontageBrandOverlayForExport(isReel = false) {
+  const includeLogo = isMontageExportLogoEnabled();
   return {
     ...buildDefaultMontageBrandOverlay(),
-    enabled: window.montageExportState.includeLogo !== false,
+    enabled: includeLogo,
     ...(isReel === true
       ? {
         marginPct: 0.03,
@@ -6046,6 +6055,7 @@ export function buildMontageExportPayload(session = null) {
 
   const reelModeEnabled = videoCfg?.reelModeEnabled === true;
   const effectiveResolution = resolveEffectiveExportResolution(window.montageExportState.resolution, reelModeEnabled);
+  const includeLogo = isMontageExportLogoEnabled();
   const payload = {
     sessionId,
     renderMode: normalizeMontageRenderMode(window.montageExportState.renderMode || "browser"),
@@ -6055,6 +6065,7 @@ export function buildMontageExportPayload(session = null) {
     qualityPreset: window.montageExportState.qualityPreset,
     resolution: effectiveResolution,
     reelModeEnabled,
+    includeLogo,
     includeBackgroundMusic,
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),

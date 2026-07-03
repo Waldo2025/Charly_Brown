@@ -206,6 +206,7 @@ const STORAGE_KEY_BASE = "cb_podcaster_sessions_v2";
 const LEGACY_STORAGE_KEY = "cb_podcaster_sessions_v1";
 const COMPOSER_GENERATION_MODE_KEY = "cb_podcaster_composer_mode_v1";
 const COMPOSER_VIDEO_TABLE_MODE_KEY = "cb_podcaster_video_table_mode_v1";
+const COMPOSER_VIDEO_NO_MODIFY_MODE_KEY = "cb_podcaster_video_no_modify_mode_v1";
 const ACTIVE_SESSION_ID_KEY = "cb_podcaster_active_session_id_v1";
 const PANEL_MUSIC_STORAGE_KEY_BASE = "cb_podcaster_panel_music_v1";
 const PODCASTER_VIDEO_IMPORT_STORAGE_KEY = "cb_podcaster_video_import_v1";
@@ -397,6 +398,8 @@ const els = {
   composerModeToggle: document.getElementById("composerModeToggle"),
   composerTableModeWrap: document.getElementById("composerTableModeWrap"),
   composerTableModeToggle: document.getElementById("composerTableModeToggle") || document.getElementById("composerTableModeToggle_footer"),
+  composerNoModifyModeWrap: document.getElementById("composerNoModifyModeWrap"),
+  composerNoModifyModeToggle: document.getElementById("composerNoModifyModeToggle") || document.getElementById("composerNoModifyModeToggle_footer"),
   connectLiveBtn: document.getElementById("connectLiveBtn"),
   liveStatusText: document.getElementById("liveStatusText"),
   addRowBtn: document.getElementById("addRowBtn"),
@@ -1093,6 +1096,13 @@ let composerVideoTableMode = (() => {
     return "compose";
   }
 })();
+let composerVideoNoModifyMode = (() => {
+  try {
+    return window.localStorage.getItem(COMPOSER_VIDEO_NO_MODIFY_MODE_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+})();
 let rowDisfluencyConfigOpenId = null;
 let dialogueVideoDirectiveRequest = null;
 let geminiAudioSpeedModalState = {
@@ -1247,7 +1257,8 @@ function normalizePodcastStudioUiState(raw = null, session = null) {
     lastActiveRowId: validRowIds.has(lastActiveRowId) ? lastActiveRowId : "",
     collapsedRowIds,
     composerGenerationMode: String(source.composerGenerationMode || composerGenerationMode || "script").trim() === "video" ? "video" : "script",
-    composerVideoTableMode: String(source.composerVideoTableMode || composerVideoTableMode || "compose").trim() === "create" ? "create" : "compose"
+    composerVideoTableMode: String(source.composerVideoTableMode || composerVideoTableMode || "compose").trim() === "create" ? "create" : "compose",
+    composerVideoNoModifyMode: source.composerVideoNoModifyMode === true
   };
 }
 
@@ -6973,7 +6984,7 @@ function createSession(overrides = {}) {
     trimestre: "",
     unidad: "",
     updatedAt: nowIso(),
-    podcastStudioUiState: normalizePodcastStudioUiState({ composerGenerationMode, composerVideoTableMode }),
+    podcastStudioUiState: normalizePodcastStudioUiState({ composerGenerationMode, composerVideoTableMode, composerVideoNoModifyMode }),
     chat: [
       {
         id: makeId("msg"),
@@ -7597,6 +7608,7 @@ async function setActiveSession(sessionId, options = {}) {
     if (ui.composerVideoTableMode) {
       setComposerVideoTableMode(ui.composerVideoTableMode);
     }
+    setComposerVideoNoModifyMode(ui.composerVideoNoModifyMode === true);
   } catch (_) {
     // noop
   } finally {
@@ -9933,6 +9945,29 @@ function setComposerVideoTableMode(mode = "compose") {
     upsertPodcastStudioUiState(
       { composerVideoTableMode: newMode },
       { autosaveReason: "composer-table-mode" }
+    );
+  }
+}
+
+function setComposerVideoNoModifyMode(enabled = false) {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== composerVideoNoModifyMode;
+  composerVideoNoModifyMode = nextEnabled;
+  try {
+    window.localStorage.setItem(COMPOSER_VIDEO_NO_MODIFY_MODE_KEY, composerVideoNoModifyMode ? "1" : "0");
+  } catch (_) {
+    // noop
+  }
+  if (els.composerNoModifyModeToggle) {
+    els.composerNoModifyModeToggle.checked = composerVideoNoModifyMode;
+  }
+  document.querySelectorAll("[id^='composerNoModifyModeToggle']").forEach((toggle) => {
+    if (toggle) toggle.checked = composerVideoNoModifyMode;
+  });
+  if (changed) {
+    upsertPodcastStudioUiState(
+      { composerVideoNoModifyMode: composerVideoNoModifyMode },
+      { autosaveReason: "composer-no-modify-mode" }
     );
   }
 }
@@ -15435,6 +15470,10 @@ function hasStructuredVideoTableInput(promptText = "", promptHtml = "") {
   return requirePodcasterScriptGeneratorApiFunction("hasStructuredVideoTableInput")(promptText, promptHtml);
 }
 
+function buildVideoScriptFromUnmodifiedTable(promptText = "", promptHtml = "", sessionSnapshot = null) {
+  return requirePodcasterScriptGeneratorApiFunction("buildVideoScriptFromUnmodifiedTable")(promptText, promptHtml, sessionSnapshot);
+}
+
 function stripMarkdownTableFromText(text = "") {
   return requirePodcasterScriptGeneratorApiFunction("stripMarkdownTableFromText")(text);
 }
@@ -15633,6 +15672,7 @@ function render() {
   syncCustomTooltips(document);
   setComposerGenerationMode(composerGenerationMode);
   setComposerVideoTableMode(composerVideoTableMode);
+  setComposerVideoNoModifyMode(composerVideoNoModifyMode);
   document.querySelectorAll("[id^='sessionPublishToggle']").forEach(el => {
     if (el) el.checked = session.publicar === true;
   });
@@ -16283,6 +16323,39 @@ function attachEvents() {
       try {
         const sessionSnapshot = getActiveSession();
         const wantsCreate = composerVideoTableMode === "create";
+        if (composerVideoNoModifyMode === true) {
+          setGenerationStatus("Validando tabla sin modificar guión...", "is-busy");
+          const directTable = buildVideoScriptFromUnmodifiedTable(prompt, promptHtml, sessionSnapshot);
+          addChatMessage("user", prompt, directTable?.html ? { html: directTable.html } : (promptHtml ? { html: promptHtml } : {}));
+          if (!directTable?.ok || !directTable?.script) {
+            const reason = String(directTable?.error || "La tabla no cumple con las columnas obligatorias.").trim();
+            addChatMessage("system", `No se pudo conectar la tabla sin modificar guión: ${reason}`);
+            setGenerationStatus("Tabla incompleta", "");
+            return;
+          }
+          addScriptAssistantMessage(directTable.script, {
+            isRefinement: false,
+            session: sessionSnapshot,
+            preserveExactRows: true,
+            videoMode: true
+          });
+          setGenerationStatus("Conectando tabla sin modificar al panel...", "is-busy");
+          connectScriptSnapshotToPanel(directTable.script, {
+            session: sessionSnapshot,
+            reason: "no-modify-table",
+            videoMode: true,
+            openSidepanel: true
+          });
+          upsertActiveSession((session) => ({
+            ...session,
+            prompt,
+            promptHtml,
+            title: buildShortSessionTitle(directTable.script?.episodeTitle || prompt)
+          }));
+          addChatMessage("system", "Modo No modificar guión activo: conecté la tabla al panel sin reescribir el contenido.");
+          setGenerationStatus("Tabla conectada sin modificar.", "is-live");
+          return;
+        }
         if (!wantsCreate) {
           setGenerationStatus("Paso 1/2: Dividiendo tu guión (Componer)...", "is-busy");
           addChatMessage("user", prompt, promptHtml ? { html: promptHtml } : {});
@@ -16431,6 +16504,17 @@ function attachEvents() {
       setComposerVideoTableMode(els.composerTableModeToggle.checked ? "create" : "compose");
     });
   }
+  if (els.composerNoModifyModeToggle) {
+    els.composerNoModifyModeToggle.addEventListener("change", () => {
+      setComposerVideoNoModifyMode(els.composerNoModifyModeToggle.checked === true);
+    });
+  }
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target && target.id && target.id.startsWith("composerNoModifyModeToggle")) {
+      setComposerVideoNoModifyMode(target.checked === true);
+    }
+  });
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (target && target.id && target.id.startsWith("reelModeToggle")) {
@@ -16747,6 +16831,7 @@ function attachEvents() {
       try {
         await authFetchJson("/api/podcaster/music/library/delete", {
           method: "POST",
+          sameOrigin: true,
           body: JSON.stringify({ libraryId })
         });
         panelMusicGlobalLibraryState.items = panelMusicGlobalLibraryState.items.filter((item) => String(item?.libraryId || "").trim() !== libraryId);
@@ -17033,6 +17118,7 @@ function attachEvents() {
         const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
         const upload = await authFetchJson("/api/podcaster/music/library/upload", {
           method: "POST",
+          sameOrigin: true,
           body: JSON.stringify({
             fileName: String(file.name || "Audio").trim() || "Audio",
             mimeType: String(file.type || "audio/mpeg").trim() || "audio/mpeg",

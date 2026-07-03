@@ -1,8 +1,15 @@
 {
-  "version": "1.0.10.360",
-  "build": "2026-1.0.10.360",
+  "version": "1.0.10.367",
+  "build": "2026-1.0.10.367",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export MP4 de Podcaster respeta montageExportIncludeLogo desactivado leyendo el checkbox vivo, enviando includeLogo:false y apagando brandOverlay en backend para no quemar el logo ASC.",
+    "Corregido: Podcaster registra openSceneVideoSelectorModal inmediatamente en PodcasterMediaReplacement aunque el módulo cargue después de DOMContentLoaded, evitando que el selector de videos de escena no esté disponible.",
+    "Corregido: Podcaster fuerza las rutas de música de fondo y biblioteca global por same-origin/local en vez de snoopy-export, evitando 401 al abrir el modal o subir audios.",
+    "Agregado: Podcaster incorpora el modo No modificar guión para tablas pegadas; valida Guion, Descripción de escena, Texto en pantalla y Elemento visual antes de conectar la misma tabla al panel sin reescribirla con Gemini.",
+    "Corregido: Podcaster deja de leer els.scriptModelSelect y state.activeSessionId desde referencias tempranas en podcaster-script-generator; ahora resuelve DOM/state en runtime para que el chat genere guiones aunque el módulo cargue antes de podcaster.js.",
+    "Corregido: Podcaster resuelve también callbacks de chat/status/logger en runtime dentro de podcaster-script-generator, evitando que la división de escenas falle por logPodcasterLiveDebug o mensajes del chat no publicados aún.",
+    "Corregido: Podcaster resuelve getActiveSession y dependencias de generación en runtime dentro de podcaster-script-generator, evitando que la división de escenas falle si el módulo carga antes de podcaster.js.",
     "Corregido: Podcaster limita a 3 las referencias finales enviadas a Veo, incluyendo continuidad o retrato, para que generar con 2 imágenes de referencia no falle por exceder el máximo del proveedor.",
     "Corregido: El export MP4 de Podcaster sincroniza el audio Gemini con el texto en pantalla estilo karaoke al respetar playbackRate en la mezcla FFmpeg del timeline.",
     "Corregido: El export MP4 de Podcaster mantiene escala y tipografía del texto en pantalla en 1920x1080 y evita que las transiciones de escenas con fondo de color revelen una base negra.",
@@ -342,5 +349,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.360"
+  "cache_version": "2026-1.0.10.367"
 }

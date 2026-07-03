@@ -8,14 +8,14 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /const shouldInlineSingleSceneBrandOverlay = Boolean\([\s\S]*input\.entries\.length === 1[\s\S]*fs\.existsSync\(resolvedInlineBrandOverlayPath\)/,
-  "El backend debe detectar el caso de una sola escena con logo para inlinear la marca en el render de escena."
+  /const shouldInlineSceneBrandOverlay = Boolean\([\s\S]*fs\.existsSync\(resolvedInlineBrandOverlayPath\)/,
+  "El backend debe detectar el logo disponible para inlinear la marca en el render de escena."
 );
 
 assert.match(
   source,
-  /if \(shouldInlineSingleSceneBrandOverlay\) \{[\s\S]*args\.push\("-loop", "1", "-i", resolvedInlineBrandOverlayPath\);[\s\S]*buildMontageBrandOverlayFilter\(input\.brandOverlay,/,
-  "La escena única debe poder componer el logo durante scene_ffmpeg_render para evitar una pasada final exclusiva."
+  /if \(shouldInlineSceneBrandOverlay\) \{[\s\S]*args\.push\("-loop", "1", "-i", resolvedInlineBrandOverlayPath\);[\s\S]*buildMontageBrandOverlayFilter\(input\.brandOverlay,/,
+  "La escena debe poder componer el logo durante scene_ffmpeg_render para evitar una pasada final exclusiva."
 );
 
 assert.match(

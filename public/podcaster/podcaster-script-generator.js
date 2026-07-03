@@ -2,7 +2,11 @@
  * podcaster-script-generator.js
  * Extracted Gemini Script Generation Engine.
  */
-import { authFetchJson } from "../js/api-client-podcaster.js";
+import {
+  authFetchJson,
+  buildApiUrl as importedBuildApiUrl,
+  hasAvailableApiBase as importedHasAvailableApiBase
+} from "../js/api-client-podcaster.js";
 import {
   registerPodcasterScriptGeneratorApi,
   requirePodcasterScriptGeneratorApiFunction
@@ -18,22 +22,155 @@ import {
 
 // === INJECTED GLOBALS (For compatibility) ===
 const {
-  els, state, SHORT_SCENE_MIN_SEC, SHORT_SCENE_MAX_SEC, VIDEO_SCENE_MAX_SEC, VIDEO_DIALOGUE_MAX_SEC,
-  VOICES, DEFAULT_HOSTS, DEFAULT_DISFLUENCY_CONFIG, DEFAULT_TTS_DIRECTION_CONFIG, SPEECH_WORDS_PER_SEC, SPEAKER_ROLE_DESCRIPTIONS, EXPRESSIONS, MEDIA_CUES,
-  logVideoCreateDebug: windowLogVideoCreateDebug, logPodcasterLiveDebug, resolveCurrentUid, firestoreDb,
+  els, state, SHORT_SCENE_MIN_SEC: windowShortSceneMinSec, SHORT_SCENE_MAX_SEC: windowShortSceneMaxSec, VIDEO_SCENE_MAX_SEC: windowVideoSceneMaxSec, VIDEO_DIALOGUE_MAX_SEC: windowVideoDialogueMaxSec,
+  VOICES: windowVoices, DEFAULT_HOSTS: windowDefaultHosts, DEFAULT_DISFLUENCY_CONFIG: windowDefaultDisfluencyConfig, DEFAULT_TTS_DIRECTION_CONFIG: windowDefaultTtsDirectionConfig, SPEECH_WORDS_PER_SEC: windowSpeechWordsPerSec, SPEAKER_ROLE_DESCRIPTIONS: windowSpeakerRoleDescriptions, EXPRESSIONS: windowExpressions, MEDIA_CUES: windowMediaCues,
+  logVideoCreateDebug: windowLogVideoCreateDebug, logPodcasterLiveDebug: windowLogPodcasterLiveDebug, resolveCurrentUid, firestoreDb,
   setSidepanelOpen: windowSetSidepanelOpen,
-  addScriptAssistantMessage, addChatMessage, setGenerationStatus,
-  getActiveSession, upsertActiveSession, normalizeGenerationConstraints,
-  normalizeVideoContentType, normalizeVideoPreset, isCurrentModeVideo, getSpeakerOptions, normalizeSpeakerLabel,
-  getSpeakerNameMap, getSpeakerVoiceMap, resolveSpeakerVoiceName, normalizeLiveVoiceName,
-  normalizeVoiceNameSource,
-  normalizeTtsDirectionConfig, getDefaultSpeakerNameMap, hostsForCount, buildSpeakerAliasMap, buildSpeakerNameMap, resolveSpeakerFromAliases,
+  addScriptAssistantMessage: windowAddScriptAssistantMessage, addChatMessage: windowAddChatMessage, setGenerationStatus: windowSetGenerationStatus,
+  getActiveSession: windowGetActiveSession, upsertActiveSession: windowUpsertActiveSession, normalizeGenerationConstraints: windowNormalizeGenerationConstraints,
+  normalizeVideoContentType: windowNormalizeVideoContentType, normalizeVideoPreset: windowNormalizeVideoPreset, isCurrentModeVideo: windowIsCurrentModeVideo, getSpeakerOptions: windowGetSpeakerOptions, normalizeSpeakerLabel: windowNormalizeSpeakerLabel,
+  getSpeakerNameMap: windowGetSpeakerNameMap, getSpeakerVoiceMap: windowGetSpeakerVoiceMap, resolveSpeakerVoiceName: windowResolveSpeakerVoiceName, normalizeLiveVoiceName: windowNormalizeLiveVoiceName,
+  normalizeVoiceNameSource: windowNormalizeVoiceNameSource,
+  normalizeTtsDirectionConfig: windowNormalizeTtsDirectionConfig, getDefaultSpeakerNameMap: windowGetDefaultSpeakerNameMap, hostsForCount: windowHostsForCount, buildSpeakerAliasMap: windowBuildSpeakerAliasMap, buildSpeakerNameMap: windowBuildSpeakerNameMap, resolveSpeakerFromAliases: windowResolveSpeakerFromAliases,
   // splitDialogueTextIntoSegments, forceHostsAndAlternation, createDefaultRows, sanitizeSpeakerMentionsInDialogue
-  splitDialogueTextIntoSegments, createDefaultRows, sanitizeSpeakerMentionsInDialogue,
-  makeId, nowIso, buildApiUrl, hasAvailableApiBase,
-  stopPodcastPlayback, stopRowAudio, stopGeminiLiveSession, normalizeDisfluencyConfig,
-  secondsToClock, trimWords: windowTrimWords, escapeHtml: windowEscapeHtml, normalizeCreativeRow, buildShortSessionTitle
+  splitDialogueTextIntoSegments: windowSplitDialogueTextIntoSegments, createDefaultRows: windowCreateDefaultRows, sanitizeSpeakerMentionsInDialogue: windowSanitizeSpeakerMentionsInDialogue,
+  makeId: windowMakeId, nowIso, buildApiUrl: windowBuildApiUrl, hasAvailableApiBase: windowHasAvailableApiBase,
+  stopPodcastPlayback: windowStopPodcastPlayback, stopRowAudio: windowStopRowAudio, stopGeminiLiveSession: windowStopGeminiLiveSession, normalizeDisfluencyConfig: windowNormalizeDisfluencyConfig,
+  secondsToClock: windowSecondsToClock, trimWords: windowTrimWords, escapeHtml: windowEscapeHtml, normalizeCreativeRow: windowNormalizeCreativeRow, buildShortSessionTitle: windowBuildShortSessionTitle
 } = window;
+
+const VOICES = Array.isArray(windowVoices) && windowVoices.length
+  ? windowVoices
+  : ["Host A", "Host B", "Host C", "Host D", "Narrador", "Invitado", "Patrocinador", "Analista", "Experto", "Co-host", "Entrevistador", "Moderador", "Cuentacuentos", "Profundizar en tema", "Debatiente", "Testigo"];
+const SHORT_SCENE_MIN_SEC = Number.isFinite(Number(windowShortSceneMinSec)) ? Number(windowShortSceneMinSec) : 6;
+const SHORT_SCENE_MAX_SEC = Number.isFinite(Number(windowShortSceneMaxSec)) ? Number(windowShortSceneMaxSec) : 7;
+const VIDEO_SCENE_MAX_SEC = Number.isFinite(Number(windowVideoSceneMaxSec)) ? Number(windowVideoSceneMaxSec) : 8;
+const VIDEO_DIALOGUE_MAX_SEC = Number.isFinite(Number(windowVideoDialogueMaxSec)) ? Number(windowVideoDialogueMaxSec) : 6;
+const DEFAULT_HOSTS = Object.freeze(Array.isArray(windowDefaultHosts) && windowDefaultHosts.length
+  ? [...windowDefaultHosts]
+  : ["Host A", "Host B"]);
+const EXPRESSIONS = Array.isArray(windowExpressions) && windowExpressions.length
+  ? windowExpressions
+  : ["Neutral", "Enérgico", "Cálido", "Curioso", "Serio", "Inspirador", "Profundo", "Analítico", "Divertido", "Sarcástico", "Informativo", "Debate"];
+const MEDIA_CUES = Array.isArray(windowMediaCues) && windowMediaCues.length
+  ? windowMediaCues
+  : ["Sin media", "Intro musical", "Transición", "Efecto sutil", "CTA final"];
+const SPEAKER_ROLE_DESCRIPTIONS = windowSpeakerRoleDescriptions && typeof windowSpeakerRoleDescriptions === "object"
+  ? windowSpeakerRoleDescriptions
+  : {
+    "Analista": "Analítico, técnico, basado en datos, tono serio y profesional.",
+    "Experto": "Autoridad técnica, lenguaje avanzado, resolutivo, aporta visión experta.",
+    "Profundizar en tema": "Curioso e inquisitivo; su misión es expandir cada punto, preguntar '¿cómo funciona esto?' y profundizar en el conocimiento para el oyente.",
+    "Entrevistador": "Dinámico, empático, guía la charla con preguntas abiertas y mantiene el flujo.",
+    "Moderador": "Neutral, gestiona turnos, resume puntos clave y asegura el orden del episodio.",
+    "Cuentacuentos": "Narrativo, cálido, usa metáforas, pausas dramáticas y lenguaje evocador.",
+    "Debatiente": "Provocador, busca el contraargumento, genera tensión constructiva y debate ideas.",
+    "Testigo": "Relata desde la experiencia personal, usa un tono testimonial y cercano.",
+    "Narrador": "Formal, descriptivo, actúa como hilo conductor entre bloques.",
+    "Co-host": "Apoyo dinámico, aporta humor o comentarios rápidos, reacciona a lo que dice el host principal.",
+    "Patrocinador": "Tono persuasivo, profesional y entusiasta sobre un producto o servicio.",
+    "Invitado": "Voz externa, aporta frescura, anécdotas y un punto de vista diferente al habitual."
+  };
+const DEFAULT_DISFLUENCY_CONFIG = Object.freeze({
+  enabled: Boolean(windowDefaultDisfluencyConfig?.enabled),
+  fillerLevel: Number.isFinite(Number(windowDefaultDisfluencyConfig?.fillerLevel)) ? Number(windowDefaultDisfluencyConfig.fillerLevel) : 20,
+  errorLevel: Number.isFinite(Number(windowDefaultDisfluencyConfig?.errorLevel)) ? Number(windowDefaultDisfluencyConfig.errorLevel) : 10,
+  stutterEnabled: Boolean(windowDefaultDisfluencyConfig?.stutterEnabled),
+  stutterLevel: Number.isFinite(Number(windowDefaultDisfluencyConfig?.stutterLevel)) ? Number(windowDefaultDisfluencyConfig.stutterLevel) : 18
+});
+const DEFAULT_TTS_DIRECTION_CONFIG = Object.freeze({
+  stylePrompt: String(windowDefaultTtsDirectionConfig?.stylePrompt || ""),
+  pacingPrompt: String(windowDefaultTtsDirectionConfig?.pacingPrompt || ""),
+  accentPrompt: String(windowDefaultTtsDirectionConfig?.accentPrompt || ""),
+  scenePrompt: String(windowDefaultTtsDirectionConfig?.scenePrompt || ""),
+  audioTags: String(windowDefaultTtsDirectionConfig?.audioTags || "")
+});
+const SPEECH_WORDS_PER_SEC = Number.isFinite(Number(windowSpeechWordsPerSec)) && Number(windowSpeechWordsPerSec) > 0
+  ? Number(windowSpeechWordsPerSec)
+  : 2.4;
+
+function resolveRuntimeFunction(name = "", earlyValue = null) {
+  const liveValue = window?.[name];
+  if (typeof liveValue === "function") return liveValue;
+  if (typeof earlyValue === "function") return earlyValue;
+  return null;
+}
+
+function callRuntimeFunction(name = "", earlyValue = null, args = []) {
+  const fn = resolveRuntimeFunction(name, earlyValue);
+  if (typeof fn !== "function") {
+    throw new Error(`${name} no está disponible todavía.`);
+  }
+  return fn(...args);
+}
+
+function getRuntimeState() {
+  return window?.state && typeof window.state === "object" ? window.state : (state || {});
+}
+
+function getRuntimeEls() {
+  return window?.els && typeof window.els === "object" ? window.els : (els || {});
+}
+
+function resolveScriptModelName() {
+  const select = getRuntimeEls()?.scriptModelSelect || document.getElementById("scriptModelSelect");
+  return String(select?.value || "").trim() || "gemini-2.5-flash";
+}
+
+const getActiveSession = (...args) => callRuntimeFunction("getActiveSession", windowGetActiveSession, args);
+const upsertActiveSession = (...args) => callRuntimeFunction("upsertActiveSession", windowUpsertActiveSession, args);
+const normalizeGenerationConstraints = (...args) => callRuntimeFunction("normalizeGenerationConstraints", windowNormalizeGenerationConstraints, args);
+const normalizeVideoContentType = (...args) => callRuntimeFunction("normalizeVideoContentType", windowNormalizeVideoContentType, args);
+const normalizeVideoPreset = (...args) => callRuntimeFunction("normalizeVideoPreset", windowNormalizeVideoPreset, args);
+const isCurrentModeVideo = (...args) => callRuntimeFunction("isCurrentModeVideo", windowIsCurrentModeVideo, args);
+const getSpeakerOptions = (...args) => callRuntimeFunction("getSpeakerOptions", windowGetSpeakerOptions, args);
+const normalizeSpeakerLabel = (...args) => callRuntimeFunction("normalizeSpeakerLabel", windowNormalizeSpeakerLabel, args);
+const getSpeakerNameMap = (...args) => callRuntimeFunction("getSpeakerNameMap", windowGetSpeakerNameMap, args);
+const getSpeakerVoiceMap = (...args) => callRuntimeFunction("getSpeakerVoiceMap", windowGetSpeakerVoiceMap, args);
+const resolveSpeakerVoiceName = (...args) => callRuntimeFunction("resolveSpeakerVoiceName", windowResolveSpeakerVoiceName, args);
+const normalizeLiveVoiceName = (...args) => callRuntimeFunction("normalizeLiveVoiceName", windowNormalizeLiveVoiceName, args);
+const normalizeVoiceNameSource = (...args) => callRuntimeFunction("normalizeVoiceNameSource", windowNormalizeVoiceNameSource, args);
+const normalizeTtsDirectionConfig = (...args) => callRuntimeFunction("normalizeTtsDirectionConfig", windowNormalizeTtsDirectionConfig, args);
+const getDefaultSpeakerNameMap = (...args) => callRuntimeFunction("getDefaultSpeakerNameMap", windowGetDefaultSpeakerNameMap, args);
+const hostsForCount = (...args) => callRuntimeFunction("hostsForCount", windowHostsForCount, args);
+const buildSpeakerAliasMap = (...args) => callRuntimeFunction("buildSpeakerAliasMap", windowBuildSpeakerAliasMap, args);
+const buildSpeakerNameMap = (...args) => callRuntimeFunction("buildSpeakerNameMap", windowBuildSpeakerNameMap, args);
+const resolveSpeakerFromAliases = (...args) => callRuntimeFunction("resolveSpeakerFromAliases", windowResolveSpeakerFromAliases, args);
+const splitDialogueTextIntoSegments = (...args) => callRuntimeFunction("splitDialogueTextIntoSegments", windowSplitDialogueTextIntoSegments, args);
+const createDefaultRows = (...args) => callRuntimeFunction("createDefaultRows", windowCreateDefaultRows, args);
+const sanitizeSpeakerMentionsInDialogue = (...args) => callRuntimeFunction("sanitizeSpeakerMentionsInDialogue", windowSanitizeSpeakerMentionsInDialogue, args);
+const makeId = (...args) => callRuntimeFunction("makeId", windowMakeId, args);
+const buildApiUrl = (...args) => callRuntimeFunction("buildApiUrl", windowBuildApiUrl || importedBuildApiUrl, args);
+const hasAvailableApiBase = (...args) => callRuntimeFunction("hasAvailableApiBase", windowHasAvailableApiBase || importedHasAvailableApiBase, args);
+const stopPodcastPlayback = (...args) => callRuntimeFunction("stopPodcastPlayback", windowStopPodcastPlayback, args);
+const stopRowAudio = (...args) => callRuntimeFunction("stopRowAudio", windowStopRowAudio, args);
+const stopGeminiLiveSession = (...args) => callRuntimeFunction("stopGeminiLiveSession", windowStopGeminiLiveSession, args);
+const normalizeDisfluencyConfig = (...args) => callRuntimeFunction("normalizeDisfluencyConfig", windowNormalizeDisfluencyConfig, args);
+const secondsToClock = (...args) => callRuntimeFunction("secondsToClock", windowSecondsToClock, args);
+const normalizeCreativeRow = (...args) => callRuntimeFunction("normalizeCreativeRow", windowNormalizeCreativeRow, args);
+const buildShortSessionTitle = (...args) => callRuntimeFunction("buildShortSessionTitle", windowBuildShortSessionTitle, args);
+const logPodcasterLiveDebug = (...args) => {
+  const fn = resolveRuntimeFunction("logPodcasterLiveDebug", windowLogPodcasterLiveDebug);
+  if (typeof fn === "function") return fn(...args);
+  return undefined;
+};
+const addScriptAssistantMessage = (...args) => {
+  const fn = resolveRuntimeFunction("addScriptAssistantMessage", windowAddScriptAssistantMessage)
+    || globalThis.PodcasterChatAssistant?.addScriptAssistantMessage;
+  if (typeof fn !== "function") {
+    throw new Error("addScriptAssistantMessage no está disponible todavía.");
+  }
+  return fn(...args);
+};
+const addChatMessage = (...args) => {
+  const fn = resolveRuntimeFunction("addChatMessage", windowAddChatMessage)
+    || globalThis.PodcasterChatAssistant?.addChatMessage;
+  if (typeof fn !== "function") {
+    throw new Error("addChatMessage no está disponible todavía.");
+  }
+  return fn(...args);
+};
+const setGenerationStatus = (...args) => callRuntimeFunction("setGenerationStatus", windowSetGenerationStatus, args);
 
 const trimWords = typeof windowTrimWords === "function"
   ? windowTrimWords
@@ -1452,7 +1589,7 @@ async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionS
   const data = await authFetchJson("/api/gemini/generate", {
     method: "POST",
     body: JSON.stringify({
-      model: els.scriptModelSelect.value,
+      model: resolveScriptModelName(),
       payload
     })
   });
@@ -2471,7 +2608,7 @@ async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, cons
     data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
-        model: els.scriptModelSelect.value,
+        model: resolveScriptModelName(),
         payload
       })
     });
@@ -2502,7 +2639,7 @@ async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, cons
     data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
-        model: els.scriptModelSelect.value,
+        model: resolveScriptModelName(),
         payload: fallbackPayload
       })
     });
@@ -2808,7 +2945,7 @@ async function handleGenerate(prompt, options = {}) {
   const userMessageHtml = String(options?.userMessageHtml || "").trim();
   if (!generationPrompt) return;
   const sessionBeforeUpdate = getActiveSession();
-  const generationSessionId = String(sessionBeforeUpdate?.id || state.activeSessionId || "").trim();
+  const generationSessionId = String(sessionBeforeUpdate?.id || getRuntimeState().activeSessionId || "").trim();
   const explicitConstraints = normalizeGenerationConstraints(options?.constraints || {
     videoMode: isCurrentModeVideo()
   });
@@ -3183,6 +3320,147 @@ function hasStructuredVideoTableInput(promptText = "", promptHtml = "") {
   return textRows.length > 0;
 }
 
+const DIRECT_VIDEO_TABLE_REQUIRED_KEYS = Object.freeze([
+  "script",
+  "sceneDescription",
+  "onScreenText",
+  "visual"
+]);
+const DIRECT_VIDEO_TABLE_REQUIRED_LABELS = Object.freeze({
+  script: "Guion",
+  sceneDescription: "Descripción de escena",
+  onScreenText: "Texto en pantalla",
+  visual: "Elemento visual"
+});
+
+function validateDirectVideoTableRows(rawRows = []) {
+  const sourceRows = (Array.isArray(rawRows) ? rawRows : [])
+    .map((row) => (Array.isArray(row) ? row : []).map((cell) => String(cell || "").replace(/\s+/g, " ").trim()))
+    .filter((row) => row.some(Boolean));
+  if (sourceRows.length < 2) {
+    return {
+      ok: false,
+      rows: [],
+      missingColumns: DIRECT_VIDEO_TABLE_REQUIRED_KEYS.map((key) => DIRECT_VIDEO_TABLE_REQUIRED_LABELS[key]),
+      error: "Pega una tabla con encabezados y al menos una fila de escena."
+    };
+  }
+  const header = sourceRows[0] || [];
+  const headerKeys = header.map((cell) => normalizeVideoTableHeaderKey(cell));
+  const missingKeys = DIRECT_VIDEO_TABLE_REQUIRED_KEYS.filter((key) => !headerKeys.includes(key));
+  if (missingKeys.length) {
+    const missingColumns = missingKeys.map((key) => DIRECT_VIDEO_TABLE_REQUIRED_LABELS[key]);
+    return {
+      ok: false,
+      rows: [],
+      missingColumns,
+      error: `Faltan columnas obligatorias: ${missingColumns.join(", ")}.`
+    };
+  }
+  const dataRows = sourceRows.slice(1);
+  const mappedRows = [];
+  const rowErrors = [];
+  dataRows.forEach((row, index) => {
+    if (!row.some(Boolean)) return;
+    const mapped = {
+      time: "",
+      script: "",
+      sceneDescription: "",
+      onScreenText: "",
+      transition: "",
+      visual: ""
+    };
+    headerKeys.forEach((key, cellIndex) => {
+      if (!key) return;
+      mapped[key] = row[cellIndex] || "";
+    });
+    const missingCells = DIRECT_VIDEO_TABLE_REQUIRED_KEYS
+      .filter((key) => !String(mapped[key] || "").trim())
+      .map((key) => DIRECT_VIDEO_TABLE_REQUIRED_LABELS[key]);
+    if (missingCells.length) {
+      rowErrors.push(`fila ${index + 2}: ${missingCells.join(", ")}`);
+      return;
+    }
+    mappedRows.push({
+      time: String(mapped.time || "").trim() || buildEducationalVideoSceneTimeRange(mappedRows.length),
+      script: String(mapped.script || "").trim(),
+      sceneDescription: String(mapped.sceneDescription || "").trim(),
+      onScreenText: String(mapped.onScreenText || "").trim(),
+      transition: String(mapped.transition || "").trim() || "Corte limpio",
+      visual: String(mapped.visual || "").trim()
+    });
+  });
+  if (rowErrors.length) {
+    return {
+      ok: false,
+      rows: [],
+      missingColumns: [],
+      rowErrors,
+      error: `Hay filas incompletas (${rowErrors.slice(0, 4).join("; ")}${rowErrors.length > 4 ? "; ..." : ""}).`
+    };
+  }
+  if (!mappedRows.length) {
+    return {
+      ok: false,
+      rows: [],
+      missingColumns: [],
+      error: "La tabla no contiene filas de escena completas."
+    };
+  }
+  return {
+    ok: true,
+    rows: mappedRows,
+    missingColumns: [],
+    rowErrors: [],
+    error: ""
+  };
+}
+
+function buildVideoScriptFromUnmodifiedTable(promptText = "", promptHtml = "", sessionSnapshot = null) {
+  const rawRows = extractStructuredVideoTableRows(promptText, promptHtml);
+  const validation = validateDirectVideoTableRows(rawRows);
+  if (!validation.ok) {
+    return {
+      ...validation,
+      script: null,
+      markdown: "",
+      html: ""
+    };
+  }
+  const rows = validation.rows.map((row, index) => normalizeCreativeRow({
+    durationSec: VIDEO_SCENE_MAX_SEC,
+    voiceOverText: row.script,
+    sceneDescription: row.sceneDescription,
+    onScreenText: row.onScreenText,
+    transition: row.transition,
+    visualNotes: row.visual
+  }, index, { videoPreset: "creative" }));
+  const episodeTitle = buildShortSessionTitle(
+    validation.rows[0]?.onScreenText
+      || validation.rows[0]?.script
+      || sessionSnapshot?.title
+      || "Video desde tabla"
+  );
+  const script = {
+    episodeTitle,
+    summary: "Tabla conectada sin modificar el guion original.",
+    videoMode: true,
+    videoPreset: "creative",
+    hosts: ["Narrador"],
+    rows
+  };
+  return {
+    ok: true,
+    rows: validation.rows,
+    script,
+    markdown: buildEducationalVideoTableMarkdown(validation.rows),
+    html: buildEducationalVideoTableHtml(validation.rows),
+    missingColumns: [],
+    rowErrors: [],
+    error: ""
+  };
+}
+
 function stripMarkdownTableFromText(text = "") {
   const source = normalizeTableClipboardText(text);
   if (!source) return "";
@@ -3245,7 +3523,7 @@ function normalizeVideoTableHeaderKey(label = "") {
   if (!clean) return "";
   if (/(tiempo|duracion|duration|time)/.test(clean)) return "time";
   if (/(guion|gui[oó]n|voz en off|voice.?over|narracion|narration)/.test(clean)) return "script";
-  if (/(descripcion de escena|descripci[oó]n de escena|scene description|descripcion escena)/.test(clean)) return "sceneDescription";
+  if (/(descripcion de (la )?escena|descripci[oó]n de (la )?escena|scene description|descripcion escena)/.test(clean)) return "sceneDescription";
   if (/(texto en pantalla|on.?screen|caption|subt[ií]tulo)/.test(clean)) return "onScreenText";
   if (/(transicion|transition|corte|fade|barrido)/.test(clean)) return "transition";
   if (/(elemento visual|recurso visual|notas visuales|visual notes|visual|imagen|fondo)/.test(clean)) return "visual";
@@ -3411,7 +3689,7 @@ async function structureEducationalVideoTableWithGemini(prompt = "", sessionSnap
   const data = await authFetchJson("/api/gemini/generate", {
     method: "POST",
     body: JSON.stringify({
-      model: els.scriptModelSelect.value,
+      model: resolveScriptModelName(),
       payload
     })
   });
@@ -3798,7 +4076,7 @@ async function splitEducationalVideoRowsWithGemini(rows = [], sessionSnapshot = 
     const data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
-        model: els.scriptModelSelect.value,
+        model: resolveScriptModelName(),
         payload
       })
     });
@@ -4004,7 +4282,7 @@ Responde solo JSON válido.`
     const data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
-        model: els.scriptModelSelect.value,
+        model: resolveScriptModelName(),
         payload
       })
     });
@@ -4199,6 +4477,8 @@ registerPodcasterScriptGeneratorApi({
   parseHtmlTableToRows,
   parsePlainTextTableToRows,
   hasStructuredVideoTableInput,
+  validateDirectVideoTableRows,
+  buildVideoScriptFromUnmodifiedTable,
   stripMarkdownTableFromText,
   extractNonTableTextFromPromptHtml,
   extractStructuredVideoTableRows,

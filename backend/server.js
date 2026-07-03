@@ -6003,9 +6003,10 @@ async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metada
           code: String(error?.code || "").trim() || null,
           status: Number(error?.status || 0) || undefined
         });
-        const status = Number(error?.status || 0) || 0;
+        const status = Number(error?.status || error?.statusCode || 0) || 0;
         const code = String(error?.code || "").trim();
-        const isRetryableCandidateFailure = code === "signed_url_upload_failed" && (status === 404 || status === 403);
+        const isRetryableCandidateFailure = (code === "signed_url_upload_failed" && (status === 404 || status === 403))
+          || isMissingBucketError(error);
         if (!isRetryableCandidateFailure) throw error;
       }
     }
@@ -10589,6 +10590,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
     ? raw.brandOverlay
     : null;
+  const includeLogoExplicitlyDisabled = raw?.includeLogo === false;
   const dialogueAudioMapRaw = raw?.dialogueAudioMap && typeof raw.dialogueAudioMap === "object"
     ? raw.dialogueAudioMap
     : {};
@@ -10760,6 +10762,26 @@ function normalizeMontageExportRequestBody(body = {}) {
     };
   };
 
+  const buildFallbackOnScreenTextSegmentsFromEntries = () => entries
+    .slice(0, 400)
+    .map((entry, idx) => {
+      const text = clampText(entry?.onScreenText || entry?.["Texto en pantalla"] || entry?.["Texto en Pantalla"] || "", 500);
+      if (!text) return null;
+      const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+      const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || entry?.durationSec * 1000 || 0) || 0));
+      return normalizeOnScreenTextSegment({
+        id: `entry-text-${entry?.rowId || idx + 1}`,
+        rowId: entry?.rowId || "",
+        sceneIndex: entry?.sceneIndex || idx + 1,
+        text,
+        wrappedText: entry?.wrappedOnScreenText || "",
+        startMs,
+        durationMs,
+        zIndex: idx + 1
+      }, idx);
+    })
+    .filter(Boolean);
+
   const normalizeStylizedTextSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
     const dataUrl = clampText(String(segment?.dataUrl || "").trim(), 16_000_000);
@@ -10804,6 +10826,8 @@ function normalizeMontageExportRequestBody(body = {}) {
     onScreenTextTimelineRaw?.enabled === false;
   if (isExplicitlyDisabledOrHidden) {
     onScreenTextSegments = [];
+  } else if (!onScreenTextSegments.length) {
+    onScreenTextSegments = buildFallbackOnScreenTextSegmentsFromEntries();
   }
   // Do NOT hardcode enabled:true here — if the timeline sent no settings and the track is
   // disabled/hidden we should get null (no settings), not a fake "enabled" settings object.
@@ -10834,7 +10858,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     const defaultBrandWidthPct = reelModeEnabled ? 0.09 : 0.05;
     const defaultBrandMarginPct = reelModeEnabled ? 0.03 : 0.025;
     return {
-      enabled: brandOverlayRaw?.enabled !== false,
+      enabled: brandOverlayRaw?.enabled !== false && !includeLogoExplicitlyDisabled,
       assetPath: resolvedAssetPath,
       assetUrl: clampText(brandOverlayRaw?.assetUrl || "", 900),
       position,
@@ -11685,9 +11709,10 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
         code: String(error?.code || "").trim() || null,
         status: Number(error?.status || 0) || undefined
       });
-      const status = Number(error?.status || 0) || 0;
+      const status = Number(error?.status || error?.statusCode || 0) || 0;
       const code = String(error?.code || "").trim();
-      const isRetryableCandidateFailure = code === "signed_url_upload_failed" && (status === 404 || status === 403);
+      const isRetryableCandidateFailure = (code === "signed_url_upload_failed" && (status === 404 || status === 403))
+        || isMissingBucketError(error);
       if (!isRetryableCandidateFailure) throw error;
     }
   }
