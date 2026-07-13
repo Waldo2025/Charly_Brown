@@ -1,4 +1,4 @@
-import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.472";
+import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.473";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
 const runtime = requirePodcasterPublicLibraryRuntime();
@@ -456,18 +456,96 @@ async function deletePodcastSceneLibraryItem(item = null) {
   return true;
 }
 
+function isPodcastSceneLibraryImage(item = null, source = "") {
+  const mimeType = String(item?.mimeType || "").trim().toLowerCase();
+  const mediaType = String(item?.type || item?.mediaType || item?.mediaKind || "").trim().toLowerCase();
+  const path = [source, item?.downloadUrl, item?.storagePath, item?.fileName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return mimeType.startsWith("image/")
+    || mediaType === "image"
+    || /\.(?:avif|gif|jpe?g|png|webp)(?:[?#\s]|$)/i.test(path);
+}
+
+function hidePodcastSceneLibraryStageVideos() {
+  [runtime.els.podcastActiveSpeakerVideo, runtime.els.podcastActiveSpeakerVideoAlt].forEach((video) => {
+    if (!video) return;
+    try { video.pause(); } catch (_) { }
+    video.hidden = true;
+    video.style.opacity = "0";
+    video.style.visibility = "hidden";
+  });
+}
+
+function hidePodcastSceneLibraryStageImages() {
+  [runtime.els.podcastActiveSpeakerImage, runtime.els.podcastActiveSpeakerImageAlt].forEach((image) => {
+    if (!image) return;
+    image.hidden = true;
+    image.style.opacity = "0";
+    image.style.visibility = "hidden";
+    delete image.dataset.stageMode;
+  });
+}
+
+async function showPodcastSceneLibraryImagePreview(item = null, source = "") {
+  const image = runtime.els.podcastActiveSpeakerImage || runtime.els.podcastActiveSpeakerImageAlt || null;
+  if (!image) return false;
+
+  hidePodcastSceneLibraryStageVideos();
+  image.hidden = false;
+  image.style.opacity = "0";
+  image.style.visibility = "visible";
+  image.dataset.src = source;
+  image.dataset.stageMode = "scene-image";
+  image.alt = String(item?.title || "Vista previa de escena pública").trim();
+
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      image.removeEventListener("load", handleLoad);
+      image.removeEventListener("error", handleError);
+    };
+    const handleLoad = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("No se pudo cargar la imagen de la escena pública."));
+    };
+    image.addEventListener("load", handleLoad, { once: true });
+    image.addEventListener("error", handleError, { once: true });
+    image.src = source;
+    if (image.complete && Number(image.naturalWidth || 0) > 0) handleLoad();
+  });
+
+  image.classList.add("is-visible");
+  image.style.opacity = "1";
+  image.style.visibility = "visible";
+  return true;
+}
+
 async function playPodcastSceneLibraryPreview(item = null) {
   const normalized = runtime.normalizePodcastSceneLibraryItem(item);
   if (!normalized) return false;
   const source = runtime.resolveStorageVideoUrl(normalized.downloadUrl || "", normalized.storagePath || "");
   if (!source) return false;
-  const video = runtime.getActiveStageVideoEl?.() || runtime.els.podcastActiveSpeakerVideoAlt || runtime.els.podcastActiveSpeakerVideo || null;
-  if (!video) return false;
-  
   if (typeof runtime.stopRowAudio === "function") {
     runtime.stopRowAudio();
   }
   await runtime.stopGeminiLiveSession().catch(() => { });
+
+  if (isPodcastSceneLibraryImage(normalized, source)) {
+    const ok = await showPodcastSceneLibraryImagePreview(normalized, source);
+    if (ok) {
+      runtime.setPodcastVideoStatus(`Mostrando vista previa: ${normalized.title}`);
+    }
+    return ok;
+  }
+
+  const video = runtime.getActiveStageVideoEl?.() || runtime.els.podcastActiveSpeakerVideoAlt || runtime.els.podcastActiveSpeakerVideo || null;
+  if (!video) return false;
+  hidePodcastSceneLibraryStageImages();
 
   video.dataset.src = source;
   video.src = source;

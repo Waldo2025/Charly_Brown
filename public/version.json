@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.472",
-  "build": "2026-1.0.10.472",
+  "version": "1.0.10.473",
+  "build": "2026-1.0.10.473",
   "branch": "codex-bootstrap",
   "changelog": [
     "Corregido: La biblioteca pública de escenas, la carga de media para reemplazar escenas y las consultas de videos/audios de sesión evitan redirects 307, conservan Authorization y permiten en CORS los headers de carga X-Row-Id, X-Mime-Type y X-Previous-Storage-Path.",
@@ -431,6 +431,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.472",
+  "cache_version": "2026-1.0.10.473",
   "updated_at": "2026-07-13T00:00:00.000Z"
 }

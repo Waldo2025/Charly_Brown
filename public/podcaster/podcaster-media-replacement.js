@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, doc, updateDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
-import { buildApiUrl, getAuthHeaders, authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.472";
+import { buildApiUrl, getAuthHeaders, authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.473";
 
 function escapeHtml(unsafe = "") {
     return String(unsafe || "")

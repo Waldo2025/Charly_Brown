@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.472";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.473";
 import { PodcasterPlaybackController } from "./podcaster-playback-controller.js";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js";
@@ -49,7 +49,7 @@ import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.472";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.473";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js";
