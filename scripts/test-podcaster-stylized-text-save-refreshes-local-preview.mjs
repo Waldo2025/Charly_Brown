@@ -11,8 +11,8 @@ if (!/await updateDoc\(sessionRef, \{[\s\S]*\[textMapRef\]: json[\s\S]*\}\);[\s\
   throw new Error("Guardar texto estilizado debe actualizar activeSession/localStorage y renderizar sin esperar recarga.");
 }
 
-if (!/podcaster-media-editor\.js\?v=2026-06-26\.9/.test(html)) {
-  throw new Error("podcaster.html debe subir el cache-buster de podcaster-media-editor.js para publicar el fix.");
+if (!/data-cache-src="podcaster\/podcaster-media-editor\.js" data-cache-type="module"/.test(html)) {
+  throw new Error("podcaster.html debe cargar podcaster-media-editor.js por cache-version-loader para publicar el fix vigente.");
 }
 
 console.log("Podcaster stylized text save refreshes local preview OK.");

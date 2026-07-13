@@ -27,6 +27,7 @@ const auth = getAuth(app);
     'contenidounidad-.html': { title: 'Contenido', header: 'filters' },
     'generarlectura.html': { title: 'Charly Studio', header: 'simple' },
     'charly-brown.html': { title: 'Charly Brown', header: 'simple' },
+    'peppermintpattyanalizer.html': { title: 'Peppermint Patty Analizer', header: 'simple' },
     'pigpencreator.html': { title: 'PigPen Escape Room Creator', header: 'simple' },
     'podcaster.html': { title: 'Podcaster Studio', header: 'simple' },
     'imagecreator.html': { title: 'Image Creator', header: 'simple' },
@@ -36,6 +37,7 @@ const auth = getAuth(app);
     'gestionusuarios.html': { title: 'Gestion de usuarios', header: 'simple' },
     'perfil.html': { title: 'Mi perfil', header: 'simple' },
     'chat.html': { title: 'Chat', header: 'simple', showFavoritesToggle: true }
+    , 'experienciamenu.html': { title: 'Menu de experiencias', header: 'simple' }
   };
 
   const cfg = pageConfig[page] || { title: 'Charly Brown', header: 'simple' };
@@ -289,11 +291,12 @@ const auth = getAuth(app);
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
       { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
       { href: 'PigPenCreator.html', icon: 'fas fa-door-closed', label: 'PigPen Escape Room' },
+      { href: 'experienciaMenu.html', icon: 'fas fa-layer-group', label: 'Experiencias' },
       { href: 'perfil.html', icon: 'fas fa-user', label: 'Perfil' },
       { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink', roleVisibility: 'admin' },
-      { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },
-      { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' }
-    ];
+    { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },
+    { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' }
+  ];
 
     const sidebarLinks = links.map((link) => {
       const isAction = link.href === '#';

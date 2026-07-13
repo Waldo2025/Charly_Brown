@@ -10,9 +10,9 @@
   <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="local-fonts.css">
-  <link rel="stylesheet" href="sidebar.css">
-  <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="analizarPDF/analizar-pdf.css">
+  <link rel="stylesheet" data-cache-href="sidebar.css">
+  <link rel="stylesheet" data-cache-href="header.css">
+  <link rel="stylesheet" data-cache-href="analizarPDF/analizar-pdf.css">
 </head>
 <body>
   <div id="analizarPdfBootSpinner" class="analizar-pdf-boot-spinner" aria-live="polite" aria-label="Cargando Peppermint Patty Analizer">
@@ -73,48 +73,91 @@
           <div class="analizar-pdf-hero-main">
             <h1>Peppermint Patty Analizer</h1>
             <div class="analizar-pdf-composer-actions analizar-pdf-hero-actions">
-              <button
-                id="analizarPdfMappingsBtn"
-                type="button"
-                class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
-                aria-label="Configuraciones"
-                data-tooltip="Configuraciones"
-              >
-                <i class="fas fa-sliders" aria-hidden="true"></i>
-              </button>
-              <button
-                id="analizarPdfSaveBtn"
-                type="button"
-                class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
-                aria-label="Guardar"
-                data-tooltip="Guardar"
-              >
-                <i class="fas fa-floppy-disk" aria-hidden="true"></i>
-              </button>
-              <button
-                id="analizarPdfAddRevisionBtn"
-                type="button"
-                class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
-                aria-label="Crear nueva ficha editorial"
-                data-tooltip="Crear nueva ficha editorial"
-              >
-                <i class="fas fa-file-circle-plus" aria-hidden="true"></i>
-              </button>
-              <button
-                id="analizarPdfAnalyzeAllBtn"
-                type="button"
-                class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
-                aria-label="Analizar todas las fichas"
-                data-tooltip="Analizar todas las fichas"
-              >
-                <i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i>
-              </button>
+              <div class="analizar-pdf-hero-action-group" aria-label="Configuraciones">
+                <button
+                  id="analizarPdfMappingsBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Configuraciones"
+                  data-tooltip="Configuraciones"
+                >
+                  <i class="fas fa-sliders" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="analizar-pdf-hero-action-group" aria-label="Plantillas">
+                <button
+                  id="analizarPdfCreateTemplateFromFileBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Crear plantilla desde archivo"
+                  data-tooltip="Crear plantilla desde archivo"
+                >
+                  <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                </button>
+                <button
+                  id="analizarPdfCreateTemplatesFromAllBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Crear plantillas desde todas las fichas"
+                  data-tooltip="Crear plantillas desde todas las fichas"
+                >
+                  <i class="fas fa-folder-tree" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="analizar-pdf-hero-action-group" aria-label="Ficha editorial">
+                <button
+                  id="analizarPdfCreateDefaultRevisionsBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Crear fichas base"
+                  data-tooltip="Crear fichas base"
+                >
+                  <i class="fas fa-layer-group" aria-hidden="true"></i>
+                </button>
+                <button
+                  id="analizarPdfAddRevisionBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Crear nueva ficha editorial"
+                  data-tooltip="Crear nueva ficha editorial"
+                >
+                  <i class="fas fa-file-circle-plus" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="analizar-pdf-hero-action-group" aria-label="Análisis">
+                <button
+                  id="analizarPdfQuickAnalyzeAllBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Análisis rápido ortotipográfico"
+                  data-tooltip="Análisis rápido ortotipográfico"
+                >
+                  <i class="fas fa-bolt" aria-hidden="true"></i>
+                </button>
+                <button
+                  id="analizarPdfAnalyzeAllBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Analizar todas las fichas"
+                  data-tooltip="Analizar todas las fichas"
+                >
+                  <i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="analizar-pdf-hero-action-group" aria-label="Guardar">
+                <button
+                  id="analizarPdfSaveBtn"
+                  type="button"
+                  class="analizar-pdf-ghost-pill analizar-pdf-hero-action-btn"
+                  aria-label="Guardar"
+                  data-tooltip="Guardar"
+                >
+                  <i class="fas fa-floppy-disk" aria-hidden="true"></i>
+                </button>
+              </div>
             </div>
           </div>
         </header>
-      </section>
-
-      <section class="analizar-pdf-workspace">
         <article id="analizarPdfEditorialPanel" class="analizar-pdf-panel analizar-pdf-editorial-panel">
           <div id="analizarPdfEditorialSpinner" class="analizar-pdf-editorial-spinner" hidden aria-live="polite" aria-label="Generando análisis de ficha editorial">
             <div class="analizar-pdf-editorial-spinner-card">
@@ -155,98 +198,142 @@
                 >Selecciona uno o varios archivos</span>
               </span>
             </label>
-            <select id="analizarPdfBookTypeInput">
-              <option value="">Tipo</option>
-              <option value="LA">LA</option>
-              <option value="LM">LM</option>
-            </select>
-            <select id="analizarPdfSourceType">
-              <option value="pdf">PDF</option>
-              <option value="idml">IDML</option>
-            </select>
-            <select id="analizarPdfNivelInput">
-              <option value="">Nivel</option>
-              <option value="Preescolar">Preescolar</option>
-              <option value="Primaria">Primaria</option>
-              <option value="Secundaria">Secundaria</option>
-            </select>
-            <select id="analizarPdfGradoInput">
-              <option value="">Grado</option>
-              <option value="Primero">Primero</option>
-              <option value="Segundo">Segundo</option>
-              <option value="Tercero">Tercero</option>
-              <option value="Cuarto">Cuarto</option>
-              <option value="Quinto">Quinto</option>
-              <option value="Sexto">Sexto</option>
-            </select>
-            <select id="analizarPdfTrimestreInput">
-              <option value="">Trimestre</option>
-              <option value="Trimestre 1">Trimestre 1</option>
-              <option value="Trimestre 2">Trimestre 2</option>
-              <option value="Trimestre 3">Trimestre 3</option>
-            </select>
-            <select id="analizarPdfUnidadInput">
-              <option value="">Unidad</option>
-              <option value="Proyecto">Proyecto</option>
-              <option value="Unidad 1">Unidad 1</option>
-              <option value="Unidad 2">Unidad 2</option>
-              <option value="Unidad 3">Unidad 3</option>
-              <option value="Unidad 4">Unidad 4</option>
-              <option value="Unidad 5">Unidad 5</option>
-              <option value="Unidad 6">Unidad 6</option>
-              <option value="Unidad 7">Unidad 7</option>
-              <option value="Unidad 8">Unidad 8</option>
-              <option value="Unidad 9">Unidad 9</option>
-              <option value="Unidad 10">Unidad 10</option>
-              <option value="Lecturas">Lecturas</option>
-              <option value="Recortables">Recortables</option>
-              <option value="Fichas">Fichas</option>
-              <option value="Anexos">Anexos</option>
-            </select>
-            <select id="analizarPdfEdicionNumeroInput">
-              <option value="">Número de edición</option>
-              <option value="1ra">1ra</option>
-              <option value="2da">2da</option>
-              <option value="3ra">3ra</option>
-              <option value="4ta">4ta</option>
-              <option value="5ta">5ta</option>
-              <option value="6ta">6ta</option>
-              <option value="7ma">7ma</option>
-              <option value="8va">8va</option>
-              <option value="9na">9na</option>
-              <option value="10ma">10ma</option>
-            </select>
-            <select id="analizarPdfRevisionNumeroInput">
-              <option value="">Revisión</option>
-              <option value="F1">F1</option>
-              <option value="F2">F2</option>
-              <option value="F3">F3</option>
-              <option value="F4">F4</option>
-              <option value="F5">F5</option>
-              <option value="F6">F6</option>
-              <option value="F7">F7</option>
-              <option value="F8">F8</option>
-              <option value="F9">F9</option>
-              <option value="F10">F10</option>
-              <option value="Dummy 1">Dummy 1</option>
-              <option value="Dummy 2">Dummy 2</option>
-              <option value="Dummy 3">Dummy 3</option>
-              <option value="Dummy 4">Dummy 4</option>
-              <option value="Dummy 5">Dummy 5</option>
-              <option value="Dummy 6">Dummy 6</option>
-              <option value="Dummy 7">Dummy 7</option>
-              <option value="Dummy 8">Dummy 8</option>
-              <option value="Dummy 9">Dummy 9</option>
-              <option value="Dummy 10">Dummy 10</option>
-            </select>
-            <input id="analizarPdfIndexPageInput" type="number" min="1" step="1" placeholder="Índice">
-            <input id="analizarPdfTemarioPageInput" type="number" min="1" step="1" placeholder="Temario">
-            <select id="analizarPdfRevisionMappingSelect">
-              <option value="">Plantilla de revisión</option>
-            </select>
-            <select id="analizarPdfSessionTitleLabel">
-              <option value="">Archivos analizados</option>
-            </select>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfBookTypeInput">
+              <span>Tipo</span>
+              <select id="analizarPdfBookTypeInput">
+                <option value="">Selecciona tipo</option>
+                <option value="LA">LA</option>
+                <option value="LM">LM</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfSourceType">
+              <span>Formato</span>
+              <select id="analizarPdfSourceType">
+                <option value="pdf">PDF</option>
+                <option value="idml">IDML</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfNivelInput">
+              <span>Nivel</span>
+              <select id="analizarPdfNivelInput">
+                <option value="">Selecciona nivel</option>
+                <option value="Preescolar">Preescolar</option>
+                <option value="Primaria">Primaria</option>
+                <option value="Secundaria">Secundaria</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfGradoInput">
+              <span>Grado</span>
+              <select id="analizarPdfGradoInput">
+                <option value="">Selecciona grado</option>
+                <option value="Primero">Primero</option>
+                <option value="Segundo">Segundo</option>
+                <option value="Tercero">Tercero</option>
+                <option value="Cuarto">Cuarto</option>
+                <option value="Quinto">Quinto</option>
+                <option value="Sexto">Sexto</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfTrimestreInput">
+              <span>Trimestre</span>
+              <select id="analizarPdfTrimestreInput">
+                <option value="">Selecciona trimestre</option>
+                <option value="Trimestre 1">Trimestre 1</option>
+                <option value="Trimestre 2">Trimestre 2</option>
+                <option value="Trimestre 3">Trimestre 3</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfUnidadInput">
+              <span>Unidad</span>
+              <select id="analizarPdfUnidadInput">
+                <option value="">Selecciona unidad</option>
+                <option value="Proyecto">Proyecto</option>
+                <option value="Unidad 1">Unidad 1</option>
+                <option value="Unidad 2">Unidad 2</option>
+                <option value="Unidad 3">Unidad 3</option>
+                <option value="Unidad 4">Unidad 4</option>
+                <option value="Unidad 5">Unidad 5</option>
+                <option value="Unidad 6">Unidad 6</option>
+                <option value="Unidad 7">Unidad 7</option>
+                <option value="Unidad 8">Unidad 8</option>
+                <option value="Unidad 9">Unidad 9</option>
+                <option value="Unidad 10">Unidad 10</option>
+                <option value="Lecturas">Lecturas</option>
+                <option value="Recortables">Recortables</option>
+                <option value="Fichas">Fichas</option>
+                <option value="Anexos">Anexos</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfEdicionNumeroInput">
+              <span>Edición</span>
+              <select id="analizarPdfEdicionNumeroInput">
+                <option value="">Selecciona edición</option>
+                <option value="1ra">1ra</option>
+                <option value="2da">2da</option>
+                <option value="3ra">3ra</option>
+                <option value="4ta">4ta</option>
+                <option value="5ta">5ta</option>
+                <option value="6ta">6ta</option>
+                <option value="7ma">7ma</option>
+                <option value="8va">8va</option>
+                <option value="9na">9na</option>
+                <option value="10ma">10ma</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfRevisionNumeroInput">
+              <span>Revisión</span>
+              <select id="analizarPdfRevisionNumeroInput">
+                <option value="">Selecciona revisión</option>
+                <option value="F1">F1</option>
+                <option value="F2">F2</option>
+                <option value="F3">F3</option>
+                <option value="F4">F4</option>
+                <option value="F5">F5</option>
+                <option value="F6">F6</option>
+                <option value="F7">F7</option>
+                <option value="F8">F8</option>
+                <option value="F9">F9</option>
+                <option value="F10">F10</option>
+                <option value="Dummy 1">Dummy 1</option>
+                <option value="Dummy 2">Dummy 2</option>
+                <option value="Dummy 3">Dummy 3</option>
+                <option value="Dummy 4">Dummy 4</option>
+                <option value="Dummy 5">Dummy 5</option>
+                <option value="Dummy 6">Dummy 6</option>
+                <option value="Dummy 7">Dummy 7</option>
+                <option value="Dummy 8">Dummy 8</option>
+                <option value="Dummy 9">Dummy 9</option>
+                <option value="Dummy 10">Dummy 10</option>
+              </select>
+            </label>
+            <label id="analizarPdfRecortableRoleField" class="analizar-pdf-biblio-field analizar-pdf-biblio-field--conditional">
+              <span>Rol recortables</span>
+              <select id="analizarPdfRecortableRoleInput">
+                <option value="source">Fuente</option>
+                <option value="destination">Destino</option>
+                <option value="both">Fuente y destino</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfIndexPageInput">
+              <span>Índice</span>
+              <input id="analizarPdfIndexPageInput" type="number" min="1" step="1" placeholder="Página índice">
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfTemarioPageInput">
+              <span>Temario</span>
+              <input id="analizarPdfTemarioPageInput" type="number" min="1" step="1" placeholder="Página temario">
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfRevisionMappingSelect">
+              <span>Plantilla</span>
+              <select id="analizarPdfRevisionMappingSelect">
+                <option value="">Plantilla de revisión</option>
+              </select>
+            </label>
+            <label class="analizar-pdf-biblio-field" for="analizarPdfSessionTitleLabel">
+              <span>Archivos analizados</span>
+              <select id="analizarPdfSessionTitleLabel">
+                <option value="">Archivos analizados</option>
+              </select>
+            </label>
             <button
               id="analizarPdfAnalyzeBtn"
               type="button"
@@ -270,7 +357,9 @@
             </button>
           </div>
         </article>
+      </section>
 
+      <section class="analizar-pdf-workspace">
         <article class="analizar-pdf-panel">
           <div class="analizar-pdf-panel-head">
             <div>
@@ -292,6 +381,108 @@
         </article>
       </section>
     </main>
+  </div>
+
+  <div id="analizarPdfDefaultRevisionsModal" class="analizar-pdf-modal" hidden>
+    <div class="analizar-pdf-modal-backdrop" data-action="close-default-revisions-modal"></div>
+    <div class="analizar-pdf-modal-card analizar-pdf-default-revisions-modal-card" role="dialog" aria-modal="true" aria-labelledby="analizarPdfDefaultRevisionsTitle">
+      <div class="analizar-pdf-modal-head">
+        <div class="analizar-pdf-mapping-modal-head-copy">
+          <h3 id="analizarPdfDefaultRevisionsTitle">Crear fichas base</h3>
+          <p>Define la configuración global; todas las fichas creadas usarán estos datos editoriales.</p>
+        </div>
+        <button type="button" class="analizar-pdf-icon-btn" data-action="close-default-revisions-modal" aria-label="Cerrar modal">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="analizar-pdf-modal-body analizar-pdf-default-revisions-modal-body">
+        <div class="analizar-pdf-default-revisions-grid">
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultSourceTypeInput">
+            <span>Formato</span>
+            <select id="analizarPdfDefaultSourceTypeInput">
+              <option value="idml">IDML</option>
+            </select>
+          </label>
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultBookTypeInput">
+            <span>Tipo</span>
+            <select id="analizarPdfDefaultBookTypeInput">
+              <option value="">Selecciona tipo</option>
+              <option value="LA">LA</option>
+              <option value="LM">LM</option>
+            </select>
+          </label>
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultNivelInput">
+            <span>Nivel</span>
+            <select id="analizarPdfDefaultNivelInput">
+              <option value="">Selecciona nivel</option>
+              <option value="Preescolar">Preescolar</option>
+              <option value="Primaria">Primaria</option>
+              <option value="Secundaria">Secundaria</option>
+            </select>
+          </label>
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultGradoInput">
+            <span>Grado</span>
+            <select id="analizarPdfDefaultGradoInput">
+              <option value="">Selecciona grado</option>
+              <option value="Primero">Primero</option>
+              <option value="Segundo">Segundo</option>
+              <option value="Tercero">Tercero</option>
+              <option value="Cuarto">Cuarto</option>
+              <option value="Quinto">Quinto</option>
+              <option value="Sexto">Sexto</option>
+            </select>
+          </label>
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultTrimestreInput">
+            <span>Trimestre</span>
+            <select id="analizarPdfDefaultTrimestreInput">
+              <option value="">Selecciona trimestre</option>
+              <option value="Trimestre 1">Trimestre 1</option>
+              <option value="Trimestre 2">Trimestre 2</option>
+              <option value="Trimestre 3">Trimestre 3</option>
+            </select>
+          </label>
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultEdicionNumeroInput">
+            <span>Edición</span>
+            <select id="analizarPdfDefaultEdicionNumeroInput">
+              <option value="">Selecciona edición</option>
+              <option value="1ra">1ra</option>
+              <option value="2da">2da</option>
+              <option value="3ra">3ra</option>
+              <option value="4ta">4ta</option>
+              <option value="5ta">5ta</option>
+              <option value="6ta">6ta</option>
+              <option value="7ma">7ma</option>
+              <option value="8va">8va</option>
+              <option value="9na">9na</option>
+              <option value="10ma">10ma</option>
+            </select>
+          </label>
+          <label class="analizar-pdf-biblio-field" for="analizarPdfDefaultRevisionNumeroInput">
+            <span>Revisión</span>
+            <select id="analizarPdfDefaultRevisionNumeroInput">
+              <option value="">Selecciona revisión</option>
+              <option value="F1">F1</option>
+              <option value="F2">F2</option>
+              <option value="F3">F3</option>
+              <option value="F4">F4</option>
+              <option value="F5">F5</option>
+              <option value="F6">F6</option>
+              <option value="F7">F7</option>
+              <option value="F8">F8</option>
+              <option value="F9">F9</option>
+              <option value="F10">F10</option>
+            </select>
+          </label>
+        </div>
+        <p id="analizarPdfDefaultRevisionsSummary" class="analizar-pdf-default-revisions-summary">
+          Selecciona un trimestre para calcular las fichas base.
+        </p>
+        <div class="analizar-pdf-default-revisions-actions">
+          <button type="button" class="analizar-pdf-ghost-pill" data-action="close-default-revisions-modal">Cancelar</button>
+          <button id="analizarPdfDefaultRevisionsConfirmBtn" type="button" class="analizar-pdf-ghost-pill is-primary">Crear fichas base</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="analizarPdfMappingsModal" class="analizar-pdf-modal" hidden>
@@ -346,8 +537,42 @@
       </div>
       <div class="analizar-pdf-modal-body">
         <div class="analizar-pdf-mapping-shell">
-          <aside id="analizarPdfMappingsList" class="analizar-pdf-mapping-list"></aside>
+          <aside class="analizar-pdf-template-groups-panel" aria-label="Grupos de plantillas">
+            <div class="analizar-pdf-template-groups-head">
+              <h4>Grupos de plantillas</h4>
+              <button
+                id="analizarPdfCreateMappingGroupBtn"
+                type="button"
+                class="analizar-pdf-icon-btn"
+                aria-label="Crear grupo de plantillas"
+                data-tooltip="Crear grupo de plantillas"
+              >
+                <i class="fas fa-plus" aria-hidden="true"></i>
+              </button>
+              <button
+                id="analizarPdfDeleteMappingGroupBtn"
+                type="button"
+                class="analizar-pdf-icon-btn analizar-pdf-icon-btn-danger"
+                aria-label="Eliminar grupo de plantillas"
+                data-tooltip="Eliminar grupo de plantillas"
+              >
+                <i class="fas fa-trash" aria-hidden="true"></i>
+              </button>
+            </div>
+            <input id="analizarPdfMappingGroupTitleInput" type="text" placeholder="Nuevo grupo">
+            <div id="analizarPdfMappingGroupsList" class="analizar-pdf-template-groups-list"></div>
+          </aside>
+          <aside class="analizar-pdf-template-list-panel" aria-label="Plantillas del grupo seleccionado">
+            <div class="analizar-pdf-template-list-head">
+              <h4>Plantillas</h4>
+              <small id="analizarPdfSelectedMappingGroupLabel">Selecciona un grupo</small>
+            </div>
+            <aside id="analizarPdfMappingsList" class="analizar-pdf-mapping-list"></aside>
+          </aside>
           <section class="analizar-pdf-mapping-editor">
+            <div id="analizarPdfMappingEditorEmpty" class="analizar-pdf-mapping-editor-empty">
+              Selecciona una plantilla para ver y editar su mapeo de estilos.
+            </div>
             <div class="analizar-pdf-mapping-meta">
               <input id="analizarPdfMappingTitleInput" type="text" placeholder="Título del mapeo">
               <select id="analizarPdfMappingBookTypeInput">
@@ -371,9 +596,8 @@
                 <option value="Sexto">Sexto</option>
               </select>
               <select id="analizarPdfMappingUnidadInput">
-                <option value="">Unidad</option>
+                <option value="">Selecciona unidad</option>
                 <option value="Proyecto">Proyecto</option>
-                <option value="Unidad normal">Unidad normal</option>
                 <option value="Unidad 1">Unidad 1</option>
                 <option value="Unidad 2">Unidad 2</option>
                 <option value="Unidad 3">Unidad 3</option>
@@ -384,6 +608,10 @@
                 <option value="Unidad 8">Unidad 8</option>
                 <option value="Unidad 9">Unidad 9</option>
                 <option value="Unidad 10">Unidad 10</option>
+                <option value="Lecturas">Lecturas</option>
+                <option value="Recortables">Recortables</option>
+                <option value="Fichas">Fichas</option>
+                <option value="Anexos">Anexos</option>
               </select>
               <div class="analizar-pdf-mapping-meta-actions">
                 <button
@@ -525,8 +753,10 @@
     </div>
   </div>
 
-  <script type="module" src="js/chromeLayout.js"></script>
+  <script type="module" data-cache-src="js/chromeLayout.js"></script>
   <script type="module" src="js/sidebar.js"></script>
-  <script type="module" src="analizarPDF/analizar-pdf-app.js"></script>
+  <script data-cache-src="vendor/muuri/muuri.min.js"></script>
+  <script data-cache-src="analizarPDF/analizar-pdf-app.js" data-cache-type="module"></script>
+  <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

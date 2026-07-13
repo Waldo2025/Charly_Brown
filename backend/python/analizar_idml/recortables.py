@@ -12,6 +12,11 @@ from .pipeline import (
     _is_first_grade_session,
     _normalize_unidad,
     _extract_video_titles,
+    _extract_destination_page_labels,
+    _origins_match_destination_labels,
+    _resolve_active_analysis_revision,
+    _resolve_active_recortable_role,
+    _resolve_item_text_with_story_context,
 )
 
 LINKED_ASSET_TYPES = (
@@ -22,6 +27,42 @@ LINKED_ASSET_TYPES = (
 )
 
 FIRST_GRADE_GEMINI_VISUAL_KINDS = {"recortable", "anexo", "ficha", "video"}
+INVALID_LINKED_ASSET_CODES = {
+    "aqui",
+    "aquí",
+    "aqu",
+    "de",
+    "del",
+    "el",
+    "la",
+    "las",
+    "los",
+    "nivel",
+    "trimestre",
+    "unidad",
+    "unidades",
+    "digital",
+    "pagina",
+    "página",
+    "pag",
+    "pág",
+    "competencia",
+    "descriptiva",
+    "descriptivo",
+    "trabajo",
+}
+
+
+def _is_valid_linked_asset_code(kind="", code=""):
+    raw_kind = str(kind or "").strip().lower()
+    raw_code = str(code or "").strip()
+    if not raw_kind or not raw_code:
+        return False
+    if raw_code.lower() in INVALID_LINKED_ASSET_CODES:
+        return False
+    if raw_kind in {"recortable", "anexo", "ficha"}:
+        return any(character.isdigit() for character in raw_code)
+    return True
 
 
 def _crop_story_preview(preview=None, page_rect=None, frame_rect=None):
@@ -93,19 +134,28 @@ def _extract_linked_asset_mentions(text, allowed_types=None):
             })
     if not type_pattern:
         return mentions
-    matches = re.findall(rf"\b({type_pattern})s?\s+([A-Za-z0-9]+)\b", source, flags=re.IGNORECASE)
-    for raw_type, raw_code in matches:
+    pattern = rf"\b({type_pattern})s?\s+([A-Za-z0-9]+)(?:\s*[\"“”'']([^\"“”'']{{3,140}})[\"“”'']|\s+«([^»]{{3,140}})»)?"
+    for match in re.finditer(pattern, source, flags=re.IGNORECASE):
+        raw_type = match.group(1)
+        raw_code = match.group(2)
         kind = str(raw_type or "").strip().lower()
         code = str(raw_code or "").strip()
+        if not _is_valid_linked_asset_code(kind, code):
+            continue
         key = f"{kind}:{code.lower()}"
         if kind and code and key not in seen:
             seen.add(key)
             label_prefix = next((entry[2] for entry in LINKED_ASSET_TYPES if entry[0] == kind), kind.title())
-            mentions.append({
+            mention = {
                 "kind": kind,
                 "code": code,
                 "label": f"{label_prefix} {code}",
-            })
+            }
+            raw_title = str(match.group(3) or match.group(4) or "").strip()
+            clean_title = " ".join(raw_title.split()).strip(" .,:;")
+            if clean_title:
+                mention["title"] = clean_title
+            mentions.append(mention)
     return mentions
 
 
@@ -372,6 +422,11 @@ def _build_external_asset_destination_index(session=None):
             linked_kind = "anexo"
         if not linked_kind:
             continue
+        if linked_kind == "recortable":
+            role = str((revision or {}).get("recortableRole") or "").strip().lower()
+            role = role if role in {"source", "destination", "both"} else "source"
+            if role not in {"destination", "both"}:
+                continue
         linked_file_label = str((revision or {}).get("title") or unidad.title()).strip() or unidad.title()
         for file_entry in ((revision or {}).get("files") or []):
             result = (file_entry or {}).get("result") or {}
@@ -381,6 +436,32 @@ def _build_external_asset_destination_index(session=None):
                 if not page_name:
                     continue
                 text_fragments = []
+                summary = (page or {}).get("recortableSummary") or {}
+                resolved_from_summary = []
+                for entry in (summary.get("resolvedDestinations") or []):
+                    code_label = str((entry or {}).get("code") or "").strip()
+                    destination_label = str((entry or {}).get("destination") or "").strip()
+                    if code_label and destination_label:
+                        resolved_from_summary.append((code_label, destination_label))
+                for code_label, destination_label in resolved_from_summary:
+                    for mention in _extract_linked_asset_mentions(code_label, allowed_types=[linked_kind]):
+                        key = f"{linked_kind}:{mention['code'].lower()}"
+                        destination_index.setdefault(key, [])
+                        dedupe_key = f"{destination_label}::{str((file_entry or {}).get('documentName') or linked_file_label).strip() or linked_file_label}"
+                        existing_targets = {
+                            f"{str((entry or {}).get('pageName') or '').strip()}::{str((entry or {}).get('fileTitle') or '').strip()}"
+                            for entry in destination_index[key]
+                        }
+                        if dedupe_key not in existing_targets:
+                            destination_index[key].append({
+                                "kind": linked_kind,
+                                "code": mention["code"],
+                                "label": mention["label"],
+                                "pageName": destination_label,
+                                "fileTitle": str((file_entry or {}).get("documentName") or linked_file_label).strip() or linked_file_label,
+                                "revisionTitle": linked_file_label,
+                                "sourcePageName": page_name,
+                            })
                 footer_title = str((((page or {}).get("footerMarkers") or {}).get("sectionTitle")) or "").strip()
                 if footer_title:
                     text_fragments.append(footer_title)
@@ -388,18 +469,189 @@ def _build_external_asset_destination_index(session=None):
                     text = str((item or {}).get("text") or "").strip()
                     if text:
                         text_fragments.append(text)
+                page_targets = []
+                seen_page_targets = set()
+                for fragment in text_fragments:
+                    declared_pages = _extract_destination_page_labels(fragment)
+                    for declared_page in declared_pages:
+                        if declared_page in seen_page_targets:
+                            continue
+                        seen_page_targets.add(declared_page)
+                        page_targets.append(declared_page)
                 aggregated = " ".join(text_fragments)
-                for mention in _extract_linked_asset_mentions(aggregated, allowed_types=[linked_kind]):
+                mentions = _extract_linked_asset_mentions(aggregated, allowed_types=[linked_kind])
+                for mention in mentions:
                     key = f"{linked_kind}:{mention['code'].lower()}"
-                    destination_index.setdefault(key, []).append({
-                        "kind": linked_kind,
-                        "code": mention["code"],
-                        "label": mention["label"],
-                        "pageName": page_name,
-                        "fileTitle": str((file_entry or {}).get("documentName") or linked_file_label).strip() or linked_file_label,
-                        "revisionTitle": linked_file_label,
-                    })
+                    target_pages = page_targets or [page_name]
+                    destination_index.setdefault(key, [])
+                    existing_targets = {
+                        f"{str((entry or {}).get('pageName') or '').strip()}::{str((entry or {}).get('fileTitle') or '').strip()}"
+                        for entry in destination_index[key]
+                    }
+                    for target_page in target_pages:
+                        dedupe_key = f"{target_page}::{str((file_entry or {}).get('documentName') or linked_file_label).strip() or linked_file_label}"
+                        if dedupe_key in existing_targets:
+                            continue
+                        existing_targets.add(dedupe_key)
+                        destination_index[key].append({
+                            "kind": linked_kind,
+                            "code": mention["code"],
+                            "label": mention["label"],
+                            "pageName": target_page,
+                            "fileTitle": str((file_entry or {}).get("documentName") or linked_file_label).strip() or linked_file_label,
+                            "revisionTitle": linked_file_label,
+                            "sourcePageName": page_name,
+                        })
     return destination_index
+
+
+def _build_external_asset_origin_index(session=None):
+    origin_index = {}
+    active_revision = _resolve_active_analysis_revision(session)
+    active_revision_id = str((active_revision or {}).get("id") or "").strip()
+    for revision in ((session or {}).get("revisions") or []):
+        revision_id = str((revision or {}).get("id") or "").strip()
+        if active_revision_id and revision_id == active_revision_id:
+            continue
+        unidad = _normalize_unidad((revision or {}).get("unidad") or "")
+        if unidad == "recortables":
+            role = str((revision or {}).get("recortableRole") or "").strip().lower()
+            role = role if role in {"source", "destination", "both"} else "source"
+            if role == "destination":
+                continue
+        revision_title = str((revision or {}).get("title") or unidad.title()).strip() or unidad.title()
+        for file_entry in ((revision or {}).get("files") or []):
+            result = (file_entry or {}).get("result") or {}
+            stats = result.get("stats") or {}
+            for page in (stats.get("pageReports") or []):
+                page_name = str((page or {}).get("pageName") or "").strip()
+                if not page_name:
+                    continue
+                summary = (page or {}).get("recortableSummary") or {}
+                for code_label in (summary.get("originCodes") or []):
+                    for mention in _extract_linked_asset_mentions(code_label, allowed_types=["recortable", "ficha", "anexo", "video"]):
+                        key = f"{mention['kind']}:{mention['code'].lower()}"
+                        origin_index.setdefault(key, [])
+                        origin_index[key].append({
+                            "kind": mention["kind"],
+                            "code": mention["code"],
+                            "label": mention["label"],
+                            "pageName": page_name,
+                            "fileTitle": str((file_entry or {}).get("documentName") or revision_title).strip() or revision_title,
+                            "revisionTitle": revision_title,
+                        })
+    return origin_index
+
+
+def _page_has_instructional_content(page):
+    for bucket_name in ("instrucciones", "subinstrucciones"):
+        if (page.get("content") or {}).get(bucket_name):
+            return True
+    return False
+
+
+def _classify_visual_linked_asset_kind(page):
+    items = page.get("pageItems") or []
+    page_rect = page.get("pageRect") or {}
+    try:
+        x1 = float(page_rect.get("x1"))
+        x2 = float(page_rect.get("x2"))
+        y1 = float(page_rect.get("y1"))
+        y2 = float(page_rect.get("y2"))
+    except (TypeError, ValueError):
+        return ""
+    page_width = max(1.0, x2 - x1)
+    page_height = max(1.0, y2 - y1)
+    outer_edge = "left" if abs(x1) > abs(x2) else "right"
+    edge_margin = max(72.0, page_width * 0.12)
+    top_limit = y1 + (page_height * 0.34)
+
+    def is_outer_edge_item(rect):
+        if not rect:
+            return False
+        if outer_edge == "left":
+            return float(rect.get("x1", 10**9)) <= (x1 + edge_margin)
+        return float(rect.get("x2", -10**9)) >= (x2 - edge_margin)
+
+    has_edge_inline_icon = False
+    has_edge_panel_marker = False
+    has_edge_video_marker = False
+    for item in items:
+        style_name = _normalize_object_style_name(item.get("appliedObjectStyle") or "")
+        rect = item.get("frameRect") or {}
+        center_y = (float(rect.get("y1", 0)) + float(rect.get("y2", 0))) / 2 if rect else 0
+        if center_y > top_limit:
+            continue
+        if "ICONOS INLINE" in style_name and is_outer_edge_item(rect):
+            has_edge_inline_icon = True
+        if "PERSIANA TABLERO" in style_name and is_outer_edge_item(rect):
+            has_edge_panel_marker = True
+        if "VIDEO" in style_name and is_outer_edge_item(rect):
+            has_edge_video_marker = True
+        if "CUTOUTS LINE" in style_name:
+            has_edge_panel_marker = True
+    if has_edge_video_marker:
+        return "video"
+    if has_edge_panel_marker and _page_has_instructional_content(page):
+        return "recortable"
+    if has_edge_inline_icon:
+        return "anexo"
+    return ""
+
+
+def _detect_visual_linked_asset_with_gemini(page, session=None, gemini_verifier=None, story_preview_index=None):
+    if not gemini_verifier or not gemini_verifier.enabled:
+        return {}
+    candidates = []
+    for bucket_name in ("instrucciones", "subinstrucciones"):
+        for item in ((page.get("content") or {}).get(bucket_name) or []):
+            story_id = str(item.get("storyId") or "").strip()
+            candidates.append({
+                "storyId": story_id,
+                "text": str(item.get("text") or "").strip(),
+                "story": (story_preview_index or {}).get(story_id) or {},
+                "frameRect": item.get("frameRect") or None,
+            })
+    for candidate in candidates:
+        story = candidate.get("story") or {}
+        inline_detections = _extract_story_inline_asset_detections(story)
+        if inline_detections:
+            return {"detections": inline_detections}
+        preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
+        if not preview.get("base64"):
+            continue
+        cropped_preview = _crop_story_preview(
+            preview,
+            page.get("pageRect") or None,
+            candidate.get("frameRect") or None,
+        ) or preview or {}
+        result = gemini_verifier.classify_linked_asset_visual(
+            page_name=page.get("pageName") or "",
+            image_base64=cropped_preview.get("base64") or "",
+            mime_type=cropped_preview.get("mimeType") or "image/jpeg",
+        )
+        detections = []
+        for asset in (result.get("assets") or []):
+            kind = str((asset or {}).get("kind") or "").strip().lower()
+            if not kind or kind == "unknown" or kind not in FIRST_GRADE_GEMINI_VISUAL_KINDS:
+                continue
+            references = _normalize_visual_reference(
+                kind=kind,
+                code=(asset or {}).get("code") or "",
+                title=(asset or {}).get("title") or "",
+                fallback_text=candidate.get("text") or "",
+            )
+            if not references:
+                continue
+            detections.append({
+                "kind": kind,
+                "codes": references,
+                "reason": str((asset or {}).get("reason") or "").strip(),
+            })
+        detections = _dedupe_visual_detections(detections)
+        if detections:
+            return {"detections": detections}
+    return {}
 
 
 def _build_recortable_checks(page_reports, alias_index=None, session=None, gemini_verifier=None, story_preview_index=None):
@@ -408,8 +660,15 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
     ignored_styles = {
         "08_05_02 HABILIDADES",
     }
-    current_unidad = _normalize_unidad((((session or {}).get("bibliographicInfo")) or {}).get("unidad") or "")
+    active_revision = _resolve_active_analysis_revision(session)
+    current_unidad = _normalize_unidad((active_revision or {}).get("unidad") or ((((session or {}).get("bibliographicInfo")) or {}).get("unidad") or ""))
+    current_recortable_role = _resolve_active_recortable_role(session)
+    is_destination_only_recortable = current_unidad == "recortables" and current_recortable_role == "destination"
+    is_linked_asset_destination_revision = current_unidad in {"anexos", "fichas"} or (
+        current_unidad == "recortables" and current_recortable_role in {"destination", "both"}
+    )
     external_destination_index = _build_external_asset_destination_index(session)
+    external_origin_index = _build_external_asset_origin_index(session)
     pages_by_name = {
         str((page or {}).get("pageName") or "").strip(): page
         for page in (page_reports or [])
@@ -425,6 +684,8 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
             "codes": [],
             "originCodes": [],
             "destinationCodes": [],
+            "codeTitles": {},
+            "pendingDestinations": [],
             "resolvedDestinations": [],
             "resolvedLinks": [],
             "hasError": False,
@@ -436,8 +697,15 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
         page_text_fragments = []
         destination_text_fragments = []
         page_mentions = []
+        destination_links = []
+        code_titles = {}
+        def remember_code_title(mention):
+            label = str((mention or {}).get("label") or "").strip()
+            title = str((mention or {}).get("title") or "").strip()
+            if label and title:
+                code_titles[label] = title
         for item in _iter_page_bucket_items(page, include_master=False):
-            text = str(item.get("text") or "").strip()
+            text = _resolve_item_text_with_story_context(item, story_preview_index=story_preview_index)
             if not text:
                 continue
             style_name = str(item.get("styleName") or "").strip().upper()
@@ -446,10 +714,16 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
             page_text_fragments.append(text)
             if (_has_alias_style(alias_index, "recortable_indicator", "paragraph", style_name) or style_name == "08_01_COMPETENCIA") and "recortable" in _normalize_story_text(text):
                 origin_indicator = True
-            if (_has_alias_style(alias_index, "recortable_destination", "paragraph", style_name) or style_name == "01_00_TITULO LITERATURAS Y EJERCICIOS"):
+            is_destination_style = (
+                _has_alias_style(alias_index, "recortable_destination", "paragraph", style_name)
+                or style_name == "01_00_TITULO LITERATURAS Y EJERCICIOS"
+            )
+            if is_linked_asset_destination_revision and is_destination_style:
                 destination_text_fragments.append(text)
             mentions = _extract_linked_asset_mentions(text)
+            declared_destination_pages = _extract_destination_page_labels(text)
             for mention in mentions:
+                remember_code_title(mention)
                 page_mentions.append(mention)
                 page_label = mention["label"]
                 if page_label.lower() not in {value.lower() for value in page_codes}:
@@ -464,19 +738,31 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                     "externalDestinations": [],
                     "destinationHasFooter": {},
                 })
-                if (_has_alias_style(alias_index, "recortable_destination", "paragraph", style_name) or style_name == "01_00_TITULO LITERATURAS Y EJERCICIOS"):
+                if is_linked_asset_destination_revision and is_destination_style:
                     destination_codes.append(page_label)
                     entry["destinations"].add(str(page.get("pageName") or "").strip())
                     entry["destinationHasFooter"][str(page.get("pageName") or "").strip()] = bool((page.get("footerMarkers") or {}).get("footerRecortable"))
+                if is_linked_asset_destination_revision:
+                    if page_label.lower() not in {value.lower() for value in destination_codes}:
+                        destination_codes.append(page_label)
+                    target_pages = declared_destination_pages or [str(page.get("pageName") or "").strip()]
+                    for declared_page in [value for value in target_pages if str(value or "").strip()]:
+                        destination_links.append({
+                            "code": page_label,
+                            "destination": declared_page,
+                        })
 
         aggregated_page_text = " ".join(page_text_fragments)
         aggregated_destination_text = " ".join(destination_text_fragments)
         visual_origin_codes = []
         textual_origin_indicator = origin_indicator
-        for mention in _extract_linked_asset_mentions(aggregated_page_text):
+        explicit_mentions = _extract_linked_asset_mentions(aggregated_page_text)
+        for mention in explicit_mentions:
+            remember_code_title(mention)
             if mention["label"].lower() not in {value.lower() for value in page_codes}:
                 page_codes.append(mention["label"])
         for mention in _extract_linked_asset_mentions(aggregated_destination_text):
+            remember_code_title(mention)
             if mention["label"].lower() not in {value.lower() for value in destination_codes}:
                 destination_codes.append(mention["label"])
             entry_key = f"{mention['kind']}:{mention['code'].lower()}"
@@ -494,7 +780,7 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
 
         visual_detection = {}
         visual_detections = []
-        if not origin_indicator:
+        if not origin_indicator and not explicit_mentions:
             visual_detection = _detect_visual_linked_asset_with_gemini(
                 page,
                 session=session,
@@ -550,9 +836,11 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                         })
                         entry["origins"].add(str(page.get("pageName") or "").strip())
 
-        explicit_mentions = _extract_linked_asset_mentions(aggregated_page_text)
         if explicit_mentions:
             for mention in explicit_mentions:
+                remember_code_title(mention)
+                if is_destination_only_recortable:
+                    continue
                 entry_key = f"{mention['kind']}:{mention['code'].lower()}"
                 entry = code_index.setdefault(entry_key, {
                     "kind": mention["kind"],
@@ -564,7 +852,7 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                     "destinationHasFooter": {},
                 })
                 entry["origins"].add(str(page.get("pageName") or "").strip())
-        if textual_origin_indicator:
+        if textual_origin_indicator and not is_destination_only_recortable:
             page["recortableSummary"]["originIndicator"] = True
             fallback_codes = _extract_recortable_fallback_codes(aggregated_page_text)
             for code in fallback_codes:
@@ -590,8 +878,52 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                 })
 
         page["recortableSummary"]["codes"] = page_codes
-        page["recortableSummary"]["originCodes"] = page_codes if (origin_indicator or explicit_mentions) else []
+        page["recortableSummary"]["originCodes"] = [] if is_destination_only_recortable else (page_codes if (origin_indicator or explicit_mentions) else [])
         page["recortableSummary"]["destinationCodes"] = destination_codes
+        page["recortableSummary"]["codeTitles"] = code_titles
+        seen_destination_pairs = set()
+        for destination_link in destination_links:
+            code_label = str(destination_link.get("code") or "").strip()
+            destination_label = str(destination_link.get("destination") or "").strip()
+            dedupe_key = f"{code_label.lower()}::{destination_label}"
+            if not code_label or not destination_label or dedupe_key in seen_destination_pairs:
+                continue
+            seen_destination_pairs.add(dedupe_key)
+            matching_origins = []
+            for mention in _extract_linked_asset_mentions(code_label, allowed_types=["recortable", "ficha", "anexo", "video"]):
+                origin_key = f"{mention['kind']}:{mention['code'].lower()}"
+                matching_origins.extend(external_origin_index.get(origin_key) or [])
+            matching_origin_pages = [
+                str((item or {}).get("pageName") or "").strip()
+                for item in matching_origins
+                if str((item or {}).get("pageName") or "").strip()
+            ]
+            is_same_kind_destination_code_match = any(
+                str((item or {}).get("kind") or "").strip().lower() == mention["kind"]
+                for item in matching_origins
+            )
+            is_match = bool(matching_origins) if is_same_kind_destination_code_match else _origins_match_destination_labels(matching_origin_pages, [destination_label])
+            page["recortableSummary"]["resolvedDestinations"].append({
+                "code": code_label,
+                "kind": mention["kind"],
+                "destination": destination_label,
+                "status": "match" if is_match else ("mismatch" if matching_origin_pages else "pending"),
+            })
+            page["recortableSummary"]["resolvedLinks"].append({
+                "code": code_label,
+                "kind": mention["kind"],
+                "role": "destination",
+                "origins": matching_origin_pages,
+                "destination": destination_label,
+                "status": "match" if is_match else ("mismatch" if matching_origin_pages else "pending"),
+            })
+            if matching_origin_pages and not is_match:
+                page["recortableIssues"].append({
+                    "pageName": page.get("pageName") or "",
+                    "code": code_label,
+                    "message": f"{code_label}: destino declarado pág. {destination_label} no coincide con el origen detectado en pág. {', pág. '.join(matching_origin_pages)}.",
+                    "severity": "error",
+                })
 
     for key, entry in code_index.items():
         code = entry["code"]
@@ -602,57 +934,84 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
         destinations = sorted(page for page in entry["destinations"] if page)
         external_destinations = entry.get("externalDestinations") or external_destination_index.get(key) or []
         if not destinations and external_destinations:
-            if len(external_destinations) == 1:
-                target = external_destinations[0]
-                subject = label if kind == "video" else f"{pretty_kind} {code}"
-                message = f"{subject}. Origen: pág. {', pág. '.join(origins)}. Destino: {target.get('fileTitle') or pretty_kind} · pág. {target.get('pageName') or '?'}."
+            if not origins:
+                continue
+            deduped_external_destinations = []
+            seen_external_destinations = set()
+            for target in external_destinations:
+                dedupe_key = f"{str((target or {}).get('pageName') or '').strip()}::{str((target or {}).get('fileTitle') or '').strip()}::{str((target or {}).get('sourcePageName') or '').strip()}"
+                if dedupe_key in seen_external_destinations:
+                    continue
+                seen_external_destinations.add(dedupe_key)
+                deduped_external_destinations.append(target)
+            external_destinations = deduped_external_destinations
+            external_pages = [str((target or {}).get("pageName") or "").strip() for target in external_destinations if str((target or {}).get("pageName") or "").strip()]
+            subject = label if kind == "video" else f"{pretty_kind} {code}"
+            is_external_code_match = bool(external_destinations)
+            if is_external_code_match or _origins_match_destination_labels(origins, external_pages):
+                if len(external_destinations) == 1:
+                    target = external_destinations[0]
+                    destination_text = f"{target.get('fileTitle') or pretty_kind} · pág. {target.get('pageName') or '?'}"
+                    if str(target.get("sourcePageName") or "").strip():
+                        destination_text = f"{destination_text} (archivo pág. {target.get('sourcePageName')})"
+                    message = f"{subject}. Origen: pág. {', pág. '.join(origins)}. Destino declarado: {destination_text}."
+                else:
+                    message = f"{subject}. Origen: pág. {', pág. '.join(origins)}. Destino declarado: pág. {', pág. '.join(external_pages)}."
                 global_issues.append({
                     "code": code,
                     "label": label,
                     "kind": kind,
                     "ok": True,
                     "origins": origins,
-                    "destination": target.get("pageName") or "",
+                    "destination": ", ".join(external_pages),
                     "message": message,
                 })
                 for page_name in origins:
                     page = pages_by_name.get(page_name)
                     if page:
-                        page["recortableSummary"]["resolvedDestinations"].append({
-                            "code": label,
-                            "destination": f"{target.get('fileTitle') or pretty_kind} · pág. {target.get('pageName') or '?'}",
-                        })
-                        page["recortableSummary"]["resolvedLinks"].append({
-                            "code": label,
-                            "role": "origin",
-                            "origins": origins,
-                            "destination": f"{target.get('fileTitle') or pretty_kind} · pág. {target.get('pageName') or '?'}",
-                        })
+                        for target in external_destinations:
+                            destination_text = f"{target.get('fileTitle') or pretty_kind} · pág. {target.get('pageName') or '?'}"
+                            if str(target.get("sourcePageName") or "").strip():
+                                destination_text = f"{destination_text} (archivo pág. {target.get('sourcePageName')})"
+                            page["recortableSummary"]["resolvedDestinations"].append({
+                                "code": label,
+                                "kind": kind,
+                                "destination": destination_text,
+                                "status": "match",
+                            })
+                            page["recortableSummary"]["resolvedLinks"].append({
+                                "code": label,
+                                "kind": kind,
+                                "role": "origin",
+                                "origins": origins,
+                                "destination": destination_text,
+                                "status": "match",
+                            })
                 continue
-            if len(external_destinations) > 1:
-                issue = {
-                    "code": code,
-                    "label": label,
-                    "kind": kind,
-                    "ok": False,
-                    "origins": origins,
-                    "message": f"{pretty_kind} {code}: tiene múltiples páginas destino en archivos externos.",
-                }
-                global_issues.append(issue)
-                for page_name in origins:
-                    page = pages_by_name.get(page_name)
-                    if page:
-                        page["recortableIssues"].append({
-                            "pageName": page_name,
-                            "code": label,
-                            "message": issue["message"],
-                            "severity": "error",
-                        })
-                continue
-        if origins and len(destinations) == 1:
+            issue = {
+                "code": code,
+                "label": label,
+                "kind": kind,
+                "ok": False,
+                "origins": origins,
+                "destinations": external_pages,
+                "message": f"{subject}: origen en pág. {', pág. '.join(origins)} y destino declarado en Recortables pág. {', pág. '.join(external_pages) or '?'}, no hacen match.",
+            }
+            global_issues.append(issue)
+            for page_name in origins:
+                page = pages_by_name.get(page_name)
+                if page:
+                    page["recortableIssues"].append({
+                        "pageName": page_name,
+                        "code": label,
+                        "message": issue["message"],
+                        "severity": "error",
+                    })
+            continue
+        if kind == "recortable" and origins and len(destinations) == 1:
             destination = destinations[0]
             has_footer = bool(entry["destinationHasFooter"].get(destination))
-            if kind != "recortable" or has_footer:
+            if has_footer:
                 subject = label if kind == "video" else f"{pretty_kind} {code}"
                 global_issues.append({
                     "code": code,
@@ -668,30 +1027,63 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                     if page:
                         page["recortableSummary"]["resolvedDestinations"].append({
                             "code": label,
+                            "kind": kind,
                             "destination": destination,
+                            "status": "match",
                         })
                         page["recortableSummary"]["resolvedLinks"].append({
                             "code": label,
+                            "kind": kind,
                             "role": "origin",
                             "origins": origins,
                             "destination": destination,
+                            "status": "match",
                         })
                 destination_page = pages_by_name.get(destination)
                 if destination_page:
                     destination_page["recortableSummary"]["resolvedDestinations"].append({
                         "code": label,
+                        "kind": kind,
                         "destination": destination,
+                        "status": "match",
                     })
                     destination_page["recortableSummary"]["resolvedLinks"].append({
                         "code": label,
+                        "kind": kind,
                         "role": "destination",
                         "origins": origins,
                         "destination": destination,
+                        "status": "match",
                     })
                 continue
 
         if origins and not destinations:
             if current_unidad not in {"proyecto", "recortables", "fichas", "anexos"}:
+                issue = {
+                    "code": code,
+                    "label": label,
+                    "kind": kind,
+                    "ok": False,
+                    "pending": True,
+                    "origins": origins,
+                    "destination": "",
+                    "message": f"{pretty_kind} {code}: destino pendiente para la sesión actual.",
+                }
+                global_issues.append(issue)
+                for page_name in origins:
+                    page = pages_by_name.get(page_name)
+                    if page:
+                        page["recortableIssues"].append({
+                            "pageName": page_name,
+                            "code": label,
+                            "message": issue["message"],
+                            "severity": "pending",
+                        })
+                        page["recortableSummary"]["pendingDestinations"].append({
+                            "code": label,
+                            "kind": kind,
+                            "destinationLabel": "pendiente",
+                        })
                 continue
             subject = label if kind == "video" else f"{pretty_kind} {code}"
             issue = {
@@ -739,6 +1131,8 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
             continue
 
         if not origins and destinations:
+            if is_destination_only_recortable:
+                continue
             subject = label if kind == "video" else f"{pretty_kind} {code}"
             issue = {
                 "code": code,
@@ -761,7 +1155,7 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                     })
             continue
 
-        if kind == "recortable" and origins and len(destinations) == 1:
+        if kind == "recortable" and origins and len(destinations) == 1 and not is_destination_only_recortable:
             destination = destinations[0]
             if not entry["destinationHasFooter"].get(destination):
                 issue = {
@@ -785,5 +1179,8 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                         })
 
     for page in page_reports or []:
-        page["recortableSummary"]["hasError"] = bool(page["recortableIssues"])
+        page["recortableSummary"]["hasError"] = any(
+            str((issue or {}).get("severity") or "").strip().lower() == "error"
+            for issue in (page.get("recortableIssues") or [])
+        )
     return global_issues, page_reports

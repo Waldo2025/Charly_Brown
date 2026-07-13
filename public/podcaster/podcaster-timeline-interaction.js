@@ -1307,7 +1307,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           endMs: patch.endMs,
           durationMs: patch.durationMs,
           trimOutMs: Number.isFinite(Number(patch.trimOutMs)) ? patch.trimOutMs : segment.trimOutMs,
-          anchorStartMs: patch.anchorStartMs
+          anchorStartMs: patch.anchorStartMs,
+          manualStartMs: true
         };
       });
       upsertPodcastVideoConfig((nextCfg) => ({

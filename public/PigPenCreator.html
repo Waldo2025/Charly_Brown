@@ -148,6 +148,17 @@
                                         </select>
                                     </label>
                                     <label class="er-field">
+                                        <span>Idioma</span>
+                                        <select id="idiomaSelect">
+                                            <option value="es-419" selected>Español (Latinoamérica)</option>
+                                            <option value="es-ES">Español (España)</option>
+                                            <option value="en-US">English (US)</option>
+                                            <option value="en-GB">English (UK)</option>
+                                            <option value="fr-FR">Français</option>
+                                            <option value="pt-BR">Português (Brasil)</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
                                         <span>Grado</span>
                                         <select id="gradoSelect" required>
                                             <option value="Primero">Primero</option>
@@ -198,6 +209,7 @@
                                     <label class="er-field hidden" id="estacionField">
                                         <span>Estación</span>
                                         <select id="estacionSelect">
+                                            <option value="Todas">Todas</option>
                                             <option value="Primera estación">Primera estación</option>
                                             <option value="Segunda estación">Segunda estación</option>
                                             <option value="Tercera estación">Tercera estación</option>
@@ -249,6 +261,13 @@
                                                 <option value="Arte estilo mural mexicano inspirado en Diego Rivera: figuras monumentales, colores tierra y simbología cultural.">🇲🇽 Mural mexicano</option>
                                             </optgroup>
                                         </select>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Texto en imágenes</span>
+                                        <div style="display: flex; align-items: center; gap: 10px; min-height: 34px;">
+                                            <input type="checkbox" id="strictImagePromptMode">
+                                            <span>Modo estricto: evitar texto visible y texto mixto</span>
+                                        </div>
                                     </label>
                                     <label class="er-field">
                                         <span>Narrativa</span>
@@ -489,7 +508,28 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="er-theme-config">
+                        <div class="er-theme-config">
+                            <div class="er-card-kicker">Paleta de salas (estación / tema)</div>
+                        <div id="previewRoomPaletteReference" class="er-preview-room-palette-grid">
+                            <section class="er-preview-palette-section">
+                                <h6 class="er-preview-palette-title">Colores por estación</h6>
+                                <div class="er-preview-palette-list">
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#fcc659"><span class="er-preview-palette-label">Estación 1</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#fcc659</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#fcc659" title="Copiar #fcc659"><i class="fas fa-copy"></i></button></div>
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#bbd152"><span class="er-preview-palette-label">Estación 2</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#bbd152</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#bbd152" title="Copiar #bbd152"><i class="fas fa-copy"></i></button></div>
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#e95297"><span class="er-preview-palette-label">Estación 3</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#e95297</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#e95297" title="Copiar #e95297"><i class="fas fa-copy"></i></button></div>
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#02b0a3"><span class="er-preview-palette-label">Estación 4</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#02b0a3</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#02b0a3" title="Copiar #02b0a3"><i class="fas fa-copy"></i></button></div>
+                                </div>
+                            </section>
+                            <section class="er-preview-palette-section">
+                                <h6 class="er-preview-palette-title">Colores por unidad/tema</h6>
+                                <div class="er-preview-palette-list">
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#2da6b1"><span class="er-preview-palette-label">Unidad/Tema 1</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#2da6b1</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#2da6b1" title="Copiar #2da6b1"><i class="fas fa-copy"></i></button></div>
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#ea5a5a"><span class="er-preview-palette-label">Unidad/Tema 2</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#ea5a5a</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#ea5a5a" title="Copiar #ea5a5a"><i class="fas fa-copy"></i></button></div>
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#952e89"><span class="er-preview-palette-label">Unidad/Tema 3</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#952e89</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#952e89" title="Copiar #952e89"><i class="fas fa-copy"></i></button></div>
+                                    <div class="er-preview-palette-item" style="--preview-palette-color:#e48119"><span class="er-preview-palette-label">Unidad/Tema 4</span><span class="er-preview-palette-chip" aria-hidden="true"></span><code class="er-preview-palette-code">#e48119</code><button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="#e48119" title="Copiar #e48119"><i class="fas fa-copy"></i></button></div>
+                                </div>
+                            </section>
+                        </div>
                         <div class="er-card-kicker">Paletas del juego</div>
                         <div class="er-preview-theme-presets" role="group" aria-label="Presets del juego">
                             <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="midnightAurora">Midnight Aurora</button>
@@ -549,6 +589,7 @@
             </div>
         </div>
     </div>
+    <input id="activityImageInput" type="file" accept="image/*" hidden>
 
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="vendor/sortablejs/Sortable.min.js"></script>

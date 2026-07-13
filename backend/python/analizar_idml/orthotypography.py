@@ -30,12 +30,18 @@ def _iter_text_windows(block, window_size=900):
     while cursor < len(normalized):
         upper = min(cursor + window_size, len(normalized))
         if upper < len(normalized):
-            boundary = max(
+            strong_boundary = max(
                 normalized.rfind("\n", cursor, upper),
-                normalized.rfind(" ", cursor, upper),
+                normalized.rfind(". ", cursor, upper),
+                normalized.rfind("! ", cursor, upper),
+                normalized.rfind("? ", cursor, upper),
+                normalized.rfind(".\n", cursor, upper),
+                normalized.rfind("!\n", cursor, upper),
+                normalized.rfind("?\n", cursor, upper),
             )
+            boundary = strong_boundary if strong_boundary > cursor + 120 else normalized.rfind(" ", cursor, upper)
             if boundary > cursor + 120:
-                upper = boundary
+                upper = boundary + (1 if normalized[boundary:boundary + 1] in ".!?" else 0)
         chunk = normalized[cursor:upper].strip()
         if len(chunk) >= 20:
             yield {
@@ -68,8 +74,19 @@ def _is_valid_issue(text, excerpt, suggestion):
         return False
     if clean_excerpt.lower() == clean_suggestion.lower():
         return False
-    if clean_excerpt.lower() not in str(text or "").lower():
+    normalized_text = re.sub(r"\s+", " ", str(text or "")).strip()
+    normalized_excerpt = re.sub(r"\s+", " ", clean_excerpt).strip()
+    normalized_suggestion = re.sub(r"\s+", " ", clean_suggestion).strip()
+    text_lower = normalized_text.lower()
+    excerpt_lower = normalized_excerpt.lower()
+    if excerpt_lower not in text_lower:
         return False
+    if normalized_suggestion.startswith("¿") and normalized_excerpt.endswith("?"):
+        start = text_lower.find(excerpt_lower)
+        last_opening = text_lower.rfind("¿", 0, start)
+        last_closing = text_lower.rfind("?", 0, start)
+        if last_opening > last_closing:
+            return False
     return True
 
 
@@ -86,12 +103,146 @@ def _build_issue_message(page_name="", reason="", excerpt="", suggestion=""):
     return details
 
 
-def find_orthotypography_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2):
-    if gemini_verifier is None or not getattr(gemini_verifier, "enabled", False):
-        return []
+def _append_local_issue(issues, seen, block, text, excerpt, suggestion, reason, max_issues):
+    clean_excerpt = str(excerpt or "").strip()
+    clean_suggestion = str(suggestion or "").strip()
+    if not clean_excerpt or not clean_suggestion:
+        return False
+    signature = (
+        str((block or {}).get("pageName") or ""),
+        str((block or {}).get("storyId") or ""),
+        clean_excerpt.lower(),
+        clean_suggestion.lower(),
+    )
+    if signature in seen:
+        return False
+    seen.add(signature)
+    issues.append({
+        "pageName": (block or {}).get("pageName") or "",
+        "storyId": (block or {}).get("storyId") or "",
+        "storyTitle": (block or {}).get("storyTitle") or "",
+        "storySource": (block or {}).get("storySource") or "",
+        "blockType": (block or {}).get("blockType") or "",
+        "styleName": (block or {}).get("styleName") or "",
+        "frameRect": (block or {}).get("frameRect") or None,
+        "message": _build_issue_message((block or {}).get("pageName"), reason, clean_excerpt, clean_suggestion),
+        "context": _build_context(text, clean_excerpt),
+        "excerpt": clean_excerpt,
+        "suggestion": clean_suggestion,
+        "providers": ["local-rules"],
+    })
+    return len(issues) >= max_issues
 
+
+def _iter_questions_without_opening_mark(text):
+    source = re.sub(r"\s+", " ", str(text or "")).strip()
+    if "?" not in source:
+        return
+    for question_match in re.finditer(r"\?", source):
+        prefix = source[:question_match.end()]
+        last_opening = prefix.rfind("¿", 0, -1)
+        last_closing = prefix.rfind("?", 0, -1)
+        if last_opening > last_closing:
+            continue
+        previous_boundary = max(
+            prefix.rfind(".", 0, -1),
+            prefix.rfind("!", 0, -1),
+            last_closing,
+        )
+        segment = prefix[previous_boundary + 1:].strip()
+        if not segment or "¿" in segment:
+            continue
+        if len(segment) < 8 or len(segment) > 180:
+            continue
+        if len(re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}", segment)) < 2:
+            continue
+        yield segment, f"¿{segment}"
+
+
+def _build_spacing_before_punctuation_pair(text="", start=0, end=0, punctuation=""):
+    source = str(text or "")
+    clean_punctuation = str(punctuation or "").strip()
+    prefix = source[:max(0, int(start or 0))]
+    left_match = re.search(r"(\S+)\s*$", prefix)
+    left_token = left_match.group(1) if left_match else ""
+    raw_gap = source[max(0, int(start or 0)):max(0, int(end or 0))]
+    if left_token:
+        return f"{left_token}{raw_gap}", f"{left_token}{clean_punctuation}"
+    return raw_gap, clean_punctuation
+
+
+def _looks_like_missing_inline_value_before_comma(text="", start=0, end=0):
+    source = str(text or "")
+    prefix = source[:max(0, int(start or 0))]
+    suffix = source[max(0, int(end or 0)):]
+    left_match = re.search(r"(\S+)\s*$", prefix)
+    left_token = (left_match.group(1) if left_match else "").strip("¿¡()[]{}\"'“”‘’").lower()
+    right_match = re.match(r"\s*([¿¡])", suffix)
+    if not right_match:
+        return False
+    return left_token in {
+        "es",
+        "son",
+        "era",
+        "eran",
+        "fue",
+        "será",
+        "seran",
+        "serán",
+        "vale",
+        "mide",
+        "tiene",
+    }
+
+
+def _find_local_orthotypography_issues(text_blocks, max_issues=20):
     issues = []
     seen = set()
+    for block in text_blocks or []:
+        for window in _iter_text_windows(block, window_size=1400):
+            text = str(window.get("text") or "")
+            for match in re.finditer(r"\s+([,.;:!?])", text):
+                if match.group(1) == "," and _looks_like_missing_inline_value_before_comma(text, match.start(), match.end()):
+                    continue
+                excerpt, suggestion = _build_spacing_before_punctuation_pair(
+                    text,
+                    match.start(),
+                    match.end(),
+                    match.group(1),
+                )
+                if _append_local_issue(issues, seen, window, text, excerpt, suggestion, "Espacio indebido antes de signo de puntuación.", max_issues):
+                    return issues
+            for match in re.finditer(r"([!?])\1+|\.{4,}|,{2,}|;{2,}|:{2,}", text):
+                excerpt = match.group(0)
+                suggestion = "…" if excerpt.startswith("....") else excerpt[0]
+                if _append_local_issue(issues, seen, window, text, excerpt, suggestion, "Secuencia de puntuación anómala.", max_issues):
+                    return issues
+            for excerpt, suggestion in _iter_questions_without_opening_mark(text):
+                if _append_local_issue(issues, seen, window, text, excerpt, suggestion, "Pregunta sin signo de apertura.", max_issues):
+                    return issues
+            if text.count("(") != text.count(")"):
+                excerpt = "(" if text.count("(") > text.count(")") else ")"
+                suggestion = "Revisar paréntesis de apertura y cierre"
+                if _append_local_issue(issues, seen, window, text, excerpt, suggestion, "Paréntesis desbalanceados.", max_issues):
+                    return issues
+    return issues
+
+
+def find_orthotypography_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2):
+    issues = _find_local_orthotypography_issues(text_blocks, max_issues=max_issues)
+    seen = {
+        (
+            str(issue.get("storyId") or ""),
+            str(issue.get("excerpt") or "").lower(),
+            str(issue.get("suggestion") or "").lower(),
+        )
+        for issue in issues
+    }
+    if len(issues) >= max_issues:
+        return issues
+    if gemini_verifier is None or not getattr(gemini_verifier, "enabled", False):
+        return issues
+
     processed_windows = 0
     story_windows = {}
     for block in text_blocks or []:

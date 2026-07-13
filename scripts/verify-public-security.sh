@@ -8,7 +8,7 @@ cd "$ROOT_DIR"
 check_absent() {
   local pattern="$1"
   local scope="$2"
-  if rg -n --hidden --glob '!functions/**' --glob '!servidor-dalle/**' --glob '!charly-app/**' --glob '!public/vendor/**' "$pattern" $scope; then
+  if rg -n --hidden --glob '!functions/**' --glob '!charly-app/**' --glob '!public/vendor/**' "$pattern" $scope; then
     echo "Pattern still present: $pattern" >&2
     exit 1
   fi
@@ -25,7 +25,7 @@ check_missing_file() {
 check_absent_pcre2() {
   local pattern="$1"
   local scope="$2"
-  if rg -n --pcre2 --hidden --glob '!functions/**' --glob '!servidor-dalle/**' --glob '!charly-app/**' --glob '!public/vendor/**' "$pattern" $scope; then
+  if rg -n --pcre2 --hidden --glob '!functions/**' --glob '!charly-app/**' --glob '!public/vendor/**' "$pattern" $scope; then
     echo "Pattern still present: $pattern" >&2
     exit 1
   fi

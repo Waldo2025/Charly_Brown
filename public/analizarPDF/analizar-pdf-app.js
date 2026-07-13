@@ -6,25 +6,46 @@ import {
   loadSessions,
   pollAnalysisStatus,
   saveSession
-} from "./analizar-pdf-session-store.js";
-import { createAnalizarPdfSidepanelApi } from "./analizar-pdf-sidepanel.js";
-import { createAnalizarPdfResultsRenderer } from "./analizar-pdf-results.js";
+} from "./analizar-pdf-session-store.js?v=2026-1.0.10.466";
+import { createAnalizarPdfSidepanelApi } from "./analizar-pdf-sidepanel.js?v=2026-1.0.10.452";
+import { createAnalizarPdfResultsRenderer } from "./analizar-pdf-results.js?v=2026-1.0.10.469";
 import {
   activateAnalizarPdfStyleMapping,
   cancelAnalizarPdfAnalysis,
+  createAnalizarPdfIdmlTemplateFromFile,
   deleteAnalizarPdfStyleMapping,
   exportAnalizarPdfCorrectedIdml,
   listAnalizarPdfStyleMappings,
   queueAnalizarPdfUpload,
+  queueAnalizarPdfStoredSourceAnalysis,
+  runAnalizarPdfQuickOrthotypography,
   saveAnalizarPdfStyleMapping
-} from "./analizar-pdf-api.js";
+} from "./analizar-pdf-api.js?v=2026-1.0.10.452";
 import {
   buildAnalizarPdfLocalBlobKey,
+  deleteAnalizarPdfCachedAnalysisSession,
   deleteAnalizarPdfCachedFile,
   deleteAnalizarPdfCachedFilesBySession,
+  getAnalizarPdfCachedAnalysisSession,
   getAnalizarPdfCachedFile,
+  listAnalizarPdfCachedFilesByRevision,
+  listAnalizarPdfCachedFilesBySession,
+  putAnalizarPdfCachedAnalysisSession,
   putAnalizarPdfCachedFile
-} from "./analizar-pdf-file-cache.js";
+} from "./analizar-pdf-file-cache.js?v=2026-1.0.10.463";
+import {
+  buildAnalysisTargetsForAll as buildAnalysisTargetsForAllPure,
+  documentNameMatchesRevision,
+  ensureActivePointers,
+  getEffectiveRecortableRole,
+  hasRenderableAnalysis,
+  mergeRenderableFileResults,
+  normalizeRecortableRole,
+  prioritizeRevisionsForRecortablesDestinations,
+  recortableRoleSupportsDestination,
+  shouldShowRecortableRole,
+  upsertRevisionInSession,
+} from "./analizar-pdf-session-logic.js?v=2026-1.0.10.466";
 
 const state = {
   sessions: [],
@@ -36,12 +57,18 @@ const state = {
   isSavingSession: false,
   isAnalyzingAll: false,
   isAnalyzingCurrent: false,
+  isQuickAnalyzingAll: false,
+  isCreatingTemplateFromFile: false,
+  isCreatingTemplatesFromAll: false,
+  defaultRevisionsModalOpen: false,
   currentUser: null,
   selectedFiles: [],
   analysisPollTimer: 0,
   analysisPollController: null,
   persistedTitlesBySessionId: {},
   styleMappings: [],
+  mappingGroups: [],
+  activeMappingGroupId: "",
   activeMappingId: "",
   mappingsModalOpen: false,
   correctionSelectionsByScopeKey: {},
@@ -49,10 +76,22 @@ const state = {
   exportConfigModalOpen: false,
   exportCleanupOptions: createDefaultExportCleanupOptions(),
   exportCleanupOptionsByScopeKey: {},
+  clearedRailSessionIds: {},
+  isRehydratingFileSelection: false,
+  jobMetaText: "",
+  jobMetaSessionId: "",
 };
 
 let exportConfigRestoreFocusEl = null;
 const ANALYZE_BTN_DEFAULT_LABEL = String(document.getElementById("analizarPdfAnalyzeBtn")?.textContent || "Analizar ficha editorial").trim() || "Analizar ficha editorial";
+const LOCAL_ANALYSIS_SESSION_STORAGE_PREFIX = "cb_analizar_pdf_local_session:";
+const MAPPING_GROUPS_STORAGE_KEY = "cb_analizar_pdf_mapping_groups";
+const UNGROUPED_MAPPING_GROUP_ID = "__ungrouped__";
+const LEGACY_DEFAULT_MAPPING_IDS = new Set([
+  "default_la_proyecto",
+  "default_la_recortables",
+  "default_la_primero_unidad",
+]);
 
 function logAnalizarPdfFlow(step = "", payload = null) {
   const label = `[analizar-pdf][flow] ${String(step || "").trim()}`;
@@ -119,7 +158,10 @@ const els = {
   unidadInput: document.getElementById("analizarPdfUnidadInput"),
   edicionNumeroInput: document.getElementById("analizarPdfEdicionNumeroInput"),
   revisionNumeroInput: document.getElementById("analizarPdfRevisionNumeroInput"),
+  recortableRoleField: document.getElementById("analizarPdfRecortableRoleField"),
+  recortableRoleInput: document.getElementById("analizarPdfRecortableRoleInput"),
   revisionMappingSelect: document.getElementById("analizarPdfRevisionMappingSelect"),
+  createDefaultRevisionsBtn: document.getElementById("analizarPdfCreateDefaultRevisionsBtn"),
   addRevisionBtn: document.getElementById("analizarPdfAddRevisionBtn"),
   revisionList: document.getElementById("analizarPdfRevisionList"),
   fileList: document.getElementById("analizarPdfFileList"),
@@ -132,6 +174,9 @@ const els = {
   fileLabel: document.getElementById("analizarPdfFileLabel"),
   analyzeBtn: document.getElementById("analizarPdfAnalyzeBtn"),
   analyzeAllBtn: document.getElementById("analizarPdfAnalyzeAllBtn"),
+  createTemplateFromFileBtn: document.getElementById("analizarPdfCreateTemplateFromFileBtn"),
+  createTemplatesFromAllBtn: document.getElementById("analizarPdfCreateTemplatesFromAllBtn"),
+  quickAnalyzeAllBtn: document.getElementById("analizarPdfQuickAnalyzeAllBtn"),
   saveBtn: document.getElementById("analizarPdfSaveBtn"),
   copyJobMetaBtn: document.getElementById("analizarPdfCopyJobMetaBtn"),
   exportCorrectedBtn: document.getElementById("analizarPdfExportCorrectedBtn"),
@@ -151,6 +196,12 @@ const els = {
   mappingsGradoFilter: document.getElementById("analizarPdfMappingsGradoFilter"),
   mappingsUnidadFilter: document.getElementById("analizarPdfMappingsUnidadFilter"),
   newMappingBtn: document.getElementById("analizarPdfNewMappingBtn"),
+  createMappingGroupBtn: document.getElementById("analizarPdfCreateMappingGroupBtn"),
+  deleteMappingGroupBtn: document.getElementById("analizarPdfDeleteMappingGroupBtn"),
+  mappingGroupTitleInput: document.getElementById("analizarPdfMappingGroupTitleInput"),
+  mappingGroupsList: document.getElementById("analizarPdfMappingGroupsList"),
+  selectedMappingGroupLabel: document.getElementById("analizarPdfSelectedMappingGroupLabel"),
+  mappingEditorEmpty: document.getElementById("analizarPdfMappingEditorEmpty"),
   mappingTitleInput: document.getElementById("analizarPdfMappingTitleInput"),
   mappingBookTypeInput: document.getElementById("analizarPdfMappingBookTypeInput"),
   mappingNivelInput: document.getElementById("analizarPdfMappingNivelInput"),
@@ -162,6 +213,16 @@ const els = {
   saveMappingBtn: document.getElementById("analizarPdfSaveMappingBtn"),
   addMappingEntryBtn: document.getElementById("analizarPdfAddMappingEntryBtn"),
   mappingEntriesList: document.getElementById("analizarPdfMappingEntriesList"),
+  defaultRevisionsModal: document.getElementById("analizarPdfDefaultRevisionsModal"),
+  defaultSourceTypeInput: document.getElementById("analizarPdfDefaultSourceTypeInput"),
+  defaultBookTypeInput: document.getElementById("analizarPdfDefaultBookTypeInput"),
+  defaultNivelInput: document.getElementById("analizarPdfDefaultNivelInput"),
+  defaultGradoInput: document.getElementById("analizarPdfDefaultGradoInput"),
+  defaultTrimestreInput: document.getElementById("analizarPdfDefaultTrimestreInput"),
+  defaultEdicionNumeroInput: document.getElementById("analizarPdfDefaultEdicionNumeroInput"),
+  defaultRevisionNumeroInput: document.getElementById("analizarPdfDefaultRevisionNumeroInput"),
+  defaultRevisionsSummary: document.getElementById("analizarPdfDefaultRevisionsSummary"),
+  defaultRevisionsConfirmBtn: document.getElementById("analizarPdfDefaultRevisionsConfirmBtn"),
   exportConfigModal: document.getElementById("analizarPdfExportConfigModal"),
   exportConfigCloseBtn: document.getElementById("analizarPdfExportConfigCloseBtn"),
   exportConfigCancelBtn: document.getElementById("analizarPdfExportConfigCancelBtn"),
@@ -182,7 +243,9 @@ const resultsRenderer = createAnalizarPdfResultsRenderer({
   pageReportsEl: els.pageReports,
   onToggleCorrectionMode: handleToggleCorrectionMode,
   onToggleCorrectionPage: handleToggleCorrectionPage,
-  onToggleCorrectionIssue: handleToggleCorrectionIssue
+  onToggleCorrectionIssue: handleToggleCorrectionIssue,
+  onClearRailAnalysis: handleClearRailAnalysis,
+  isRailCleared: (session) => Boolean(state.clearedRailSessionIds[String(session?.id || "").trim()])
 });
 const sidepanelApi = createAnalizarPdfSidepanelApi({
   els,
@@ -276,9 +339,13 @@ function isAuthAnalysisError(error = null) {
   return status === 401 || status === 403 || message.includes("AUTH_REQUIRED") || message.includes("AUTH_INVALID") || message.includes("AUTH_FORBIDDEN");
 }
 
-function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed") {
+function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed", options = {}) {
   const cleanJobId = String(jobId || "").trim();
   const normalizedStatus = String(nextStatus || "failed").trim().toLowerCase() || "failed";
+  const targetRevisionId = String(options?.revisionId || "").trim();
+  const targetFileId = String(options?.fileId || "").trim();
+  const hasExactTarget = Boolean(targetRevisionId && targetFileId);
+  const keepBatchOverlay = options?.keepBatchOverlay === true;
   let changed = false;
   mutateActiveSession((draft) => {
     if (!draft || typeof draft !== "object") {
@@ -293,10 +360,11 @@ function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed") {
     }
     for (const revision of Array.isArray(draft.revisions) ? draft.revisions : []) {
       for (const file of Array.isArray(revision?.files) ? revision.files : []) {
-        if (cleanJobId && String(file?.analysisJobId || "").trim() !== cleanJobId) {
-          continue;
-        }
-        if (!cleanJobId && !isBusyAnalysisStatus(file?.analysisStatus || "")) {
+        const matchesExactTarget = hasExactTarget
+          && String(revision?.id || "").trim() === targetRevisionId
+          && String(file?.id || "").trim() === targetFileId;
+        const matchesJob = cleanJobId && String(file?.analysisJobId || "").trim() === cleanJobId;
+        if (hasExactTarget ? !matchesExactTarget : cleanJobId ? !matchesJob : !isBusyAnalysisStatus(file?.analysisStatus || "")) {
           continue;
         }
         file.analysisStatus = normalizedStatus;
@@ -309,26 +377,131 @@ function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed") {
   }, { render: false });
   window.clearTimeout(state.analysisPollTimer);
   state.analysisPollTimer = 0;
-  state.isAnalyzingCurrent = false;
-  state.isAnalyzingAll = false;
-  setBusyOverlay("");
+  if (!keepBatchOverlay) {
+    state.isAnalyzingCurrent = false;
+    state.isAnalyzingAll = false;
+    setBusyOverlay("");
+  } else {
+    setBusyOverlay(state.busyOverlayLabel || "Analizando todas las fichas editoriales");
+  }
   renderActionButtonState();
   renderAll();
   return changed;
 }
 
+function applyAnalysisStatusPayloadToLocalSession(payload = null) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const cleanJobId = String(payload.jobId || "").trim();
+  const revisionId = String(payload.revisionId || "").trim();
+  const fileId = String(payload.fileId || "").trim();
+  const hasResult = payload.result && typeof payload.result === "object";
+  const hasSummary = payload.resultSummary && typeof payload.resultSummary === "object";
+  const status = String(payload.status || "").trim().toLowerCase();
+  const session = store.getActiveSession();
+  if (!session || (!cleanJobId && (!revisionId || !fileId))) {
+    return session;
+  }
+  const next = mutateActiveSession((draft) => {
+    let targetRevision = null;
+    let targetFile = null;
+    if (revisionId && fileId) {
+      targetRevision = (Array.isArray(draft.revisions) ? draft.revisions : [])
+        .find((revision) => String(revision?.id || "").trim() === revisionId) || null;
+      targetFile = (Array.isArray(targetRevision?.files) ? targetRevision.files : [])
+        .find((file) => String(file?.id || "").trim() === fileId) || null;
+    }
+    if (!targetFile || !targetRevision) {
+      for (const revision of Array.isArray(draft.revisions) ? draft.revisions : []) {
+        for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+          const matchesJob = cleanJobId && String(file?.analysisJobId || "").trim() === cleanJobId;
+          if (matchesJob) {
+            targetRevision = revision;
+            targetFile = file;
+            break;
+          }
+        }
+        if (targetFile) break;
+      }
+    }
+    if (!targetFile || !targetRevision) {
+      return draft;
+    }
+    targetFile.analysisStatus = status || targetFile.analysisStatus || "idle";
+    targetFile.analysisJobId = ["queued", "processing", "uploading"].includes(status) ? cleanJobId : "";
+    if (hasResult) {
+      targetFile.result = payload.result;
+    }
+    if (hasSummary) {
+      targetFile.resultSummary = payload.resultSummary;
+      targetRevision.latestAnalysisAt = String(payload.resultSummary?.analyzedAt || targetRevision.latestAnalysisAt || "").trim();
+    }
+    targetFile.updatedAt = new Date().toISOString();
+    targetRevision.summary = buildRevisionSummary(targetRevision.files || []);
+    targetRevision.updatedAt = new Date().toISOString();
+    draft.analysisStatus = ["queued", "processing", "uploading"].includes(status) ? status : "idle";
+    draft.analysisJobId = ["queued", "processing", "uploading"].includes(status) ? cleanJobId : "";
+    return draft;
+  }, { render: false });
+  if (next) {
+    persistLocalAnalysisSession(next);
+  }
+  return next || session;
+}
+
+function hasAvailableIdmlSource(file = null) {
+  return Boolean(
+    file
+    && (
+      String(file?.sourceAssetPath || "").trim()
+      || String(file?.localBlobKey || "").trim()
+      || file?.hasLocalSource === true
+    )
+  );
+}
+
+function isIdmlFileEntry(file = null, session = null) {
+  const sourceReference = [
+    file?.documentName,
+    file?.fileName,
+    file?.sourceAssetPath,
+    file?.sourceStoragePath,
+    file?.sourceDownloadUrl
+  ].map((value) => String(value || "").trim().toLowerCase()).join(" ");
+  return getNormalizedSourceType(file?.sourceType || session?.sourceType || "") === "idml"
+    || /\.idml(?:\?|#|$)/i.test(sourceReference);
+}
+
 function renderActionButtonState() {
-  const blockAll = state.isAnalyzingAll || state.isAnalyzingCurrent || state.isSavingSession;
+  const blockAll = state.isAnalyzingAll || state.isAnalyzingCurrent || state.isSavingSession || state.isQuickAnalyzingAll || state.isCreatingTemplateFromFile || state.isCreatingTemplatesFromAll;
   const session = store.getActiveSession();
   const revision = getActiveRevision(session);
   const file = getActiveFile(session, revision);
   const fileBusy = isBusyAnalysisStatus(file?.analysisStatus || "");
+  const isIdmlSession = getNormalizedSourceType(session?.sourceType || file?.sourceType || "") === "idml" || isIdmlFileEntry(file, session);
+  const activeHasSource = isIdmlSession && isIdmlFileEntry(file, session) && hasAvailableIdmlSource(file);
+  const anyQuickSource = (Array.isArray(session?.revisions) ? session.revisions : []).some((entry) => {
+    return (Array.isArray(entry?.files) ? entry.files : []).some((item) => isIdmlFileEntry(item, session) && hasAvailableIdmlSource(item));
+  });
   if (els.analyzeBtn) {
     els.analyzeBtn.disabled = blockAll && !fileBusy;
     els.analyzeBtn.textContent = fileBusy ? "Detener análisis" : ANALYZE_BTN_DEFAULT_LABEL;
   }
   if (els.analyzeAllBtn) {
     els.analyzeAllBtn.disabled = blockAll;
+  }
+  if (els.createDefaultRevisionsBtn) {
+    els.createDefaultRevisionsBtn.disabled = blockAll || !session;
+  }
+  if (els.createTemplateFromFileBtn) {
+    els.createTemplateFromFileBtn.disabled = blockAll || !activeHasSource;
+  }
+  if (els.createTemplatesFromAllBtn) {
+    els.createTemplatesFromAllBtn.disabled = blockAll || !anyQuickSource;
+  }
+  if (els.quickAnalyzeAllBtn) {
+    els.quickAnalyzeAllBtn.disabled = blockAll || !anyQuickSource;
   }
   if (els.saveBtn) {
     els.saveBtn.disabled = blockAll;
@@ -350,13 +523,20 @@ function hideBootSpinner() {
   }, 260);
 }
 
+function getLiveJobMetaElement() {
+  return document.getElementById("analizarPdfJobMeta") || els.jobMeta || null;
+}
+
 function setJobMetaText(value = "") {
-  if (!els.jobMeta) return;
-  els.jobMeta.textContent = String(value || "");
+  state.jobMetaText = String(value || "");
+  state.jobMetaSessionId = String(store.getActiveSession()?.id || state.activeSessionId || "").trim();
+  const jobMeta = getLiveJobMetaElement();
+  if (!jobMeta) return;
+  jobMeta.textContent = state.jobMetaText;
 }
 
 function getJobMetaText() {
-  return String(els.jobMeta?.textContent || "").trim();
+  return String(getLiveJobMetaElement()?.textContent || "").trim();
 }
 
 function safeLocalStorageGet(key = "") {
@@ -373,6 +553,121 @@ function safeLocalStorageSet(key = "", value = "") {
   } catch (_) {
     // noop
   }
+}
+
+function safeLocalStorageRemove(key = "") {
+  try {
+    window.localStorage.removeItem(key);
+  } catch (_) {
+    // noop
+  }
+}
+
+function getLocalAnalysisSessionStorageKey(sessionId = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  return cleanSessionId ? `${LOCAL_ANALYSIS_SESSION_STORAGE_PREFIX}${cleanSessionId}` : "";
+}
+
+function persistLocalAnalysisSession(session = null) {
+  const sessionId = String(session?.id || "").trim();
+  const key = getLocalAnalysisSessionStorageKey(sessionId);
+  if (!key || !session) return;
+  putAnalizarPdfCachedAnalysisSession(session).catch(() => {
+    try {
+      safeLocalStorageSet(key, JSON.stringify(session));
+    } catch (_) {
+      // noop
+    }
+  });
+}
+
+function mergeLocalAnalysisIntoSession(session = null, local = null) {
+  if (!session || !local || typeof local !== "object") return session;
+  const next = structuredClone(session);
+  const localRevisions = Array.isArray(local.revisions) ? local.revisions : [];
+  const localRevisionById = new Map(
+    localRevisions
+      .map((revision) => [String(revision?.id || "").trim(), revision])
+      .filter(([id]) => id)
+  );
+  next.revisions = Array.isArray(next.revisions) ? next.revisions : [];
+  for (const revision of next.revisions) {
+    const revisionId = String(revision?.id || "").trim();
+    const localRevision = localRevisionById.get(revisionId);
+    if (!localRevision) continue;
+    const localFilesById = new Map(
+      (Array.isArray(localRevision.files) ? localRevision.files : [])
+        .map((file) => [String(file?.id || "").trim(), file])
+        .filter(([id]) => id)
+    );
+    revision.files = Array.isArray(revision.files) ? revision.files : [];
+    for (const file of revision.files) {
+      const localFile = localFilesById.get(String(file?.id || "").trim());
+      if (!localFile || (!hasRenderableAnalysis(localFile) && !localFile.quickAnalysis)) continue;
+      if (hasRenderableAnalysis(localFile)) {
+        file.analysisStatus = localFile.analysisStatus || file.analysisStatus || "completed";
+        file.analysisJobId = isBusyAnalysisStatus(localFile.analysisStatus || "") ? (localFile.analysisJobId || "") : "";
+        file.result = localFile.result || file.result || createEmptyResultPayload();
+        file.resultSummary = localFile.resultSummary || file.resultSummary || createEmptyResultSummary();
+      }
+      if (localFile.quickAnalysis) {
+        file.quickAnalysis = localFile.quickAnalysis;
+      }
+      file.updatedAt = localFile.updatedAt || file.updatedAt || "";
+    }
+    const existingFileIds = new Set(revision.files.map((file) => String(file?.id || "").trim()).filter(Boolean));
+    for (const localFile of Array.isArray(localRevision.files) ? localRevision.files : []) {
+      const localFileId = String(localFile?.id || "").trim();
+      if (!localFileId || existingFileIds.has(localFileId) || (!hasRenderableAnalysis(localFile) && !localFile.quickAnalysis)) continue;
+      revision.files.push(structuredClone(localFile));
+    }
+    revision.summary = buildRevisionSummary(revision.files);
+    revision.latestAnalysisAt = revision.files.reduce((latest, file) => {
+      const analyzedAt = String(file?.resultSummary?.analyzedAt || "").trim();
+      return analyzedAt && analyzedAt > latest ? analyzedAt : latest;
+    }, String(revision.latestAnalysisAt || "").trim());
+  }
+  const existingRevisionIds = new Set(next.revisions.map((revision) => String(revision?.id || "").trim()).filter(Boolean));
+  for (const localRevision of localRevisions) {
+    const localRevisionId = String(localRevision?.id || "").trim();
+    const renderableFiles = (Array.isArray(localRevision?.files) ? localRevision.files : []).filter((file) => hasRenderableAnalysis(file) || file?.quickAnalysis);
+    if (!localRevisionId || existingRevisionIds.has(localRevisionId) || !renderableFiles.length) continue;
+    next.revisions.push({
+      ...structuredClone(localRevision),
+      files: renderableFiles.map((file) => structuredClone(file)),
+      summary: buildRevisionSummary(renderableFiles),
+    });
+  }
+  return next;
+}
+
+async function restoreLocalAnalysisSession(session = null) {
+  const sessionId = String(session?.id || "").trim();
+  const key = getLocalAnalysisSessionStorageKey(sessionId);
+  if (!key) return session;
+  const cached = await getAnalizarPdfCachedAnalysisSession(sessionId).catch(() => null);
+  if (cached && typeof cached === "object") {
+    return mergeLocalAnalysisIntoSession(session, cached);
+  }
+  try {
+    const raw = safeLocalStorageGet(key);
+    if (!raw) return session;
+    const local = JSON.parse(raw);
+    if (!local || typeof local !== "object") return session;
+    const merged = mergeLocalAnalysisIntoSession(session, local);
+    putAnalizarPdfCachedAnalysisSession(merged).catch(() => {});
+    return merged;
+  } catch (_) {
+    return session;
+  }
+}
+
+function removeLocalAnalysisSession(sessionId = "") {
+  const key = getLocalAnalysisSessionStorageKey(sessionId);
+  if (key) {
+    safeLocalStorageRemove(key);
+  }
+  deleteAnalizarPdfCachedAnalysisSession(sessionId).catch(() => {});
 }
 
 function buildSessionTitleFromBibliographicInfo(info = {}) {
@@ -455,6 +750,22 @@ function buildMappingScopeKey(info = {}) {
     String(info?.grado || "").trim().toLowerCase(),
     String(info?.unidad || "").trim().toLowerCase(),
   ].filter(Boolean).join("|");
+}
+
+function buildMappingLookupScopeKeys(info = {}) {
+  const keys = [];
+  const exactKey = buildMappingScopeKey(info);
+  if (exactKey) {
+    keys.push(exactKey);
+  }
+  const wildcardGradeKey = buildMappingScopeKey({
+    ...info,
+    grado: "",
+  });
+  if (wildcardGradeKey && !keys.includes(wildcardGradeKey)) {
+    keys.push(wildcardGradeKey);
+  }
+  return keys;
 }
 
 function buildCorrectionScopeKey(sessionId = "", revisionId = "", fileId = "") {
@@ -821,10 +1132,231 @@ function normalizeStyleMapping(raw = {}, index = 0) {
     nivel,
     grado,
     unidad,
+    groupId: String(source.groupId || "").trim(),
+    groupTitle: String(source.groupTitle || "").trim(),
     isActive: source.isActive === true,
     updatedAt: String(source.updatedAt || "").trim(),
     entries: Array.isArray(source.entries) ? source.entries.map((entry, entryIndex) => normalizeMappingEntry(entry, entryIndex)) : [],
   };
+}
+
+function isLegacyDefaultStyleMapping(mapping = null) {
+  const id = String(mapping?.id || "").trim();
+  if (LEGACY_DEFAULT_MAPPING_IDS.has(id)) return true;
+  const slug = String(mapping?.mappingSlug || "").trim();
+  if (LEGACY_DEFAULT_MAPPING_IDS.has(slug)) return true;
+  const title = String(mapping?.title || "").trim().toLowerCase();
+  return title === "la · proyecto" || title === "la · recortables" || title === "la · primero · unidad normal";
+}
+
+function slugifyMappingGroupPart(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+function normalizeMappingGroup(raw = {}, index = 0) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const title = String(source.title || source.groupTitle || "").trim() || `Grupo ${index + 1}`;
+  const id = String(source.id || source.groupId || `mapping_group_${slugifyMappingGroupPart(title) || index + 1}`).trim();
+  return {
+    id,
+    title,
+    createdAt: String(source.createdAt || new Date().toISOString()).trim(),
+  };
+}
+
+function loadMappingGroupsFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(MAPPING_GROUPS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    state.mappingGroups = Array.isArray(parsed) ? parsed.map((entry, index) => normalizeMappingGroup(entry, index)) : [];
+  } catch (_) {
+    state.mappingGroups = [];
+  }
+}
+
+function persistMappingGroupsToStorage() {
+  try {
+    window.localStorage.setItem(MAPPING_GROUPS_STORAGE_KEY, JSON.stringify(state.mappingGroups || []));
+  } catch (_) {
+    // best-effort
+  }
+}
+
+function getMappingGroups() {
+  const groupsById = new Map();
+  for (const group of Array.isArray(state.mappingGroups) ? state.mappingGroups : []) {
+    const normalized = normalizeMappingGroup(group, groupsById.size);
+    if (normalized.id) groupsById.set(normalized.id, normalized);
+  }
+  for (const mapping of Array.isArray(state.styleMappings) ? state.styleMappings : []) {
+    const groupId = String(mapping?.groupId || "").trim();
+    const groupTitle = String(mapping?.groupTitle || "").trim();
+    if (!groupId || groupsById.has(groupId)) continue;
+    groupsById.set(groupId, normalizeMappingGroup({ id: groupId, title: groupTitle || groupId }, groupsById.size));
+  }
+  state.mappingGroups = [...groupsById.values()];
+  persistMappingGroupsToStorage();
+  return state.mappingGroups;
+}
+
+function createMappingGroup(title = "") {
+  const cleanTitle = String(title || "").trim() || "Grupo de plantillas";
+  const baseId = `mapping_group_${slugifyMappingGroupPart(cleanTitle) || Date.now()}`;
+  const existingIds = new Set(getMappingGroups().map((group) => group.id));
+  let id = baseId;
+  let suffix = 2;
+  while (existingIds.has(id)) {
+    id = `${baseId}_${suffix}`;
+    suffix += 1;
+  }
+  const group = normalizeMappingGroup({ id, title: cleanTitle, createdAt: new Date().toISOString() });
+  state.mappingGroups = [...getMappingGroups(), group];
+  persistMappingGroupsToStorage();
+  return group;
+}
+
+function findMappingGroupByTitle(title = "") {
+  const targetSlug = slugifyMappingGroupPart(title);
+  if (!targetSlug) return null;
+  return getMappingGroups().find((group) => slugifyMappingGroupPart(group?.title || "") === targetSlug) || null;
+}
+
+function getOrCreateMappingGroup(title = "") {
+  const existing = findMappingGroupByTitle(title);
+  if (existing) {
+    return existing;
+  }
+  return createMappingGroup(title);
+}
+
+function removeMappingGroupFromStorage(groupId = "") {
+  const cleanGroupId = String(groupId || "").trim();
+  if (!cleanGroupId || cleanGroupId === UNGROUPED_MAPPING_GROUP_ID) return false;
+  const currentGroups = getMappingGroups();
+  const nextGroups = currentGroups.filter((group) => group.id !== cleanGroupId);
+  if (nextGroups.length === currentGroups.length) return false;
+  state.mappingGroups = nextGroups;
+  persistMappingGroupsToStorage();
+  return true;
+}
+
+function getMappingGroupIdForMapping(mapping = null) {
+  return String(mapping?.groupId || "").trim() || UNGROUPED_MAPPING_GROUP_ID;
+}
+
+function getMappingGroupTitleById(groupId = "") {
+  const cleanGroupId = String(groupId || "").trim();
+  if (!cleanGroupId || cleanGroupId === UNGROUPED_MAPPING_GROUP_ID) {
+    return "Sin grupo";
+  }
+  const group = getMappingGroups().find((entry) => entry.id === cleanGroupId) || null;
+  return group?.title || cleanGroupId;
+}
+
+function getVisibleMappingGroupsForMappings(mappings = []) {
+  const filteredMappings = Array.isArray(mappings) ? mappings : [];
+  const countsByGroupId = new Map();
+  for (const mapping of filteredMappings) {
+    const groupId = getMappingGroupIdForMapping(mapping);
+    countsByGroupId.set(groupId, (countsByGroupId.get(groupId) || 0) + 1);
+  }
+  const groups = getMappingGroups().map((group) => ({
+    ...group,
+    count: countsByGroupId.get(group.id) || 0,
+  }));
+  if (countsByGroupId.has(UNGROUPED_MAPPING_GROUP_ID)) {
+    groups.unshift({
+      id: UNGROUPED_MAPPING_GROUP_ID,
+      title: "Sin grupo",
+      count: countsByGroupId.get(UNGROUPED_MAPPING_GROUP_ID) || 0,
+      isVirtual: true,
+    });
+  }
+  return groups.filter((group) => group.count > 0 || !group.isVirtual);
+}
+
+function ensureActiveMappingGroupSelection(filteredMappings = []) {
+  const visibleGroups = getVisibleMappingGroupsForMappings(filteredMappings);
+  const visibleGroupIds = new Set(visibleGroups.map((group) => group.id));
+  const activeMapping = getActiveMapping();
+  const draft = state.__mappingDraft ? normalizeStyleMapping(state.__mappingDraft) : null;
+  const selectedFromMapping = draft
+    ? getMappingGroupIdForMapping(draft)
+    : activeMapping
+      ? getMappingGroupIdForMapping(activeMapping)
+      : "";
+  if (selectedFromMapping && visibleGroupIds.has(selectedFromMapping)) {
+    state.activeMappingGroupId = selectedFromMapping;
+    return visibleGroups;
+  }
+  if (!state.activeMappingGroupId || !visibleGroupIds.has(state.activeMappingGroupId)) {
+    state.activeMappingGroupId = visibleGroups[0]?.id || "";
+  }
+  if (state.activeMappingId) {
+    const selectedGroupId = state.activeMappingGroupId;
+    const activeGroupId = activeMapping ? getMappingGroupIdForMapping(activeMapping) : "";
+    if (selectedGroupId && activeGroupId && selectedGroupId !== activeGroupId) {
+      state.activeMappingId = "";
+      state.__mappingDraft = null;
+    }
+  }
+  return visibleGroups;
+}
+
+function getMappingsForActiveGroup(filteredMappings = []) {
+  const selectedGroupId = String(state.activeMappingGroupId || "").trim();
+  if (!selectedGroupId) return [];
+  return (Array.isArray(filteredMappings) ? filteredMappings : [])
+    .filter((mapping) => getMappingGroupIdForMapping(mapping) === selectedGroupId);
+}
+
+function buildTemplateGroupTitle(session = null) {
+  const info = session?.bibliographicInfo || {};
+  return [
+    "Plantillas",
+    info.nivel,
+    info.grado,
+    info.trimestre,
+    info.edicionNumero ? `${info.edicionNumero}` : "",
+  ].map((value) => String(value || "").trim()).filter(Boolean).join(" · ") || "Plantillas de fichas editoriales";
+}
+
+function buildTemplateMappingIdentity(session = null, revision = null) {
+  const info = session?.bibliographicInfo || {};
+  return [
+    info.bookType,
+    info.nivel,
+    info.grado,
+    String(revision?.unidad || info.unidad || "").trim(),
+    String(revision?.revisionNumero || "").trim(),
+  ].map((value) => slugifyMappingGroupPart(value)).filter(Boolean).join("::");
+}
+
+function findExistingTemplateMappingForRevision(session = null, revision = null, group = null) {
+  const groupId = String(group?.id || "").trim();
+  const identity = buildTemplateMappingIdentity(session, revision);
+  if (!groupId || !identity) return null;
+  return (Array.isArray(state.styleMappings) ? state.styleMappings : []).find((mapping) => {
+    if (String(mapping?.groupId || "").trim() !== groupId) return false;
+    return buildTemplateMappingIdentity({
+      bibliographicInfo: {
+        bookType: mapping.bookType,
+        nivel: mapping.nivel,
+        grado: mapping.grado,
+        unidad: mapping.unidad,
+      },
+    }, {
+      unidad: mapping.unidad,
+      revisionNumero: String(revision?.revisionNumero || "").trim(),
+    }) === identity;
+  }) || null;
 }
 
 function buildMappingTemplateEntries(template = []) {
@@ -885,16 +1417,17 @@ function resolveDefaultMappingForSession(session = null) {
     candidates.push("Unidad normal");
   }
   for (const unidad of candidates.filter(Boolean)) {
-    const scopeKey = buildMappingScopeKey({
+    const scopeKeys = buildMappingLookupScopeKeys({
       bookType: session.bibliographicInfo.bookType,
       nivel: session.bibliographicInfo.nivel,
       grado: session.bibliographicInfo.grado,
       unidad,
     });
-    if (!scopeKey) continue;
-    const match = (Array.isArray(state.styleMappings) ? state.styleMappings : []).find((mapping) => mapping.scopeKey === scopeKey && mapping.isActive);
-    if (match) {
-      return match;
+    for (const scopeKey of scopeKeys) {
+      const match = (Array.isArray(state.styleMappings) ? state.styleMappings : []).find((mapping) => mapping.scopeKey === scopeKey && mapping.isActive);
+      if (match) {
+        return match;
+      }
     }
   }
   return null;
@@ -923,10 +1456,33 @@ function getSessionBaseInfo(session = null) {
   };
 }
 
+function resolveBibliographicRecortableRole(session = null, revision = getActiveRevision(session)) {
+  const unidad = String(revision?.unidad || session?.bibliographicInfo?.unidad || "").trim();
+  if (shouldShowRecortableRole(unidad)) {
+    const revisionRole = normalizeRecortableRole(revision?.recortableRole, unidad);
+    if (revisionRole) {
+      return revisionRole;
+    }
+    const storedRole = normalizeRecortableRole(session?.bibliographicInfo?.recortableRole, unidad);
+    if (storedRole) {
+      return storedRole;
+    }
+  }
+  return "source";
+}
+
 function getRevisionDraftInfo(session = null) {
+  const activeRevision = getActiveRevision(session);
+  const unidad = String(activeRevision?.unidad || session?.bibliographicInfo?.unidad || "").trim();
   return {
-    unidad: String(session?.bibliographicInfo?.unidad || "").trim(),
-    revisionNumero: String(session?.bibliographicInfo?.revisionNumero || "").trim(),
+    unidad,
+    revisionNumero: String(activeRevision?.revisionNumero || session?.bibliographicInfo?.revisionNumero || "").trim(),
+    recortableRole: shouldShowRecortableRole(unidad)
+      ? normalizeRecortableRole(
+        activeRevision?.recortableRole || session?.bibliographicInfo?.recortableRole || "source",
+        unidad
+      )
+      : "",
   };
 }
 
@@ -939,6 +1495,277 @@ function getActiveRevision(session = null) {
 function getActiveFile(session = null, revision = getActiveRevision(session)) {
   const fileId = String(state.activeFileId || "").trim();
   return revision?.files?.find((entry) => entry.id === fileId) || revision?.files?.[0] || null;
+}
+
+function getFileEntryKey(file = null) {
+  return String(file?.fileKey || buildFileKey(file?.documentName || file?.fileName || "")).trim();
+}
+
+function buildNonRecortableFileKeySet(session = null) {
+  const keys = new Set();
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    if (shouldShowRecortableRole(revision?.unidad || "")) {
+      continue;
+    }
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      const fileKey = getFileEntryKey(file);
+      if (fileKey) {
+        keys.add(fileKey);
+      }
+    }
+  }
+  return keys;
+}
+
+function isRecortableFileContaminatedBySource(session = null, revision = null, file = null) {
+  if (!shouldShowRecortableRole(revision?.unidad || "")) {
+    return false;
+  }
+  const fileKey = getFileEntryKey(file);
+  if (!fileKey) {
+    return false;
+  }
+  return buildNonRecortableFileKeySet(session).has(fileKey);
+}
+
+function isRecortableDestinationCandidate(activeRevision = null, candidateRevision = null) {
+  if (!candidateRevision || !shouldShowRecortableRole(candidateRevision?.unidad || "")) {
+    return false;
+  }
+  if (String(activeRevision?.id || "").trim() === String(candidateRevision?.id || "").trim()) {
+    return false;
+  }
+  if (!shouldShowRecortableRole(activeRevision?.unidad || "")) {
+    return true;
+  }
+  return recortableRoleSupportsDestination(candidateRevision);
+}
+
+function buildMissingRecortableDestinationIssues(session = null, activeRevision = null, targets = []) {
+  if (!session || !activeRevision || recortableRoleSupportsDestination(activeRevision)) {
+    return [];
+  }
+  const targetRevisionIds = new Set(
+    (Array.isArray(targets) ? targets : [])
+      .map((target) => String(target?.revision?.id || "").trim())
+      .filter(Boolean)
+  );
+  return (Array.isArray(session?.revisions) ? session.revisions : [])
+    .filter((revision) => isRecortableDestinationCandidate(activeRevision, revision))
+    .filter((revision) => !targetRevisionIds.has(String(revision?.id || "").trim()))
+    .map((revision) => {
+      const files = Array.isArray(revision?.files) ? revision.files : [];
+      const cleanFiles = files.filter((file) => !isRecortableFileContaminatedBySource(session, revision, file));
+      if (cleanFiles.some((file) => hasRenderableAnalysis(file))) {
+        return null;
+      }
+      const title = String(revision?.title || revision?.unidad || "Recortables").trim();
+      const message = !cleanFiles.length
+        ? `${title}: falta el archivo recortable destino; vuelve a seleccionar el IDML REC en esa ficha.`
+        : `${title}: no hay copia local ni fuente guardada disponible; vuelve a seleccionar el IDML REC en esa ficha.`;
+      return {
+        revisionId: String(revision?.id || "").trim(),
+        fileId: String(cleanFiles[0]?.id || "").trim(),
+        message,
+      };
+    })
+    .filter(Boolean);
+}
+
+function createMissingRecortableDestinationError(prefix = "", issues = []) {
+  const messages = (Array.isArray(issues) ? issues : []).map((issue) => String(issue?.message || "").trim()).filter(Boolean);
+  const error = new Error(`${prefix} ${messages.join(" ")}`.trim());
+  error.code = "RECORTABLE_DESTINATION_MISSING";
+  error.missingRecortableDestinationIssues = Array.isArray(issues) ? issues : [];
+  return error;
+}
+
+function focusMissingRecortableDestination(error = null) {
+  const issue = Array.isArray(error?.missingRecortableDestinationIssues)
+    ? error.missingRecortableDestinationIssues.find((entry) => String(entry?.revisionId || "").trim())
+    : null;
+  if (!issue) {
+    return false;
+  }
+  state.activeRevisionId = String(issue.revisionId || "").trim();
+  state.activeFileId = String(issue.fileId || "").trim();
+  state.selectedFiles = [];
+  if (els.fileInput) {
+    els.fileInput.value = "";
+  }
+  const session = store.getActiveSession();
+  const revision = getActiveRevision(session);
+  if (revision) {
+    mutateActiveSession((draft) => {
+      draft.analysisStatus = "idle";
+      draft.analysisJobId = "";
+      draft.bibliographicInfo.unidad = revision.unidad || "";
+      draft.bibliographicInfo.revisionNumero = revision.revisionNumero || "";
+      draft.bibliographicInfo.recortableRole = resolveBibliographicRecortableRole(draft, revision);
+      return draft;
+    }, { render: false });
+  }
+  return true;
+}
+
+function isMissingRecortableDestinationError(error = null) {
+  return String(error?.code || "").trim() === "RECORTABLE_DESTINATION_MISSING";
+}
+
+function removeRecortableSourceFileContamination(session = null) {
+  if (!session || typeof session !== "object") {
+    return session;
+  }
+  for (const revision of Array.isArray(session.revisions) ? session.revisions : []) {
+    if (shouldShowRecortableRole(revision?.unidad || "")) {
+      continue;
+    }
+    const files = Array.isArray(revision.files) ? revision.files : [];
+    const cleanFiles = files.filter((file) => !isRecortableDocumentMisassignedToSource(revision, file));
+    if (cleanFiles.length === files.length) {
+      continue;
+    }
+    revision.files = cleanFiles;
+    revision.fileCount = revision.files.length;
+    revision.summary = buildRevisionSummary(revision.files);
+    revision.updatedAt = new Date().toISOString();
+  }
+  const sourceFileKeys = buildNonRecortableFileKeySet(session);
+  if (!sourceFileKeys.size) {
+    return session;
+  }
+  for (const revision of Array.isArray(session.revisions) ? session.revisions : []) {
+    if (!shouldShowRecortableRole(revision?.unidad || "")) {
+      continue;
+    }
+    const files = Array.isArray(revision.files) ? revision.files : [];
+    const cleanFiles = files.filter((file) => !sourceFileKeys.has(getFileEntryKey(file)));
+    if (!cleanFiles.length) {
+      continue;
+    }
+    revision.files = cleanFiles;
+    revision.fileCount = revision.files.length;
+    revision.summary = buildRevisionSummary(revision.files);
+  }
+  return session;
+}
+
+async function restoreCachedFilesForRevision(session = null, revision = null) {
+  const sessionId = String(session?.id || "").trim();
+  const revisionId = String(revision?.id || "").trim();
+  if (!sessionId || !revisionId) {
+    return false;
+  }
+  const cachedRecords = await listAnalizarPdfCachedFilesByRevision(sessionId, revisionId);
+  return restoreCachedFileRecordsIntoRevision(session, revision, cachedRecords);
+}
+
+function looksLikeRecortableDocumentName(value = "") {
+  const name = String(value || "").trim();
+  if (!name) return false;
+  return /(?:^|[_\-\s])REC(?:[_\-\s.]|$)/i.test(name) || /recortable/i.test(name);
+}
+
+function isRecortableDocumentMisassignedToSource(revision = null, file = null) {
+  return !shouldShowRecortableRole(revision?.unidad || "")
+    && looksLikeRecortableDocumentName(file?.documentName || file?.fileName || file?.name || "");
+}
+
+function restoreCachedFileRecordsIntoRevision(session = null, revision = null, cachedRecords = []) {
+  const sessionId = String(session?.id || "").trim();
+  const revisionId = String(revision?.id || "").trim();
+  if (!sessionId || !revisionId || !revision) {
+    return false;
+  }
+  const existingFileIds = new Set((Array.isArray(revision.files) ? revision.files : []).map((file) => String(file?.id || "").trim()).filter(Boolean));
+  const existingFileKeys = new Set((Array.isArray(revision.files) ? revision.files : []).map((file) => getFileEntryKey(file)).filter(Boolean));
+  let changed = false;
+  revision.files = Array.isArray(revision.files) ? revision.files : [];
+  for (const record of cachedRecords) {
+    const fileId = String(record?.fileId || "").trim();
+    const fileName = String(record?.fileName || record?.file?.name || "").trim();
+    const fileKey = buildFileKey(fileName);
+    if (!fileId || !fileName || existingFileIds.has(fileId) || existingFileKeys.has(fileKey)) {
+      continue;
+    }
+    revision.files.push({
+      id: fileId,
+      fileKey,
+      documentName: fileName,
+      mappingId: String(revision.mappingId || "").trim(),
+      mappingTitle: String(revision.mappingTitle || "").trim(),
+      mappingUpdatedAt: String(revision.mappingUpdatedAt || "").trim(),
+      sourceAssetPath: "",
+      localBlobKey: String(record.id || buildAnalizarPdfLocalBlobKey(sessionId, revisionId, fileId)).trim(),
+      hasLocalSource: true,
+      fileSize: Number(record.size || record.file?.size || 0) || 0,
+      fileLastModified: Number(record.lastModified || record.file?.lastModified || 0) || 0,
+      fileMimeType: String(record.type || record.file?.type || "").trim(),
+      sourceType: getNormalizedSourceType(session.sourceType),
+      analysisStatus: "idle",
+      analysisJobId: "",
+      createdAt: String(record.updatedAt || new Date().toISOString()).trim(),
+      updatedAt: new Date().toISOString(),
+      resultSummary: createEmptyResultSummary(),
+      result: createEmptyResultPayload(),
+    });
+    existingFileIds.add(fileId);
+    existingFileKeys.add(fileKey);
+    changed = true;
+  }
+  if (changed) {
+    normalizeSingleFilePerRevision(session);
+    revision.fileCount = revision.files.length;
+    revision.summary = buildRevisionSummary(revision.files);
+    revision.updatedAt = new Date().toISOString();
+  }
+  return changed;
+}
+
+async function restoreCachedFilesForRecortableDestinations(session = null, activeRevision = null) {
+  if (!session || typeof session !== "object") {
+    return session;
+  }
+  let changed = false;
+  const sessionId = String(session?.id || "").trim();
+  const sessionCachedRecords = sessionId ? await listAnalizarPdfCachedFilesBySession(sessionId) : [];
+  for (const revision of Array.isArray(session.revisions) ? session.revisions : []) {
+    if (!isRecortableDestinationCandidate(activeRevision, revision)) {
+      continue;
+    }
+    const exactRestored = await restoreCachedFilesForRevision(session, revision);
+    const revisionFiles = Array.isArray(revision.files) ? revision.files : [];
+    const needsRecFallback = !revisionFiles.some((file) => !isRecortableFileContaminatedBySource(session, revision, file));
+    const fallbackRecords = needsRecFallback
+      ? sessionCachedRecords.filter((record) => {
+        const recordRevisionId = String(record?.revisionId || "").trim();
+        const recordFileName = String(record?.fileName || record?.file?.name || "").trim();
+        return recordRevisionId !== String(revision.id || "").trim() && looksLikeRecortableDocumentName(recordFileName);
+      })
+      : [];
+    const fallbackRestored = fallbackRecords.length
+      ? restoreCachedFileRecordsIntoRevision(session, revision, fallbackRecords)
+      : false;
+    logAnalizarPdfFlow("restoreRecortableDestinationCache:revision", {
+      sessionId,
+      activeRevisionId: activeRevision?.id || "",
+      revisionId: revision?.id || "",
+      exactRestored,
+      fallbackRecordCount: fallbackRecords.length,
+      fallbackRestored,
+      fileCount: Array.isArray(revision.files) ? revision.files.length : 0,
+    });
+    if (exactRestored || fallbackRestored) {
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return session;
+  }
+  const saved = await saveSession(session);
+  store.upsertSession(saved);
+  store.setActiveSession(saved.id);
+  return saved;
 }
 
 function isRevisionBusy(revision = null) {
@@ -956,6 +1783,41 @@ function resolveMappingEntriesForRevision(revision = null) {
   return Array.isArray(mapping?.entries) ? mapping.entries.filter((entry) => entry?.enabled !== false && String(entry?.alias || "").trim()) : [];
 }
 
+function formatRailTrimesterLabel(value = "") {
+  const cleanValue = String(value || "").trim();
+  const match = cleanValue.match(/(\d+)/);
+  if (match) return `Trim ${match[1]}`;
+  return cleanValue;
+}
+
+function buildEditorialRailTitle(session = null, revision = null) {
+  const info = session?.bibliographicInfo || {};
+  const parts = [
+    info.grado,
+    formatRailTrimesterLabel(info.trimestre),
+    revision?.unidad || info.unidad,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  return parts.join(" · ") || String(revision?.title || "Ficha editorial").trim() || "Ficha editorial";
+}
+
+function buildEditorialProcessLabel(session = null, revision = null, file = null, options = {}) {
+  const action = String(options?.action || "Analizando").trim() || "Analizando";
+  const step = String(options?.step || "").trim();
+  const index = Number(options?.index || 0);
+  const total = Number(options?.total || 0);
+  const progress = Number.isFinite(index) && index > 0 && Number.isFinite(total) && total > 0
+    ? `${index}/${total}`
+    : "";
+  const target = buildEditorialRailTitle(session, revision);
+  const fileName = String(file?.documentName || file?.name || "").trim();
+  return [
+    [action, progress].filter(Boolean).join(" "),
+    target,
+    step,
+    fileName ? `Archivo: ${fileName}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
 function buildRenderableSession(session = null) {
   if (!session) return null;
   const revision = getActiveRevision(session);
@@ -963,40 +1825,43 @@ function buildRenderableSession(session = null) {
   const correctionContext = getActiveCorrectionContext(session);
   const correctionSelection = getCorrectionSelection(correctionContext.key);
   const activeMappingEntries = resolveMappingEntriesForRevision(revision);
-  const activeFileResult = file && revision
-    ? [{
-      ...session,
-      title: `${session.title} · ${revision?.title || "Revisión"} · ${file.documentName || "Archivo"}`,
-      fileTitle: file.documentName || "Archivo",
-      revisionTitle: revision?.title || "Revisión",
-      sourceType: file.sourceType || session.sourceType,
-      analysisStatus: file.analysisStatus || session.analysisStatus,
-      analysisJobId: file.analysisJobId || session.analysisJobId,
-      result: file.result || session.result,
-      resultSummary: file.resultSummary || session.resultSummary,
-      correctionSelection,
-      mappingEntries: activeMappingEntries,
-    }]
-    : [];
-  const fallbackFileResults = (Array.isArray(session?.revisions) ? session.revisions : []).flatMap((revisionEntry) => {
+  const fallbackFileResults = (Array.isArray(session?.revisions) ? session.revisions : []).flatMap((revisionEntry, revisionIndex) => {
     const mappingEntries = resolveMappingEntriesForRevision(revisionEntry);
     const revisionFiles = Array.isArray(revisionEntry?.files) ? revisionEntry.files : [];
     return revisionFiles
-      .filter((entry) => entry?.result || entry?.resultSummary)
-      .map((entry) => ({
+      .filter((entry) => hasRenderableAnalysis(entry) || entry?.quickAnalysis)
+      .map((entry, fileIndex) => ({
         ...session,
+        revisionId: revisionEntry?.id || "",
+        fileId: entry?.id || "",
+        revisionIndex,
+        fileIndex,
         title: `${session.title} · ${revisionEntry?.title || "Revisión"} · ${entry.documentName || "Archivo"}`,
         fileTitle: entry.documentName || "Archivo",
+        railTitle: buildEditorialRailTitle(session, revisionEntry),
+        railTooltip: entry.documentName || `${revisionEntry?.title || "Revisión"} · ${entry.documentName || "Archivo"}`,
         revisionTitle: revisionEntry?.title || "Revisión",
+        unidad: revisionEntry?.unidad || "",
+        recortableRole: revisionEntry?.recortableRole || "",
         sourceType: entry.sourceType || session.sourceType,
-        analysisStatus: entry.analysisStatus || session.analysisStatus,
-        analysisJobId: entry.analysisJobId || session.analysisJobId,
-        result: entry.result || session.result,
-        resultSummary: entry.resultSummary || session.resultSummary,
+        analysisStatus: entry.analysisStatus || "idle",
+        analysisJobId: entry.analysisJobId || "",
+        result: entry.result || createEmptyResultPayload(),
+        resultSummary: entry.resultSummary || createEmptyResultSummary(),
+        quickAnalysis: entry.quickAnalysis || null,
+        fileUpdatedAt: String(entry.updatedAt || "").trim(),
+        fileCreatedAt: String(entry.createdAt || "").trim(),
+        correctionSelection: String(revisionEntry?.id || "").trim() === String(revision?.id || "").trim()
+          && String(entry?.id || "").trim() === String(file?.id || "").trim()
+          ? correctionSelection
+          : {},
         mappingEntries,
       }));
   });
-  const fileResults = fallbackFileResults.length ? fallbackFileResults : activeFileResult;
+  const fileResults = mergeRenderableFileResults({
+    activeEntry: null,
+    fallbackEntries: fallbackFileResults,
+  });
   logAnalizarPdfFlow("buildRenderableSession", {
     sessionId: session?.id || "",
     activeRevisionId: revision?.id || "",
@@ -1008,6 +1873,8 @@ function buildRenderableSession(session = null) {
     return {
       ...session,
       sourceType: fileResults[0]?.sourceType || revision?.files?.[0]?.sourceType || session.sourceType,
+      activeRevisionId: revision?.id || "",
+      activeFileId: "",
       result: fileResults[0]?.result || session.result,
       resultSummary: fileResults[0]?.resultSummary || session.resultSummary,
       fileResults,
@@ -1018,17 +1885,109 @@ function buildRenderableSession(session = null) {
   }
   return {
     ...session,
+    activeRevisionId: revision?.id || "",
+    activeFileId: file?.id || "",
     sourceType: file.sourceType || session.sourceType,
-    analysisStatus: file.analysisStatus || session.analysisStatus,
-    analysisJobId: file.analysisJobId || session.analysisJobId,
+    analysisStatus: file.analysisStatus || "idle",
+    analysisJobId: file.analysisJobId || "",
     title: `${session.title} · ${revision?.title || "Revisión"} · ${file.documentName || "Archivo"}`,
-    result: file.result || session.result,
-    resultSummary: file.resultSummary || session.resultSummary,
+    unidad: revision?.unidad || "",
+    recortableRole: revision?.recortableRole || "",
+    result: file.result || createEmptyResultPayload(),
+    resultSummary: file.resultSummary || createEmptyResultSummary(),
+    quickAnalysis: file.quickAnalysis || null,
     fileResults,
     revisionSummary: revision?.summary || null,
     correctionSelection,
     mappingEntries: activeMappingEntries,
   };
+}
+
+function buildLocalAnalysisContextForJob(session = null, targetRevisionId = "", targetFileId = "") {
+  const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
+  const contextRevisions = [];
+  const clampContextText = (value = "", max = 120) => String(value || "").trim().slice(0, max);
+  const compactStringList = (items = [], maxItems = 24, maxText = 120) => {
+    const seen = new Set();
+    const output = [];
+    for (const item of Array.isArray(items) ? items : []) {
+      const text = clampContextText(item, maxText);
+      const key = text.toLowerCase();
+      if (!text || seen.has(key)) continue;
+      seen.add(key);
+      output.push(text);
+      if (output.length >= maxItems) break;
+    }
+    return output;
+  };
+  const compactResolvedDestinations = (items = []) => {
+    const seen = new Set();
+    const output = [];
+    for (const item of Array.isArray(items) ? items : []) {
+      const entry = {
+        code: clampContextText(item?.code || "", 120),
+        kind: clampContextText(item?.kind || "", 40),
+        destination: clampContextText(item?.destination || "", 80),
+        status: clampContextText(item?.status || "", 40),
+      };
+      const key = `${entry.kind.toLowerCase()}::${entry.code.toLowerCase()}::${entry.destination.toLowerCase()}`;
+      if (!entry.code || !entry.destination || seen.has(key)) continue;
+      seen.add(key);
+      output.push(entry);
+      if (output.length >= 24) break;
+    }
+    return output;
+  };
+  for (const revision of revisions) {
+    const contextFiles = [];
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (String(revision?.id || "").trim() === String(targetRevisionId || "").trim()
+        && String(file?.id || "").trim() === String(targetFileId || "").trim()) {
+        continue;
+      }
+      const pageReports = Array.isArray(file?.result?.stats?.pageReports) ? file.result.stats.pageReports : [];
+      const recortablePages = pageReports
+        .map((page) => {
+          const summary = page?.recortableSummary || {};
+          const originCodes = compactStringList(summary.originCodes);
+          const destinationCodes = compactStringList(summary.destinationCodes);
+          const resolvedDestinations = compactResolvedDestinations(summary.resolvedDestinations);
+          const hasRecortableData = originCodes.length || destinationCodes.length || resolvedDestinations.length;
+          if (!hasRecortableData) return null;
+          return {
+            pageName: clampContextText(page?.pageName || "", 80),
+            recortableSummary: {
+              originCodes,
+              destinationCodes,
+              resolvedDestinations,
+            },
+          };
+        })
+        .filter(Boolean);
+      if (!recortablePages.length) continue;
+      contextFiles.push({
+        id: file?.id || "",
+        documentName: file?.documentName || file?.fileName || "Archivo",
+        sourceType: file?.sourceType || session?.sourceType || "",
+        resultSummary: file?.resultSummary || null,
+        result: {
+          stats: {
+            pageReports: recortablePages,
+          },
+        },
+      });
+    }
+    if (!contextFiles.length) continue;
+    contextRevisions.push({
+      id: revision?.id || "",
+      title: revision?.title || "",
+      unidad: revision?.unidad || "",
+      revisionNumero: revision?.revisionNumero || "",
+      recortableRole: revision?.recortableRole || "",
+      files: contextFiles,
+    });
+  }
+  return contextRevisions.length ? { revisions: contextRevisions } : null;
 }
 
 function syncPersistedTitleMap() {
@@ -1188,6 +2147,62 @@ async function resolveCachedFileForEntry(fileEntry = null) {
   return cached?.file instanceof File ? cached.file : null;
 }
 
+async function resolveIdmlSourceForTool(fileEntry = null) {
+  const cachedFile = await resolveCachedFileForEntry(fileEntry);
+  if (cachedFile) {
+    return { file: cachedFile, useStoredSource: false };
+  }
+  if (String(fileEntry?.sourceAssetPath || "").trim()) {
+    return { file: null, useStoredSource: true };
+  }
+  return { file: null, useStoredSource: false };
+}
+
+function formatIdmlToolError(error = null) {
+  const message = String(error?.message || error || "").trim();
+  if (
+    !message
+    || /^HTTP\s+404$/i.test(message)
+    || /copia local|source|IDML original|archivo original|not found/i.test(message)
+  ) {
+    return "No se encontró la copia local/backend del IDML; vuelve a seleccionar el archivo en esa ficha.";
+  }
+  return message;
+}
+
+async function clearStaleLocalSourceMetadata(session = null) {
+  if (!session || typeof session !== "object") {
+    return session;
+  }
+  let changed = false;
+  const draft = structuredClone(session);
+  for (const revision of Array.isArray(draft.revisions) ? draft.revisions : []) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (!file?.hasLocalSource && !String(file?.localBlobKey || "").trim()) {
+        continue;
+      }
+      const cachedFile = await resolveCachedFileForEntry(file);
+      if (cachedFile) {
+        continue;
+      }
+      file.hasLocalSource = false;
+      file.localBlobKey = "";
+      file.fileSize = 0;
+      file.fileLastModified = 0;
+      file.fileMimeType = "";
+      file.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return session;
+  }
+  const saved = await saveSession(draft);
+  store.upsertSession(saved);
+  store.setActiveSession(saved.id);
+  return saved;
+}
+
 async function rehydrateSelectedFilesForActiveContext() {
   const session = store.getActiveSession();
   const revision = getActiveRevision(session);
@@ -1223,9 +2238,14 @@ async function rehydrateSelectedFilesForActiveContext() {
   try {
     const transfer = new DataTransfer();
     transfer.items.add(cachedFile);
+    state.isRehydratingFileSelection = true;
     els.fileInput.files = transfer.files;
   } catch (_) {
     // Algunos navegadores no permiten reasignar files; el label igual se rehidrata.
+  } finally {
+    queueMicrotask(() => {
+      state.isRehydratingFileSelection = false;
+    });
   }
   renderActiveSession();
 }
@@ -1236,13 +2256,18 @@ async function persistSelectedFilesToActiveRevision() {
   if (!session || !selectedFiles.length) {
     return;
   }
+  const targetSessionId = String(session?.id || "").trim();
+  const targetRevisionId = String(state.activeRevisionId || "").trim();
   const sourceType = getNormalizedSourceType(session?.sourceType);
   const filesToMerge = selectedFiles.map((file) => ({
     name: file.name,
     sourceType
   }));
   const saved = await persistActiveSession(filesToMerge);
-  const revision = getActiveRevision(saved);
+  if (String(saved?.id || "").trim() !== targetSessionId) {
+    return;
+  }
+  const revision = (Array.isArray(saved?.revisions) ? saved.revisions : []).find((entry) => String(entry?.id || "").trim() === targetRevisionId) || null;
   if (!saved?.id || !revision?.id) {
     return;
   }
@@ -1271,6 +2296,37 @@ async function persistSelectedFilesToActiveRevision() {
   await persistActiveSession([]);
 }
 
+function getFilesToMergeForActiveRevision(session = null, activeRevision = null, selectedFiles = []) {
+  const files = Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : [];
+  if (!files.length || !session || !activeRevision) {
+    return [];
+  }
+  const allFileKeys = new Set();
+  const activeFileKeys = new Set();
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    const isActiveRevision = String(revision?.id || "").trim() === String(activeRevision?.id || "").trim();
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      const fileKey = getFileEntryKey(file);
+      if (!fileKey) continue;
+      allFileKeys.add(fileKey);
+      if (isActiveRevision) {
+        activeFileKeys.add(fileKey);
+      }
+    }
+  }
+  return files.filter((file) => {
+    const fileKey = buildFileKey(file?.name || "");
+    if (!fileKey) return false;
+    if (!shouldShowRecortableRole(activeRevision?.unidad || "") && looksLikeRecortableDocumentName(file?.name || "")) {
+      return false;
+    }
+    if (documentNameMatchesRevision(file?.name || "", activeRevision)) {
+      return true;
+    }
+    return activeFileKeys.has(fileKey) || !allFileKeys.has(fileKey);
+  });
+}
+
 async function buildAnalysisTargets(session = null, selectedFiles = state.selectedFiles) {
   const revision = getActiveRevision(session);
   const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
@@ -1284,74 +2340,145 @@ async function buildAnalysisTargets(session = null, selectedFiles = state.select
     logAnalizarPdfFlow("buildAnalysisTargets:no-revision");
     return [];
   }
-  if (Array.isArray(selectedFiles) && selectedFiles.length) {
-    const resolvedTargets = selectedFiles.map((selectedFile) => {
-      const selectedFileKey = buildFileKey(selectedFile.name);
-      const directTargetFile = (revision.files || []).find((entry) => String(entry.fileKey || "").trim() === selectedFileKey) || null;
-      if (directTargetFile) {
-        return { selectedFile, targetFile: directTargetFile, revision };
-      }
-      for (const candidateRevision of revisions) {
-        const targetFile = (candidateRevision?.files || []).find((entry) => String(entry.fileKey || "").trim() === selectedFileKey) || null;
-        if (targetFile) {
-          return { selectedFile, targetFile, revision: candidateRevision };
+  const resolveTargetsForRevision = async (targetRevision, revisionSelectedFiles = []) => {
+    if (!targetRevision) return [];
+    const revisionFiles = (Array.isArray(targetRevision.files) ? targetRevision.files : [])
+      .filter((entry) => !isRecortableFileContaminatedBySource(session, targetRevision, entry));
+    if (Array.isArray(revisionSelectedFiles) && revisionSelectedFiles.length) {
+      const resolvedTargets = revisionSelectedFiles.map((selectedFile) => {
+        const selectedFileKey = buildFileKey(selectedFile.name);
+        const directTargetFile = revisionFiles.find((entry) => String(entry.fileKey || "").trim() === selectedFileKey) || null;
+        if (directTargetFile) {
+          return { selectedFile, targetFile: directTargetFile, revision: targetRevision };
         }
+        return null;
+      }).filter(Boolean);
+      if (resolvedTargets.length) {
+        return resolvedTargets;
       }
-      return null;
-    }).filter(Boolean);
-    logAnalizarPdfFlow("buildAnalysisTargets:resolved-selected", {
-      resolvedCount: resolvedTargets.length,
-      targets: resolvedTargets.map((target) => ({
-        revisionId: target.revision?.id || "",
-        fileId: target.targetFile?.id || "",
-        fileName: target.selectedFile?.name || "",
-        mappingId: target.targetFile?.mappingId || "",
-      })),
+    }
+    const targets = [];
+    for (const targetFile of revisionFiles) {
+      const cachedFile = await resolveCachedFileForEntry(targetFile);
+      if (cachedFile) {
+        targets.push({ selectedFile: cachedFile, targetFile, revision: targetRevision });
+        continue;
+      }
+      if (String(targetFile?.sourceAssetPath || "").trim()) {
+        targets.push({ selectedFile: null, targetFile, revision: targetRevision, useStoredSource: true });
+      }
+    }
+    return targets;
+  };
+  const activeTargets = await resolveTargetsForRevision(revision, selectedFiles);
+  if (Array.isArray(selectedFiles) && selectedFiles.length && !activeTargets.some((target) => target.selectedFile)) {
+    logAnalizarPdfFlow("buildAnalysisTargets:selected-miss-fallback", {
+      activeRevisionId: revision?.id || "",
+      selectedFiles: selectedFiles.map((file) => file?.name || ""),
     });
-    return resolvedTargets;
   }
   const targets = [];
-  for (const targetFile of Array.isArray(revision.files) ? revision.files : []) {
-    const cachedFile = await resolveCachedFileForEntry(targetFile);
-    if (!cachedFile) continue;
-    targets.push({ selectedFile: cachedFile, targetFile, revision });
+  const destinationTargetsToAnalyzeLast = [];
+  if (!recortableRoleSupportsDestination(revision)) {
+    const prioritizedDestinationRevisions = prioritizeRevisionsForRecortablesDestinations(revisions, {
+      excludeRevisionIds: [revision.id]
+    }).filter((entry) => isRecortableDestinationCandidate(revision, entry));
+    for (const destinationRevision of prioritizedDestinationRevisions) {
+      const destinationFiles = (Array.isArray(destinationRevision.files) ? destinationRevision.files : [])
+        .filter((entry) => !isRecortableFileContaminatedBySource(session, destinationRevision, entry));
+      if (destinationFiles.some((entry) => hasRenderableAnalysis(entry))) {
+        continue;
+      }
+      const destinationTargets = await resolveTargetsForRevision(destinationRevision);
+      destinationTargetsToAnalyzeLast.push(...destinationTargets.map((target) => ({
+        ...target,
+        requiresSuccessBeforeActive: false,
+      })));
+    }
   }
+  targets.push(...activeTargets);
+  targets.push(...destinationTargetsToAnalyzeLast);
   logAnalizarPdfFlow("buildAnalysisTargets:resolved-cached", {
     resolvedCount: targets.length,
-    targets: targets.map((target) => ({
-      revisionId: target.revision?.id || "",
-      fileId: target.targetFile?.id || "",
-      fileName: target.selectedFile?.name || "",
-      mappingId: target.targetFile?.mappingId || "",
-    })),
+      targets: targets.map((target) => ({
+        revisionId: target.revision?.id || "",
+        fileId: target.targetFile?.id || "",
+        fileName: target.selectedFile?.name || target.targetFile?.documentName || "",
+        mappingId: target.targetFile?.mappingId || target.revision?.mappingId || "",
+      })),
   });
   return targets;
 }
 
 async function buildAnalysisTargetsForAll(session = null, selectedFiles = state.selectedFiles) {
-  const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
-  const activeRevision = getActiveRevision(session);
-  const activeRevisionId = String(activeRevision?.id || "").trim();
-  const targets = [];
-  for (const revision of revisions) {
-    const revisionId = String(revision?.id || "").trim();
-    if (!revisionId) continue;
-    const revisionSelectedFiles = revisionId === activeRevisionId ? selectedFiles : [];
-    if (Array.isArray(revisionSelectedFiles) && revisionSelectedFiles.length) {
-      for (const selectedFile of revisionSelectedFiles) {
-        const targetFile = (revision.files || []).find((entry) => String(entry.fileKey || "").trim() === buildFileKey(selectedFile.name));
-        if (!targetFile) continue;
-        targets.push({ selectedFile, targetFile, revision });
-      }
-      continue;
-    }
-    for (const targetFile of Array.isArray(revision.files) ? revision.files : []) {
-      const cachedFile = await resolveCachedFileForEntry(targetFile);
-      if (!cachedFile) continue;
-      targets.push({ selectedFile: cachedFile, targetFile, revision });
+  return buildAnalysisTargetsForAllPure({
+    session,
+    activeRevisionId: String(getActiveRevision(session)?.id || "").trim(),
+    selectedFiles,
+    resolveCachedFileForEntry,
+    buildFileKey,
+  });
+}
+
+async function buildMissingLocalSourceMessagesForAll(session = null, selectedFiles = [], targets = []) {
+  const selectedFilesByKey = new Map();
+  for (const selectedFile of Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : []) {
+    const fileKey = buildFileKey(selectedFile?.name || "");
+    if (fileKey && !selectedFilesByKey.has(fileKey)) {
+      selectedFilesByKey.set(fileKey, selectedFile);
     }
   }
-  return targets;
+  const targetKeys = new Set(
+    (Array.isArray(targets) ? targets : [])
+      .map((target) => `${String(target?.revision?.id || "").trim()}::${String(target?.targetFile?.id || "").trim()}`)
+      .filter((key) => key !== "::")
+  );
+  const messages = [];
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    const revisionId = String(revision?.id || "").trim();
+    if (!revisionId) continue;
+    const revisionLabel = revision?.title || revision?.unidad || "Ficha editorial";
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      const fileId = String(file?.id || "").trim();
+      if (!fileId || targetKeys.has(`${revisionId}::${fileId}`) || hasRenderableAnalysis(file)) {
+        continue;
+      }
+      const fileKey = String(file?.fileKey || "").trim();
+      if ((fileKey && selectedFilesByKey.has(fileKey)) || String(file?.sourceAssetPath || "").trim()) {
+        continue;
+      }
+      const cachedFile = await resolveCachedFileForEntry(file);
+      if (cachedFile) {
+        continue;
+      }
+      messages.push(`${revisionLabel}: ${file?.documentName || "archivo sin nombre"}`);
+    }
+  }
+  return messages;
+}
+
+function buildMissingLocalSourceNoticeFromSession(session = null) {
+  const missing = [];
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    const revisionLabel = revision?.title || revision?.unidad || "Ficha editorial";
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (
+        hasRenderableAnalysis(file)
+        || String(file?.sourceAssetPath || "").trim()
+        || file?.hasLocalSource === true
+        || String(file?.localBlobKey || "").trim()
+      ) {
+        continue;
+      }
+      missing.push(`${revisionLabel}: ${file?.documentName || "archivo sin nombre"}`);
+    }
+  }
+  if (!missing.length) return "";
+  return [
+    `No se analizaron ${missing.length} ficha(s) porque no hay IDML local ni copia guardada disponible. Vuelve a seleccionar esos IDML y ejecuta Analizar todo.`,
+    ...missing.slice(0, 8),
+    missing.length > 8 ? `... y ${missing.length - 8} ficha(s) más.` : "",
+  ].filter(Boolean).join(" ");
 }
 
 async function clearBusyStatusesWithoutLocalFiles(session = null, options = {}) {
@@ -1400,8 +2527,20 @@ async function clearBusyStatusesWithoutLocalFiles(session = null, options = {}) 
   return true;
 }
 
+function isRecoverableStoredSourceAnalysisError(error = null) {
+  const message = String(error?.message || error || "").trim().toLowerCase();
+  return (
+    message.includes("no se encontró la copia local del archivo original") ||
+    message.includes("archivo de revisión no encontrado") ||
+    message.includes("http 404")
+  );
+}
+
 async function runAnalysisForTargets(session = null, targets = [], emptyMessage = "") {
   const savedSessionId = String(session?.id || "").trim();
+  if (savedSessionId) {
+    delete state.clearedRailSessionIds[savedSessionId];
+  }
   logAnalizarPdfFlow("runAnalysisForTargets:start", {
     sessionId: savedSessionId,
     targetCount: Array.isArray(targets) ? targets.length : 0,
@@ -1417,14 +2556,34 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
     setJobMetaText(emptyMessage || "No hay archivos disponibles para analizar.");
     return;
   }
-  for (const { selectedFile, targetFile, revision } of targets) {
+  const nonBlockingMessages = [];
+  for (const [targetIndex, target] of targets.entries()) {
+    const { selectedFile, targetFile, revision, useStoredSource, requiresSuccessBeforeActive } = target;
+    const targetProgress = {
+      action: targets.length > 1 ? "Analizando ficha" : "Analizando",
+      index: targetIndex + 1,
+      total: targets.length,
+    };
+    setBusyOverlay(buildEditorialProcessLabel(session, revision, targetFile || selectedFile, {
+      ...targetProgress,
+      step: "Preparando archivo",
+    }));
+    await flushUiFrame();
     logAnalizarPdfFlow("runAnalysisForTargets:target", {
       revisionId: revision?.id || "",
       fileId: targetFile?.id || "",
-      fileName: selectedFile?.name || "",
-      mappingId: targetFile?.mappingId || "",
+      fileName: selectedFile?.name || targetFile?.documentName || "",
+      mappingId: targetFile?.mappingId || revision?.mappingId || "",
+      useStoredSource: useStoredSource === true,
     });
-    const localMetadata = await cacheSelectedFileForRevision(savedSessionId, revision.id, targetFile, selectedFile);
+    const localMetadata = selectedFile
+      ? await cacheSelectedFileForRevision(savedSessionId, revision.id, targetFile, selectedFile)
+      : null;
+    setBusyOverlay(buildEditorialProcessLabel(session, revision, targetFile || selectedFile, {
+      ...targetProgress,
+      step: selectedFile ? "Guardando copia local del IDML" : "Usando copia guardada del IDML",
+    }));
+    await flushUiFrame();
     logAnalizarPdfFlow("runAnalysisForTargets:cached", {
       fileId: targetFile?.id || "",
       localBlobKey: localMetadata?.localBlobKey || "",
@@ -1444,13 +2603,80 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
     logAnalizarPdfFlow("runAnalysisForTargets:persist-before-upload", {
       fileId: targetFile?.id || "",
     });
-    await persistActiveSession([]);
-    const upload = await queueUploadForSession(store.getActiveSession(), savedSessionId, selectedFile, {
-      revisionId: revision.id,
-      fileId: targetFile.id,
-      mappingId: targetFile.mappingId
-    });
+    setBusyOverlay(buildEditorialProcessLabel(session, revision, targetFile || selectedFile, {
+      ...targetProgress,
+      step: "Guardando estado de la ficha",
+    }));
+    await flushUiFrame();
+    await saveActiveSessionSnapshot();
+    let upload = null;
+    try {
+      setBusyOverlay(buildEditorialProcessLabel(session, revision, targetFile || selectedFile, {
+        ...targetProgress,
+        step: useStoredSource ? "Creando job con copia guardada" : "Subiendo IDML al backend",
+      }));
+      await flushUiFrame();
+      const activeSessionForJob = store.getActiveSession();
+      const localAnalysisContext = buildLocalAnalysisContextForJob(activeSessionForJob, revision.id, targetFile.id);
+      upload = useStoredSource
+        ? await queueStoredSourceAnalysisForSession(activeSessionForJob, savedSessionId, targetFile, {
+          revisionId: revision.id,
+          fileId: targetFile.id,
+          mappingId: targetFile.mappingId || revision.mappingId || "",
+          localAnalysisContext,
+        })
+        : await queueUploadForSession(activeSessionForJob, savedSessionId, selectedFile, {
+          revisionId: revision.id,
+          fileId: targetFile.id,
+          mappingId: targetFile.mappingId || revision.mappingId || "",
+          localAnalysisContext,
+        });
+    } catch (error) {
+      if (useStoredSource && isRecoverableStoredSourceAnalysisError(error)) {
+        if (requiresSuccessBeforeActive) {
+          throw createMissingRecortableDestinationError(
+            "No se analizó la unidad origen porque primero debe analizarse el recortable destino.",
+            [{
+              revisionId: String(revision?.id || "").trim(),
+              fileId: String(targetFile?.id || "").trim(),
+              message: `${revision?.title || revision?.unidad || "Recortables"}: no hay copia local ni fuente guardada disponible; vuelve a seleccionar el IDML REC en esa ficha.`,
+            }]
+          );
+        }
+        const warningMessage = `Se omitió ${targetFile?.documentName || "archivo"} porque ya no existe la copia local para reanalizar; vuelve a seleccionar ese IDML para generar la ficha.`;
+        logAnalizarPdfFlow("runAnalysisForTargets:skip-stored-source", {
+          revisionId: revision?.id || "",
+          fileId: targetFile?.id || "",
+          message: String(error?.message || error || ""),
+        });
+        nonBlockingMessages.push(warningMessage);
+        mutateActiveSession((draft) => {
+          const draftRevision = (draft.revisions || []).find((entry) => entry.id === revision.id);
+          const draftFile = draftRevision?.files?.find((entry) => entry.id === targetFile.id);
+          if (draftFile) {
+            draftFile.analysisStatus = "failed";
+            draftFile.analysisJobId = "";
+            draftFile.sourceAssetPath = "";
+            draftFile.hasLocalSource = false;
+            draftFile.localBlobKey = "";
+            draftFile.updatedAt = new Date().toISOString();
+          }
+          draft.analysisJobId = "";
+          if (draft.analysisStatus === "uploading") {
+            draft.analysisStatus = "idle";
+          }
+          return draft;
+        });
+        await saveActiveSessionSnapshot();
+        continue;
+      }
+      throw error;
+    }
     const queued = upload.response || {};
+    setBusyOverlay(buildEditorialProcessLabel(session, revision, targetFile || selectedFile, {
+      ...targetProgress,
+      step: `Job ${queued.status || "en cola"}`,
+    }));
     logAnalizarPdfFlow("runAnalysisForTargets:queued", {
       fileId: targetFile?.id || "",
       jobId: queued.jobId || "",
@@ -1468,7 +2694,23 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
       return draft;
     });
     setJobMetaText(formatJobMeta(queued, buildRenderableSession(store.getActiveSession())));
-    await startPolling(queued.jobId || "");
+    try {
+      await startPolling(queued.jobId || "", {
+        session,
+        revision,
+        file: targetFile || selectedFile,
+        action: targetProgress.action,
+        index: targetProgress.index,
+        total: targetProgress.total,
+      });
+    } catch (error) {
+      const targetLabel = targetFile?.documentName || selectedFile?.name || "archivo";
+      nonBlockingMessages.push(`${targetLabel}: ${String(error?.message || error)}`);
+      continue;
+    }
+  }
+  if (nonBlockingMessages.length) {
+    setJobMetaText(nonBlockingMessages.join(" "));
   }
 }
 
@@ -1495,6 +2737,47 @@ async function queueUploadForSession(session = null, sessionId = "", file = null
     ...uploadState,
     response: await queueAnalizarPdfUpload(sessionId, file, uploadState.sourceType, fileContext)
   };
+}
+
+async function queueStoredSourceAnalysisForSession(session = null, sessionId = "", targetFile = null, fileContext = null) {
+  const uploadState = getUploadUiState(session);
+  logAnalizarPdfFlow("queueStoredSourceAnalysisForSession", {
+    sessionId,
+    sourceType: uploadState.sourceType,
+    fileName: targetFile?.documentName || "",
+    fileContext: fileContext || null,
+  });
+  return {
+    ...uploadState,
+    response: await queueAnalizarPdfStoredSourceAnalysis(sessionId, uploadState.sourceType, {
+      ...fileContext,
+      fileName: targetFile?.documentName || fileContext?.fileName || "",
+      documentName: targetFile?.documentName || "",
+    }),
+  };
+}
+
+function restoreAnalysisTargetPointers(session = null, revisionId = "", fileId = "", selectedFiles = []) {
+  const cleanRevisionId = String(revisionId || "").trim();
+  const cleanFileId = String(fileId || "").trim();
+  const revision = (Array.isArray(session?.revisions) ? session.revisions : [])
+    .find((entry) => String(entry?.id || "").trim() === cleanRevisionId) || null;
+  if (!revision) {
+    return;
+  }
+  state.activeRevisionId = cleanRevisionId;
+  if (cleanFileId && (revision.files || []).some((entry) => String(entry?.id || "").trim() === cleanFileId)) {
+    state.activeFileId = cleanFileId;
+    return;
+  }
+  const selectedFileName = Array.isArray(selectedFiles) && selectedFiles.length
+    ? String(selectedFiles[0]?.name || "").trim()
+    : "";
+  const selectedFileKey = selectedFileName ? buildFileKey(selectedFileName) : "";
+  const selectedFileEntry = selectedFileKey
+    ? (revision.files || []).find((entry) => String(entry?.fileKey || "").trim() === selectedFileKey) || null
+    : null;
+  state.activeFileId = String(selectedFileEntry?.id || revision.files?.[0]?.id || "").trim();
 }
 
 function renderSectionsEditor(session = null) {
@@ -1548,13 +2831,21 @@ function renderBibliographicInfo(session = null) {
     els.trimestreInput.value = bibliographicInfo.trimestre || "";
   }
   if (els.unidadInput) {
-    els.unidadInput.value = bibliographicInfo.unidad || "";
+    els.unidadInput.value = activeRevision?.unidad || bibliographicInfo.unidad || "";
   }
   if (els.edicionNumeroInput) {
     els.edicionNumeroInput.value = bibliographicInfo.edicionNumero || "";
   }
   if (els.revisionNumeroInput) {
-    els.revisionNumeroInput.value = bibliographicInfo.revisionNumero || "";
+    els.revisionNumeroInput.value = activeRevision?.revisionNumero || bibliographicInfo.revisionNumero || "";
+  }
+  const currentUnidad = String(activeRevision?.unidad || bibliographicInfo.unidad || "").trim();
+  const showRecortableRole = shouldShowRecortableRole(currentUnidad);
+  if (els.recortableRoleField) {
+    els.recortableRoleField.classList.toggle("is-disabled", !showRecortableRole);
+  }
+  if (els.recortableRoleInput) {
+    els.recortableRoleInput.value = resolveBibliographicRecortableRole(session, activeRevision);
   }
   if (els.revisionMappingSelect) {
     els.revisionMappingSelect.innerHTML = renderRevisionMappingOptions(inferredRevisionMappingId);
@@ -1668,18 +2959,29 @@ function renderFileList(session = null) {
 
 function renderRevisionMappingOptions(selectedMappingId = "") {
   const options = ['<option value="">Sin mapeo</option>'];
-  for (const mapping of Array.isArray(state.styleMappings) ? state.styleMappings : []) {
-    const selected = mapping.id === selectedMappingId ? " selected" : "";
-    options.push(`<option value="${escapeAttr(mapping.id)}"${selected}>${escapeHtml(mapping.title || "Mapeo")}</option>`);
+  const mappings = Array.isArray(state.styleMappings) ? state.styleMappings : [];
+  const groups = getVisibleMappingGroupsForMappings(mappings);
+  const groupIds = new Set(groups.map((group) => group.id));
+  if (!groupIds.has(UNGROUPED_MAPPING_GROUP_ID) && mappings.some((mapping) => getMappingGroupIdForMapping(mapping) === UNGROUPED_MAPPING_GROUP_ID)) {
+    groups.unshift({ id: UNGROUPED_MAPPING_GROUP_ID, title: "Sin grupo", count: 0, isVirtual: true });
+  }
+  for (const group of groups) {
+    const groupMappings = mappings.filter((mapping) => getMappingGroupIdForMapping(mapping) === group.id);
+    if (!groupMappings.length) continue;
+    options.push(`<optgroup label="${escapeAttr(group.title || "Grupo")}">`);
+    for (const mapping of groupMappings) {
+      const selected = mapping.id === selectedMappingId ? " selected" : "";
+      options.push(`<option value="${escapeAttr(mapping.id)}"${selected}>${escapeHtml(mapping.title || "Mapeo")}</option>`);
+    }
+    options.push("</optgroup>");
   }
   return options.join("");
 }
 
 function ensureActiveRevisionAndFile(session = null) {
-  const revision = getActiveRevision(session);
-  state.activeRevisionId = String(revision?.id || "").trim();
-  const file = getActiveFile(session, revision);
-  state.activeFileId = String(file?.id || "").trim();
+  const pointers = ensureActivePointers(session, state.activeRevisionId, state.activeFileId);
+  state.activeRevisionId = pointers.activeRevisionId;
+  state.activeFileId = pointers.activeFileId;
 }
 
 function renderPaletteShell(session = null) {
@@ -1706,22 +3008,59 @@ function renderMappingsModal() {
   if (!state.mappingsModalOpen) {
     return;
   }
-  const mappings = getFilteredMappings();
+  const filteredMappings = getFilteredMappings();
+  const groups = ensureActiveMappingGroupSelection(filteredMappings);
+  const mappings = getMappingsForActiveGroup(filteredMappings);
+  const selectedGroupTitle = getMappingGroupTitleById(state.activeMappingGroupId);
+  if (els.mappingGroupsList) {
+    els.mappingGroupsList.innerHTML = groups.length
+      ? groups.map((group) => {
+        const isActive = group.id === state.activeMappingGroupId;
+        return `
+          <button type="button" class="analizar-pdf-template-group-card${isActive ? " is-active" : ""}" data-mapping-group-id="${escapeAttr(group.id)}">
+            <strong>${escapeHtml(group.title)}</strong>
+            <small>${escapeHtml(String(group.count || 0))} plantilla(s)</small>
+          </button>
+        `;
+      }).join("")
+      : `<div class="analizar-pdf-empty-state">Crea un grupo o una plantilla desde archivo.</div>`;
+  }
+  if (els.selectedMappingGroupLabel) {
+    els.selectedMappingGroupLabel.textContent = state.activeMappingGroupId
+      ? `${selectedGroupTitle} · ${mappings.length} plantilla(s)`
+      : "Selecciona un grupo";
+  }
+  if (els.deleteMappingGroupBtn) {
+    const canDeleteGroup = Boolean(state.activeMappingGroupId && state.activeMappingGroupId !== UNGROUPED_MAPPING_GROUP_ID);
+    els.deleteMappingGroupBtn.disabled = !canDeleteGroup;
+  }
   els.mappingsList.innerHTML = mappings.length
     ? mappings.map((mapping) => `
-      <button type="button" class="analizar-pdf-subrecord-card${mapping.id === state.activeMappingId ? " is-active" : ""}" data-action="select-mapping" data-mapping-id="${escapeAttr(mapping.id)}">
+      <button type="button" class="analizar-pdf-subrecord-card${mapping.id === state.activeMappingId ? " is-active" : ""}" data-action="select-mapping" data-mapping-id="${escapeAttr(mapping.id)}" draggable="true">
         <span>${escapeHtml(mapping.title || "Mapeo sin título")}</span>
         <small>${escapeHtml([mapping.bookType, mapping.nivel, mapping.grado, mapping.unidad].filter(Boolean).join(" · "))}${mapping.isActive ? " · activo" : ""}</small>
       </button>
     `).join("")
-    : `<div class="analizar-pdf-empty-state">No hay mapeos para ese filtro.</div>`;
+    : state.activeMappingGroupId
+      ? `<div class="analizar-pdf-empty-state">No hay plantillas en este grupo para el filtro actual.</div>`
+      : `<div class="analizar-pdf-empty-state">Selecciona un grupo para ver sus plantillas.</div>`;
 
   const mapping = getCurrentMappingDraft();
-  els.mappingTitleInput.value = mapping.title || "";
-  els.mappingBookTypeInput.value = mapping.bookType || "";
-  els.mappingNivelInput.value = mapping.nivel || "";
-  els.mappingGradoInput.value = mapping.grado || "";
-  els.mappingUnidadInput.value = mapping.unidad || "";
+  const hasSelectedMapping = Boolean(state.__mappingDraft || getActiveMapping());
+  const editorEl = els.mappingEditorEmpty?.closest(".analizar-pdf-mapping-editor") || null;
+  editorEl?.classList.toggle("is-empty", !hasSelectedMapping);
+  [els.mappingTitleInput, els.mappingBookTypeInput, els.mappingNivelInput, els.mappingGradoInput, els.mappingUnidadInput, els.addMappingEntryBtn, els.activateMappingBtn, els.duplicateMappingBtn, els.deleteMappingBtn, els.saveMappingBtn].forEach((element) => {
+    if (element) element.disabled = !hasSelectedMapping;
+  });
+  els.mappingTitleInput.value = hasSelectedMapping ? mapping.title || "" : "";
+  els.mappingBookTypeInput.value = hasSelectedMapping ? mapping.bookType || "" : "";
+  els.mappingNivelInput.value = hasSelectedMapping ? mapping.nivel || "" : "";
+  els.mappingGradoInput.value = hasSelectedMapping ? mapping.grado || "" : "";
+  els.mappingUnidadInput.value = hasSelectedMapping ? mapping.unidad || "" : "";
+  if (!hasSelectedMapping) {
+    els.mappingEntriesList.innerHTML = "";
+    return;
+  }
   els.mappingEntriesList.innerHTML = Array.isArray(mapping.entries) && mapping.entries.length
     ? `
       <table class="analizar-pdf-mapping-table">
@@ -1813,6 +3152,11 @@ function renderMappingsModal() {
 function renderActiveSession() {
   const session = store.getActiveSession();
   ensureActiveRevisionAndFile(session);
+  const sessionId = String(session?.id || "").trim();
+  if (state.jobMetaSessionId && state.jobMetaSessionId !== sessionId) {
+    state.jobMetaText = "";
+    state.jobMetaSessionId = sessionId;
+  }
   const uploadState = getUploadUiState(session);
   els.indexPageInput.value = session?.indexConfig?.indexPageNumber || "";
   if (els.temarioPageInput) {
@@ -1837,8 +3181,15 @@ function renderActiveSession() {
   renderSectionsEditor(session);
   renderPaletteShell(session);
   resultsRenderer.render(buildRenderableSession(session));
+  if (!state.jobMetaText && !isBusyAnalysisStatus(session?.analysisStatus || "")) {
+    const missingLocalSourceNotice = buildMissingLocalSourceNoticeFromSession(session);
+    if (missingLocalSourceNotice) {
+      setJobMetaText(missingLocalSourceNotice);
+    }
+  }
   persistBibliographicDraft(session);
   persistActiveSessionId(session?.id || "");
+  persistLocalAnalysisSession(session);
 }
 
 function handleToggleCorrectionMode() {
@@ -1849,6 +3200,49 @@ function handleToggleCorrectionMode() {
     ...current,
     checkboxesVisible: !current.checkboxesVisible,
   }));
+  renderAll();
+}
+
+async function handleClearRailAnalysis() {
+  const session = store.getActiveSession();
+  if (!session) return;
+  logAnalizarPdfFlow("clearRailAnalysis:start", {
+    sessionId: session?.id || "",
+    revisionCount: Array.isArray(session?.revisions) ? session.revisions.length : 0,
+  });
+  const confirmed = window.confirm("Se borrarán los análisis visibles del panel de accesos rápidos de esta sesión. Los archivos fuente se conservarán. ¿Continuar?");
+  if (!confirmed) return;
+  let clearedCount = 0;
+  mutateActiveSession((draft) => {
+    if (!draft || typeof draft !== "object") return draft;
+    for (const revision of Array.isArray(draft.revisions) ? draft.revisions : []) {
+      for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+        if (!hasRenderableAnalysis(file)) continue;
+        resetFileAnalysisState(file);
+        clearedCount += 1;
+      }
+      revision.summary = buildRevisionSummary(revision.files || []);
+      revision.latestAnalysisAt = "";
+      revision.updatedAt = new Date().toISOString();
+    }
+    draft.analysisStatus = "idle";
+    draft.analysisJobId = "";
+    draft.resultSummary = createEmptyResultSummary();
+    draft.result = createEmptyResultPayload();
+    return draft;
+  }, { render: false });
+  if (!clearedCount) {
+    logAnalizarPdfFlow("clearRailAnalysis:no-op", { sessionId: session?.id || "" });
+    renderAll();
+    return;
+  }
+  state.clearedRailSessionIds[String(session.id || "").trim()] = true;
+  await persistActiveSession([]);
+  logAnalizarPdfFlow("clearRailAnalysis:done", {
+    sessionId: store.getActiveSession()?.id || "",
+    clearedCount,
+  });
+  setJobMetaText("Análisis previos limpiados del panel.");
   renderAll();
 }
 
@@ -1909,25 +3303,47 @@ function handleToggleCorrectionIssue(payload = {}) {
 function renderAll() {
   sidepanelApi.renderSessions();
   renderActiveSession();
+  renderDefaultRevisionsModal();
   renderMappingsModal();
   renderExportConfigModal();
+  const jobMeta = getLiveJobMetaElement();
+  if (state.jobMetaText && jobMeta) {
+    jobMeta.textContent = state.jobMetaText;
+  }
 }
 
 async function refreshSessions(preferredSessionId = "") {
   const sessions = await loadSessions();
-  store.setSessions(sessions);
+  const sessionsWithLocalAnalysis = await Promise.all(sessions.map((session) => restoreLocalAnalysisSession(session)));
+  const normalizedSessions = [];
+  for (const session of sessionsWithLocalAnalysis) {
+    if (normalizeSingleFilePerRevision(session)) {
+      normalizedSessions.push(session);
+    }
+  }
+  store.setSessions(sessionsWithLocalAnalysis);
   syncPersistedTitleMap();
-  const fallbackId = preferredSessionId || state.activeSessionId || restoreActiveSessionId() || sessions[0]?.id || "";
+  const fallbackId = preferredSessionId || state.activeSessionId || restoreActiveSessionId() || sessionsWithLocalAnalysis[0]?.id || "";
   store.setActiveSession(fallbackId);
   ensureActiveRevisionAndFile(store.getActiveSession());
   await clearBusyStatusesWithoutLocalFiles(store.getActiveSession(), { scope: "all" });
   renderAll();
+  if (normalizedSessions.length) {
+    Promise.allSettled(normalizedSessions.map((session) => saveSession(session))).catch(() => {});
+  }
 }
 
 async function refreshStyleMappings(preferredMappingId = "") {
   const payload = await listAnalizarPdfStyleMappings();
-  state.styleMappings = Array.isArray(payload?.mappings) ? payload.mappings.map((entry, index) => normalizeStyleMapping(entry, index)) : [];
-  state.activeMappingId = preferredMappingId || state.activeMappingId || state.styleMappings[0]?.id || "";
+  const allMappings = Array.isArray(payload?.mappings) ? payload.mappings.map((entry, index) => normalizeStyleMapping(entry, index)) : [];
+  const legacyMappings = allMappings.filter((entry) => isLegacyDefaultStyleMapping(entry));
+  state.styleMappings = allMappings.filter((entry) => !isLegacyDefaultStyleMapping(entry));
+  if (legacyMappings.length) {
+    Promise.allSettled(legacyMappings.map((entry) => deleteAnalizarPdfStyleMapping(entry.id))).catch(() => {});
+  }
+  getMappingGroups();
+  const preferred = isLegacyDefaultStyleMapping({ id: preferredMappingId }) ? "" : preferredMappingId;
+  state.activeMappingId = preferred || (isLegacyDefaultStyleMapping({ id: state.activeMappingId }) ? "" : state.activeMappingId) || state.styleMappings[0]?.id || "";
   renderMappingsModal();
 }
 
@@ -1951,6 +3367,261 @@ function buildRevisionSummary(files = []) {
   });
 }
 
+function createEmptyResultSummary() {
+  return {
+    paginationIssueCount: 0,
+    sectionIssueCount: 0,
+    spellingIssueCount: 0,
+    orthotypographyIssueCount: 0,
+    colorIssueCount: 0,
+    recortableIssueCount: 0,
+    pageCount: 0,
+    analyzedAt: "",
+  };
+}
+
+function createEmptyResultPayload() {
+  return {
+    paginationIssues: [],
+    sectionIssues: [],
+    spellingIssues: [],
+    orthotypographyIssues: [],
+    colorIssues: [],
+    recortableIssues: [],
+    stats: null,
+  };
+}
+
+function resetFileAnalysisState(file = null) {
+  if (!file || typeof file !== "object") return;
+  file.analysisStatus = "idle";
+  file.analysisJobId = "";
+  file.resultSummary = createEmptyResultSummary();
+  file.result = createEmptyResultPayload();
+  file.updatedAt = new Date().toISOString();
+}
+
+function normalizeSingleFilePerRevision(session = null) {
+  if (!session || typeof session !== "object") return false;
+  let changed = false;
+  const pickFileForRevision = (revision = {}) => {
+    const files = Array.isArray(revision?.files) ? revision.files.filter(Boolean) : [];
+    if (files.length <= 1) return files[0] || null;
+    const matching = files.filter((file) => documentNameMatchesRevision(file?.documentName || file?.name || "", revision));
+    const candidates = matching.length ? matching : files;
+    return candidates
+      .slice()
+      .sort((left, right) => {
+        const leftRenderable = hasRenderableAnalysis(left) ? 1 : 0;
+        const rightRenderable = hasRenderableAnalysis(right) ? 1 : 0;
+        if (leftRenderable !== rightRenderable) return rightRenderable - leftRenderable;
+        return String(right?.updatedAt || right?.createdAt || "").localeCompare(String(left?.updatedAt || left?.createdAt || ""));
+      })[0] || null;
+  };
+  for (const revision of Array.isArray(session.revisions) ? session.revisions : []) {
+    const files = Array.isArray(revision?.files) ? revision.files.filter(Boolean) : [];
+    if (files.length <= 1) {
+      revision.fileCount = files.length;
+      continue;
+    }
+    const selected = pickFileForRevision(revision);
+    revision.files = selected ? [selected] : [];
+    revision.fileCount = revision.files.length;
+    revision.summary = buildRevisionSummary(revision.files);
+    revision.updatedAt = new Date().toISOString();
+    changed = true;
+  }
+  return changed;
+}
+
+async function attachSelectedFilesToRevision(session = null, revisionId = "", selectedFiles = []) {
+  const cleanRevisionId = String(revisionId || "").trim();
+  const files = Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : [];
+  if (!session || !cleanRevisionId || !files.length) {
+    return session;
+  }
+  let draft = structuredClone(session);
+  const revision = (Array.isArray(draft.revisions) ? draft.revisions : [])
+    .find((entry) => String(entry?.id || "").trim() === cleanRevisionId) || null;
+  if (!revision) {
+    return session;
+  }
+  revision.files = Array.isArray(revision.files) ? revision.files : [];
+  const fileEntriesByName = new Map();
+  const matchingFiles = files.filter((file) => documentNameMatchesRevision(file?.name || "", revision));
+  const selectedFilesForRevision = matchingFiles.length
+    ? [matchingFiles[matchingFiles.length - 1]]
+    : [files[files.length - 1]].filter(Boolean);
+  for (const selectedFile of selectedFilesForRevision) {
+    const documentName = String(selectedFile?.name || "").trim();
+    const fileKey = buildFileKey(documentName);
+    if (!documentName || !fileKey) {
+      continue;
+    }
+    let fileEntry = revision.files.find((entry) => String(entry?.fileKey || "").trim() === fileKey) || null;
+    if (!fileEntry) {
+      fileEntry = {
+        id: `file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        fileKey,
+        documentName,
+        mappingId: String(revision.mappingId || "").trim(),
+        mappingTitle: String(revision.mappingTitle || "").trim(),
+        mappingUpdatedAt: String(revision.mappingUpdatedAt || "").trim(),
+        sourceAssetPath: "",
+        localBlobKey: "",
+        hasLocalSource: false,
+        fileSize: 0,
+        fileLastModified: 0,
+        fileMimeType: "",
+        sourceType: getNormalizedSourceType(session.sourceType),
+        analysisStatus: "idle",
+        analysisJobId: "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        resultSummary: createEmptyResultSummary(),
+        result: createEmptyResultPayload(),
+      };
+      revision.files.push(fileEntry);
+    } else {
+      fileEntry.documentName = documentName;
+      fileEntry.sourceType = getNormalizedSourceType(session.sourceType);
+      fileEntry.mappingId = String(fileEntry.mappingId || revision.mappingId || "").trim();
+      fileEntry.mappingTitle = String(fileEntry.mappingTitle || revision.mappingTitle || "").trim();
+      fileEntry.mappingUpdatedAt = String(fileEntry.mappingUpdatedAt || revision.mappingUpdatedAt || "").trim();
+      resetFileAnalysisState(fileEntry);
+    }
+    revision.files = [fileEntry];
+    fileEntriesByName.set(documentName, fileEntry);
+  }
+  revision.fileCount = revision.files.length;
+  revision.summary = buildRevisionSummary(revision.files);
+  revision.updatedAt = new Date().toISOString();
+  let saved = await saveSession(draft);
+  const metadataByFileId = new Map();
+  const savedRevision = (Array.isArray(saved.revisions) ? saved.revisions : [])
+    .find((entry) => String(entry?.id || "").trim() === cleanRevisionId) || null;
+  for (const selectedFile of files) {
+    const fileKey = buildFileKey(selectedFile?.name || "");
+    const targetFile = (Array.isArray(savedRevision?.files) ? savedRevision.files : [])
+      .find((entry) => String(entry?.fileKey || "").trim() === fileKey) || null;
+    const localMetadata = targetFile
+      ? await cacheSelectedFileForRevision(saved.id, cleanRevisionId, targetFile, selectedFile)
+      : null;
+    if (targetFile && localMetadata) {
+      metadataByFileId.set(targetFile.id, localMetadata);
+    }
+  }
+  if (metadataByFileId.size) {
+    draft = structuredClone(saved);
+    const draftRevision = (Array.isArray(draft.revisions) ? draft.revisions : [])
+      .find((entry) => String(entry?.id || "").trim() === cleanRevisionId) || null;
+    for (const file of Array.isArray(draftRevision?.files) ? draftRevision.files : []) {
+      const metadata = metadataByFileId.get(file.id);
+      if (metadata) {
+        Object.assign(file, metadata);
+      }
+    }
+    saved = await saveSession(draft);
+  }
+  store.upsertSession(saved);
+  store.setActiveSession(saved.id);
+  logAnalizarPdfFlow("attachSelectedFilesToRevision:done", {
+    sessionId: saved?.id || "",
+    revisionId: cleanRevisionId,
+    files: files.map((file) => file?.name || ""),
+  });
+  return saved;
+}
+
+async function revisionNeedsSelectedFileAssignment(session = null, revision = null, selectedFileKeys = new Set()) {
+  const files = (Array.isArray(revision?.files) ? revision.files : [])
+    .filter((entry) => !isRecortableFileContaminatedBySource(session, revision, entry));
+  if (!files.length) {
+    return true;
+  }
+  if (files.some((entry) => selectedFileKeys.has(getFileEntryKey(entry)))) {
+    return false;
+  }
+  for (const file of files) {
+    const cachedFile = await resolveCachedFileForEntry(file);
+    if (cachedFile) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function attachUnmatchedSelectedFilesToEmptyRevisions(session = null, selectedFiles = []) {
+  const files = Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : [];
+  if (!session || !files.length) {
+    return session;
+  }
+  const selectedFileKeys = new Set(
+    files.map((file) => buildFileKey(file?.name || "")).filter(Boolean)
+  );
+  const existingFileKeys = new Set();
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      const fileKey = getFileEntryKey(file);
+      if (fileKey) existingFileKeys.add(fileKey);
+    }
+  }
+  const unmatchedFiles = files.filter((file) => {
+    const fileKey = buildFileKey(file?.name || "");
+    return fileKey && !existingFileKeys.has(fileKey);
+  });
+  if (!unmatchedFiles.length) {
+    return session;
+  }
+  const regularTargetRevisions = [];
+  const recortableTargetRevisions = [];
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    if (!(await revisionNeedsSelectedFileAssignment(session, revision, selectedFileKeys))) {
+      continue;
+    }
+    if (shouldShowRecortableRole(revision?.unidad || "")) {
+      recortableTargetRevisions.push(revision);
+    } else {
+      regularTargetRevisions.push(revision);
+    }
+  }
+  if (!regularTargetRevisions.length && !recortableTargetRevisions.length) {
+    logAnalizarPdfFlow("attachUnmatchedSelectedFilesToEmptyRevisions:no-target-revisions", {
+      sessionId: session?.id || "",
+      unmatchedFiles: unmatchedFiles.map((file) => file?.name || ""),
+    });
+    return session;
+  }
+  let saved = session;
+  const assignments = [];
+  const skippedFiles = [];
+  for (const file of unmatchedFiles) {
+    const isRecortableFile = looksLikeRecortableDocumentName(file?.name || "");
+    const targetBucket = isRecortableFile ? recortableTargetRevisions : regularTargetRevisions;
+    const matchingIndex = targetBucket.findIndex((revision) => documentNameMatchesRevision(file?.name || "", revision));
+    const revision = matchingIndex >= 0
+      ? targetBucket.splice(matchingIndex, 1)[0]
+      : targetBucket.shift();
+    if (!revision) {
+      skippedFiles.push(file);
+      continue;
+    }
+    saved = await attachSelectedFilesToRevision(saved, revision.id, [file]);
+    assignments.push({
+      revisionId: revision.id,
+      revisionTitle: revision.title || "",
+      fileName: file?.name || "",
+    });
+  }
+  logAnalizarPdfFlow("attachUnmatchedSelectedFilesToEmptyRevisions:done", {
+    sessionId: saved?.id || "",
+    assignments,
+    skippedFileCount: skippedFiles.length,
+    skippedFiles: skippedFiles.map((file) => file?.name || ""),
+  });
+  return saved;
+}
+
 function createDraftRevision(session = null) {
   const defaultMapping = resolveDefaultMappingForSession(session);
   const timestamp = new Date().toISOString();
@@ -1960,6 +3631,7 @@ function createDraftRevision(session = null) {
     title: "Nueva ficha editorial",
     unidad: "",
     revisionNumero: "",
+    recortableRole: "source",
     mappingId: String(defaultMapping?.id || "").trim(),
     mappingTitle: String(defaultMapping?.title || "").trim(),
     mappingUpdatedAt: String(defaultMapping?.updatedAt || "").trim(),
@@ -1979,147 +3651,199 @@ function createDraftRevision(session = null) {
   };
 }
 
+function resolveDefaultRevisionUnitCountByTrimester(trimestre = "") {
+  const cleanTrimestre = String(trimestre || "").trim().toLowerCase();
+  if (cleanTrimestre === "trimestre 2") return 6;
+  if (cleanTrimestre === "trimestre 1" || cleanTrimestre === "trimestre 3") return 7;
+  return 7;
+}
+
+function buildDefaultRevisionBlueprints(config = {}) {
+  const unitCount = resolveDefaultRevisionUnitCountByTrimester(config.trimestre);
+  const revisionNumero = String(config.revisionNumero || "F1").trim() || "F1";
+  const units = [
+    { unidad: "Proyecto", recortableRole: "source" },
+    ...Array.from({ length: unitCount }, (_, index) => ({
+      unidad: `Unidad ${index + 1}`,
+      recortableRole: "source",
+    })),
+    { unidad: "Lecturas", recortableRole: "source" },
+    { unidad: "Recortables", recortableRole: "destination" },
+  ];
+  return units.map((entry) => ({
+    ...entry,
+    revisionNumero,
+  }));
+}
+
+function collectDefaultRevisionsConfigFromDom() {
+  return {
+    sourceType: String(els.defaultSourceTypeInput?.value || "idml").trim() || "idml",
+    bookType: String(els.defaultBookTypeInput?.value || "").trim(),
+    nivel: String(els.defaultNivelInput?.value || "").trim(),
+    grado: String(els.defaultGradoInput?.value || "").trim(),
+    trimestre: String(els.defaultTrimestreInput?.value || "").trim(),
+    edicionNumero: String(els.defaultEdicionNumeroInput?.value || "").trim(),
+    revisionNumero: String(els.defaultRevisionNumeroInput?.value || "").trim(),
+  };
+}
+
+function validateDefaultRevisionsConfig(config = {}) {
+  const missing = [];
+  if (!config.bookType) missing.push("Tipo");
+  if (!config.nivel) missing.push("Nivel");
+  if (!config.grado) missing.push("Grado");
+  if (!config.trimestre) missing.push("Trimestre");
+  if (!config.edicionNumero) missing.push("Edición");
+  if (!config.revisionNumero) missing.push("Revisión");
+  return missing;
+}
+
+function buildDefaultRevisionsSummaryText(config = {}) {
+  const unitCount = resolveDefaultRevisionUnitCountByTrimester(config.trimestre);
+  if (!config.trimestre) {
+    return "Selecciona un trimestre para calcular las fichas base.";
+  }
+  return `${config.trimestre}: Proyecto + ${unitCount} unidad(es) + Lecturas + Recortables.`;
+}
+
+function seedDefaultRevisionsModalFromSession(session = null) {
+  const info = session?.bibliographicInfo || {};
+  if (els.defaultSourceTypeInput) els.defaultSourceTypeInput.value = "idml";
+  if (els.defaultBookTypeInput) els.defaultBookTypeInput.value = info.bookType || els.bookTypeInput?.value || "";
+  if (els.defaultNivelInput) els.defaultNivelInput.value = info.nivel || els.nivelInput?.value || "";
+  if (els.defaultGradoInput) els.defaultGradoInput.value = info.grado || els.gradoInput?.value || "";
+  if (els.defaultTrimestreInput) els.defaultTrimestreInput.value = info.trimestre || els.trimestreInput?.value || "";
+  if (els.defaultEdicionNumeroInput) els.defaultEdicionNumeroInput.value = info.edicionNumero || els.edicionNumeroInput?.value || "";
+  if (els.defaultRevisionNumeroInput) els.defaultRevisionNumeroInput.value = info.revisionNumero || els.revisionNumeroInput?.value || "F1";
+}
+
+function renderDefaultRevisionsModal() {
+  if (!els.defaultRevisionsModal) return;
+  els.defaultRevisionsModal.hidden = !state.defaultRevisionsModalOpen;
+  if (!state.defaultRevisionsModalOpen) return;
+  const config = collectDefaultRevisionsConfigFromDom();
+  const missing = validateDefaultRevisionsConfig(config);
+  if (els.defaultRevisionsSummary) {
+    els.defaultRevisionsSummary.textContent = missing.length
+      ? `${buildDefaultRevisionsSummaryText(config)} Faltan: ${missing.join(", ")}.`
+      : buildDefaultRevisionsSummaryText(config);
+  }
+  if (els.defaultRevisionsConfirmBtn) {
+    els.defaultRevisionsConfirmBtn.disabled = missing.length > 0;
+  }
+}
+
+function openDefaultRevisionsModal() {
+  const session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea una sesión antes de generar fichas base.");
+    return;
+  }
+  state.defaultRevisionsModalOpen = true;
+  seedDefaultRevisionsModalFromSession(session);
+  renderDefaultRevisionsModal();
+}
+
+function closeDefaultRevisionsModal() {
+  state.defaultRevisionsModalOpen = false;
+  renderDefaultRevisionsModal();
+}
+
+async function handleCreateDefaultRevisions(config = null) {
+  const session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea una sesión antes de generar fichas base.");
+    return;
+  }
+  const normalizedConfig = config || collectDefaultRevisionsConfigFromDom();
+  const missing = validateDefaultRevisionsConfig(normalizedConfig);
+  if (missing.length) {
+    setJobMetaText(`Faltan datos para crear fichas base: ${missing.join(", ")}.`);
+    return;
+  }
+  const blueprints = buildDefaultRevisionBlueprints(normalizedConfig);
+  const added = [];
+  const nextSession = mutateActiveSession((draft) => {
+    draft.sourceType = "idml";
+    draft.bibliographicInfo = {
+      ...(draft.bibliographicInfo || {}),
+      bookType: normalizedConfig.bookType,
+      nivel: normalizedConfig.nivel,
+      grado: normalizedConfig.grado,
+      trimestre: normalizedConfig.trimestre,
+      edicionNumero: normalizedConfig.edicionNumero,
+      revisionNumero: normalizedConfig.revisionNumero,
+      unidad: draft.bibliographicInfo?.unidad || "Proyecto",
+      recortableRole: draft.bibliographicInfo?.recortableRole || "source",
+    };
+    draft.revisions = Array.isArray(draft.revisions) ? draft.revisions : [];
+    const existingKeys = new Set(draft.revisions.map((revision) => buildRevisionKey(revision)).filter(Boolean));
+    for (const blueprint of blueprints) {
+      const revisionKey = buildRevisionKey(blueprint);
+      if (existingKeys.has(revisionKey)) {
+        continue;
+      }
+      const revision = createDraftRevision(draft);
+      revision.revisionKey = revisionKey;
+      revision.unidad = blueprint.unidad;
+      revision.revisionNumero = blueprint.revisionNumero;
+      revision.recortableRole = shouldShowRecortableRole(blueprint.unidad)
+        ? normalizeRecortableRole(blueprint.recortableRole, blueprint.unidad)
+        : "source";
+      revision.title = buildRevisionTitle(revision);
+      revision.updatedAt = new Date().toISOString();
+      draft.revisions.push(revision);
+      existingKeys.add(revisionKey);
+      added.push(revision);
+    }
+    if (added.length) {
+      draft.bibliographicInfo.unidad = added[0].unidad || draft.bibliographicInfo.unidad || "";
+      draft.bibliographicInfo.revisionNumero = added[0].revisionNumero || draft.bibliographicInfo.revisionNumero || "";
+      draft.bibliographicInfo.recortableRole = added[0].recortableRole || draft.bibliographicInfo.recortableRole || "source";
+    }
+    return draft;
+  }, { render: false });
+  if (!nextSession) return;
+  if (added.length) {
+    state.activeRevisionId = String(added[0]?.id || "").trim();
+    state.activeFileId = "";
+  }
+  const saved = await saveSession(nextSession);
+  store.upsertSession(saved);
+  store.setActiveSession(saved.id);
+  syncPersistedTitleMap();
+  closeDefaultRevisionsModal();
+  renderAll();
+  setJobMetaText(added.length
+    ? `Fichas base creadas: ${added.length}.`
+    : "Las fichas base ya existían; no se duplicaron.");
+}
+
 function upsertRevisionIntoSession(session = null, filesToMerge = []) {
   const draft = structuredClone(session || {});
   const defaultMapping = resolveDefaultMappingForSession(draft);
-  draft.revisions = Array.isArray(draft.revisions) ? draft.revisions : [];
-  const revisionInfo = getRevisionDraftInfo(draft);
-  const revisionKey = buildRevisionKey(revisionInfo);
-  const activeRevisionId = String(state.activeRevisionId || "").trim();
-  const activeRevision = activeRevisionId
-    ? draft.revisions.find((entry) => String(entry?.id || "").trim() === activeRevisionId) || null
-    : null;
-  const isActiveDraft = Boolean(activeRevision && String(activeRevision.revisionKey || "").startsWith("__draft__"));
-  if (!revisionKey && !isActiveDraft) {
-    return { session: draft, revision: null, addedFiles: [] };
-  }
-  const revisionTitle = revisionKey ? buildRevisionTitle(revisionInfo) : String(activeRevision?.title || "Nueva ficha editorial").trim();
-  let revision = null;
-  const existingByKey = draft.revisions.find((entry) => String(entry?.revisionKey || "").trim() === revisionKey) || null;
-  if (isActiveDraft) {
-    if (existingByKey && existingByKey.id !== activeRevision.id && !(activeRevision.files || []).length) {
-      draft.revisions = draft.revisions.filter((entry) => entry.id !== activeRevision.id);
-      revision = existingByKey;
-    } else {
-      revision = activeRevision;
-    }
-  } else {
-    revision = existingByKey;
-  }
-  if (!revision) {
-    revision = {
-      id: `revision_${Date.now()}`,
-      revisionKey,
-      title: revisionTitle,
-      unidad: revisionInfo.unidad,
-      revisionNumero: revisionInfo.revisionNumero,
-      mappingId: String(defaultMapping?.id || "").trim(),
-      mappingTitle: String(defaultMapping?.title || "").trim(),
-      mappingUpdatedAt: String(defaultMapping?.updatedAt || "").trim(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      latestAnalysisAt: "",
-      fileCount: 0,
-      summary: {
-        paginationIssueCount: 0,
-        sectionIssueCount: 0,
-        spellingIssueCount: 0,
-        orthotypographyIssueCount: 0,
-        colorIssueCount: 0,
-        recortableIssueCount: 0,
-      },
-      files: []
-    };
-    draft.revisions.push(revision);
-  } else {
-    revision.title = revisionTitle;
-    if (revisionKey) {
-      revision.revisionKey = revisionKey;
-      revision.unidad = revisionInfo.unidad;
-      revision.revisionNumero = revisionInfo.revisionNumero;
-    }
-    revision.mappingId = String(revision.mappingId || defaultMapping?.id || "").trim();
-    revision.mappingTitle = String(revision.mappingTitle || defaultMapping?.title || "").trim();
-    revision.mappingUpdatedAt = String(revision.mappingUpdatedAt || defaultMapping?.updatedAt || "").trim();
-    revision.updatedAt = new Date().toISOString();
-  }
-  revision.files = Array.isArray(revision.files) ? revision.files : [];
-  const addedFiles = [];
-  for (const candidate of filesToMerge) {
-    const documentName = String(candidate?.name || candidate?.documentName || "").trim();
-    if (!documentName) continue;
-    const fileKey = buildFileKey(documentName);
-    const existing = revision.files.find((entry) => String(entry?.fileKey || "").trim() === fileKey);
-    if (existing) {
-      existing.documentName = documentName;
-      existing.sourceType = getNormalizedSourceType(candidate?.sourceType || draft.sourceType);
-      existing.mappingId = String(existing.mappingId || revision.mappingId || defaultMapping?.id || "").trim();
-      existing.mappingTitle = String(existing.mappingTitle || revision.mappingTitle || defaultMapping?.title || "").trim();
-      existing.mappingUpdatedAt = String(existing.mappingUpdatedAt || revision.mappingUpdatedAt || defaultMapping?.updatedAt || "").trim();
-      existing.updatedAt = new Date().toISOString();
-      addedFiles.push(existing);
-      continue;
-    }
-  const fileEntry = {
-      id: `file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      fileKey,
-      documentName,
-      mappingId: String(revision.mappingId || defaultMapping?.id || "").trim(),
-      mappingTitle: String(revision.mappingTitle || defaultMapping?.title || "").trim(),
-      mappingUpdatedAt: String(revision.mappingUpdatedAt || defaultMapping?.updatedAt || "").trim(),
-      sourceAssetPath: "",
-      localBlobKey: "",
-      hasLocalSource: false,
-      fileSize: 0,
-      fileLastModified: 0,
-      fileMimeType: "",
-      sourceType: getNormalizedSourceType(candidate?.sourceType || draft.sourceType),
-      analysisStatus: "idle",
-      analysisJobId: "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      resultSummary: {
-        paginationIssueCount: 0,
-        sectionIssueCount: 0,
-        spellingIssueCount: 0,
-        orthotypographyIssueCount: 0,
-        colorIssueCount: 0,
-        recortableIssueCount: 0,
-        pageCount: 0,
-        analyzedAt: ""
-      },
-      result: {
-        paginationIssues: [],
-        sectionIssues: [],
-        spellingIssues: [],
-        orthotypographyIssues: [],
-        colorIssues: [],
-        recortableIssues: [],
-        stats: null
-      }
-    };
-    revision.files.push(fileEntry);
-    addedFiles.push(fileEntry);
-  }
-  revision.fileCount = revision.files.length;
-  revision.summary = buildRevisionSummary(revision.files);
-  if (revisionKey) {
-    revision.revisionKey = revisionKey;
-    revision.title = revisionTitle;
-    revision.unidad = revisionInfo.unidad;
-    revision.revisionNumero = revisionInfo.revisionNumero;
-  }
-  state.activeRevisionId = revision.id;
-  if (addedFiles.length) {
-    state.activeFileId = addedFiles[addedFiles.length - 1].id;
-  } else {
-    state.activeFileId = String(revision.files?.[0]?.id || "").trim();
-  }
-  return { session: draft, revision, addedFiles };
+  const { session: nextSession, revision, addedFiles, activeFileId } = upsertRevisionInSession({
+    session: draft,
+    activeRevisionId: state.activeRevisionId,
+    revisionInfo: getRevisionDraftInfo(draft),
+    filesToMerge,
+    defaultMapping,
+    getNormalizedSourceType,
+    buildRevisionKey,
+    buildRevisionTitle,
+    buildFileKey,
+    buildRevisionSummary,
+  });
+  state.activeRevisionId = String(revision?.id || "").trim();
+  state.activeFileId = activeFileId;
+  return { session: nextSession, revision, addedFiles };
 }
 
 function resolveSessionForPersistence(session = null, filesToMerge = []) {
   const draft = structuredClone(session || {});
+  removeRecortableSourceFileContamination(draft);
+  normalizeSingleFilePerRevision(draft);
   const derivedTitle = buildDerivedSessionTitle(draft);
   draft.title = derivedTitle;
   draft.sessionKey = buildSessionKey(getSessionBaseInfo(draft));
@@ -2131,12 +3855,15 @@ function resolveSessionForPersistence(session = null, filesToMerge = []) {
     draft.analysisStatus = "idle";
     draft.analysisJobId = "";
   }
-  return upsertRevisionIntoSession(draft, filesToMerge).session;
+  const nextSession = upsertRevisionIntoSession(draft, filesToMerge).session;
+  normalizeSingleFilePerRevision(nextSession);
+  return nextSession;
 }
 
-async function persistActiveSession(filesToMerge = []) {
+async function persistActiveSession(filesToMerge = [], options = {}) {
   const session = store.getActiveSession();
   if (!session) throw new Error("No hay sesión activa.");
+  const includeAnalysis = options?.includeAnalysis === true;
   logAnalizarPdfFlow("persistActiveSession:start", {
     sessionId: session?.id || "",
     activeRevisionId: state.activeRevisionId || "",
@@ -2150,7 +3877,7 @@ async function persistActiveSession(filesToMerge = []) {
     candidateId: candidate?.id || "",
     revisionCount: Array.isArray(candidate?.revisions) ? candidate.revisions.length : 0,
   });
-  const saved = await saveSession(candidate);
+  const saved = await saveSession(candidate, { includeAnalysis });
   logAnalizarPdfFlow("persistActiveSession:saved", {
     previousId,
     savedId: saved?.id || "",
@@ -2158,6 +3885,7 @@ async function persistActiveSession(filesToMerge = []) {
   });
   if (previousId && previousId !== saved.id) {
     state.sessions = state.sessions.filter((entry) => String(entry?.id || "").trim() !== previousId);
+    removeLocalAnalysisSession(previousId);
   }
   store.upsertSession(saved);
   store.setActiveSession(saved.id);
@@ -2165,6 +3893,406 @@ async function persistActiveSession(filesToMerge = []) {
   syncPersistedTitleMap();
   renderAll();
   return saved;
+}
+
+async function saveActiveSessionSnapshot(options = {}) {
+  const session = store.getActiveSession();
+  if (!session) throw new Error("No hay sesión activa.");
+  persistLocalAnalysisSession(session);
+  const saved = session;
+  if (options.render === true) {
+    renderAll();
+  }
+  return saved;
+}
+
+function buildTemplateMappingTitle(revision = null) {
+  return [
+    "Plantilla",
+    String(revision?.unidad || "").trim(),
+    String(revision?.revisionNumero || "").trim(),
+  ].filter(Boolean).join(" · ") || "Plantilla desde archivo";
+}
+
+async function createTemplateMappingForRevisionFile(session = null, revision = null, file = null, options = {}) {
+  if (!session || !revision || !file) {
+    throw new Error("Selecciona una ficha editorial con archivo IDML.");
+  }
+  if (!isIdmlFileEntry(file, session)) {
+    throw new Error("La creación de plantilla solo aplica a sesiones IDML.");
+  }
+  if (!hasAvailableIdmlSource(file)) {
+    throw new Error("No hay copia local/backend del IDML; vuelve a seleccionar el archivo en esa ficha.");
+  }
+  setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+    action: "Creando plantilla",
+    step: "Resolviendo fuente IDML",
+    index: options?.index || 0,
+    total: options?.total || 0,
+  }));
+  await flushUiFrame();
+  const source = await resolveIdmlSourceForTool(file);
+  if (!source.file && !source.useStoredSource) {
+    throw new Error("No se encontró la copia local/backend del IDML; vuelve a seleccionar el archivo en esa ficha.");
+  }
+  setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+    action: "Creando plantilla",
+    step: "Extrayendo estilos usados",
+    index: options?.index || 0,
+    total: options?.total || 0,
+  }));
+  await flushUiFrame();
+  const payload = await createAnalizarPdfIdmlTemplateFromFile(session.id, revision.id, file.id, {
+    file: source.file,
+    useStoredSource: source.useStoredSource,
+    fileName: file.documentName || source.file?.name || "documento.idml",
+    mappingId: file.mappingId || revision.mappingId || "",
+  });
+  const template = payload?.template || {};
+  const entries = buildMappingTemplateEntries(Array.isArray(template.entries) ? template.entries : []);
+  if (!entries.length) {
+    throw new Error("No se encontraron estilos usados en el IDML seleccionado.");
+  }
+  const group = options?.group || null;
+  const existingMapping = options?.existingMapping ? normalizeStyleMapping(options.existingMapping) : null;
+  setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+    action: "Creando plantilla",
+    step: existingMapping?.id ? "Actualizando mapeo existente" : "Guardando mapeo nuevo",
+    index: options?.index || 0,
+    total: options?.total || 0,
+  }));
+  await flushUiFrame();
+  const mappingDraft = normalizeStyleMapping({
+    ...(existingMapping || {}),
+    id: existingMapping?.id || "",
+    mappingSlug: existingMapping?.mappingSlug || "",
+    title: buildTemplateMappingTitle(revision),
+    bookType: session?.bibliographicInfo?.bookType || "",
+    nivel: session?.bibliographicInfo?.nivel || "",
+    grado: session?.bibliographicInfo?.grado || "",
+    unidad: revision?.unidad || session?.bibliographicInfo?.unidad || "",
+    groupId: group?.id || "",
+    groupTitle: group?.title || "",
+    isActive: false,
+    entries,
+  });
+  const savedMappingPayload = await saveAnalizarPdfStyleMapping(mappingDraft);
+  const savedMapping = mergeSavedMappingWithDraft(savedMappingPayload?.mapping || savedMappingPayload || {}, mappingDraft);
+  upsertStyleMappingInState(savedMapping);
+  return {
+    payload,
+    entries,
+    savedMapping,
+  };
+}
+
+function applyTemplateMappingToRevisionFile(draft = null, revisionId = "", fileId = "", savedMapping = null, sourceAssetPath = "") {
+  const draftRevision = (draft?.revisions || []).find((entry) => entry.id === revisionId);
+  if (!draftRevision) return;
+  draftRevision.mappingId = savedMapping?.id || "";
+  draftRevision.mappingTitle = savedMapping?.title || "";
+  draftRevision.mappingUpdatedAt = savedMapping?.updatedAt || "";
+  for (const draftFile of Array.isArray(draftRevision.files) ? draftRevision.files : []) {
+    draftFile.mappingId = savedMapping?.id || "";
+    draftFile.mappingTitle = savedMapping?.title || "";
+    draftFile.mappingUpdatedAt = savedMapping?.updatedAt || "";
+    if (draftFile.id === fileId && sourceAssetPath) {
+      draftFile.sourceAssetPath = sourceAssetPath;
+    }
+    if (draftFile.id === fileId) {
+      draftFile.updatedAt = new Date().toISOString();
+    }
+  }
+}
+
+async function handleCreateTemplateFromFile() {
+  let session = store.getActiveSession();
+  if (session) {
+    session = await persistActiveSession([]);
+  }
+  const revision = getActiveRevision(session);
+  const file = getActiveFile(session, revision);
+  if (!session || !revision || !file) {
+    setJobMetaText("Selecciona una ficha editorial con archivo IDML.");
+    return;
+  }
+  if (!isIdmlFileEntry(file, session)) {
+    setJobMetaText("La creación de plantilla solo aplica a sesiones IDML.");
+    return;
+  }
+  if (!hasAvailableIdmlSource(file)) {
+    setJobMetaText("No hay copia backend del IDML para crear plantilla. Vuelve a seleccionar y analiza esa ficha para guardar la fuente local.");
+    return;
+  }
+  try {
+    state.isCreatingTemplateFromFile = true;
+    setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+      action: "Creando plantilla",
+      step: "Preparando extracción de estilos",
+    }));
+    renderActionButtonState();
+    await flushUiFrame();
+    const { payload, entries, savedMapping } = await createTemplateMappingForRevisionFile(session, revision, file);
+    const nextSession = mutateActiveSession((draft) => {
+      applyTemplateMappingToRevisionFile(draft, revision.id, file.id, savedMapping, payload?.sourceAssetPath || "");
+      return draft;
+    }, { render: false });
+    if (nextSession) {
+      const savedSession = await saveSession(nextSession);
+      store.upsertSession(savedSession);
+      store.setActiveSession(savedSession.id);
+      ensureActiveRevisionAndFile(savedSession);
+    }
+    setJobMetaText(`Plantilla creada: ${savedMapping.title || "Plantilla"} (${entries.length} estilos usados).`);
+    renderAll();
+  } catch (error) {
+    setJobMetaText(formatIdmlToolError(error));
+  } finally {
+    state.isCreatingTemplateFromFile = false;
+    setBusyOverlay("");
+    renderActionButtonState();
+    renderAll();
+  }
+}
+
+async function buildTemplateCreationTargets(session = null) {
+  const targets = [];
+  const skipped = [];
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (!isIdmlFileEntry(file, session)) {
+        skipped.push({ revisionId: revision?.id || "", fileId: file?.id || "", unidad: revision?.unidad || "", documentName: file?.documentName || "", reason: "not-idml" });
+        continue;
+      }
+      if (!hasAvailableIdmlSource(file)) {
+        skipped.push({ revisionId: revision?.id || "", fileId: file?.id || "", unidad: revision?.unidad || "", documentName: file?.documentName || "", reason: "missing-source" });
+        continue;
+      }
+      const source = await resolveIdmlSourceForTool(file);
+      if (source.file || source.useStoredSource) {
+        targets.push({ revision, file });
+      } else {
+        skipped.push({ revisionId: revision?.id || "", fileId: file?.id || "", unidad: revision?.unidad || "", documentName: file?.documentName || "", reason: "unresolved-source" });
+      }
+    }
+  }
+  logAnalizarPdfFlow("buildTemplateCreationTargets:resolved", {
+    targetCount: targets.length,
+    targets: targets.map((target) => ({
+      revisionId: target.revision?.id || "",
+      fileId: target.file?.id || "",
+      unidad: target.revision?.unidad || "",
+      documentName: target.file?.documentName || "",
+    })),
+    skipped,
+  });
+  return targets;
+}
+
+async function handleCreateTemplatesFromAll() {
+  if (state.isCreatingTemplatesFromAll) return;
+  let session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea una sesión antes de crear plantillas.");
+    return;
+  }
+  session = await persistActiveSession([]);
+  const targets = await buildTemplateCreationTargets(session);
+  if (!targets.length) {
+    setJobMetaText("No hay fichas editoriales con IDML local/backend disponible para crear plantillas.");
+    return;
+  }
+  await refreshStyleMappings(state.activeMappingId);
+  const group = getOrCreateMappingGroup(buildTemplateGroupTitle(session));
+  const failures = [];
+  const created = [];
+  const updated = [];
+  try {
+    state.isCreatingTemplatesFromAll = true;
+    setBusyOverlay("Creando plantillas desde todas las fichas");
+    renderActionButtonState();
+    await flushUiFrame();
+    let workingSession = session;
+    for (let index = 0; index < targets.length; index += 1) {
+      const { revision, file } = targets[index];
+      setBusyOverlay(buildEditorialProcessLabel(workingSession, revision, file, {
+        action: "Creando plantilla",
+        step: "Preparando ficha",
+        index: index + 1,
+        total: targets.length,
+      }));
+      setJobMetaText(`Creando plantilla ${index + 1}/${targets.length}: ${revision.title || revision.unidad || "Ficha editorial"}`);
+      await flushUiFrame();
+      try {
+        const existingMapping = findExistingTemplateMappingForRevision(workingSession, revision, group);
+        const { payload, entries, savedMapping } = await createTemplateMappingForRevisionFile(workingSession, revision, file, {
+          group,
+          existingMapping,
+          index: index + 1,
+          total: targets.length,
+        });
+        if (existingMapping?.id) {
+          updated.push(savedMapping);
+        } else {
+          created.push(savedMapping);
+        }
+        const nextSession = mutateActiveSession((draft) => {
+          applyTemplateMappingToRevisionFile(draft, revision.id, file.id, savedMapping, payload?.sourceAssetPath || "");
+          return draft;
+        }, { render: false });
+        if (nextSession) {
+          workingSession = nextSession;
+          persistLocalAnalysisSession(nextSession);
+        }
+        logAnalizarPdfFlow("createTemplatesFromAll:created", {
+          revisionId: revision.id,
+          fileId: file.id,
+          mappingId: savedMapping.id,
+          entryCount: entries.length,
+          groupId: group.id,
+        });
+      } catch (error) {
+        failures.push(`${revision.title || revision.unidad || "Ficha editorial"}: ${formatIdmlToolError(error)}`);
+      }
+    }
+    if (workingSession) {
+      const savedSession = await saveSession(workingSession);
+      store.upsertSession(savedSession);
+      store.setActiveSession(savedSession.id);
+      ensureActiveRevisionAndFile(savedSession);
+    }
+    await refreshStyleMappings(created[0]?.id || updated[0]?.id || state.activeMappingId);
+    setJobMetaText([
+      `Plantillas creadas: ${created.length}. Actualizadas: ${updated.length}/${targets.length}.`,
+      `Grupo: ${group.title}.`,
+      failures.length ? `Fallos: ${failures.slice(0, 6).join(" ")}` : "",
+    ].filter(Boolean).join(" "));
+    renderAll();
+  } finally {
+    state.isCreatingTemplatesFromAll = false;
+    setBusyOverlay("");
+    renderActionButtonState();
+    renderAll();
+  }
+}
+
+async function buildQuickAnalysisTargets(session = null) {
+  const targets = [];
+  for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (!hasAvailableIdmlSource(file)) {
+        continue;
+      }
+      if (!isIdmlFileEntry(file, session)) {
+        continue;
+      }
+      const source = await resolveIdmlSourceForTool(file);
+      if (source.file || source.useStoredSource) {
+        targets.push({
+          revision,
+          file,
+          selectedFile: source.file,
+          useStoredSource: source.useStoredSource,
+        });
+      }
+    }
+  }
+  return targets;
+}
+
+async function handleQuickAnalyzeAll() {
+  if (state.isQuickAnalyzingAll) return;
+  const session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea una sesión antes de ejecutar el análisis rápido.");
+    return;
+  }
+  const hasIdmlFile = (Array.isArray(session?.revisions) ? session.revisions : []).some((revision) => {
+    return (Array.isArray(revision?.files) ? revision.files : []).some((file) => isIdmlFileEntry(file, session));
+  });
+  if (!hasIdmlFile) {
+    setJobMetaText("El análisis rápido ortotipográfico solo aplica a sesiones IDML.");
+    return;
+  }
+  const targets = await buildQuickAnalysisTargets(session);
+  const missing = buildMissingLocalSourceNoticeFromSession(session);
+  if (!targets.length) {
+    setJobMetaText(missing || "No hay copias backend de IDML disponibles para análisis rápido.");
+    return;
+  }
+  const failures = [];
+  try {
+    state.isQuickAnalyzingAll = true;
+    setBusyOverlay("Preparando análisis rápido ortotipográfico");
+    renderActionButtonState();
+    await flushUiFrame();
+    for (let index = 0; index < targets.length; index += 1) {
+      const { revision, file, selectedFile, useStoredSource } = targets[index];
+      setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+        action: "Análisis rápido",
+        step: useStoredSource ? "Leyendo copia guardada" : "Preparando IDML local",
+        index: index + 1,
+        total: targets.length,
+      }));
+      setJobMetaText(`Analizando rápido ${index + 1}/${targets.length}: ${revision.title || revision.unidad || "Ficha editorial"}`);
+      await flushUiFrame();
+      try {
+        setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+          action: "Análisis rápido",
+          step: "Buscando hallazgos ortotipográficos",
+          index: index + 1,
+          total: targets.length,
+        }));
+        await flushUiFrame();
+        const payload = await runAnalizarPdfQuickOrthotypography(session.id, revision.id, file.id, {
+          file: selectedFile,
+          useStoredSource,
+          fileName: file.documentName || selectedFile?.name || "documento.idml",
+          mappingId: file.mappingId || revision.mappingId || "",
+        });
+        const quickAnalysis = payload?.quickAnalysis || null;
+        if (!quickAnalysis) {
+          throw new Error("Respuesta rápida vacía.");
+        }
+        setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
+          action: "Análisis rápido",
+          step: "Guardando reporte rápido en la ficha",
+          index: index + 1,
+          total: targets.length,
+        }));
+        await flushUiFrame();
+        const next = mutateActiveSession((draft) => {
+          const draftRevision = (draft.revisions || []).find((entry) => entry.id === revision.id);
+          const draftFile = draftRevision?.files?.find((entry) => entry.id === file.id);
+          if (draftFile) {
+            draftFile.quickAnalysis = quickAnalysis;
+            if (payload?.sourceAssetPath) {
+              draftFile.sourceAssetPath = payload.sourceAssetPath;
+            }
+            draftFile.updatedAt = new Date().toISOString();
+          }
+          return draft;
+        }, { render: false });
+        if (next) {
+          persistLocalAnalysisSession(next);
+        }
+        renderAll();
+      } catch (error) {
+        failures.push(`${revision.title || revision.unidad || "Ficha editorial"}: ${formatIdmlToolError(error)}`);
+      }
+    }
+    const analyzedCount = targets.length - failures.length;
+    setJobMetaText([
+      `Análisis rápido finalizado: ${analyzedCount}/${targets.length} ficha(s).`,
+      failures.length ? `Fallos: ${failures.slice(0, 6).join(" ")}` : "",
+      missing ? `Omitidas: ${missing}` : "",
+    ].filter(Boolean).join(" "));
+  } finally {
+    state.isQuickAnalyzingAll = false;
+    setBusyOverlay("");
+    renderActionButtonState();
+    renderAll();
+  }
 }
 
 async function handleCreateSession() {
@@ -2177,6 +4305,8 @@ async function handleCreateSession() {
   if (els.fileInput) {
     els.fileInput.value = "";
   }
+  state.jobMetaText = "";
+  state.jobMetaSessionId = "";
   setJobMetaText("");
   const session = createEmptyAnalizarPdfSession();
   const draftRevision = createDraftRevision(session);
@@ -2232,6 +4362,7 @@ async function handleDeleteSession(sessionId = "") {
   if (!window.confirm("¿Eliminar esta sesión?")) return;
   await import("./analizar-pdf-api.js").then(({ deleteAnalizarPdfSession }) => deleteAnalizarPdfSession(sessionId));
   await deleteAnalizarPdfCachedFilesBySession(sessionId).catch(() => {});
+  removeLocalAnalysisSession(sessionId);
   store.setSessions(state.sessions.filter((session) => session.id !== sessionId));
   if (state.activeSessionId === sessionId) {
     state.activeSessionId = state.sessions[0]?.id || "";
@@ -2335,25 +4466,17 @@ function mutateActiveSession(mutator, options = {}) {
   return next;
 }
 
-function mutateActiveMapping(mutator) {
-  const active = getActiveMapping() || createEmptyMappingDraft();
-  const next = typeof mutator === "function" ? normalizeStyleMapping(mutator(structuredClone(active)) || active) : active;
-  const mappings = Array.isArray(state.styleMappings) ? [...state.styleMappings] : [];
-  const existingIndex = mappings.findIndex((entry) => entry.id === next.id && next.id);
-  if (existingIndex >= 0) {
-    mappings.splice(existingIndex, 1, next);
-  } else if (next.id) {
-    mappings.unshift(next);
-  } else {
-    state.activeMappingId = "";
-    state.__mappingDraft = next;
-    renderMappingsModal();
-    return next;
+async function persistEditorialSelectionChange(mutator) {
+  const nextSession = mutateActiveSession(mutator, { render: false });
+  if (nextSession) {
+    renderBibliographicInfo(nextSession);
   }
-  state.styleMappings = mappings;
-  state.activeMappingId = next.id;
-  renderMappingsModal();
-  return next;
+  try {
+    await persistActiveSession([]);
+  } catch (error) {
+    setJobMetaText(String(error?.message || error));
+    renderAll();
+  }
 }
 
 function upsertStyleMappingInState(raw = {}) {
@@ -2367,6 +4490,7 @@ function upsertStyleMappingInState(raw = {}) {
   }
   state.styleMappings = mappings.sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
   state.activeMappingId = String(next.id || state.activeMappingId || "").trim();
+  state.activeMappingGroupId = getMappingGroupIdForMapping(next);
   return next;
 }
 
@@ -2376,6 +4500,8 @@ function mergeSavedMappingWithDraft(savedRaw = {}, draftRaw = {}) {
   const draftEntriesById = new Map((draft.entries || []).map((entry) => [entry.id, entry]));
   return normalizeStyleMapping({
     ...saved,
+    groupId: saved.groupId || draft.groupId || "",
+    groupTitle: saved.groupTitle || draft.groupTitle || "",
     entries: (saved.entries || []).map((entry) => {
       const draftEntry = draftEntriesById.get(entry.id);
       if (!draftEntry) return entry;
@@ -2488,15 +4614,62 @@ function bindEditorEvents() {
 
   bibliographicFieldMap.forEach(([field, element]) => {
     if (!element) return;
-    element.addEventListener("change", () => {
-      mutateActiveSession((session) => {
-        session.bibliographicInfo[field] = String(element.value || "").trim();
+    element.addEventListener("change", async () => {
+      const shouldPersistImmediately = field === "unidad" || field === "revisionNumero";
+      const runner = shouldPersistImmediately ? persistEditorialSelectionChange : async (mutator) => {
+        const nextSession = mutateActiveSession(mutator);
+        renderBibliographicInfo(nextSession || store.getActiveSession());
+      };
+      await runner((session) => {
+        const activeRevision = getActiveRevision(session);
+        const nextValue = String(element.value || "").trim();
+        if (field === "unidad" || field === "revisionNumero") {
+          if (activeRevision) {
+            if (field === "unidad") {
+              activeRevision.unidad = nextValue;
+              const currentUnidad = String(activeRevision.unidad || "").trim();
+              if (shouldShowRecortableRole(currentUnidad)) {
+                const nextRole = resolveBibliographicRecortableRole(session, activeRevision);
+                activeRevision.recortableRole = normalizeRecortableRole(nextRole, currentUnidad);
+                session.bibliographicInfo.recortableRole = activeRevision.recortableRole;
+              } else {
+                delete activeRevision.recortableRole;
+                session.bibliographicInfo.recortableRole = "source";
+              }
+            } else {
+              activeRevision.revisionNumero = nextValue;
+            }
+            activeRevision.title = buildRevisionTitle({
+              unidad: activeRevision.unidad,
+              revisionNumero: activeRevision.revisionNumero,
+            });
+          }
+          session.bibliographicInfo[field] = nextValue;
+        } else {
+          session.bibliographicInfo[field] = nextValue;
+        }
         session.title = buildDerivedSessionTitle(session);
         session.sessionKey = buildSessionKey(getSessionBaseInfo(session));
         return session;
       });
     });
   });
+
+  if (els.recortableRoleInput) {
+    els.recortableRoleInput.addEventListener("change", async () => {
+      await persistEditorialSelectionChange((session) => {
+        const activeRevision = getActiveRevision(session);
+        const unidad = String(activeRevision?.unidad || session?.bibliographicInfo?.unidad || "").trim();
+        const nextRole = normalizeRecortableRole(els.recortableRoleInput.value, unidad);
+        session.bibliographicInfo.recortableRole = nextRole || "source";
+        if (!activeRevision || !shouldShowRecortableRole(unidad)) {
+          return session;
+        }
+        activeRevision.recortableRole = nextRole;
+        return session;
+      });
+    });
+  }
 
   if (els.sessionTitleLabel) {
     els.sessionTitleLabel.addEventListener("change", () => {
@@ -2510,6 +4683,7 @@ function bindEditorEvents() {
         mutateActiveSession((session) => {
           session.bibliographicInfo.unidad = revision.unidad || session.bibliographicInfo.unidad;
           session.bibliographicInfo.revisionNumero = revision.revisionNumero || session.bibliographicInfo.revisionNumero;
+          session.bibliographicInfo.recortableRole = resolveBibliographicRecortableRole(session, revision);
           return session;
         });
         rehydrateSelectedFilesForActiveContext().catch(() => {});
@@ -2548,11 +4722,16 @@ function bindEditorEvents() {
     const button = event.target.closest("[data-revision-id]");
     if (!button) return;
     state.activeRevisionId = String(button.dataset.revisionId || "").trim();
+    state.selectedFiles = [];
+    if (els.fileInput) {
+      els.fileInput.value = "";
+    }
     const revision = getActiveRevision(store.getActiveSession());
     if (revision) {
       mutateActiveSession((session) => {
         session.bibliographicInfo.unidad = revision.unidad || "";
         session.bibliographicInfo.revisionNumero = revision.revisionNumero || "";
+        session.bibliographicInfo.recortableRole = resolveBibliographicRecortableRole(session, revision);
         return session;
       });
       rehydrateSelectedFilesForActiveContext().catch(() => {});
@@ -2612,10 +4791,60 @@ function bindEditorEvents() {
     await handleCreateRevision();
   });
 
+  els.createDefaultRevisionsBtn?.addEventListener("click", () => {
+    openDefaultRevisionsModal();
+  });
+
+  els.defaultRevisionsModal?.addEventListener("click", (event) => {
+    if (event.target.closest('[data-action="close-default-revisions-modal"]')) {
+      closeDefaultRevisionsModal();
+    }
+  });
+
+  [
+    els.defaultSourceTypeInput,
+    els.defaultBookTypeInput,
+    els.defaultNivelInput,
+    els.defaultGradoInput,
+    els.defaultTrimestreInput,
+    els.defaultEdicionNumeroInput,
+    els.defaultRevisionNumeroInput,
+  ].forEach((element) => {
+    element?.addEventListener("change", () => renderDefaultRevisionsModal());
+  });
+
+  els.defaultRevisionsConfirmBtn?.addEventListener("click", () => {
+    handleCreateDefaultRevisions(collectDefaultRevisionsConfigFromDom()).catch((error) => {
+      setJobMetaText(String(error?.message || error));
+    });
+  });
+
+  els.createTemplateFromFileBtn?.addEventListener("click", () => {
+    handleCreateTemplateFromFile().catch((error) => {
+      setJobMetaText(String(error?.message || error));
+    });
+  });
+
+  els.createTemplatesFromAllBtn?.addEventListener("click", () => {
+    handleCreateTemplatesFromAll().catch((error) => {
+      setJobMetaText(String(error?.message || error));
+    });
+  });
+
+  els.quickAnalyzeAllBtn?.addEventListener("click", () => {
+    handleQuickAnalyzeAll().catch((error) => {
+      setJobMetaText(String(error?.message || error));
+    });
+  });
+
   els.fileList?.addEventListener("click", (event) => {
     const button = event.target.closest('[data-action="select-file"]');
     if (!button) return;
     state.activeFileId = String(button.dataset.fileId || "").trim();
+    state.selectedFiles = [];
+    if (els.fileInput) {
+      els.fileInput.value = "";
+    }
     renderAll();
     rehydrateSelectedFilesForActiveContext().catch(() => {});
   });
@@ -2688,6 +4917,9 @@ function bindEditorEvents() {
   });
 
   els.fileInput.addEventListener("change", () => {
+    if (state.isRehydratingFileSelection) {
+      return;
+    }
     state.selectedFiles = Array.from(els.fileInput.files || []);
     renderActiveSession();
     persistSelectedFilesToActiveRevision().catch((error) => {
@@ -2731,7 +4963,60 @@ function bindEditorEvents() {
 
   els.newMappingBtn?.addEventListener("click", () => {
     state.activeMappingId = "";
-    state.__mappingDraft = createEmptyMappingDraft();
+    const selectedGroupId = String(state.activeMappingGroupId || "").trim();
+    const selectedGroupTitle = getMappingGroupTitleById(selectedGroupId);
+    state.__mappingDraft = normalizeStyleMapping({
+      ...createEmptyMappingDraft(),
+      groupId: selectedGroupId && selectedGroupId !== UNGROUPED_MAPPING_GROUP_ID ? selectedGroupId : "",
+      groupTitle: selectedGroupId && selectedGroupId !== UNGROUPED_MAPPING_GROUP_ID ? selectedGroupTitle : "",
+    });
+    renderMappingsModal();
+  });
+
+  els.createMappingGroupBtn?.addEventListener("click", () => {
+    const group = createMappingGroup(els.mappingGroupTitleInput?.value || "");
+    if (els.mappingGroupTitleInput) {
+      els.mappingGroupTitleInput.value = "";
+    }
+    state.activeMappingGroupId = group.id;
+    state.activeMappingId = "";
+    state.__mappingDraft = null;
+    setJobMetaText(`Grupo de plantillas creado: ${group.title}.`);
+    renderMappingsModal();
+  });
+
+  els.deleteMappingGroupBtn?.addEventListener("click", async () => {
+    const groupId = String(state.activeMappingGroupId || "").trim();
+    if (!groupId || groupId === UNGROUPED_MAPPING_GROUP_ID) return;
+    const group = getMappingGroups().find((entry) => entry.id === groupId) || null;
+    if (!group) return;
+    const mappingsInGroup = (Array.isArray(state.styleMappings) ? state.styleMappings : [])
+      .filter((mapping) => String(mapping?.groupId || "").trim() === groupId);
+    const message = mappingsInGroup.length
+      ? `¿Eliminar el grupo "${group.title}" y sus ${mappingsInGroup.length} plantilla(s)? Esta acción no se puede deshacer.`
+      : `¿Eliminar el grupo "${group.title}"?`;
+    if (!window.confirm(message)) return;
+    for (const mapping of mappingsInGroup) {
+      if (mapping?.id) {
+        await deleteAnalizarPdfStyleMapping(mapping.id);
+      }
+    }
+    state.styleMappings = (Array.isArray(state.styleMappings) ? state.styleMappings : [])
+      .filter((mapping) => String(mapping?.groupId || "").trim() !== groupId);
+    removeMappingGroupFromStorage(groupId);
+    state.activeMappingGroupId = "";
+    state.activeMappingId = "";
+    state.__mappingDraft = null;
+    await refreshStyleMappings();
+    setJobMetaText(`Grupo de plantillas eliminado: ${group.title}. Plantillas eliminadas: ${mappingsInGroup.length}.`);
+  });
+
+  els.mappingGroupsList?.addEventListener("click", (event) => {
+    const groupCard = event.target.closest("[data-mapping-group-id]");
+    if (!groupCard) return;
+    state.activeMappingGroupId = String(groupCard.dataset.mappingGroupId || "").trim();
+    state.activeMappingId = "";
+    state.__mappingDraft = null;
     renderMappingsModal();
   });
 
@@ -2740,6 +5025,60 @@ function bindEditorEvents() {
     if (!button) return;
     state.activeMappingId = String(button.dataset.mappingId || "").trim();
     state.__mappingDraft = normalizeStyleMapping(getActiveMapping() || {});
+    renderMappingsModal();
+  });
+
+  els.mappingsList?.addEventListener("dragstart", (event) => {
+    const item = event.target.closest("[data-mapping-id]");
+    if (!item) return;
+    event.dataTransfer?.setData("text/plain", String(item.dataset.mappingId || "").trim());
+    event.dataTransfer?.setData("application/x-analizar-pdf-mapping-id", String(item.dataset.mappingId || "").trim());
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  });
+
+  els.mappingGroupsList?.addEventListener("dragover", (event) => {
+    const groupCard = event.target.closest("[data-mapping-group-id]");
+    if (!groupCard) return;
+    event.preventDefault();
+    groupCard.classList.add("is-drag-over");
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+  });
+
+  els.mappingGroupsList?.addEventListener("dragleave", (event) => {
+    const groupCard = event.target.closest("[data-mapping-group-id]");
+    if (groupCard) {
+      groupCard.classList.remove("is-drag-over");
+    }
+  });
+
+  els.mappingGroupsList?.addEventListener("drop", async (event) => {
+    const groupCard = event.target.closest("[data-mapping-group-id]");
+    if (!groupCard) return;
+    event.preventDefault();
+    groupCard.classList.remove("is-drag-over");
+    const mappingId = String(
+      event.dataTransfer?.getData("application/x-analizar-pdf-mapping-id")
+      || event.dataTransfer?.getData("text/plain")
+      || ""
+    ).trim();
+    const groupId = String(groupCard.dataset.mappingGroupId || "").trim();
+    const group = getMappingGroups().find((entry) => entry.id === groupId) || null;
+    const mapping = (Array.isArray(state.styleMappings) ? state.styleMappings : []).find((entry) => entry.id === mappingId) || null;
+    if (!mapping || !group) return;
+    const draft = normalizeStyleMapping({
+      ...mapping,
+      groupId: group.id,
+      groupTitle: group.title,
+    });
+    const saved = await saveAnalizarPdfStyleMapping(draft);
+    const mergedSaved = mergeSavedMappingWithDraft(saved?.mapping || saved || {}, draft);
+    upsertStyleMappingInState(mergedSaved);
+    state.activeMappingGroupId = group.id;
+    setJobMetaText(`Plantilla "${mergedSaved.title}" agregada a ${group.title}.`);
     renderMappingsModal();
   });
 
@@ -2824,6 +5163,7 @@ function bindEditorEvents() {
     const saved = await saveAnalizarPdfStyleMapping(draft);
     const mergedSaved = mergeSavedMappingWithDraft(saved?.mapping || saved || {}, draft);
     upsertStyleMappingInState(mergedSaved);
+    state.activeMappingGroupId = getMappingGroupIdForMapping(mergedSaved);
     state.__mappingDraft = null;
     renderMappingsModal();
   });
@@ -2893,7 +5233,8 @@ function bindEditorEvents() {
       setBusyOverlay("Guardando ficha editorial");
       renderActionButtonState();
       await flushUiFrame();
-      await persistActiveSession();
+      persistLocalAnalysisSession(store.getActiveSession());
+      await persistActiveSession([]);
       setJobMetaText("Sesión guardada.");
     } catch (error) {
       setJobMetaText(String(error?.message || error));
@@ -2985,7 +5326,7 @@ function bindEditorEvents() {
       state.isExportingCorrectedIdml = true;
       renderActionButtonState();
       closeExportConfigModal({ restoreFocus: false });
-      const payload = await exportAnalizarPdfCorrectedIdml(session.id, revision.id, file.id, exportRequest, cleanupOptions);
+      const payload = await exportAnalizarPdfCorrectedIdml(session.id, revision.id, file.id, exportRequest, cleanupOptions, file.result || null);
       const objectUrl = String(payload?.objectUrl || "").trim();
       if (objectUrl) {
         const anchor = document.createElement("a");
@@ -3060,6 +5401,8 @@ function bindEditorEvents() {
       setJobMetaText("Crea una sesión antes de analizar.");
       return;
     }
+    const targetRevisionId = String(revision?.id || state.activeRevisionId || "").trim();
+    const targetFileId = String(activeFile?.id || state.activeFileId || "").trim();
     try {
       state.isAnalyzingCurrent = true;
       logAnalizarPdfFlow("analyzeBtn:start", {
@@ -3067,7 +5410,10 @@ function bindEditorEvents() {
         selectedFiles: uploadState.files.map((file) => file?.name || ""),
         sourceType: uploadState.sourceType,
       });
-      setBusyOverlay("Preparando análisis de la ficha editorial");
+      setBusyOverlay(buildEditorialProcessLabel(session, revision, activeFile, {
+        action: "Analizando",
+        step: "Preparando ficha activa",
+      }));
       renderActionButtonState();
       await flushUiFrame();
       const filesToMerge = uploadState.files.map((file) => ({
@@ -3075,8 +5421,15 @@ function bindEditorEvents() {
         sourceType: uploadState.sourceType
       }));
       logAnalizarPdfFlow("analyzeBtn:files-to-merge", { filesToMerge });
-      const saved = await persistActiveSession(filesToMerge);
-      setBusyOverlay("Analizando ficha editorial");
+      let saved = await persistActiveSession(filesToMerge);
+      restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
+      saved = await restoreCachedFilesForRecortableDestinations(saved, getActiveRevision(saved));
+      saved = await clearStaleLocalSourceMetadata(saved);
+      restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
+      setBusyOverlay(buildEditorialProcessLabel(saved, getActiveRevision(saved), getActiveFile(saved, getActiveRevision(saved)), {
+        action: "Analizando",
+        step: "Construyendo objetivos de análisis",
+      }));
       renderActionButtonState();
       await flushUiFrame();
       const targets = await buildAnalysisTargets(saved, uploadState.files.length ? uploadState.files : []);
@@ -3085,9 +5438,23 @@ function bindEditorEvents() {
         targets: targets.map((target) => ({
           revisionId: target.revision?.id || "",
           fileId: target.targetFile?.id || "",
-          fileName: target.selectedFile?.name || "",
+          fileName: target.selectedFile?.name || target.targetFile?.documentName || "",
         })),
       });
+      const missingRecortableDestinationIssues = buildMissingRecortableDestinationIssues(
+        saved,
+        getActiveRevision(saved),
+        targets
+      );
+      if (missingRecortableDestinationIssues.length) {
+        logAnalizarPdfFlow("analyzeBtn:missing-recortable-destination", {
+          issues: missingRecortableDestinationIssues,
+        });
+        throw createMissingRecortableDestinationError(
+          "No se analizó la unidad origen porque primero debe analizarse el recortable destino.",
+          missingRecortableDestinationIssues
+        );
+      }
       await runAnalysisForTargets(
         saved,
         targets,
@@ -3104,6 +5471,11 @@ function bindEditorEvents() {
         message: String(error?.message || error),
         stack: String(error?.stack || ""),
       });
+      if (isMissingRecortableDestinationError(error)) {
+        focusMissingRecortableDestination(error);
+        setJobMetaText(String(error?.message || error));
+        return;
+      }
       mutateActiveSession((draft) => {
         draft.analysisStatus = "failed";
         const activeRevision = (draft.revisions || []).find((entry) => entry.id === String(state.activeRevisionId || "").trim());
@@ -3133,32 +5505,86 @@ function bindEditorEvents() {
       setJobMetaText("Crea una sesión antes de analizar.");
       return;
     }
+    const targetRevisionId = String(getActiveRevision(session)?.id || state.activeRevisionId || "").trim();
+    const targetFileId = String(getActiveFile(session, getActiveRevision(session))?.id || state.activeFileId || "").trim();
     try {
       state.isAnalyzingAll = true;
-      setBusyOverlay("Preparando análisis completo");
+      setBusyOverlay(buildEditorialProcessLabel(session, getActiveRevision(session), getActiveFile(session, getActiveRevision(session)), {
+        action: "Analizar todo",
+        step: "Preparando fichas editoriales",
+      }));
       renderActionButtonState();
       await flushUiFrame();
-      const filesToMerge = uploadState.files.map((file) => ({
+      const activeRevisionForMerge = getActiveRevision(session);
+      const filesToMerge = getFilesToMergeForActiveRevision(session, activeRevisionForMerge, uploadState.files).map((file) => ({
         name: file.name,
         sourceType: uploadState.sourceType
       }));
-      const saved = await persistActiveSession(filesToMerge);
-      setBusyOverlay("Analizando todas las fichas editoriales");
+      logAnalizarPdfFlow("analyzeAllBtn:files-to-merge", {
+        filesToMerge,
+        selectedFiles: uploadState.files.map((file) => file?.name || ""),
+      });
+      let saved = await persistActiveSession(filesToMerge);
+      saved = await attachUnmatchedSelectedFilesToEmptyRevisions(saved, uploadState.files);
+      restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
+      saved = await restoreCachedFilesForRecortableDestinations(saved, getActiveRevision(saved));
+      saved = await clearStaleLocalSourceMetadata(saved);
+      restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
+      setBusyOverlay(buildEditorialProcessLabel(saved, getActiveRevision(saved), getActiveFile(saved, getActiveRevision(saved)), {
+        action: "Analizar todo",
+        step: "Construyendo cola de fichas",
+      }));
       renderActionButtonState();
       await flushUiFrame();
       const targets = await buildAnalysisTargetsForAll(saved, uploadState.files.length ? uploadState.files : []);
+      const missingLocalSourceMessages = await buildMissingLocalSourceMessagesForAll(saved, uploadState.files, targets);
+      const missingLocalSourceNotice = missingLocalSourceMessages.length
+        ? [
+          `No se analizaron ${missingLocalSourceMessages.length} ficha(s) porque no hay IDML local ni copia guardada disponible. Vuelve a seleccionar esos IDML y ejecuta Analizar todo.`,
+          ...missingLocalSourceMessages.slice(0, 8),
+          missingLocalSourceMessages.length > 8 ? `... y ${missingLocalSourceMessages.length - 8} ficha(s) más.` : "",
+        ].filter(Boolean).join(" ")
+        : "";
+      if (missingLocalSourceMessages.length) {
+        logAnalizarPdfFlow("analyzeAllBtn:missing-local-sources", {
+          count: missingLocalSourceMessages.length,
+          messages: missingLocalSourceMessages,
+        });
+      }
+      const missingRecortableDestinationIssues = buildMissingRecortableDestinationIssues(
+        saved,
+        getActiveRevision(saved),
+        targets
+      );
+      if (missingRecortableDestinationIssues.length) {
+        logAnalizarPdfFlow("analyzeAllBtn:missing-recortable-destination", {
+          issues: missingRecortableDestinationIssues,
+        });
+        setJobMetaText([
+          "Se analizarán las fichas disponibles. El recortable destino queda pendiente porque falta cargar su IDML en la ficha Recortables.",
+          ...missingRecortableDestinationIssues.map((issue) => issue.message),
+        ].join(" "));
+      }
       await runAnalysisForTargets(
         saved,
         targets,
         uploadState.files.length
           ? "No se pudieron resolver los archivos seleccionados para el análisis completo."
-          : "No hay archivos locales disponibles en las fichas editoriales para un análisis completo."
+          : (missingLocalSourceNotice || "No hay archivos locales disponibles en las fichas editoriales para un análisis completo.")
       );
+      if (missingLocalSourceNotice) {
+        setJobMetaText(missingLocalSourceNotice);
+      }
       state.selectedFiles = [];
       els.fileInput.value = "";
       renderAll();
       rehydrateSelectedFilesForActiveContext().catch(() => {});
     } catch (error) {
+      if (isMissingRecortableDestinationError(error)) {
+        focusMissingRecortableDestination(error);
+        setJobMetaText(String(error?.message || error));
+        return;
+      }
       mutateActiveSession((draft) => {
         draft.analysisStatus = "failed";
         return draft;
@@ -3173,7 +5599,16 @@ function bindEditorEvents() {
   });
 }
 
-async function startPolling(jobId = "") {
+function getPollingStageLabel(status = "") {
+  const cleanStatus = String(status || "").trim().toLowerCase();
+  if (cleanStatus === "queued") return "En cola de procesamiento";
+  if (cleanStatus === "processing") return "Procesando estructura, estilos y hallazgos";
+  if (cleanStatus === "completed") return "Integrando resultados en la ficha";
+  if (cleanStatus === "failed") return "Falló el análisis";
+  return "Consultando avance del análisis";
+}
+
+async function startPolling(jobId = "", context = {}) {
   window.clearTimeout(state.analysisPollTimer);
   const cleanJobId = String(jobId || "").trim();
   logAnalizarPdfFlow("startPolling:start", { jobId: cleanJobId });
@@ -3190,24 +5625,33 @@ async function startPolling(jobId = "") {
     const tick = async () => {
       try {
         const payload = await pollAnalysisStatus(cleanJobId);
+        setBusyOverlay(buildEditorialProcessLabel(context?.session || store.getActiveSession(), context?.revision || null, context?.file || null, {
+          action: context?.action || "Analizando",
+          index: context?.index || 0,
+          total: context?.total || 0,
+          step: getPollingStageLabel(payload?.status || ""),
+        }));
         logAnalizarPdfFlow("startPolling:tick", {
           jobId: cleanJobId,
           status: payload?.status || "",
           hasSession: Boolean(payload?.session),
+          hasResult: Boolean(payload?.result),
           error: payload?.error || "",
         });
-        const session = payload?.session || null;
-        if (session) {
-          store.upsertSession(session);
-        }
-        setJobMetaText(formatJobMeta(payload, buildRenderableSession(session)));
+        const renderSession = applyAnalysisStatusPayloadToLocalSession(payload) || store.getActiveSession();
+        ensureActiveRevisionAndFile(store.getActiveSession());
+        setJobMetaText(formatJobMeta(payload, buildRenderableSession(renderSession)));
         renderAll();
         if (payload?.status === "queued" || payload?.status === "processing") {
           state.analysisPollTimer = window.setTimeout(tick, 2500);
           logAnalizarPdfFlow("startPolling:scheduled-next", { jobId: cleanJobId });
           return;
         }
-        clearBusyAnalysisStateForJob(cleanJobId, payload?.status || "completed");
+        clearBusyAnalysisStateForJob(cleanJobId, payload?.status || "completed", {
+          revisionId: payload?.revisionId || "",
+          fileId: payload?.fileId || "",
+          keepBatchOverlay: state.isAnalyzingAll === true,
+        });
         settleAnalysisPoll(payload);
       } catch (error) {
         const clearStatus = isAuthAnalysisError(error)
@@ -3221,7 +5665,9 @@ async function startPolling(jobId = "") {
           message: String(error?.message || error),
         });
         if (clearStatus) {
-          clearBusyAnalysisStateForJob(cleanJobId, clearStatus);
+          clearBusyAnalysisStateForJob(cleanJobId, clearStatus, {
+            keepBatchOverlay: state.isAnalyzingAll === true,
+          });
           setJobMetaText(
             isAuthAnalysisError(error)
               ? "La sesión expiró o perdió autorización para consultar el análisis. Vuelve a cargar la página."
@@ -3241,6 +5687,7 @@ async function startPolling(jobId = "") {
 async function bootstrap() {
   sidepanelApi.bindEvents();
   bindEditorEvents();
+  loadMappingGroupsFromStorage();
   const isCollapsed = safeLocalStorageGet("cb_editorial_panel_collapsed") === "true";
   if (isCollapsed && els.editorialPanel && els.toggleEditorialBtn) {
     els.editorialPanel.classList.add("is-collapsed");

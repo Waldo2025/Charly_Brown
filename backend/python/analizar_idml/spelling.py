@@ -1,6 +1,13 @@
 import re
 import unicodedata
 
+from .rae_validator import RAE_2010_UNACCENTED_MONOSYLLABLES, validate_spelling_candidate_with_rae
+
+try:
+    import enchant
+except Exception:  # pragma: no cover - depends on local system dictionaries.
+    enchant = None
+
 
 def _normalize_text(text):
     return re.sub(r"\s+", " ", str(text or "")).strip()
@@ -80,6 +87,8 @@ def _is_valid_spelling_match(text, excerpt, suggestion):
     accent_fold_excerpt = _strip_accents(clean_excerpt).lower()
     accent_fold_suggestion = _strip_accents(clean_suggestion).lower()
     if accent_fold_excerpt == accent_fold_suggestion:
+        if accent_fold_excerpt in RAE_2010_UNACCENTED_MONOSYLLABLES:
+            return False
         excerpt_accents = _count_accents(clean_excerpt)
         suggestion_accents = _count_accents(clean_suggestion)
         if excerpt_accents > 0:
@@ -97,12 +106,146 @@ def _build_issue_message(page_name="", reason=""):
     return clean_reason
 
 
-def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2):
-    if gemini_verifier is None or not getattr(gemini_verifier, "enabled", False):
-        return []
+def _resolve_dictionary(candidates):
+    if enchant is None:
+        return None, ""
+    for code in candidates:
+        try:
+            return enchant.Dict(code), code
+        except Exception:
+            continue
+    return None, ""
 
+
+def _extract_tokens_with_positions(text=""):
+    pattern = r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]{2,}"
+    return [(match.group(0), match.start()) for match in re.finditer(pattern, str(text or ""))]
+
+
+def _compact_alpha(value=""):
+    return re.sub(r"[^a-záéíóúüñ]", "", str(value or "").strip().lower())
+
+
+def _should_ignore_local_token(token=""):
+    clean = str(token or "").strip()
+    if len(clean) < 4:
+        return True
+    if "-" in clean or any(char.isdigit() for char in clean):
+        return True
+    if clean.isupper():
+        return True
+    if clean[0].isupper() and len(clean) >= 4:
+        return True
+    compact = _compact_alpha(clean)
+    if not compact:
+        return True
+    if _strip_accents(compact) in RAE_2010_UNACCENTED_MONOSYLLABLES:
+        return True
+    return compact in {
+        "recortable",
+        "anexo",
+        "ficha",
+        "video",
+        "pagina",
+        "paginas",
+    }
+
+
+def _merge_suggestions(*groups):
+    merged = []
+    seen = set()
+    for group in groups:
+        for value in group or []:
+            clean = str(value or "").strip()
+            key = clean.lower()
+            if not clean or key in seen:
+                continue
+            seen.add(key)
+            merged.append(clean)
+            if len(merged) >= 4:
+                return merged
+    return merged
+
+
+def _is_reliable_local_suggestion(token="", suggestions=None):
+    raw_token = str(token or "").strip().lower()
+    normalized_token = _strip_accents(raw_token)
+    if normalized_token in RAE_2010_UNACCENTED_MONOSYLLABLES:
+        return ""
+    for suggestion in suggestions or []:
+        clean_suggestion = str(suggestion or "").strip()
+        if not clean_suggestion or " " in clean_suggestion or "-" in clean_suggestion:
+            continue
+        if clean_suggestion.lower() == raw_token:
+            continue
+        if _strip_accents(clean_suggestion).lower() != normalized_token:
+            continue
+        if _count_accents(clean_suggestion) <= _count_accents(raw_token):
+            continue
+        return clean_suggestion
+    return ""
+
+
+def _find_local_spelling_issues(text_blocks, max_issues=20):
+    es_dict, es_code = _resolve_dictionary(["es_MX", "es", "es_ES"])
+    if es_dict is None:
+        return []
     issues = []
     seen = set()
+    for block in text_blocks or []:
+        for window in _iter_text_windows(block, window_size=1400):
+            text = str(window.get("text") or "")
+            for token, offset in _extract_tokens_with_positions(text):
+                if _should_ignore_local_token(token):
+                    continue
+                if es_dict.check(token.lower()):
+                    continue
+                suggestions = _merge_suggestions(es_dict.suggest(token))
+                accepted = _is_reliable_local_suggestion(token, suggestions)
+                if not accepted:
+                    continue
+                if not validate_spelling_candidate_with_rae(token, accepted):
+                    continue
+                signature = (
+                    str(window.get("pageName") or ""),
+                    str(window.get("storyId") or ""),
+                    token.lower(),
+                    offset,
+                )
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                issues.append({
+                    "pageName": window.get("pageName") or "",
+                    "storyId": window.get("storyId") or "",
+                    "storyTitle": window.get("storyTitle") or "",
+                    "storySource": window.get("storySource") or "",
+                    "message": _build_issue_message(window.get("pageName"), f"Posible falta de ortografía: “{token}” debería llevar acento."),
+                    "context": _build_context(text, token),
+                    "token": token,
+                    "replacements": [accepted],
+                    "providers": [es_code or "pyenchant"],
+                })
+                if len(issues) >= max_issues:
+                    return issues
+    return issues
+
+
+def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2):
+    issues = _find_local_spelling_issues(text_blocks, max_issues=max_issues)
+    seen = {
+        (
+            str(issue.get("storyId") or ""),
+            str(issue.get("token") or "").lower(),
+            str((issue.get("replacements") or [""])[0] or "").lower(),
+        )
+        for issue in issues
+    }
+    if len(issues) >= max_issues:
+        return issues
+    if gemini_verifier is None or not getattr(gemini_verifier, "enabled", False):
+        return issues
+
     processed_windows = 0
     story_windows = {}
     for block in text_blocks or []:
@@ -119,6 +262,8 @@ def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_
                 excerpt = str(item.get("excerpt") or "").strip()
                 suggestion = str(item.get("suggestion") or "").strip()
                 if not _is_valid_spelling_match(window.get("text"), excerpt, suggestion):
+                    continue
+                if not validate_spelling_candidate_with_rae(excerpt, suggestion):
                     continue
                 signature = (
                     str(window.get("storyId") or ""),

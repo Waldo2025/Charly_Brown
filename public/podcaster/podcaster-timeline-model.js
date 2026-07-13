@@ -419,6 +419,10 @@ function normalizeSceneVolumeOverridePct(value) {
   return clamped;
 }
 
+function toNullableSceneVolumeOverride(value) {
+  return value == null ? Number.NaN : toFiniteNumber(value, Number.NaN);
+}
+
 function normalizePersistedMediaReference(rawUrl = "", storagePath = "") {
   if (typeof window.normalizePersistedMediaReference === "function") {
     return window.normalizePersistedMediaReference(rawUrl, storagePath);
@@ -508,6 +512,7 @@ function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
     storagePath,
     startMs,
     anchorStartMs,
+    manualStartMs: raw.manualStartMs === true || raw.manualPosition === true,
     endMs,
     trimInMs,
     trimOutMs,
@@ -1673,8 +1678,8 @@ function resolveTimelineClipMix(session = null, rowId = "") {
     0,
     Math.min(100, toFiniteNumber(dialogueTrack?.volumePct, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)))
   );
-  const veoOverride = toFiniteNumber(clip?.veoVolumeOverridePct, Number.NaN);
-  const geminiOverride = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
+  const veoOverride = toNullableSceneVolumeOverride(clip?.veoVolumeOverridePct);
+  const geminiOverride = toNullableSceneVolumeOverride(clip?.geminiVolumeOverridePct);
   let veoPct = Number.isFinite(veoOverride) ? Math.max(0, Math.min(100, Math.round(veoOverride))) : fallbackVeoPct;
   const rows = getSessionRows(activeSession);
   const row = rows.find((item) => String(item?.id || "").trim() === key) || null;
@@ -1718,7 +1723,7 @@ function resolveTimelineClipVoiceVolume(session = null, rowId = "") {
   const key = String(rowId || "").trim();
   const clip = key ? ensureTimelineClipsByRowId(activeSession, { persist: false })[key] : null;
   const dialogueTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-  const override = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
+  const override = toNullableSceneVolumeOverride(clip?.geminiVolumeOverridePct);
   const pct = Number.isFinite(override)
     ? Math.max(0, Math.min(100, Math.round(override)))
     : Math.max(0, Math.min(100, toFiniteNumber(dialogueTrack?.volumePct, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, toFiniteNumber(cfg.masterVolume, 100)))));
@@ -1807,22 +1812,32 @@ function preserveGeminiDialogueOffsetsForReorderedTimeline(beforeSession = null)
     const clip = beforeClips[rowId];
     if (!rowId || !clip || !segment.enabled) return null;
     const offsetMs = Math.round(Number(segment.startMs || 0) - Number(clip.startMs || 0));
-    return [rowId, offsetMs];
+    return [rowId, {
+      mode: "relative",
+      offsetMs,
+      manualStartMs: segment.manualStartMs === true || segment.manualPosition === true
+    }];
   }).filter(Boolean));
   let changed = false;
   const nextSegments = afterTrack.segments.map((segment) => {
     const rowId = String(segment?.rowId || "").trim();
     const clip = afterClips[rowId];
     if (!rowId || !clip) return segment;
-    const offsetMs = offsetByRowId.get(rowId);
-    if (offsetMs == null) return segment;
-    const targetStartMs = Math.max(0, Math.round(Number(clip.startMs || 0) + offsetMs));
+    const offset = offsetByRowId.get(rowId);
+    if (!offset) return segment;
+    const targetStartMs = Math.max(0, Math.round(Number(clip.startMs || 0) + Number(offset.offsetMs || 0)));
     if (Math.round(segment.startMs || 0) === targetStartMs) return segment;
+    const durationMs = Math.max(
+      STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS)
+    );
     changed = true;
     return {
       ...segment,
       startMs: targetStartMs,
-      anchorStartMs: targetStartMs
+      endMs: targetStartMs + durationMs,
+      anchorStartMs: Math.max(0, Math.round(Number(clip.startMs || 0) || 0)),
+      manualStartMs: offset.manualStartMs === true || segment.manualStartMs === true
     };
   });
   if (changed) {

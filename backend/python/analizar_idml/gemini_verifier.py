@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,11 +49,32 @@ class GeminiVerifier:
             or os.getenv("ANALIZAR_PDF_GEMINI_TIMEOUT_SEC")
             or 6.0
         )
+        self.max_requests = max(0, int(
+            os.getenv("ANALIZAR_IDML_GEMINI_MAX_REQUESTS")
+            or os.getenv("ANALIZAR_PDF_GEMINI_MAX_REQUESTS")
+            or 8
+        ))
+        self.time_budget_sec = max(0.0, float(
+            os.getenv("ANALIZAR_IDML_GEMINI_TIME_BUDGET_SEC")
+            or os.getenv("ANALIZAR_PDF_GEMINI_TIME_BUDGET_SEC")
+            or 20.0
+        ))
+        self.started_at = time.monotonic()
+        self.request_count = 0
 
     def _endpoint(self):
         model = urllib.parse.quote(self.model, safe="")
         key = urllib.parse.quote(self.api_key, safe="")
         return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+
+    def _within_budget(self):
+        if not self.enabled:
+            return False
+        if self.max_requests > 0 and self.request_count >= self.max_requests:
+            return False
+        if self.time_budget_sec > 0 and (time.monotonic() - self.started_at) >= self.time_budget_sec:
+            return False
+        return True
 
     def _extract_text(self, payload):
         try:
@@ -63,6 +85,9 @@ class GeminiVerifier:
             return ""
 
     def _post_json(self, body):
+        if not self._within_budget():
+            raise TimeoutError("gemini_budget_exhausted")
+        self.request_count += 1
         request = urllib.request.Request(
             self._endpoint(),
             data=json.dumps(body).encode("utf-8"),
@@ -93,9 +118,27 @@ class GeminiVerifier:
                 "comillas o parentesis desbalanceados y secuencias de puntuacion anomala. "
                 "No corrijas estilo opcional ni cambios debatibles."
             ),
+            "redaction": (
+                "Detecta SOLO incoherencias reales de redaccion que dificulten entender el texto: "
+                "ambiguedad fuerte, falta de referente, orden confuso, contradiccion interna o formulacion incompleta. "
+                "No propongas mejoras de estilo opcionales, no simplifiques por gusto y no corrijas ortografia ni ortotipografia. "
+                "Ignora referencias editoriales y complementos con codigos como Recortable PaT1, Anexo PbT1, Ficha, Video "
+                "o etiquetas tecnicas similares; esos codigos son validos y no son incoherencias."
+            ),
         }
+        editorial_context = (
+            "Idioma y criterio obligatorio: español editorial de México para material escolar de primaria. "
+            "No apliques reglas gramaticales, ortograficas ni de puntuacion del ingles. "
+            "No traduzcas, no reescribas y no cambies regionalismos validos del español. "
+            "Aplica la Ortografia academica vigente desde 2010: guion, truhan, fie, liais y formas equivalentes "
+            "consideradas monosilabas ortograficas se escriben sin tilde; no sugieras guión, truhán, fié ni liáis. "
+            "Para signos de interrogacion y exclamacion, evalua la pregunta o exclamacion completa: "
+            "si el segmento ya contiene signo de apertura español (¿ o ¡), no marques falta aunque haya "
+            "palabras interrogativas internas como que, qué, como, cómo, por que o por qué."
+        )
         return (
             "Eres un verificador editorial conservador para texto extraido de archivos IDML en espanol.\n"
+            f"{editorial_context}\n"
             f"{category_instructions.get(category, category_instructions['spelling'])}\n"
             "Si no estas completamente seguro, responde [].\n"
             "Responde SOLO JSON valido con un array.\n"
@@ -142,11 +185,18 @@ class GeminiVerifier:
                 reason = str(item.get("reason") or "").strip()
                 if not excerpt or not suggestion or not reason:
                     continue
-                accepted.append({
+                accepted_item = {
                     "excerpt": excerpt,
                     "suggestion": suggestion,
                     "reason": reason,
-                })
+                }
+                try:
+                    confidence = float(item.get("confidence"))
+                    if 0 <= confidence <= 1:
+                        accepted_item["confidence"] = confidence
+                except (TypeError, ValueError):
+                    pass
+                accepted.append(accepted_item)
             return accepted
         except (
             urllib.error.URLError,

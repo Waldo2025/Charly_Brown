@@ -12,6 +12,7 @@ const EMPTY_RESULT = Object.freeze({
   sectionIssues: [],
   spellingIssues: [],
   orthotypographyIssues: [],
+  redactionIssues: [],
   colorIssues: [],
   recortableIssues: [],
   stats: null
@@ -34,18 +35,24 @@ const EMPTY_BIBLIOGRAPHIC_INFO = Object.freeze({
   trimestre: "",
   unidad: "",
   edicionNumero: "",
-  revisionNumero: ""
+  revisionNumero: "",
+  recortableRole: "source"
 });
 
 const saveCoordinator = createAnalizarPdfSaveCoordinator({
   saveImpl: async (session) => {
-    const payload = await saveAnalizarPdfSession(normalizeAnalizarPdfSession(session));
+    const normalized = normalizeAnalizarPdfSession(session);
+    const payload = await saveAnalizarPdfSession(
+      stripAnalysisResultsFromSession(normalized),
+      collectAnalysisResultsForRemoteStorage(normalized)
+    );
     return normalizeAnalizarPdfSession(payload?.session || session);
   }
 });
 
 function normalizeBibliographicInfo(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const normalizedRole = String(source.recortableRole || "").trim().toLowerCase();
   return {
     bookType: String(source.bookType || "").trim(),
     nivel: String(source.nivel || "").trim(),
@@ -53,15 +60,18 @@ function normalizeBibliographicInfo(raw = {}) {
     trimestre: String(source.trimestre || "").trim(),
     unidad: String(source.unidad || "").trim(),
     edicionNumero: String(source.edicionNumero || "").trim(),
-    revisionNumero: String(source.revisionNumero || "").trim()
+    revisionNumero: String(source.revisionNumero || "").trim(),
+    recortableRole: ["source", "destination", "both"].includes(normalizedRole) ? normalizedRole : "source"
   };
 }
 
 function normalizeColorEntry(raw = {}, index = 0) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const swatchName = String(source.swatchName || source.name || "").trim();
   return {
     id: String(source.id || `color_${index + 1}`).trim() || `color_${index + 1}`,
-    swatchName: String(source.swatchName || "").trim(),
+    name: swatchName,
+    swatchName,
     cmyk: String(source.cmyk || "").trim(),
     hex: String(source.hex || "").trim()
   };
@@ -74,14 +84,23 @@ function normalizeAnalysisStatus(value = "") {
 
 function normalizeResult(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const stats = source.stats && typeof source.stats === "object"
+    ? {
+      ...source.stats,
+      swatchInventory: Array.isArray(source.stats.swatchInventory)
+        ? source.stats.swatchInventory.map((entry, index) => normalizeColorEntry(entry, index))
+        : [],
+    }
+    : null;
   return {
     paginationIssues: Array.isArray(source.paginationIssues) ? source.paginationIssues : [],
     sectionIssues: Array.isArray(source.sectionIssues) ? source.sectionIssues : [],
     spellingIssues: Array.isArray(source.spellingIssues) ? source.spellingIssues : [],
     orthotypographyIssues: Array.isArray(source.orthotypographyIssues) ? source.orthotypographyIssues : [],
+    redactionIssues: Array.isArray(source.redactionIssues) ? source.redactionIssues : [],
     colorIssues: Array.isArray(source.colorIssues) ? source.colorIssues : [],
     recortableIssues: Array.isArray(source.recortableIssues) ? source.recortableIssues : [],
-    stats: source.stats && typeof source.stats === "object" ? source.stats : null
+    stats
   };
 }
 
@@ -100,6 +119,9 @@ function normalizeResultSummary(raw = {}, result = EMPTY_RESULT) {
     orthotypographyIssueCount: Number(source.orthotypographyIssueCount) >= 0
       ? Number(source.orthotypographyIssueCount)
       : result.orthotypographyIssues.length,
+    redactionIssueCount: Number(source.redactionIssueCount) >= 0
+      ? Number(source.redactionIssueCount)
+      : result.redactionIssues.length,
     colorIssueCount: Number(source.colorIssueCount) >= 0
       ? Number(source.colorIssueCount)
       : result.colorIssues.length,
@@ -111,6 +133,99 @@ function normalizeResultSummary(raw = {}, result = EMPTY_RESULT) {
       : Math.max(0, Number(result?.stats?.pageCount || 0) || 0),
     analyzedAt: String(source.analyzedAt || "").trim()
   };
+}
+
+function normalizeQuickAnalysisIssue(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    pageName: String(source.pageName || "").trim(),
+    storyId: String(source.storyId || "").trim(),
+    styleName: String(source.styleName || "").trim(),
+    paragraphText: String(source.paragraphText || "").trim(),
+    excerpt: String(source.excerpt || "").trim(),
+    suggestion: String(source.suggestion || "").trim(),
+    message: String(source.message || "").trim(),
+    context: String(source.context || "").trim(),
+  };
+}
+
+function normalizeQuickAnalysis(raw = null) {
+  if (!raw || typeof raw !== "object") return null;
+  const pages = Array.isArray(raw.pages)
+    ? raw.pages.map((page) => ({
+      pageName: String(page?.pageName || "").trim(),
+      issues: Array.isArray(page?.issues) ? page.issues.map((issue) => normalizeQuickAnalysisIssue(issue)) : [],
+    })).filter((page) => page.pageName && page.issues.length)
+    : [];
+  return {
+    status: String(raw.status || "").trim() || "idle",
+    analyzedAt: String(raw.analyzedAt || "").trim(),
+    orthotypographyIssueCount: Number(raw.orthotypographyIssueCount) >= 0
+      ? Number(raw.orthotypographyIssueCount)
+      : pages.reduce((total, page) => total + page.issues.length, 0),
+    pageCount: Number(raw.pageCount || 0) || 0,
+    pages,
+  };
+}
+
+function stripAnalysisResultFromFileEntry(file = {}) {
+  return {
+    ...file,
+    analysisStatus: "idle",
+    analysisJobId: "",
+    resultSummary: normalizeResultSummary({}, EMPTY_RESULT),
+    result: { ...EMPTY_RESULT },
+    quickAnalysis: null
+  };
+}
+
+export function stripAnalysisResultsFromSession(session = null) {
+  const normalized = normalizeAnalizarPdfSession(session || {});
+  return normalizeAnalizarPdfSession({
+    ...normalized,
+    analysisStatus: "idle",
+    analysisJobId: "",
+    resultSummary: normalizeResultSummary({}, EMPTY_RESULT),
+    result: { ...EMPTY_RESULT },
+    revisions: (Array.isArray(normalized.revisions) ? normalized.revisions : []).map((revision) => ({
+      ...revision,
+      latestAnalysisAt: "",
+      summary: {
+        paginationIssueCount: 0,
+        sectionIssueCount: 0,
+        spellingIssueCount: 0,
+        orthotypographyIssueCount: 0,
+        redactionIssueCount: 0,
+        colorIssueCount: 0,
+        recortableIssueCount: 0,
+      },
+      files: (Array.isArray(revision.files) ? revision.files : []).map((file) => stripAnalysisResultFromFileEntry(file))
+    }))
+  });
+}
+
+export function collectAnalysisResultsForRemoteStorage(session = null) {
+  const normalized = normalizeAnalizarPdfSession(session || {});
+  const results = [];
+  for (const revision of Array.isArray(normalized.revisions) ? normalized.revisions : []) {
+    for (const file of Array.isArray(revision.files) ? revision.files : []) {
+      const hasResult = Boolean(file?.result?.stats || file?.resultSummary?.pageCount || file?.resultSummary?.analyzedAt);
+      const hasQuickAnalysis = Boolean(file?.quickAnalysis);
+      if (!hasResult && !hasQuickAnalysis) continue;
+      results.push({
+        revisionId: revision.id,
+        fileId: file.id,
+        documentName: file.documentName || "",
+        sourceType: file.sourceType || normalized.sourceType || "",
+        analysisStatus: file.analysisStatus || "completed",
+        updatedAt: file.updatedAt || "",
+        resultSummary: file.resultSummary || normalizeResultSummary({}, EMPTY_RESULT),
+        result: hasResult ? file.result : { ...EMPTY_RESULT },
+        quickAnalysis: file.quickAnalysis || null,
+      });
+    }
+  }
+  return results;
 }
 
 function buildSessionKey(info = {}) {
@@ -145,6 +260,13 @@ function normalizeFileEntry(raw = {}, index = 0) {
   const source = raw && typeof raw === "object" ? raw : {};
   const documentName = String(source.documentName || source.fileName || "").trim();
   const result = normalizeResult(source.result);
+  const sourceReference = [
+    documentName,
+    source.sourceAssetPath,
+    source.sourceStoragePath,
+    source.sourceDownloadUrl
+  ].map((value) => String(value || "").trim().toLowerCase()).join(" ");
+  const sourceType = source.sourceType === "idml" || /\.idml(?:\?|#|$)/i.test(sourceReference) ? "idml" : "pdf";
   return {
     id: String(source.id || `file_${index + 1}`).trim() || `file_${index + 1}`,
     fileKey: String(source.fileKey || buildFileKey(documentName) || `file_${index + 1}`).trim() || `file_${index + 1}`,
@@ -163,13 +285,14 @@ function normalizeFileEntry(raw = {}, index = 0) {
     correctedStoragePath: String(source.correctedStoragePath || "").trim(),
     correctedDownloadUrl: String(source.correctedDownloadUrl || "").trim(),
     correctedExportedAt: String(source.correctedExportedAt || "").trim(),
-    sourceType: source.sourceType === "idml" ? "idml" : "pdf",
+    sourceType,
     analysisStatus: normalizeAnalysisStatus(source.analysisStatus),
     analysisJobId: String(source.analysisJobId || "").trim(),
     createdAt: String(source.createdAt || "").trim(),
     updatedAt: String(source.updatedAt || "").trim(),
     resultSummary: normalizeResultSummary(source.resultSummary, result),
-    result
+    result,
+    quickAnalysis: normalizeQuickAnalysis(source.quickAnalysis)
   };
 }
 
@@ -177,12 +300,17 @@ function normalizeRevisionEntry(raw = {}, index = 0) {
   const source = raw && typeof raw === "object" ? raw : {};
   const files = Array.isArray(source.files) ? source.files.map((entry, fileIndex) => normalizeFileEntry(entry, fileIndex)) : [];
   const summarySource = source.summary && typeof source.summary === "object" ? source.summary : {};
+  const unidad = String(source.unidad || "").trim();
+  const normalizedRole = String(source.recortableRole || "").trim().toLowerCase();
   return {
     id: String(source.id || `revision_${index + 1}`).trim() || `revision_${index + 1}`,
     revisionKey: String(source.revisionKey || buildRevisionKey(source) || `revision_${index + 1}`).trim() || `revision_${index + 1}`,
     title: String(source.title || buildRevisionTitle(source)).trim() || buildRevisionTitle(source),
     unidad: String(source.unidad || "").trim(),
     revisionNumero: String(source.revisionNumero || "").trim(),
+    recortableRole: /^recortables$/i.test(unidad)
+      ? (["source", "destination", "both"].includes(normalizedRole) ? normalizedRole : "source")
+      : "",
     mappingId: String(source.mappingId || "").trim(),
     mappingTitle: String(source.mappingTitle || "").trim(),
     mappingUpdatedAt: String(source.mappingUpdatedAt || "").trim(),
@@ -195,6 +323,7 @@ function normalizeRevisionEntry(raw = {}, index = 0) {
       sectionIssueCount: Number(summarySource.sectionIssueCount || 0) || 0,
       spellingIssueCount: Number(summarySource.spellingIssueCount || 0) || 0,
       orthotypographyIssueCount: Number(summarySource.orthotypographyIssueCount || 0) || 0,
+      redactionIssueCount: Number(summarySource.redactionIssueCount || 0) || 0,
       colorIssueCount: Number(summarySource.colorIssueCount || 0) || 0,
       recortableIssueCount: Number(summarySource.recortableIssueCount || 0) || 0,
     },
@@ -267,8 +396,22 @@ export async function loadSessions() {
   return Array.isArray(payload?.sessions) ? payload.sessions.map((item) => normalizeAnalizarPdfSession(item)) : [];
 }
 
-export async function saveSession(session = null) {
-  return saveCoordinator.save(session);
+export async function saveSession(session = null, options = {}) {
+  const includeAnalysis = options?.includeAnalysis === true;
+  const saved = await saveCoordinator.save(normalizeAnalizarPdfSession(session));
+  return includeAnalysis ? normalizeAnalizarPdfSession({
+    ...session,
+    id: saved?.id || session?.id || "",
+    ownerId: saved?.ownerId || session?.ownerId || "",
+    createdAt: saved?.createdAt || session?.createdAt || "",
+    updatedAt: saved?.updatedAt || session?.updatedAt || "",
+  }) : normalizeAnalizarPdfSession({
+    ...session,
+    id: saved?.id || session?.id || "",
+    ownerId: saved?.ownerId || session?.ownerId || "",
+    createdAt: saved?.createdAt || session?.createdAt || "",
+    updatedAt: saved?.updatedAt || session?.updatedAt || "",
+  });
 }
 
 export async function deleteSession(sessionId = "") {

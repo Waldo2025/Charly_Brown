@@ -129,6 +129,7 @@ function initElements() {
 }
 
 let currentEditingRowId = null;
+let mediaEditorInitialized = false;
 
 
 
@@ -538,8 +539,14 @@ function applyTextEffect(effect) {
 
 async function openStylizedTextEditor() {
     const session = window.PodcasterState?.activeSession;
-    const rowId = window.PodcasterState?.activeRowId;
+    const rowId = String(window.PodcasterState?.activeRowId || session?.script?.rows?.[0]?.id || '').trim();
     if (!session || !rowId) return;
+    if (!els.textModal) initElements();
+    if (!els.textModal) return;
+
+    if (String(window.PodcasterState?.activeRowId || '').trim() !== rowId) {
+        window.PodcasterUI?.setPodcastVideoRow?.(rowId, { syncStage: true, lightweightUi: true });
+    }
 
     currentEditingRowId = rowId;
     els.textModal.hidden = false;
@@ -596,7 +603,9 @@ function setupEventListeners() {
 
 
     // Stylized Text
-    els.addStylizedTextBtn.addEventListener('click', openStylizedTextEditor);
+    if (els.addStylizedTextBtn) {
+        els.addStylizedTextBtn.addEventListener('click', openStylizedTextEditor);
+    }
 
     document.querySelector('.pme-color-picker-wrapper')?.addEventListener('click', (e) => {
         // Prevent recursive click if the target is the input itself
@@ -718,19 +727,34 @@ function setupEventListeners() {
     document.addEventListener('click', (e) => {
         const editBtn = e.target.closest("[data-action='timeline-edit-stylized-text']");
         if (editBtn) {
-            window.PodcasterState.activeRowId = editBtn.dataset.rowId;
+            const rowId = String(editBtn.dataset.rowId || '').trim();
+            if (rowId) {
+                if (typeof window.PodcasterUI?.selectTimelineSceneRow === 'function') {
+                    window.PodcasterUI.selectTimelineSceneRow(rowId, { syncStage: true });
+                } else if (typeof window.PodcasterUI?.setPodcastVideoRow === 'function') {
+                    window.PodcasterUI.setPodcastVideoRow(rowId, { syncStage: true, lightweightUi: true });
+                }
+            }
             openStylizedTextEditor();
         }
     });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initPodcasterMediaEditor() {
+    if (mediaEditorInitialized) return;
     initElements();
-    if (!els.textModal && !els.addStylizedTextBtn) return;
+    if (!els.textModal || !els.addStylizedTextBtn) return;
     
     initFirebase();
     setupEventListeners();
-});
+    mediaEditorInitialized = true;
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPodcasterMediaEditor, { once: true });
+} else {
+    initPodcasterMediaEditor();
+}
 
 // Export for use in players
 window.PodcasterMediaEditor = {

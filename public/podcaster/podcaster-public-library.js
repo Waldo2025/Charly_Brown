@@ -1,4 +1,4 @@
-import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js";
+import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.472";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
 const runtime = requirePodcasterPublicLibraryRuntime();

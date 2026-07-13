@@ -59,12 +59,12 @@ if (!/function isMontageReelResolution/.test(serverSource)
 if (!/let onScreenTextSegments = Array\.isArray\(onScreenTextTimelineRaw\?\.segments\)/.test(serverSource)
   || !/const buildFallbackOnScreenTextSegmentsFromEntries = \(\) => entries[\s\S]*entry\?\.onScreenText/.test(serverSource)
   || !/else if \(!onScreenTextSegments\.length\) \{[\s\S]*buildFallbackOnScreenTextSegmentsFromEntries\(\)/.test(serverSource)
-  || !/let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\) && !shouldPreferBrowserTextFinalPass;/.test(serverSource)
+  || !/let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\)[\s\S]*&& input\.useTimelineAudio !== true;/.test(serverSource)
   || !/const reviewOnScreenTextEnabled = input\.exportMode === "review" && isTextTrackVisible && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/.test(serverSource)) {
   throw new Error("El backend debe quemar texto en pantalla aunque falte el flag enabled del timeline y debe reconstruir segmentos desde entries.");
 }
 
-if (!/let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\) && !shouldPreferBrowserTextFinalPass;/.test(serverSource)
+if (!/let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\)[\s\S]*&& input\.useTimelineAudio !== true;/.test(serverSource)
   || !/await appendMontageSceneOnScreenTextAssFilters\({/.test(serverSource)) {
   throw new Error("El export reel debe componer el texto en pantalla dentro del render por escena.");
 }

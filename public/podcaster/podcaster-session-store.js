@@ -885,11 +885,12 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     throw error;
   }
   let response = null;
-  if (deps.hasAvailableApiBase?.()) {
+  const useSessionSaveApi = options?.useApi === true && deps.hasAvailableApiBase?.();
+  if (useSessionSaveApi) {
     try {
       response = await deps.authFetchJson("/api/podcaster/sessions/save", {
         method: "POST",
-        preferRemote: false,
+        sameOrigin: true,
         body: JSON.stringify({ session: payload })
       });
     } catch (error) {

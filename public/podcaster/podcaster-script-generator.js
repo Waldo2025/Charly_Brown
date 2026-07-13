@@ -3323,13 +3323,11 @@ function hasStructuredVideoTableInput(promptText = "", promptHtml = "") {
 const DIRECT_VIDEO_TABLE_REQUIRED_KEYS = Object.freeze([
   "script",
   "sceneDescription",
-  "onScreenText",
   "visual"
 ]);
 const DIRECT_VIDEO_TABLE_REQUIRED_LABELS = Object.freeze({
   script: "Guion",
   sceneDescription: "Descripción de escena",
-  onScreenText: "Texto en pantalla",
   visual: "Elemento visual"
 });
 
@@ -3432,6 +3430,7 @@ function buildVideoScriptFromUnmodifiedTable(promptText = "", promptHtml = "", s
     voiceOverText: row.script,
     sceneDescription: row.sceneDescription,
     onScreenText: row.onScreenText,
+    onScreenTextNoSummarize: true,
     transition: row.transition,
     visualNotes: row.visual
   }, index, { videoPreset: "creative" }));

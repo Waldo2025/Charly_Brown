@@ -1420,7 +1420,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     panelMusicGlobalLibraryState.loading = true;
     if (options.render !== false) syncMusicControls();
     try {
-      const response = await authFetchJson("/api/podcaster/music/library/list", { method: "GET", sameOrigin: true });
+      const response = await authFetchJson("/api/podcaster/music/library/list", { method: "GET" });
       panelMusicGlobalLibraryState.items = Array.isArray(response?.tracks)
         ? response.tracks.map((track) => normalizeGlobalPanelMusicLibraryTrack(track)).filter(Boolean)
         : [];
@@ -2077,7 +2077,6 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     if (!silent) setGenerationStatus("Subiendo música a Firebase Storage...", "is-busy");
     const upload = await authFetchJson("/api/podcaster/music/upload", {
       method: "POST",
-      sameOrigin: true,
       body: JSON.stringify({
         sessionId: String(sessionId || getActiveSession()?.id || "").trim(),
         fileName: String(currentTrack.name || "podcast-music").trim() || "podcast-music",

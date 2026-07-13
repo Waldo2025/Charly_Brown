@@ -63,6 +63,10 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     const rounded = Math.round(numeric * 100) / 100;
     return rounded.toFixed(2).replace(/\.?0+$/, "");
   }
+
+  function resolveOverridePercent(value, fallback = Number.NaN) {
+    return value == null ? Number.NaN : toFiniteNumber(value, fallback);
+  }
   
   function resolveTimelineClipRestoreTarget(clip = null) {
     return getTimelineClipRestoreTarget(clip);
@@ -180,8 +184,8 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     const baseVeoVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseVeoVolumePct, 100))));
     const baseGeminiVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseGeminiVolumePct, 100))));
     const baseBackgroundMusicVolumePct = Math.max(0, Math.min(200, Math.round(toFiniteNumber(timelineClipDurationModalState.baseBackgroundMusicVolumePct, 100))));
-    const clipVeoOverride = toFiniteNumber(clip.veoVolumeOverridePct, Number.NaN);
-    const clipGeminiOverride = toFiniteNumber(clip.geminiVolumeOverridePct, Number.NaN);
+    const clipVeoOverride = resolveOverridePercent(clip.veoVolumeOverridePct, Number.NaN);
+    const clipGeminiOverride = resolveOverridePercent(clip.geminiVolumeOverridePct, Number.NaN);
     const sceneBackgroundOverride = getSceneBackgroundMusicVolumeOverridePct(session, rowId);
     const lastBaseVeo = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseVeoVolumePct, baseVeoVolumePct))));
     const lastBaseGemini = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseGeminiVolumePct, baseGeminiVolumePct))));
@@ -396,8 +400,8 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
         : nextTrimOutMs;
       if (guardedTrimOutMs !== nextTrimOutMs) preventedGeminiCut = true;
       durationChanged = Number(current?.trimOutMs || 0) !== guardedTrimOutMs;
-      const currentVeoOverride = toFiniteNumber(current?.veoVolumeOverridePct, Number.NaN);
-      const currentGeminiOverride = toFiniteNumber(current?.geminiVolumeOverridePct, Number.NaN);
+      const currentVeoOverride = resolveOverridePercent(current?.veoVolumeOverridePct, Number.NaN);
+      const currentGeminiOverride = resolveOverridePercent(current?.geminiVolumeOverridePct, Number.NaN);
       const normalizedCurrentVeoOverride = Number.isFinite(currentVeoOverride) ? Math.max(0, Math.min(100, Math.round(currentVeoOverride))) : null;
       const normalizedCurrentGeminiOverride = Number.isFinite(currentGeminiOverride) ? Math.max(0, Math.min(100, Math.round(currentGeminiOverride))) : null;
       volumeChanged = normalizedCurrentVeoOverride !== desiredVeoOverridePct
@@ -553,8 +557,8 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     const baseVeoVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.montageDefaultVeoVolumePct, 0))));
     const baseGeminiVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100))));
     const baseBackgroundMusicVolumePct = Math.max(0, Math.min(200, Math.round(toFiniteNumber(panelMusicState?.montageVolume, 100))));
-    const clipVeoOverride = toFiniteNumber(clip?.veoVolumeOverridePct, Number.NaN);
-    const clipGeminiOverride = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
+    const clipVeoOverride = resolveOverridePercent(clip?.veoVolumeOverridePct, Number.NaN);
+    const clipGeminiOverride = resolveOverridePercent(clip?.geminiVolumeOverridePct, Number.NaN);
     const sceneBackgroundOverride = getSceneBackgroundMusicVolumeOverridePct(session, key);
     timelineClipDurationModalState = {
       rowId: key,

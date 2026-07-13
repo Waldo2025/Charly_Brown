@@ -104,17 +104,23 @@ const {
   ANALIZAR_PDF_MAPPING_TOOL_NAME,
   buildResultSummary,
   buildDefaultStyleMappingSeeds,
+  buildStyleMappingLookupScopeKeys,
   buildStyleMappingScopeKey,
   classifyAnalizarPdfStartupError,
   createAnalizarPdfJobStore,
   ensureDirSync,
   logAnalizarPdf,
+  mergeAnalizarPdfSessionPreservingFreshFileResults,
   normalizeAnalysisStatus,
   reconcileStaleAnalizarPdfSessionJobs,
+  repairAnalizarPdfSessionSourceAssetPaths,
   resolveAnalyzerScript,
+  sanitizeResult,
   sanitizeResultSummary,
   sanitizeAnalizarPdfSession,
-  sanitizeStyleMapping
+  stripAnalizarPdfAnalysisResults,
+  sanitizeStyleMapping,
+  spawnAnalizarPdfPythonJob
 } = require("./analizar-pdf.js");
 const {
   createAnalizarPdfProcessingQueue
@@ -1107,7 +1113,12 @@ const corsOptions = {
     "X-Revision-Id",
     "X-File-Id",
     "X-Mapping-Id",
-    "X-File-Name"
+    "X-File-Name",
+    "X-Row-Id",
+    "X-Mime-Type",
+    "X-Previous-Storage-Path",
+    "X-Use-Stored-Source",
+    "X-Local-Analysis-Context"
   ],
   exposedHeaders: ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -1321,6 +1332,10 @@ const analizarPdfJobStore = createAnalizarPdfJobStore();
 const analizarPdfGeneratedFileStore = new Map();
 const ANALIZAR_PDF_COLLECTION = "analizarPDF";
 const ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION = "analizarPDFStyleMappings";
+const ANALIZAR_PDF_REVISIONS_COLLECTION = "revisions";
+const ANALIZAR_PDF_ANALYSIS_RESULTS_COLLECTION = "analysisResults";
+const ANALIZAR_PDF_ANALYSIS_CHUNKS_COLLECTION = "chunks";
+const ANALIZAR_PDF_ANALYSIS_CHUNK_SIZE = 600000;
 
 function buildAnalizarPdfFileStatePatch({
   analysisStatus = "queued",
@@ -1381,6 +1396,7 @@ async function processQueuedAnalizarPdfJob(job = {}) {
       tempFilePath
     });
     analizarPdfJobStore.set(jobId, { status: "processing", startedAt: new Date().toISOString() });
+    const { revision: jobRevision } = findRevisionAndFile(session, revisionId, fileId);
     await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, buildAnalizarPdfFileStatePatch({
       analysisStatus: "processing",
       jobId,
@@ -1397,6 +1413,13 @@ async function processQueuedAnalizarPdfJob(job = {}) {
       pdfPath: tempFilePath,
       session: {
         ...session,
+        analysisContext: {
+          revisionId,
+          fileId,
+          unidad: jobRevision?.unidad || session?.bibliographicInfo?.unidad || "",
+          revisionNumero: jobRevision?.revisionNumero || session?.bibliographicInfo?.revisionNumero || "",
+          recortableRole: jobRevision?.recortableRole || session?.bibliographicInfo?.recortableRole || "",
+        },
         analysisMapping: selectedMapping || null
       }
     });
@@ -1413,9 +1436,7 @@ async function processQueuedAnalizarPdfJob(job = {}) {
       mappingId: selectedMapping?.id || mappingId || "",
       mappingTitle: selectedMapping?.title || "",
       mappingUpdatedAt: selectedMapping?.updatedAt || "",
-      sourceAssetPath: stableSourcePath,
-      result,
-      resultSummary
+      sourceAssetPath: stableSourcePath
     }));
     logAnalizarPdf("job.completed", {
       jobId,
@@ -1426,6 +1447,9 @@ async function processQueuedAnalizarPdfJob(job = {}) {
       status: "completed",
       completedAt: new Date().toISOString(),
       resultSummary,
+      result,
+      revisionId,
+      fileId,
       session: persistedSession
     });
     return result;
@@ -3996,25 +4020,164 @@ async function loadAnalizarPdfSessionForOwner(uid = "", sessionId = "") {
     err.status = 403;
     throw err;
   }
-  const sanitized = sanitizeAnalizarPdfSession(data, {
+  const subcollectionRevisions = await loadAnalizarPdfRevisionsForSession(ref);
+  const legacyRevisions = Array.isArray(data.revisions) ? data.revisions : [];
+  const sanitized = sanitizeAnalizarPdfSession({
+    ...data,
+    revisions: subcollectionRevisions.length ? subcollectionRevisions : legacyRevisions
+  }, {
     id: cleanSessionId,
     ownerId: cleanUid,
     createdAt: data.createdAt || new Date().toISOString()
   });
   const reconciled = reconcileStaleAnalizarPdfSessionJobs(sanitized, analizarPdfJobStore);
-  if (reconciled.__staleJobsReconciled) {
-    const { __staleJobsReconciled, ...persistable } = reconciled;
-    await ref.set(persistable, { merge: true });
+  const repaired = repairAnalizarPdfSessionSourceAssetPaths(reconciled);
+  if (reconciled.__staleJobsReconciled || repaired.__sourceAssetPathsRepaired) {
+    const { __staleJobsReconciled, __sourceAssetPathsRepaired, ...persistable } = {
+      ...repaired,
+      __staleJobsReconciled: reconciled.__staleJobsReconciled,
+    };
+    await persistAnalizarPdfSessionSplit(ref, cleanUid, persistable);
     return {
       ref,
       data: persistable
     };
   }
-  const { __staleJobsReconciled, ...cleanData } = reconciled;
+  const { __staleJobsReconciled, __sourceAssetPathsRepaired, ...cleanData } = repaired;
   return {
     ref,
     data: cleanData
   };
+}
+
+function buildAnalizarPdfRevisionDocId(revisionId = "", index = 0) {
+  const cleanId = clampText(revisionId || "", 120).replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 220);
+  return cleanId || `revision_${index + 1}`;
+}
+
+function buildAnalizarPdfSessionRootDocument(uid = "", session = {}) {
+  const sanitized = stripAnalizarPdfAnalysisResults(sanitizeAnalizarPdfSession(session || {}, {
+    id: session?.id || "",
+    ownerId: uid || session?.ownerId || "",
+    createdAt: session?.createdAt || nowIso()
+  }));
+  const revisionOrder = (Array.isArray(sanitized.revisions) ? sanitized.revisions : [])
+    .map((revision) => String(revision?.id || "").trim())
+    .filter(Boolean);
+  return {
+    ...sanitized,
+    revisions: [],
+    revisionOrder,
+    revisionCount: revisionOrder.length
+  };
+}
+
+function sanitizeAnalizarPdfRevisionForStorage(revision = {}, index = 0, session = {}) {
+  const sanitizedSession = stripAnalizarPdfAnalysisResults(sanitizeAnalizarPdfSession({
+    id: session?.id || "revision_storage",
+    ownerId: session?.ownerId || "",
+    sourceType: session?.sourceType || "idml",
+    bibliographicInfo: session?.bibliographicInfo || {},
+    revisions: [revision]
+  }, {
+    id: session?.id || "revision_storage",
+    ownerId: session?.ownerId || "",
+    createdAt: session?.createdAt || nowIso()
+  }));
+  const sanitizedRevision = sanitizedSession.revisions?.[0] || {};
+  return {
+    ...sanitizedRevision,
+    index,
+    ownerId: session?.ownerId || "",
+    sessionId: session?.id || "",
+    updatedAt: sanitizedRevision.updatedAt || nowIso()
+  };
+}
+
+async function loadAnalizarPdfRevisionsForSession(sessionRef = null) {
+  if (!sessionRef) return [];
+  const snap = await sessionRef.collection(ANALIZAR_PDF_REVISIONS_COLLECTION).get();
+  return snap.docs
+    .map((docSnap, fallbackIndex) => {
+      const data = docSnap.data() || {};
+      const revision = sanitizeAnalizarPdfSession({
+        id: data.sessionId || sessionRef.id,
+        ownerId: data.ownerId || "",
+        sourceType: "idml",
+        revisions: [{
+          ...data,
+          id: data.id || docSnap.id
+        }]
+      }, {
+        id: data.sessionId || sessionRef.id,
+        ownerId: data.ownerId || ""
+      }).revisions?.[0] || null;
+      return {
+        revision,
+        index: Number.isFinite(Number(data.index)) ? Number(data.index) : fallbackIndex
+      };
+    })
+    .filter((entry) => entry.revision)
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.revision);
+}
+
+async function persistAnalizarPdfRevisionsForSession(sessionRef = null, uid = "", sessionId = "", revisions = []) {
+  if (!sessionRef || !sessionId) return;
+  const cleanUid = clampText(uid || "", 180);
+  const cleanSessionId = clampText(sessionId || "", 120);
+  const sanitizedSession = sanitizeAnalizarPdfSession({
+    id: cleanSessionId,
+    ownerId: cleanUid,
+    revisions: Array.isArray(revisions) ? revisions : []
+  }, {
+    id: cleanSessionId,
+    ownerId: cleanUid
+  });
+  const desiredDocIds = new Set();
+  const existingSnap = await sessionRef.collection(ANALIZAR_PDF_REVISIONS_COLLECTION).get();
+  const deleteBatch = db.batch();
+  let hasDeletes = false;
+  for (const docSnap of existingSnap.docs) {
+    const revisionId = String((docSnap.data() || {}).id || docSnap.id || "").trim();
+    if (!sanitizedSession.revisions.some((revision, index) => buildAnalizarPdfRevisionDocId(revision.id, index) === docSnap.id || String(revision.id || "").trim() === revisionId)) {
+      deleteBatch.delete(docSnap.ref);
+      hasDeletes = true;
+    }
+  }
+  if (hasDeletes) {
+    await deleteBatch.commit();
+  }
+  if (!sanitizedSession.revisions.length) return;
+  const writeBatch = db.batch();
+  sanitizedSession.revisions.forEach((revision, index) => {
+    const docId = buildAnalizarPdfRevisionDocId(revision.id, index);
+    desiredDocIds.add(docId);
+    writeBatch.set(
+      sessionRef.collection(ANALIZAR_PDF_REVISIONS_COLLECTION).doc(docId),
+      sanitizeAnalizarPdfRevisionForStorage(revision, index, {
+        id: cleanSessionId,
+        ownerId: cleanUid,
+        sourceType: sanitizedSession.sourceType,
+        bibliographicInfo: sanitizedSession.bibliographicInfo,
+        createdAt: sanitizedSession.createdAt
+      }),
+      { merge: true }
+    );
+  });
+  await writeBatch.commit();
+}
+
+async function persistAnalizarPdfSessionSplit(sessionRef = null, uid = "", session = {}) {
+  if (!sessionRef) return;
+  const cleanUid = clampText(uid || "", 180);
+  const sanitized = sanitizeAnalizarPdfSession(session || {}, {
+    id: session?.id || sessionRef.id,
+    ownerId: cleanUid,
+    createdAt: session?.createdAt || nowIso()
+  });
+  await sessionRef.set(buildAnalizarPdfSessionRootDocument(cleanUid, sanitized), { merge: true });
+  await persistAnalizarPdfRevisionsForSession(sessionRef, cleanUid, sanitized.id, sanitized.revisions || []);
 }
 
 async function persistAnalizarPdfSessionForOwner(uid = "", source = {}) {
@@ -4025,6 +4188,31 @@ async function persistAnalizarPdfSessionForOwner(uid = "", source = {}) {
     createdAt: source?.createdAt || new Date().toISOString()
   });
   const sessionRef = db.collection(ANALIZAR_PDF_COLLECTION).doc(base.id);
+  const existingSnap = await sessionRef.get();
+  const existingData = existingSnap.exists ? (existingSnap.data() || {}) : null;
+  if (existingData && String(existingData.ownerId || "").trim() !== cleanUid) {
+    const err = new Error("No puedes sobrescribir una sesión de otro usuario.");
+    err.status = 403;
+    throw err;
+  }
+  const existingRevisions = existingData ? await loadAnalizarPdfRevisionsForSession(sessionRef) : [];
+  const existingFull = existingData ? {
+    ...existingData,
+    revisions: existingRevisions.length ? existingRevisions : (Array.isArray(existingData.revisions) ? existingData.revisions : [])
+  } : null;
+  const mergedSession = mergeAnalizarPdfSessionPreservingFreshFileResults(existingFull, {
+    ...(existingFull || {}),
+    ...base,
+    ownerId: cleanUid,
+    createdAt: existingFull?.createdAt || base.createdAt,
+    updatedAt: new Date().toISOString()
+  }, {
+    ownerId: cleanUid,
+    id: base.id,
+    createdAt: existingFull?.createdAt || base.createdAt
+  });
+  const merged = repairAnalizarPdfSessionSourceAssetPaths(mergedSession);
+  const { __sourceAssetPathsRepaired, __preservedFreshFileResults, ...persistable } = merged;
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(sessionRef);
     const existing = snap.exists ? (snap.data() || {}) : null;
@@ -4033,28 +4221,23 @@ async function persistAnalizarPdfSessionForOwner(uid = "", source = {}) {
       err.status = 403;
       throw err;
     }
-    const merged = sanitizeAnalizarPdfSession({
-      ...(existing || {}),
-      ...base,
-      ownerId: cleanUid,
-      createdAt: existing?.createdAt || base.createdAt,
-      updatedAt: new Date().toISOString()
-    }, {
-      ownerId: cleanUid,
-      id: base.id,
-      createdAt: existing?.createdAt || base.createdAt
-    });
-    tx.set(sessionRef, merged, { merge: true });
+    tx.set(sessionRef, buildAnalizarPdfSessionRootDocument(cleanUid, persistable), { merge: true });
   });
-  const saved = await sessionRef.get();
-  return sanitizeAnalizarPdfSession(saved.data() || {}, {
+  await persistAnalizarPdfRevisionsForSession(sessionRef, cleanUid, base.id, persistable.revisions || []);
+  return sanitizeAnalizarPdfSession(persistable, {
     id: base.id,
     ownerId: cleanUid,
-    createdAt: base.createdAt
+    createdAt: persistable.createdAt || base.createdAt
   });
 }
 
 async function ensureDefaultStyleMappings() {
+  const legacyDefaultIds = [
+    "default_la_proyecto",
+    "default_la_recortables",
+    "default_la_primero_unidad"
+  ];
+  await Promise.all(legacyDefaultIds.map((id) => db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).doc(id).delete().catch(() => {})));
   const seeds = buildDefaultStyleMappingSeeds("");
   if (!Array.isArray(seeds) || !seeds.length) return [];
   const refs = seeds.map((entry) => db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).doc(entry.id));
@@ -4183,25 +4366,27 @@ async function resolveStyleMappingForAnalysis(uid = "", session = null, revision
     candidateUnits.push("Unidad normal");
   }
   for (const unidad of candidateUnits.filter(Boolean)) {
-    const scopeKey = buildStyleMappingScopeKey({
+    const scopeKeys = buildStyleMappingLookupScopeKeys({
       bookType: session?.bibliographicInfo?.bookType || "",
       nivel: session?.bibliographicInfo?.nivel || "",
       grado: session?.bibliographicInfo?.grado || "",
       unidad
     });
-    if (!scopeKey) {
+    if (!scopeKeys.length) {
       continue;
     }
     const mappingsSnap = await db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).get();
-    const activeDoc = mappingsSnap.docs.find((docSnap) => {
-      const data = docSnap.data() || {};
-      return String(data.scopeKey || "").trim() === scopeKey && data.isActive === true;
-    });
-    if (activeDoc) {
-      return sanitizeStyleMapping(activeDoc.data() || {}, {
-        id: activeDoc.id,
-        ownerId: ""
+    for (const scopeKey of scopeKeys) {
+      const activeDoc = mappingsSnap.docs.find((docSnap) => {
+        const data = docSnap.data() || {};
+        return String(data.scopeKey || "").trim() === scopeKey && data.isActive === true;
       });
+      if (activeDoc) {
+        return sanitizeStyleMapping(activeDoc.data() || {}, {
+          id: activeDoc.id,
+          ownerId: ""
+        });
+      }
     }
   }
   return null;
@@ -4212,6 +4397,220 @@ function findRevisionAndFile(session = null, revisionId = "", fileId = "") {
   const revision = revisions.find((entry) => String(entry?.id || "").trim() === String(revisionId || "").trim()) || null;
   const file = Array.isArray(revision?.files) ? revision.files.find((entry) => String(entry?.id || "").trim() === String(fileId || "").trim()) || null : null;
   return { revision, file };
+}
+
+function buildAnalizarPdfAnalysisResultDocId(revisionId = "", fileId = "") {
+  return `${clampText(revisionId, 120)}__${clampText(fileId, 120)}`
+    .replace(/[^A-Za-z0-9_.-]+/g, "_")
+    .slice(0, 260);
+}
+
+function normalizeAnalizarPdfAnalysisResultPayload(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const result = sanitizeResult(source.result);
+  const quickAnalysis = source.quickAnalysis && typeof source.quickAnalysis === "object" ? source.quickAnalysis : null;
+  return {
+    revisionId: clampText(source.revisionId || "", 120),
+    fileId: clampText(source.fileId || "", 120),
+    documentName: clampText(source.documentName || "", 240),
+    sourceType: String(source.sourceType || "pdf").trim() === "idml" ? "idml" : "pdf",
+    analysisStatus: normalizeAnalysisStatus(source.analysisStatus || "completed"),
+    updatedAt: clampText(source.updatedAt || nowIso(), 80),
+    resultSummary: sanitizeResultSummary(source.resultSummary, result),
+    result,
+    quickAnalysis
+  };
+}
+
+function splitBase64JsonPayload(value = {}) {
+  const base64 = Buffer.from(JSON.stringify(value || {}), "utf8").toString("base64");
+  const chunks = [];
+  for (let index = 0; index < base64.length; index += ANALIZAR_PDF_ANALYSIS_CHUNK_SIZE) {
+    chunks.push(base64.slice(index, index + ANALIZAR_PDF_ANALYSIS_CHUNK_SIZE));
+  }
+  return chunks.length ? chunks : [""];
+}
+
+async function persistAnalizarPdfAnalysisResults(uid = "", sessionId = "", analysisResults = []) {
+  const cleanUid = clampText(uid, 180);
+  const cleanSessionId = clampText(sessionId, 120);
+  if (!cleanUid || !cleanSessionId || !Array.isArray(analysisResults) || !analysisResults.length) return;
+  const sessionRef = db.collection(ANALIZAR_PDF_COLLECTION).doc(cleanSessionId);
+  for (const rawResult of analysisResults) {
+    const payload = normalizeAnalizarPdfAnalysisResultPayload(rawResult);
+    if (!payload.revisionId || !payload.fileId) continue;
+    const docId = buildAnalizarPdfAnalysisResultDocId(payload.revisionId, payload.fileId);
+    if (!docId) continue;
+    const resultRef = sessionRef.collection(ANALIZAR_PDF_ANALYSIS_RESULTS_COLLECTION).doc(docId);
+    const chunksRef = resultRef.collection(ANALIZAR_PDF_ANALYSIS_CHUNKS_COLLECTION);
+    const existingChunks = await chunksRef.get();
+    const deleteBatch = db.batch();
+    existingChunks.docs.forEach((docSnap) => deleteBatch.delete(docSnap.ref));
+    if (!existingChunks.empty) {
+      await deleteBatch.commit();
+    }
+    const chunks = splitBase64JsonPayload(payload);
+    const writeBatch = db.batch();
+    writeBatch.set(resultRef, {
+      ownerId: cleanUid,
+      sessionId: cleanSessionId,
+      revisionId: payload.revisionId,
+      fileId: payload.fileId,
+      documentName: payload.documentName,
+      sourceType: payload.sourceType,
+      analysisStatus: payload.analysisStatus,
+      resultSummary: payload.resultSummary,
+      updatedAt: payload.updatedAt || nowIso(),
+      chunkCount: chunks.length,
+      encoding: "base64-json-v1"
+    }, { merge: true });
+    chunks.forEach((chunk, index) => {
+      writeBatch.set(chunksRef.doc(String(index).padStart(4, "0")), {
+        index,
+        data: chunk
+      });
+    });
+    await writeBatch.commit();
+  }
+}
+
+async function deleteFirestoreCollectionSnapshot(snapshot = null) {
+  if (!snapshot || snapshot.empty) return;
+  const batch = db.batch();
+  snapshot.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+  await batch.commit();
+}
+
+async function deleteAnalizarPdfSessionSubcollections(sessionRef = null) {
+  if (!sessionRef) return;
+  const revisionsSnap = await sessionRef.collection(ANALIZAR_PDF_REVISIONS_COLLECTION).get();
+  await deleteFirestoreCollectionSnapshot(revisionsSnap);
+  const resultsSnap = await sessionRef.collection(ANALIZAR_PDF_ANALYSIS_RESULTS_COLLECTION).get();
+  for (const resultDoc of resultsSnap.docs) {
+    const chunksSnap = await resultDoc.ref.collection(ANALIZAR_PDF_ANALYSIS_CHUNKS_COLLECTION).get();
+    await deleteFirestoreCollectionSnapshot(chunksSnap);
+  }
+  await deleteFirestoreCollectionSnapshot(resultsSnap);
+}
+
+async function loadAnalizarPdfAnalysisResultsForSession(sessionId = "") {
+  const cleanSessionId = clampText(sessionId, 120);
+  if (!cleanSessionId) return [];
+  const resultsSnap = await db.collection(ANALIZAR_PDF_COLLECTION)
+    .doc(cleanSessionId)
+    .collection(ANALIZAR_PDF_ANALYSIS_RESULTS_COLLECTION)
+    .get();
+  const results = [];
+  for (const docSnap of resultsSnap.docs) {
+    const meta = docSnap.data() || {};
+    const chunksSnap = await docSnap.ref.collection(ANALIZAR_PDF_ANALYSIS_CHUNKS_COLLECTION).orderBy("index", "asc").get();
+    const base64 = chunksSnap.docs.map((chunkDoc) => String((chunkDoc.data() || {}).data || "")).join("");
+    if (!base64) continue;
+    try {
+      const parsed = JSON.parse(Buffer.from(base64, "base64").toString("utf8"));
+      results.push(normalizeAnalizarPdfAnalysisResultPayload({
+        ...parsed,
+        revisionId: parsed.revisionId || meta.revisionId,
+        fileId: parsed.fileId || meta.fileId
+      }));
+    } catch (error) {
+      logAnalizarPdf("analysis-result.load.failed", {
+        sessionId: cleanSessionId,
+        resultId: docSnap.id,
+        message: String(error?.message || error)
+      });
+    }
+  }
+  return results;
+}
+
+function mergeAnalysisResultsIntoAnalizarPdfSession(session = null, analysisResults = []) {
+  if (!session || !Array.isArray(analysisResults) || !analysisResults.length) return session;
+  const next = JSON.parse(JSON.stringify(session));
+  next.revisions = Array.isArray(next.revisions) ? next.revisions : [];
+  for (const resultEntry of analysisResults) {
+    const revisionId = clampText(resultEntry?.revisionId || "", 120);
+    const fileId = clampText(resultEntry?.fileId || "", 120);
+    if (!revisionId || !fileId) continue;
+    const revision = next.revisions.find((entry) => String(entry?.id || "").trim() === revisionId);
+    if (!revision) continue;
+    const file = (Array.isArray(revision.files) ? revision.files : []).find((entry) => String(entry?.id || "").trim() === fileId);
+    if (!file) continue;
+    file.analysisStatus = resultEntry.analysisStatus || file.analysisStatus || "completed";
+    file.resultSummary = resultEntry.resultSummary || file.resultSummary;
+    file.result = resultEntry.result || file.result;
+    file.quickAnalysis = resultEntry.quickAnalysis || file.quickAnalysis || null;
+    file.updatedAt = resultEntry.updatedAt || file.updatedAt || "";
+  }
+  return sanitizeAnalizarPdfSession(next, {
+    id: next.id,
+    ownerId: next.ownerId,
+    createdAt: next.createdAt
+  });
+}
+
+function parseAnalizarPdfLocalAnalysisContextHeader(req = null) {
+  const raw = String(req?.headers?.["x-local-analysis-context"] || "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+  } catch (error) {
+    const err = new Error("Contexto local de análisis inválido.");
+    err.status = 400;
+    throw err;
+  }
+}
+
+function mergeAnalizarPdfLocalAnalysisContext(session = null, context = null) {
+  if (!context || typeof context !== "object" || !Array.isArray(context.revisions) || !context.revisions.length) {
+    return session;
+  }
+  const draft = JSON.parse(JSON.stringify(session || {}));
+  if (!Array.isArray(draft.revisions)) draft.revisions = [];
+  for (const contextRevision of context.revisions) {
+    const revisionId = clampText(contextRevision?.id || "", 120);
+    if (!revisionId) continue;
+    let revision = draft.revisions.find((entry) => String(entry?.id || "").trim() === revisionId);
+    if (!revision) {
+      revision = {
+        id: revisionId,
+        title: clampText(contextRevision?.title || "", 240),
+        unidad: clampText(contextRevision?.unidad || "", 80),
+        revisionNumero: clampText(contextRevision?.revisionNumero || "", 40),
+        recortableRole: clampText(contextRevision?.recortableRole || "", 40),
+        files: []
+      };
+      draft.revisions.push(revision);
+    }
+    if (!Array.isArray(revision.files)) revision.files = [];
+    for (const contextFile of Array.isArray(contextRevision?.files) ? contextRevision.files : []) {
+      const fileId = clampText(contextFile?.id || "", 120);
+      if (!fileId) continue;
+      let file = revision.files.find((entry) => String(entry?.id || "").trim() === fileId);
+      if (!file) {
+        file = {
+          id: fileId,
+          documentName: clampText(contextFile?.documentName || "Archivo", 240),
+          sourceType: clampText(contextFile?.sourceType || draft.sourceType || "", 40)
+        };
+        revision.files.push(file);
+      }
+      const pageReports = contextFile?.result?.stats?.pageReports;
+      if (Array.isArray(pageReports) && pageReports.length) {
+        file.result = {
+          ...(file.result && typeof file.result === "object" ? file.result : {}),
+          stats: {
+            ...((file.result && typeof file.result === "object" && file.result.stats && typeof file.result.stats === "object") ? file.result.stats : {}),
+            pageReports
+          }
+        };
+      }
+      if (contextFile?.resultSummary && typeof contextFile.resultSummary === "object") {
+        file.resultSummary = contextFile.resultSummary;
+      }
+    }
+  }
+  return draft;
 }
 
 function spawnCorrectIdmlPythonJob(options = {}) {
@@ -4292,87 +4691,18 @@ async function updateAnalizarPdfFileState(uid = "", sessionId = "", revisionId =
   }
   const next = deepClone(data);
   next.revisions = Array.isArray(next.revisions) ? next.revisions : [];
-  const patchDocumentName = clampText(patch?.documentName || patch?.fileName || "", 240);
-  const revisionInfo = {
-    unidad: clampText(next?.bibliographicInfo?.unidad || "", 80),
-    revisionNumero: clampText(next?.bibliographicInfo?.revisionNumero || "", 80)
-  };
   let revision = next.revisions.find((entry) => String(entry?.id || "").trim() === cleanRevisionId);
   if (!revision) {
-    revision = next.revisions.find((entry) =>
-      clampText(entry?.unidad || "", 80) === revisionInfo.unidad &&
-      clampText(entry?.revisionNumero || "", 80) === revisionInfo.revisionNumero
-    ) || null;
-  }
-  if (!revision) {
-    revision = {
-      id: cleanRevisionId,
-      revisionKey: [revisionInfo.unidad.toLowerCase(), revisionInfo.revisionNumero.toLowerCase()].filter(Boolean).join("|") || cleanRevisionId,
-      title: [revisionInfo.unidad, revisionInfo.revisionNumero].filter(Boolean).join(" · ") || "Revisión sin título",
-      unidad: revisionInfo.unidad,
-      revisionNumero: revisionInfo.revisionNumero,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      latestAnalysisAt: "",
-      fileCount: 0,
-      summary: {
-        paginationIssueCount: 0,
-        sectionIssueCount: 0,
-        spellingIssueCount: 0,
-        orthotypographyIssueCount: 0,
-        colorIssueCount: 0,
-        recortableIssueCount: 0
-      },
-      files: []
-    };
-    next.revisions.unshift(revision);
+    const err = new Error("Ficha editorial de análisis no encontrada.");
+    err.status = 404;
+    throw err;
   }
   revision.files = Array.isArray(revision.files) ? revision.files : [];
   let file = revision.files.find((entry) => String(entry?.id || "").trim() === cleanFileId);
-  if (!file && patchDocumentName) {
-    const fileKey = patchDocumentName.toLowerCase();
-    file = revision.files.find((entry) => String(entry?.fileKey || "").trim() === fileKey) || null;
-  }
   if (!file) {
-    file = {
-      id: cleanFileId,
-      fileKey: patchDocumentName.toLowerCase() || cleanFileId,
-      documentName: patchDocumentName || "Archivo sin nombre",
-      mappingId: clampText(patch?.mappingId || "", 120),
-      mappingTitle: clampText(patch?.mappingTitle || "", 240),
-      mappingUpdatedAt: clampText(patch?.mappingUpdatedAt || "", 80),
-      sourceAssetPath: clampText(patch?.sourceAssetPath || "", 600),
-      localBlobKey: clampText(patch?.localBlobKey || "", 240),
-      hasLocalSource: patch?.hasLocalSource === true,
-      fileSize: Math.max(0, Number(patch?.fileSize || 0) || 0),
-      fileLastModified: Math.max(0, Number(patch?.fileLastModified || 0) || 0),
-      fileMimeType: clampText(patch?.fileMimeType || "", 160),
-      sourceType: String(patch?.sourceType || next.sourceType || "pdf").trim() === "idml" ? "idml" : "pdf",
-      analysisStatus: "idle",
-      analysisJobId: "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      resultSummary: {
-        paginationIssueCount: 0,
-        sectionIssueCount: 0,
-        spellingIssueCount: 0,
-        orthotypographyIssueCount: 0,
-        colorIssueCount: 0,
-        recortableIssueCount: 0,
-        pageCount: 0,
-        analyzedAt: ""
-      },
-      result: {
-        paginationIssues: [],
-        sectionIssues: [],
-        spellingIssues: [],
-        orthotypographyIssues: [],
-        colorIssues: [],
-        recortableIssues: [],
-        stats: null
-      }
-    };
-    revision.files.push(file);
+    const err = new Error("Archivo de análisis no encontrado en la ficha editorial destino.");
+    err.status = 404;
+    throw err;
   }
   Object.assign(file, patch && typeof patch === "object" ? patch : {});
   file.updatedAt = new Date().toISOString();
@@ -4391,7 +4721,7 @@ async function updateAnalizarPdfFileState(uid = "", sessionId = "", revisionId =
     id: sessionId,
     createdAt: data.createdAt
   });
-  await ref.set(sanitized, { merge: true });
+  await persistAnalizarPdfSessionSplit(ref, uid, sanitized);
   return sanitized;
 }
 
@@ -4409,7 +4739,7 @@ async function updateAnalizarPdfSessionState(uid = "", sessionId = "", patch = {
     id: sessionId,
     createdAt: data.createdAt
   });
-  await ref.set(next, { merge: true });
+  await persistAnalizarPdfSessionSplit(ref, uid, next);
   return next;
 }
 
@@ -6259,22 +6589,13 @@ app.get("/api/analizar-pdf/sessions/list", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const snap = await db.collection(ANALIZAR_PDF_COLLECTION).where("ownerId", "==", uid).limit(80).get();
-    const sessions = snap.docs
-      .map((docSnap) => {
-        const sanitized = sanitizeAnalizarPdfSession(docSnap.data() || {}, {
-          id: docSnap.id,
-          ownerId: uid
-        });
-        const reconciled = reconcileStaleAnalizarPdfSessionJobs(sanitized, analizarPdfJobStore);
-        if (reconciled.__staleJobsReconciled) {
-          const { __staleJobsReconciled, ...persistable } = reconciled;
-          void docSnap.ref.set(persistable, { merge: true });
-          return persistable;
-        }
-        const { __staleJobsReconciled, ...cleanData } = reconciled;
-        return cleanData;
-      })
-      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    const sessions = await Promise.all(snap.docs
+      .map(async (docSnap) => {
+        const { data } = await loadAnalizarPdfSessionForOwner(uid, docSnap.id);
+        const analysisResults = await loadAnalizarPdfAnalysisResultsForSession(docSnap.id);
+        return mergeAnalysisResultsIntoAnalizarPdfSession(data, analysisResults);
+      }));
+    sessions.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     return res.status(200).json({ ok: true, sessions });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudieron listar las sesiones.") });
@@ -6288,8 +6609,14 @@ app.post("/api/analizar-pdf/sessions/save", async (req, res) => {
     if (!source) {
       return res.status(400).json({ error: "Falta payload session." });
     }
+    const analysisResults = Array.isArray(req.body?.analysisResults) ? req.body.analysisResults : [];
     const session = await persistAnalizarPdfSessionForOwner(uid, source);
-    return res.status(200).json({ ok: true, session });
+    await persistAnalizarPdfAnalysisResults(uid, session.id, analysisResults);
+    const savedAnalysisResults = await loadAnalizarPdfAnalysisResultsForSession(session.id);
+    return res.status(200).json({
+      ok: true,
+      session: mergeAnalysisResultsIntoAnalizarPdfSession(session, savedAnalysisResults)
+    });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo guardar la sesión.") });
   }
@@ -6303,6 +6630,7 @@ app.post("/api/analizar-pdf/sessions/delete", async (req, res) => {
       return res.status(400).json({ error: "Falta sessionId." });
     }
     const { ref } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    await deleteAnalizarPdfSessionSubcollections(ref);
     await ref.delete();
     return res.status(200).json({ ok: true, sessionId });
   } catch (error) {
@@ -6359,6 +6687,184 @@ app.post("/api/analizar-pdf/style-mappings/activate", async (req, res) => {
   }
 });
 
+async function prepareAnalizarPdfIdmlToolSource(req, uid = "") {
+  const sessionId = clampText(req.headers["x-session-id"] || req.body?.sessionId || "", 120);
+  const revisionId = clampText(req.headers["x-revision-id"] || req.body?.revisionId || "", 120);
+  const fileId = clampText(req.headers["x-file-id"] || req.body?.fileId || "", 120);
+  const mappingId = clampText(req.headers["x-mapping-id"] || req.body?.mappingId || "", 120);
+  const requestedFileName = clampText(req.headers["x-file-name"] || req.body?.fileName || "", 240);
+  const reuseStoredSource = String(req.headers["x-use-stored-source"] || "").trim() === "1";
+  const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+  const declaredLength = Number(req.headers["content-length"] || 0) || 0;
+  const isJsonRequest = contentType.includes("application/json");
+  if (!uid || !sessionId || !revisionId || !fileId) {
+    const error = new Error("Faltan sessionId, revisionId o fileId.");
+    error.status = 400;
+    throw error;
+  }
+  if (declaredLength > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
+    const error = new Error("El IDML excede el tamaño permitido.");
+    error.status = 413;
+    throw error;
+  }
+  const { data: session } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+  const { revision, file } = findRevisionAndFile(session, revisionId, fileId);
+  if (!revision || !file) {
+    const error = new Error("Archivo de revisión no encontrado.");
+    error.status = 404;
+    throw error;
+  }
+  const rawFileName = clampText(
+    requestedFileName
+    || file.documentName
+    || file.fileName
+    || path.basename(String(file.sourceAssetPath || ""))
+    || "documento.idml",
+    240
+  ) || "documento.idml";
+  const idmlSourceReference = [
+    rawFileName,
+    file.documentName,
+    file.fileName,
+    file.sourceAssetPath,
+    file.sourceStoragePath,
+    file.sourceDownloadUrl
+  ].map((value) => clampText(value || "", 900).toLowerCase()).join(" ");
+  const isIdmlFile = String(file.sourceType || session.sourceType || "").trim() === "idml" || /\.idml(?:\?|#|$)/i.test(idmlSourceReference);
+  if (!isIdmlFile) {
+    const error = new Error("Esta acción solo aplica a archivos IDML.");
+    error.status = 400;
+    throw error;
+  }
+  const normalizedFileName = rawFileName.toLowerCase();
+  if (!normalizedFileName.endsWith(".idml")) {
+    const error = new Error("El archivo debe ser .idml.");
+    error.status = 400;
+    throw error;
+  }
+
+  let inputPath = "";
+  if (reuseStoredSource || isJsonRequest) {
+    inputPath = clampText(file.sourceAssetPath || "", 600);
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      const error = new Error("No se encontró la copia local/backend del IDML; vuelve a seleccionar el archivo en esa ficha.");
+      error.status = 404;
+      throw error;
+    }
+    return { session, revision, file, sessionId, revisionId, fileId, mappingId, inputPath };
+  }
+
+  const tempDir = path.join(os.tmpdir(), "analizar-pdf-tools", sessionId, randomUUID());
+  ensureDirSync(tempDir);
+  const tempFilePath = path.join(tempDir, normalizedFileName.endsWith(".idml") ? rawFileName : `${rawFileName}.idml`);
+  const stableSourceDir = path.join(os.tmpdir(), "analizar-pdf-sources", sessionId, revisionId || "default");
+  ensureDirSync(stableSourceDir);
+  const stableSourcePath = path.join(stableSourceDir, `${fileId || buildFileKey(rawFileName) || randomUUID()}.idml`);
+  let bytesRead = 0;
+  try {
+    const output = fs.createWriteStream(tempFilePath);
+    req.on("data", (chunk) => {
+      bytesRead += Buffer.byteLength(chunk);
+      if (bytesRead > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
+        req.destroy(new Error("IDML_TOO_LARGE"));
+      }
+    });
+    await pipeline(req, output);
+    fs.copyFileSync(tempFilePath, stableSourcePath);
+  } finally {
+    fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+  await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
+    ...buildAnalizarPdfFileStatePatch({
+      analysisStatus: file.analysisStatus || "idle",
+      jobId: file.analysisJobId || "",
+      rawFileName,
+      sourceType: "idml",
+      mappingId: mappingId || file.mappingId || revision.mappingId || "",
+      sourceAssetPath: stableSourcePath
+    })
+  });
+  file.sourceAssetPath = stableSourcePath;
+  file.documentName = file.documentName || rawFileName;
+  logAnalizarPdf("idml-tool.upload.saved", {
+    sessionId,
+    revisionId,
+    fileId,
+    rawFileName,
+    stableSourcePath,
+    bytesRead
+  });
+  return { session, revision, file, sessionId, revisionId, fileId, mappingId, inputPath: stableSourcePath };
+}
+
+app.post("/api/analizar-pdf/idml-template-from-file", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const { session, revision, sessionId, revisionId, fileId, inputPath } = await prepareAnalizarPdfIdmlToolSource(req, uid);
+    const result = await spawnAnalizarPdfPythonJob({
+      scriptPath: path.join(__dirname, "python", "analyze_idml_template.py"),
+      pdfPath: inputPath,
+      session: {
+        ...session,
+        analysisContext: {
+          revisionId,
+          fileId,
+          unidad: revision?.unidad || session?.bibliographicInfo?.unidad || "",
+          revisionNumero: revision?.revisionNumero || session?.bibliographicInfo?.revisionNumero || "",
+          recortableRole: revision?.recortableRole || session?.bibliographicInfo?.recortableRole || "",
+        }
+      }
+    });
+    return res.status(200).json({
+      ok: true,
+      sessionId,
+      revisionId,
+      fileId,
+      sourceAssetPath: inputPath,
+      template: result
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo crear la plantilla desde el IDML.") });
+  }
+});
+
+app.post("/api/analizar-pdf/quick-orthotypography", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const { session, revision, file, sessionId, revisionId, fileId, mappingId, inputPath } = await prepareAnalizarPdfIdmlToolSource(req, uid);
+    const selectedMapping = await resolveStyleMappingForAnalysis(uid, session, revisionId, fileId, mappingId || file.mappingId || revision.mappingId || "");
+    const result = await spawnAnalizarPdfPythonJob({
+      scriptPath: path.join(__dirname, "python", "analyze_idml_quick_orthotypography.py"),
+      pdfPath: inputPath,
+      session: {
+        ...session,
+        analysisContext: {
+          revisionId,
+          fileId,
+          unidad: revision?.unidad || session?.bibliographicInfo?.unidad || "",
+          revisionNumero: revision?.revisionNumero || session?.bibliographicInfo?.revisionNumero || "",
+          recortableRole: revision?.recortableRole || session?.bibliographicInfo?.recortableRole || "",
+        },
+        analysisMapping: selectedMapping || null
+      }
+    });
+    return res.status(200).json({
+      ok: true,
+      sessionId,
+      revisionId,
+      fileId,
+      sourceAssetPath: inputPath,
+      quickAnalysis: {
+        ...result,
+        status: "completed",
+        analyzedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo ejecutar el análisis rápido.") });
+  }
+});
+
 app.post("/api/analizar-pdf/export-corrected-idml", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -6397,9 +6903,12 @@ app.post("/api/analizar-pdf/export-corrected-idml", async (req, res) => {
     if (!selectedIssues.length && !hasCleanupActions) {
       return res.status(400).json({ error: "Activa al menos una corrección o limpieza antes de exportar." });
     }
+    const requestResult = req.body?.result && typeof req.body.result === "object"
+      ? req.body.result
+      : null;
     const payload = {
       toolName: ANALIZAR_PDF_MAPPING_TOOL_NAME,
-      result: file.result || {},
+      result: requestResult || file.result || {},
       correctionSelection,
       cleanupOptions
     };
@@ -6449,6 +6958,7 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
   const revisionId = clampText(req.headers["x-revision-id"] || "", 120);
   const fileId = clampText(req.headers["x-file-id"] || "", 120);
   const mappingId = clampText(req.headers["x-mapping-id"] || "", 120);
+  const reuseStoredSource = String(req.headers["x-use-stored-source"] || "").trim() === "1";
   const rawFileName = clampText(req.headers["x-file-name"] || "documento.pdf", 240) || "documento.pdf";
   const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
   const declaredLength = Number(req.headers["content-length"] || 0) || 0;
@@ -6457,6 +6967,9 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
   }
   if (!sessionId) {
     return res.status(400).json({ error: "Falta sessionId." });
+  }
+  if (!revisionId || !fileId) {
+    return res.status(400).json({ error: "Faltan revisionId o fileId para asociar el análisis a una ficha editorial." });
   }
   if (declaredLength > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
     return res.status(413).json({ error: "El PDF excede el tamaño permitido." });
@@ -6474,37 +6987,70 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
       contentType,
       declaredLength
     });
-    const { data: session } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    const { data: persistedSession } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    const localAnalysisContext = parseAnalizarPdfLocalAnalysisContextHeader(req);
+    const session = mergeAnalizarPdfLocalAnalysisContext(persistedSession, localAnalysisContext);
+    if (localAnalysisContext?.revisions?.length) {
+      logAnalizarPdf("analyze.local-context.merged", {
+        sessionId,
+        revisionCount: localAnalysisContext.revisions.length,
+        fileCount: localAnalysisContext.revisions.reduce((total, revision) => total + (Array.isArray(revision?.files) ? revision.files.length : 0), 0)
+      });
+    }
+    const { revision: targetRevision, file: targetFile } = findRevisionAndFile(session, revisionId, fileId);
+    if (!targetRevision || !targetFile) {
+      return res.status(404).json({ error: "Archivo de revisión no encontrado." });
+    }
     const selectedMapping = await resolveStyleMappingForAnalysis(uid, session, revisionId, fileId, mappingId);
     const expectedExt = session.sourceType === "idml" ? ".idml" : ".pdf";
     const normalizedFileName = rawFileName.toLowerCase();
     if (!normalizedFileName.endsWith(expectedExt)) {
       return res.status(400).json({ error: `El archivo debe ser ${expectedExt}.` });
     }
-    if (contentType && session.sourceType !== "idml" && !contentType.includes("pdf")) {
+    if (!reuseStoredSource && contentType && session.sourceType !== "idml" && !contentType.includes("pdf")) {
       return res.status(400).json({ error: "El archivo debe ser PDF." });
     }
     const scriptPath = resolveAnalyzerScript(session);
     const tempDir = path.join(os.tmpdir(), "analizar-pdf-jobs", sessionId, randomUUID());
     ensureDirSync(tempDir);
     tempFilePath = path.join(tempDir, normalizedFileName.endsWith(expectedExt) ? rawFileName : `${rawFileName}${expectedExt}`);
-    const stableSourceDir = path.join(os.tmpdir(), "analizar-pdf-sources", sessionId, revisionId || "default");
-    ensureDirSync(stableSourceDir);
-    const stableSourcePath = path.join(stableSourceDir, `${fileId || buildFileKey(rawFileName) || randomUUID()}${expectedExt}`);
-    const output = fs.createWriteStream(tempFilePath);
+    let stableSourcePath = "";
     let bytesRead = 0;
-    req.on("data", (chunk) => {
-      bytesRead += Buffer.byteLength(chunk);
-      if (bytesRead > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
-        req.destroy(new Error("PDF_TOO_LARGE"));
+    if (reuseStoredSource) {
+      const existingSourcePath = clampText(targetFile?.sourceAssetPath || "", 600);
+      if (!existingSourcePath || !fs.existsSync(existingSourcePath)) {
+        return res.status(404).json({ error: "No se encontró la copia local del archivo original para reanalizar." });
       }
-    });
-    await pipeline(req, output);
-    logAnalizarPdf("analyze.upload.saved", {
-      sessionId,
-      tempFilePath,
-      bytesRead
-    });
+      stableSourcePath = existingSourcePath;
+      fs.copyFileSync(existingSourcePath, tempFilePath);
+      bytesRead = Number(fs.statSync(existingSourcePath).size || 0) || 0;
+      logAnalizarPdf("analyze.stored-source.reused", {
+        sessionId,
+        revisionId,
+        fileId,
+        tempFilePath,
+        stableSourcePath,
+        bytesRead
+      });
+    } else {
+      const stableSourceDir = path.join(os.tmpdir(), "analizar-pdf-sources", sessionId, revisionId || "default");
+      ensureDirSync(stableSourceDir);
+      stableSourcePath = path.join(stableSourceDir, `${fileId || buildFileKey(rawFileName) || randomUUID()}${expectedExt}`);
+      const output = fs.createWriteStream(tempFilePath);
+      req.on("data", (chunk) => {
+        bytesRead += Buffer.byteLength(chunk);
+        if (bytesRead > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
+          req.destroy(new Error("PDF_TOO_LARGE"));
+        }
+      });
+      await pipeline(req, output);
+      fs.copyFileSync(tempFilePath, stableSourcePath);
+      logAnalizarPdf("analyze.upload.saved", {
+        sessionId,
+        tempFilePath,
+        bytesRead
+      });
+    }
     const jobId = `analizar_pdf_job_${randomUUID().slice(0, 12)}`;
     analizarPdfJobStore.set(jobId, {
       sessionId,
@@ -6527,7 +7073,6 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
         sourceAssetPath: stableSourcePath
       })
     });
-    fs.copyFileSync(tempFilePath, stableSourcePath);
     logAnalizarPdf("job.queued", { jobId, sessionId, ownerId: uid });
 
     void analizarPdfProcessingQueue.enqueue({
@@ -6613,6 +7158,10 @@ app.get("/api/analizar-pdf/analyze-status", async (req, res) => {
       jobId,
       status: String(job.status || "queued"),
       error: job.error || null,
+      revisionId: String(job.revisionId || ""),
+      fileId: String(job.fileId || ""),
+      result: job.result || null,
+      resultSummary: job.resultSummary || null,
       session
     });
   } catch (error) {
@@ -12355,6 +12904,48 @@ function buildMontageOverlapCompositionPlan(exportedEntries = []) {
   return { entries: planned, hasOverlap, hasGaps, totalDurationMs: Math.max(500, totalDurationMs) };
 }
 
+function buildMontageExportOffsetsByRowId(entries = [], {
+  useTimelinePositions = false
+} = {}) {
+  const exportOffsetsByRowId = new Map();
+  let cursorMs = 0;
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const rowId = String(entry?.rowId || "").trim();
+    const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
+    const timelineStartMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+    if (rowId) {
+      exportOffsetsByRowId.set(rowId, {
+        startMs: useTimelinePositions ? timelineStartMs : cursorMs,
+        durationMs,
+        timelineStartMs
+      });
+    }
+    if (!useTimelinePositions) {
+      cursorMs += durationMs;
+    }
+  });
+  return exportOffsetsByRowId;
+}
+
+function remapMontageTimelineSegmentsToExportOffsets(segments = [], exportOffsetsByRowId = new Map()) {
+  if (!Array.isArray(segments) || !segments.length || !(exportOffsetsByRowId instanceof Map) || !exportOffsetsByRowId.size) {
+    return Array.isArray(segments) ? segments : [];
+  }
+  return segments.map((segment) => {
+    if (!segment || typeof segment !== "object") return segment;
+    const rowId = String(segment?.rowId || "").trim();
+    const exportOffset = rowId ? exportOffsetsByRowId.get(rowId) : null;
+    if (!exportOffset) return segment;
+    const segmentStartMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
+    const relativeStartMs = Math.max(0, segmentStartMs - baseTimelineStartMs);
+    return {
+      ...segment,
+      startMs: Math.max(0, Math.round(Number(exportOffset?.startMs || 0) || 0) + relativeStartMs)
+    };
+  });
+}
+
 function buildMontageTransitionProgressExpr(startSec = 0, durationSec = 0.3) {
   const start = Math.max(0, Number(startSec || 0) || 0).toFixed(3);
   const duration = Math.max(0.001, Number(durationSec || 0.3) || 0.3).toFixed(3);
@@ -13823,7 +14414,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const hasStylizedTextSegments = input.exportMode === "normal" && input.onlyAudio !== true && hasMontageStylizedTextSegments(input);
     const browserRendererAvailability = { available: false };
     const shouldPreferBrowserTextFinalPass = false;
-    let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input) && !shouldPreferBrowserTextFinalPass;
+    let shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input)
+      && !shouldPreferBrowserTextFinalPass
+      && input.useTimelineAudio !== true;
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const exportedEntries = [];
@@ -14560,23 +15153,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     logMontageMemory("concat_timeline_after", { jobId, exportedSceneCount: exportedEntries.length });
     await removeMontageTempPaths(intermediatePaths.filter((targetPath) => String(targetPath || "").trim() && String(targetPath || "").trim() !== String(concatOutPath || "").trim()));
 
-    const exportOffsetsByRowId = new Map();
     const overlapAwareEntries = overlapPlan.entries.length ? overlapPlan.entries : exportedEntries;
-    let cursorMs = 0;
-    overlapAwareEntries.forEach((entry) => {
-      const rowId = String(entry?.rowId || "").trim();
-      const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
-      if (rowId) {
-        exportOffsetsByRowId.set(String(entry.rowId || "").trim(), {
-          // startMs: cursorMs
-          startMs: (overlapPlan.hasOverlap || overlapPlan.hasGaps)
-            ? Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
-            : cursorMs,
-          durationMs,
-          timelineStartMs: Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
-        });
-      }
-      cursorMs += (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? 0 : durationMs;
+    const exportOffsetsByRowId = buildMontageExportOffsetsByRowId(overlapAwareEntries, {
+      useTimelinePositions: overlapPlan.hasOverlap || overlapPlan.hasGaps
     });
 
     const exportedDurationSec = (overlapPlan.hasOverlap || overlapPlan.hasGaps)
@@ -14667,9 +15246,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ...input.onScreenTextSettings,
           partyKaraoke: input.partyKaraoke !== false
         };
-        const effectiveRenderedSegments = Array.isArray(input.onScreenTextSegments)
-          ? input.onScreenTextSegments
-          : [];
+        const effectiveRenderedSegments = remapMontageTimelineSegmentsToExportOffsets(
+          Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments : [],
+          exportOffsetsByRowId
+        );
         const renderedOnScreenTextSegmentMap = buildMontageOnScreenTextRenderedSegmentMap(input.onScreenTextRenderedSegments || []);
 
         // Review mode: Original drawtext-based burning

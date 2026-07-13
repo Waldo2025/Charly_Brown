@@ -154,21 +154,13 @@ def _point_in_rect(x, y, rect):
 
 
 def _classify_text_frame_status(frame_rect, page_rect, overflows=False):
-    # Adobe expone overset real mediante TextFrame.overflows; la geometría del marco
-    # respecto a la página es una señal distinta y no debe mezclarse con "desbordado".
+    # Adobe expone overset real mediante TextFrame.Overflows. La geometría del
+    # marco no es una fuente confiable para este reporte: en los IDML hay marcos
+    # anclados, maestros, contenedores grandes y coordenadas de spread/pasteboard
+    # que rebasan la página aunque el texto visible esté correcto.
     if overflows:
         return "desbordado"
-    if not frame_rect or not page_rect:
-        return "correcto"
-    if _rect_fits_inside(frame_rect, page_rect):
-        return "correcto"
-    if not _rects_intersect(frame_rect, page_rect):
-        return "fuera de la página"
-    center_x = (frame_rect["x1"] + frame_rect["x2"]) / 2
-    center_y = (frame_rect["y1"] + frame_rect["y2"]) / 2
-    if _point_in_rect(center_x, center_y, page_rect):
-        return "parcialmente fuera de la página"
-    return "fuera de la página"
+    return "correcto"
 
 
 def _resolve_page_for_rect(frame_rect, page_entries):

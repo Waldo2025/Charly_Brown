@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.472";
 import { PodcasterPlaybackController } from "./podcaster-playback-controller.js";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js";
@@ -49,7 +49,7 @@ import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.472";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js";
@@ -895,7 +895,12 @@ window.MEDIA_CUES = MEDIA_CUES;
 window.PodcasterState = {
   get state() { return state; },
   get activeSession() { return getActiveSession(); },
-  get activeRowId() { return podcastVideoState.activeRowId; }
+  get activeRowId() { return podcastVideoState.activeRowId; },
+  set activeRowId(rowId) {
+    const key = String(rowId || "").trim();
+    if (!key) return;
+    setPodcastVideoRow(key, { syncStage: true, lightweightUi: true });
+  }
 };
 
 // --- Colaboración en Tiempo Real: Actividad ---
@@ -5354,6 +5359,7 @@ function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
     storagePath,
     startMs,
     anchorStartMs,
+    manualStartMs: raw.manualStartMs === true || raw.manualPosition === true,
     endMs,
     trimInMs,
     trimOutMs,
@@ -5787,6 +5793,7 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
         Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
       )
     );
+    const hasManualStartMs = segment?.manualStartMs === true || segment?.manualPosition === true;
     const durationMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
       resolveGeminiSegmentDurationWithinScene(
@@ -5808,6 +5815,7 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
       sceneIndex,
       startMs,
       anchorStartMs: sceneStartMs,
+      manualStartMs: hasManualStartMs,
       durationMs,
       trimInMs,
       trimOutMs: trimInMs + durationMs,
@@ -6057,7 +6065,7 @@ function reorderTimelineClipsByTracks() {
   invalidateStudioRuntimeCache();
   syncGeminiDialogueTrackWithRuntime({
     render: false,
-    preserveStartMs: false,
+    preserveStartMs: true,
     syncTextToScene: true,
     autosave: false
   });
@@ -6354,7 +6362,8 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       : (preserveStartMs && existingSegment && existingDurationMs > 0 ? existingDurationMs : clipPlayableMs);
 
     const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, expectedSegmentDuration);
-    const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, sceneStartMs, automaticOffsetMs);
+    const hasExplicitManualStartMs = existingSegment?.manualStartMs === true || existingSegment?.manualPosition === true;
+    const hasManualStartMs = hasExplicitManualStartMs || hasManualGeminiSegmentOffset(existingSegment, sceneStartMs, automaticOffsetMs);
 
     // Calcular el desplazamiento exacto del inicio de la escena para preservar el offset relativo del audio
     let shiftSceneStartMs = 0;
@@ -6409,6 +6418,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       audioSrc,
       startMs,
       anchorStartMs: sceneStartMs,
+      manualStartMs: hasExplicitManualStartMs,
       endMs: startMs + durationMs,
       trimInMs: segmentTrimInMs,
       trimOutMs: segmentTrimOutMs,
@@ -9783,10 +9793,12 @@ function applyMontageSceneMixToAllScenes() {
   Object.keys(nextClips).forEach((rowId) => {
     const current = nextClips[rowId];
     if (!current) return;
-    const currentVeoOverride = toFiniteNumber(current?.veoVolumeOverridePct, Number.NaN);
-    const currentGeminiOverride = toFiniteNumber(current?.geminiVolumeOverridePct, Number.NaN);
+    const currentVeoOverride = current?.veoVolumeOverridePct == null ? Number.NaN : toFiniteNumber(current?.veoVolumeOverridePct, Number.NaN);
+    const currentGeminiOverride = current?.geminiVolumeOverridePct == null ? Number.NaN : toFiniteNumber(current?.geminiVolumeOverridePct, Number.NaN);
     const preserveManualVeo = Number.isFinite(currentVeoOverride) && Math.round(currentVeoOverride) !== previousVeoPct;
-    const preserveManualGemini = Number.isFinite(currentGeminiOverride) && Math.round(currentGeminiOverride) !== previousGeminiPct;
+    const preserveManualGemini = Number.isFinite(currentGeminiOverride)
+      && Math.round(currentGeminiOverride) !== previousGeminiPct
+      && Math.round(currentGeminiOverride) !== 0;
     const updated = normalizeTimelineClipItem({
       ...current,
       veoVolumeOverridePct: preserveManualVeo ? current.veoVolumeOverridePct : veoPct,
@@ -14259,6 +14271,13 @@ async function openPodcastVideoModalWithLoader() {
     }
   }
   const runToken = ++podcastVideoOpenRunToken;
+  await pausePodcastPlayback().catch(() => { });
+  await playbackController.stop({ keepStatus: true, keepCursor: true }).catch(() => { });
+  podcastVideoState.montageActive = false;
+  podcastVideoState.montagePaused = false;
+  podcastVideoState.timelineSequenceActive = false;
+  podcastVideoState.timelineSequencePaused = false;
+  podcastVideoState.speaking = false;
   podcastVideoState.enabled = true;
   if (preOpenSession) {
     upsertActiveSession((session) => ({
@@ -14277,6 +14296,8 @@ async function openPodcastVideoModalWithLoader() {
   if (runToken !== podcastVideoOpenRunToken) return;
   const openedSession = getActiveSession();
   podcastVideoState.speaking = false;
+  podcastVideoState.montageActive = false;
+  podcastVideoState.montagePaused = false;
 
   if (openedSession && shouldAutoRepairTimelineLayout(openedSession)) {
     reflowTimelineClipsByScriptOrder(openedSession, { persist: true, render: false });
@@ -16831,7 +16852,6 @@ function attachEvents() {
       try {
         await authFetchJson("/api/podcaster/music/library/delete", {
           method: "POST",
-          sameOrigin: true,
           body: JSON.stringify({ libraryId })
         });
         panelMusicGlobalLibraryState.items = panelMusicGlobalLibraryState.items.filter((item) => String(item?.libraryId || "").trim() !== libraryId);
@@ -17118,7 +17138,6 @@ function attachEvents() {
         const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
         const upload = await authFetchJson("/api/podcaster/music/library/upload", {
           method: "POST",
-          sameOrigin: true,
           body: JSON.stringify({
             fileName: String(file.name || "Audio").trim() || "Audio",
             mimeType: String(file.type || "audio/mpeg").trim() || "audio/mpeg",
@@ -20295,6 +20314,8 @@ window.PodcasterUI = {
   render: () => render(),
   upsertActiveSession: (updater, options) => upsertActiveSession(updater, options),
   upsertPodcastVideoConfig: (updater, options) => upsertPodcastVideoConfig(updater, options),
+  selectTimelineSceneRow: (rowId = "", options = {}) => selectTimelineSceneRow(rowId, options),
+  setPodcastVideoRow: (rowId = "", options = {}) => setPodcastVideoRow(rowId, options),
   syncStageMedia: (rowId = "", options = {}) => syncPodcastVideoStageMedia(getActiveSession(), rowId, options)
 };
 

@@ -16,15 +16,28 @@ const stubImport = `const deleteAnalizarPdfSession = async () => {};
 const getAnalizarPdfAnalysisStatus = async () => ({});
 const listAnalizarPdfSessions = async () => ({ sessions: [] });
 const queueAnalizarPdfUpload = async () => ({});
-const saveAnalizarPdfSession = async (session) => ({ session });`;
+globalThis.__savedAnalizarPdfSessions = [];
+const saveAnalizarPdfSession = async (session, analysisResults = []) => {
+  globalThis.__savedAnalizarPdfSessions.push({ session, analysisResults });
+  return { session: { ...session, revisions: (session.revisions || []).map((revision) => ({
+    ...revision,
+    files: (revision.files || []).map((file) => {
+      const sidecar = analysisResults.find((entry) => entry.revisionId === revision.id && entry.fileId === file.id);
+      return sidecar ? { ...file, result: sidecar.result, resultSummary: sidecar.resultSummary, quickAnalysis: sidecar.quickAnalysis || null } : file;
+    })
+  })) } };
+};`;
 const patchedSource = source.replace(
   /import\s*\{[\s\S]*?\}\s*from\s*["']\.\/analizar-pdf-api\.js["'];/,
   stubImport
+).replace(
+  /import\s*\{\s*createAnalizarPdfSaveCoordinator\s*\}\s*from\s*["']\.\/analizar-pdf-save-coordinator\.js["'];/,
+  `const createAnalizarPdfSaveCoordinator = ({ saveImpl } = {}) => ({ save: saveImpl });`
 );
 assert.notEqual(
   patchedSource,
   source,
-  "El test debe poder sustituir el import del API para ejecutar el session store en Node."
+  "El test debe poder sustituir imports del API/coordinador para ejecutar el session store en Node."
 );
 
 assert.match(
@@ -54,10 +67,10 @@ const tempApiModulePath = path.join(tempDir, "analizar-pdf-api.mjs");
 try {
   await writeFile(tempModulePath, patchedSource, "utf8");
   const apiPatchedSource = apiSource.replace(
-    /import\s*\{\s*authFetchJson,\s*buildApiUrl,\s*getAuthHeaders,\s*hasAvailableApiBase\s*\}\s*from\s*["']\.\.\/js\/api-client\.js["'];/,
-    `const authFetchJson = async () => ({});
+    /import\s*\{\s*authFetch,\s*authFetchJson,\s*buildApiUrl,\s*hasAvailableApiBase\s*\}\s*from\s*["']\.\.\/js\/api-client\.js["'];/,
+    `const authFetch = async (url, options = {}) => fetch(url, options);
+const authFetchJson = async () => ({});
 const buildApiUrl = (path) => path;
-const getAuthHeaders = async (headers) => headers;
 const hasAvailableApiBase = () => true;`
   );
   assert.notEqual(
@@ -69,7 +82,8 @@ const hasAvailableApiBase = () => true;`
 
   const {
     createEmptyAnalizarPdfSession,
-    normalizeAnalizarPdfSession
+    normalizeAnalizarPdfSession,
+    saveSession
   } = await import(pathToFileURL(tempModulePath).href);
   const { queueAnalizarPdfUpload } = await import(pathToFileURL(tempApiModulePath).href);
 
@@ -102,7 +116,8 @@ const hasAvailableApiBase = () => true;`
     trimestre: "",
     unidad: "",
     edicionNumero: "",
-    revisionNumero: ""
+    revisionNumero: "",
+    recortableRole: "source"
   });
   assert.deepEqual(empty.colorConfig, { palette: [] });
   assert.deepEqual(empty.result.orthotypographyIssues, []);
@@ -112,6 +127,7 @@ const hasAvailableApiBase = () => true;`
     sectionIssueCount: 0,
     spellingIssueCount: 0,
     orthotypographyIssueCount: 0,
+    redactionIssueCount: 0,
     colorIssueCount: 0,
     recortableIssueCount: 0,
     pageCount: 0,
@@ -189,11 +205,66 @@ const hasAvailableApiBase = () => true;`
     sectionIssueCount: 1,
     spellingIssueCount: 1,
     orthotypographyIssueCount: 1,
+    redactionIssueCount: 0,
     colorIssueCount: 1,
     recortableIssueCount: 0,
     pageCount: 24,
     analyzedAt: "2026-06-03T00:00:00.000Z"
   });
+
+  globalThis.__savedAnalizarPdfSessions = [];
+  const savedWithAnalysisOption = await saveSession({
+    ...normalized,
+    id: "session_with_heavy_analysis",
+    revisions: [{
+      id: "revision_heavy",
+      title: "Unidad 1 · F1",
+      unidad: "Unidad 1",
+      revisionNumero: "F1",
+      files: [{
+        id: "file_heavy",
+        documentName: "unidad.idml",
+        resultSummary: {
+          paginationIssueCount: 2,
+          sectionIssueCount: 0,
+          spellingIssueCount: 1,
+          orthotypographyIssueCount: 1,
+          colorIssueCount: 0,
+          recortableIssueCount: 0,
+          pageCount: 96,
+          analyzedAt: "2026-07-08T00:00:00.000Z"
+        },
+        result: {
+          paginationIssues: ["p"],
+          sectionIssues: [],
+          spellingIssues: ["s"],
+          orthotypographyIssues: ["o"],
+          colorIssues: [],
+          recortableIssues: [],
+          stats: {
+            pageCount: 96,
+            swatchInventory: [{ name: "U1", hex: "#336699" }],
+            pageReports: [{ pageName: "1", content: { otro: [{ text: "pesado" }] } }]
+          }
+        }
+      }]
+    }]
+  }, { includeAnalysis: true });
+  assert.equal(savedWithAnalysisOption.id, "session_with_heavy_analysis");
+  assert.equal(globalThis.__savedAnalizarPdfSessions.length, 1);
+  const remotePayload = globalThis.__savedAnalizarPdfSessions[0].session;
+  const sidecarPayload = globalThis.__savedAnalizarPdfSessions[0].analysisResults;
+  assert.deepEqual(remotePayload.result.spellingIssues, []);
+  assert.equal(remotePayload.result.stats, null);
+  assert.deepEqual(remotePayload.revisions[0].files[0].result.spellingIssues, []);
+  assert.equal(remotePayload.revisions[0].files[0].result.stats, null);
+  assert.equal(remotePayload.revisions[0].files[0].resultSummary.pageCount, 0);
+  assert.equal(sidecarPayload.length, 1);
+  assert.equal(sidecarPayload[0].revisionId, "revision_heavy");
+  assert.equal(sidecarPayload[0].fileId, "file_heavy");
+  assert.equal(sidecarPayload[0].result.stats.pageCount, 96);
+  assert.equal(sidecarPayload[0].result.stats.swatchInventory[0].name, "U1");
+  assert.equal(sidecarPayload[0].result.stats.swatchInventory[0].swatchName, "U1");
 } finally {
   await rm(tempDir, { recursive: true, force: true });
 }

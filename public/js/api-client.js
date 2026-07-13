@@ -95,8 +95,10 @@ function shouldUseExportApiPath(path = "") {
   if (clean === "/api/assets/proxy-media" || clean.startsWith("/api/assets/proxy-media?")) return true;
   if (clean === "/api/assets/proxy-image" || clean.startsWith("/api/assets/proxy-image?")) return true;
   if (clean === "/api/assets/montage-download" || clean.startsWith("/api/assets/montage-download?")) return true;
-  if (clean === "/api/podcaster/sessions/list" || clean.startsWith("/api/podcaster/sessions/list?")) return true;
-  if (clean === "/api/podcaster/sessions/get" || clean.startsWith("/api/podcaster/sessions/get?")) return true;
+  if (clean === "/api/podcaster/music" || clean.startsWith("/api/podcaster/music/")) return true;
+  if (clean === "/api/podcaster/sessions" || clean.startsWith("/api/podcaster/sessions/")) return true;
+  if (clean === "/api/podcaster/scene-library" || clean.startsWith("/api/podcaster/scene-library/")) return true;
+  if (clean === "/api/podcaster/scene-media" || clean.startsWith("/api/podcaster/scene-media/")) return true;
   if (clean.startsWith("/api/podcaster/montage/")) return true;
   return false;
 }

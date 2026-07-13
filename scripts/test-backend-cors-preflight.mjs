@@ -12,6 +12,12 @@ assert.match(
   "El backend debe permitir Cache-Control/Pragma/Expires en preflight CORS."
 );
 
+assert.match(
+  source,
+  /allowedHeaders:\s*\[[\s\S]*?"X-Local-Analysis-Context"[\s\S]*?\]/m,
+  "El backend debe permitir X-Local-Analysis-Context en preflight CORS para analizarPDF."
+);
+
 assert.doesNotMatch(
   source,
   /app\.options\("\*",\s*cors\(corsOptions\)\);/,
@@ -26,7 +32,7 @@ assert.match(
 
 assert.match(
   source,
-  /withTimeout\(\s*\(\) => montageExportJobStore\.getJob\(jobId\),\s*1200,/m,
+  /withTimeout\(\s*\(\) => montageExportJobStore\.getJob\(cleanJobId\),\s*MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS,/m,
   "El polling de montage/export-status debe degradar consultas lentas en vez de bloquear la respuesta."
 );
 

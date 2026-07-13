@@ -24,8 +24,8 @@ if (!/\.pme-canvas-container \.canvas-container\s*\{[\s\S]*left:\s*50%;[\s\S]*to
   throw new Error("El wrapper de Fabric debe quedar centrado dentro del preview del editor.");
 }
 
-if (!/podcaster-media-editor\.js\?v=2026-06-26\.9/.test(html)) {
-  throw new Error("El cache-buster de podcaster-media-editor.js debe subir para publicar la corrección.");
+if (!/data-cache-src="podcaster\/podcaster-media-editor\.js" data-cache-type="module"/.test(html)) {
+  throw new Error("podcaster-media-editor.js debe cargarse por cache-version-loader para recibir el cache-buster vigente.");
 }
 
 console.log("Podcaster stylized text preview scale and center OK.");

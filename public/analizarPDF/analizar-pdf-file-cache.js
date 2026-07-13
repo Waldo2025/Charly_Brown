@@ -1,6 +1,7 @@
 const DB_NAME = "cb_analizar_pdf_files_v1";
 const STORE_NAME = "files";
-const DB_VERSION = 1;
+const SESSION_STORE_NAME = "analysisSessions";
+const DB_VERSION = 2;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -10,6 +11,9 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
         store.createIndex("bySession", "sessionId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(SESSION_STORE_NAME)) {
+        db.createObjectStore(SESSION_STORE_NAME, { keyPath: "id" });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -21,6 +25,32 @@ function runTransaction(mode = "readonly", executor) {
   return openDb().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, mode);
     const store = tx.objectStore(STORE_NAME);
+    let settled = false;
+    const finishResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const finishReject = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    tx.oncomplete = () => finishResolve(undefined);
+    tx.onerror = () => finishReject(tx.error || new Error("Transacción IndexedDB falló."));
+    tx.onabort = () => finishReject(tx.error || new Error("Transacción IndexedDB abortada."));
+    try {
+      executor(store, finishResolve, finishReject);
+    } catch (error) {
+      finishReject(error);
+    }
+  }));
+}
+
+function runObjectStoreTransaction(storeName = STORE_NAME, mode = "readonly", executor) {
+  return openDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
     let settled = false;
     const finishResolve = (value) => {
       if (settled) return;
@@ -108,6 +138,69 @@ export async function getAnalizarPdfCachedFile(localBlobKey = "") {
   });
 }
 
+export async function listAnalizarPdfCachedFilesByRevision(sessionId = "", revisionId = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  const cleanRevisionId = String(revisionId || "").trim();
+  if (!cleanSessionId || !cleanRevisionId) return [];
+  return runTransaction("readonly", (store, resolve) => {
+    const matches = [];
+    const index = store.index("bySession");
+    const request = index.openCursor(cleanSessionId);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(matches);
+        return;
+      }
+      const record = cursor.value || {};
+      if (String(record.revisionId || "").trim() === cleanRevisionId && record.blob) {
+        const file = new File(
+          [record.blob],
+          String(record.fileName || "documento.bin").trim() || "documento.bin",
+          {
+            type: String(record.type || "application/octet-stream").trim() || "application/octet-stream",
+            lastModified: Number(record.lastModified || 0) || Date.now()
+          }
+        );
+        matches.push({ ...record, file });
+      }
+      cursor.continue();
+    };
+    request.onerror = () => resolve(matches);
+  });
+}
+
+export async function listAnalizarPdfCachedFilesBySession(sessionId = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  if (!cleanSessionId) return [];
+  return runTransaction("readonly", (store, resolve) => {
+    const matches = [];
+    const index = store.index("bySession");
+    const request = index.openCursor(cleanSessionId);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(matches);
+        return;
+      }
+      const record = cursor.value || {};
+      if (record.blob) {
+        const file = new File(
+          [record.blob],
+          String(record.fileName || "documento.bin").trim() || "documento.bin",
+          {
+            type: String(record.type || "application/octet-stream").trim() || "application/octet-stream",
+            lastModified: Number(record.lastModified || 0) || Date.now()
+          }
+        );
+        matches.push({ ...record, file });
+      }
+      cursor.continue();
+    };
+    request.onerror = () => resolve(matches);
+  });
+}
+
 export async function deleteAnalizarPdfCachedFile(localBlobKey = "") {
   const cleanKey = String(localBlobKey || "").trim();
   if (!cleanKey) return;
@@ -128,5 +221,37 @@ export async function deleteAnalizarPdfCachedFilesBySession(sessionId = "") {
       store.delete(cursor.primaryKey);
       cursor.continue();
     };
+  });
+}
+
+export async function putAnalizarPdfCachedAnalysisSession(session = null) {
+  const sessionId = String(session?.id || "").trim();
+  if (!sessionId || !session) return null;
+  const record = {
+    id: sessionId,
+    session,
+    updatedAt: new Date().toISOString()
+  };
+  await runObjectStoreTransaction(SESSION_STORE_NAME, "readwrite", (store) => {
+    store.put(record);
+  });
+  return record;
+}
+
+export async function getAnalizarPdfCachedAnalysisSession(sessionId = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  if (!cleanSessionId) return null;
+  return runObjectStoreTransaction(SESSION_STORE_NAME, "readonly", (store, resolve) => {
+    const request = store.get(cleanSessionId);
+    request.onsuccess = () => resolve(request.result?.session || null);
+    request.onerror = () => resolve(null);
+  });
+}
+
+export async function deleteAnalizarPdfCachedAnalysisSession(sessionId = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  if (!cleanSessionId) return;
+  await runObjectStoreTransaction(SESSION_STORE_NAME, "readwrite", (store) => {
+    store.delete(cleanSessionId);
   });
 }

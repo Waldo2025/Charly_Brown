@@ -5619,7 +5619,9 @@ export function buildMontageExportPayload(session = null) {
     segments: []
   };
   const normalizeLegacyPct = (value, fallback = 100, max = 200) => {
-    const num = window.toFiniteNumber(value, fallback);
+    const resolvedValue = value == null ? Number.NaN : window.toFiniteNumber(value, Number.NaN);
+    const resolvedFallback = window.toFiniteNumber(fallback, 100);
+    const num = Number.isFinite(resolvedValue) ? resolvedValue : resolvedFallback;
     const ceiling = Math.max(0, Number(max) || 100);
     if (!Number.isFinite(num)) return Math.max(0, Math.min(ceiling, Number(fallback) || 0));
     const scaled = num > 0 && num <= 1 ? num * 100 : num;
@@ -5721,7 +5723,9 @@ export function buildMontageExportPayload(session = null) {
           Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMsRaw || (trimInMs + durationMs)),
           trimInMs + durationMs
         );
-        const overridePctRaw = window.toFiniteNumber(runtime?.clip?.geminiVolumeOverridePct, Number.NaN);
+        const overridePctRaw = runtime?.clip?.geminiVolumeOverridePct == null
+          ? Number.NaN
+          : window.toFiniteNumber(runtime?.clip?.geminiVolumeOverridePct, Number.NaN);
         const volumePct = Number.isFinite(overridePctRaw)
           ? normalizeLegacyPct(overridePctRaw, baseGeminiVolumePct)
           : baseGeminiVolumePct;

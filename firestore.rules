@@ -341,6 +341,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /experiencia_menu_sessions/{sessionId} {
+      allow read: if isSignedIn() && isOwner(resource.data.ownerId);
+      allow create: if isSignedIn() &&
+        isOwner(request.resource.data.ownerId) &&
+        request.resource.data.sessionId == sessionId;
+      allow update: if isSignedIn() &&
+        isOwner(resource.data.ownerId) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.sessionId == sessionId;
+      allow delete: if isSignedIn() && isOwner(resource.data.ownerId);
+    }
+
     match /podcaster_export_jobs/{jobId} {
       allow read: if isEditor() || (
         isSignedIn() &&
@@ -364,6 +376,33 @@ service cloud.firestore {
         isSignedIn() &&
         isOwner(resource.data.ownerId)
       );
+    }
+
+    match /analizarPDF/{sessionId}/revisions/{revisionId} {
+      allow read: if isEditor() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/analizarPDF/$(sessionId)) &&
+        isOwner(get(/databases/$(database)/documents/analizarPDF/$(sessionId)).data.ownerId)
+      );
+      allow write: if false;
+    }
+
+    match /analizarPDF/{sessionId}/analysisResults/{resultId} {
+      allow read: if isEditor() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/analizarPDF/$(sessionId)) &&
+        isOwner(get(/databases/$(database)/documents/analizarPDF/$(sessionId)).data.ownerId)
+      );
+      allow write: if false;
+    }
+
+    match /analizarPDF/{sessionId}/analysisResults/{resultId}/chunks/{chunkId} {
+      allow read: if isEditor() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/analizarPDF/$(sessionId)) &&
+        isOwner(get(/databases/$(database)/documents/analizarPDF/$(sessionId)).data.ownerId)
+      );
+      allow write: if false;
     }
 
     match /escapeRoom/{sessionId} {

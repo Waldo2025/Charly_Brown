@@ -20,7 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-import { authFetchJson, buildVeoApiUrl, hasAvailableApiBase } from "./api-client.js";
+import { authFetchJson, buildApiUrl, buildVeoApiUrl, hasAvailableApiBase } from "./api-client.js";
 import {
   normalizeEscapeRoomProject,
   normalizeMission,
@@ -87,6 +87,134 @@ const PREVIEW_THEME_DEFAULT = {
   subtitleSize: 22,
   paragraphSize: 16
 };
+const PROMPT_LANGUAGE_MODES = {
+  "es-mx": {
+    name: "Español latinoamericano (es-MX)",
+    directive: "Escribe todo en español latinoamericano neutro (es-419), sin modismos de España."
+  },
+  "es-419": {
+    name: "Español latinoamericano (es-419)",
+    directive: "Escribe todo en español latinoamericano neutral (es-419), sin modismos de España."
+  },
+  "es-es": {
+    name: "Español de España (es-ES)",
+    directive: "Escribe todo en español de España (es-ES), con usos y tono propios de España."
+  },
+  "en-us": {
+    name: "Inglés (en-US)",
+    directive: "Write all content in U.S. English (en-US), concise and clear."
+  },
+  "en-gb": {
+    name: "English (en-GB)",
+    directive: "Write all content in British English (en-GB), clear and concise."
+  },
+  "fr-fr": {
+    name: "Francés (fr-FR)",
+    directive: "Écris tout le contenu en français (fr-FR), de manière claire et concise."
+  },
+  "pt-br": {
+    name: "Português (pt-BR)",
+    directive: "Escreva todo o conteúdo em português brasileiro (pt-BR), claro e direto."
+  }
+};
+const MISSION_LEVEL_COLORS = {
+  1: "#fcc659",
+  2: "#bbd152",
+  3: "#e95297",
+  4: "#02b0a3"
+};
+const THEME_COMBINE_COLORS = {
+  1: "#2da6b1",
+  2: "#ea5a5a",
+  3: "#952e89",
+  4: "#e48119"
+};
+const SUPPORT_GRAPHIC_UPLOAD_ENDPOINT = "/api/unidades/support-graphics/upload";
+const DATA_URL_PATTERN = /^data:([^;,]+)(;[^,]*)?,(.*)$/i;
+const GENERIC_PISTA_MARKERS = [
+  "pista sutil",
+  "pista util",
+  "pista útil",
+  "añade una pista",
+  "añade una pista útil",
+  "agrega una pista",
+  "agrega pista",
+  "sin dar respuesta",
+  "pista para resolver",
+  "sin definir",
+  "sin pista",
+  "texto de pista",
+  "instrucción de pista",
+  "introducción de pista",
+  "sugerencia",
+  "pista breve"
+];
+const QUESTION_HINT_MIN_LENGTH = 24;
+const QUESTION_HINT_STOP_WORDS = new Set([
+  "de", "del", "al", "la", "el", "los", "las", "un", "una", "uno", "una", "y", "o", "a", "en", "con", "para", "por", "sin", "sobre", "entre", "que", "del", "su", "sus", "es", "son", "sino", "tambien", "también", "cada", "cuando", "cuál", "cual", "donde", "dónde", "quien", "quién", "como", "cómo", "porque", "pues", "pero", "siempre", "nunca", "si", "no", "ser", "este", "esta", "estos", "estas", "esos", "esas", "ese", "esa", "aquellos", "aquellas", "lo", "me", "te", "nos", "vos", "ellos", "ellas", "nosotros", "vosotros", "yo", "más", "mas", "muy", "tan", "tal", "todo", "toda", "todos", "todas", "ningun", "ninguna", "ninguno", "ningunos", "ningunas", "aqui", "aca", "solo", "sólo", "hay", "ya", "tambien", "también", "bien", "dentro", "entre", "fue", "fueron", "ser", "estar", "son", "era", "eran", "eran", "sera", "tambien", "si", "como", "cuando", "quien", "donde"
+]);
+
+function cleanHintText(value = "") {
+  return normalizeString(value, "").trim();
+}
+
+function hasConcreteHintSignal(value = "") {
+  const normalized = cleanHintText(value).toLowerCase();
+  if (!normalized) return false;
+  if (/\d/.test(normalized)) return true;
+  const concretePatterns = /\b(color|número|numero|cantidad|valor|suma|resta|compara|compara|encuentra|busca|identifica|coincid|relacion|orden|secuencia|personaje|lugar|objeto|acción|accion|condición|condicion|fórmula|formula|método|metodo|cifra|fecha)\b/i;
+  if (concretePatterns.test(normalized)) return true;
+  const words = normalized.match(/[a-záéíóúüñ]{4,}/gi);
+  return Array.isArray(words) && words.length >= 5;
+}
+
+function isGenericHint(value = "") {
+  const normalized = cleanHintText(value).toLowerCase();
+  if (!normalized) return true;
+  if (normalized.length < QUESTION_HINT_MIN_LENGTH) return true;
+  if (new Set(normalized.split(/\s+/)).size <= 3) return true;
+  if (!hasConcreteHintSignal(normalized)) return true;
+  return GENERIC_PISTA_MARKERS.some((marker) => normalized === marker || normalized.includes(marker));
+}
+
+function extractQuestionHintKeywords(text = "") {
+  const sentence = cleanHintText(text)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ");
+  if (!sentence) return [];
+  const words = sentence
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 3)
+    .filter((word) => !QUESTION_HINT_STOP_WORDS.has(word));
+
+  const unique = [...new Set(words)];
+  return unique.slice(0, 3);
+}
+
+function buildFallbackHint({ reto = "", missionTitle = "", respuestas = [] }, fallbackLabel = "" ) {
+  const answerList = Array.isArray(respuestas) ? respuestas : [respuestas];
+  const answerHints = extractQuestionHintKeywords(answerList.join(" "));
+  const tokens = extractQuestionHintKeywords(`${reto} ${missionTitle} ${fallbackLabel}`).filter((token) => !answerHints.includes(token));
+  if (tokens.length) {
+    const sample = tokens.slice(0, 2).map((token) => `"${token}"`).join(" y ");
+    return `En el enunciado${fallbackLabel ? ` ${fallbackLabel}` : ""}, usa el detalle ${sample} para descartar opciones que no cumplan esa condición.`;
+  }
+
+  const missionContext = missionTitle ? ` Usa el contexto de ${missionTitle}.` : "";
+  return `Lee con atención el enunciado y busca una pista concreta (número, acción, personaje, lugar o condición). No des la respuesta; identifica qué detalle permite descartar opciones incorrectas.${missionContext}`.trim();
+}
+
+function normalizeQuestionHint(question = {}, missionTitle = "", fallbackLabel = "") {
+  const current = cleanHintText(question.pista);
+  const reto = cleanHintText(question.reto || "");
+  const corrected = isGenericHint(current)
+    ? buildFallbackHint({ reto, missionTitle, respuestas: question.respuestas_aceptadas || [] }, fallbackLabel)
+    : current;
+  return cleanHintText(corrected);
+}
 
 const elements = {
   form: document.getElementById("escapeRoomForm"),
@@ -146,7 +274,11 @@ const elements = {
   previewBaseColor: document.getElementById("previewBaseColor"),
   previewCardRadius: document.getElementById("previewCardRadius"),
   previewThemeSummary: document.getElementById("previewThemeSummary"),
-  btnPreviewThemeReset: document.getElementById("btnPreviewThemeReset")
+  previewRoomPaletteReference: document.getElementById("previewRoomPaletteReference"),
+  btnPreviewThemeReset: document.getElementById("btnPreviewThemeReset"),
+  activityImageInput: document.getElementById("activityImageInput"),
+  idiomaSelect: document.getElementById("idiomaSelect"),
+  strictImagePromptMode: document.getElementById("strictImagePromptMode")
 };
 
 let objectiveIdeaModalInstance = null;
@@ -170,7 +302,8 @@ const state = {
   suspendSessionSave: false,
   saveState: "idle",
   currentUser: null,
-  previewTheme: { ...PREVIEW_THEME_DEFAULT }
+  previewTheme: { ...PREVIEW_THEME_DEFAULT },
+  pendingImageReplacementTarget: null
 };
 
 function hideBootSpinner() {
@@ -404,6 +537,74 @@ function readPreviewThemeFromInputs() {
   });
 }
 
+function resolvePaletteItemsFromMap(labelPrefix, palette) {
+  return Object.entries(palette)
+    .map(([index, color]) => ({
+      label: `${labelPrefix} ${index}`,
+      color: normalizeHexColor(color, "#ffffff"),
+      index
+    }))
+    .sort((left, right) => Number(left.index) - Number(right.index));
+}
+
+async function copyTextToClipboard(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (typeof navigator?.clipboard?.writeText === "function") {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      // fallback below
+    }
+  }
+  try {
+    const temp = document.createElement("textarea");
+    temp.value = text;
+    temp.style.position = "fixed";
+    temp.style.opacity = "0";
+    document.body.appendChild(temp);
+    temp.focus();
+    temp.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(temp);
+    return Boolean(copied);
+  } catch (_) {
+    return false;
+  }
+}
+
+function renderPreviewRoomPaletteReference() {
+  const container = elements.previewRoomPaletteReference;
+  if (!container) return;
+
+  const stationItems = resolvePaletteItemsFromMap("Estación", MISSION_LEVEL_COLORS);
+  const themeItems = resolvePaletteItemsFromMap("Tema/Unidad", THEME_COMBINE_COLORS);
+
+  const buildSection = (title, items) => `
+    <section class="er-preview-palette-section">
+      <h6 class="er-preview-palette-title">${title}</h6>
+      <div class="er-preview-palette-list">
+        ${items.map((item) => `
+          <div class="er-preview-palette-item" style="--preview-palette-color:${item.color}">
+            <span class="er-preview-palette-label">${escapeHtml(item.label)}</span>
+            <span class="er-preview-palette-chip" aria-hidden="true"></span>
+            <code class="er-preview-palette-code">${item.color}</code>
+            <button type="button" class="er-icon-button er-preview-palette-copy" data-preview-palette-copy="${item.color}" title="Copiar ${escapeHtml(item.color)}">
+              <i class="fas fa-copy"></i>
+            </button>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+
+  container.innerHTML = [
+    buildSection("Colores por estación", stationItems),
+    buildSection("Colores por tema / unidad", themeItems)
+  ].join("");
+}
+
 function syncPreviewThemeInputs(theme = {}) {
   const nextTheme = normalizePreviewThemeConfig(theme);
   if (elements.previewBaseColor) elements.previewBaseColor.value = nextTheme.baseColor;
@@ -488,6 +689,99 @@ function getAcademicFieldMode() {
   return String(elements.nivelSelect?.value || "Primaria").trim() === "Secundaria" ? "Secundaria" : "Primaria";
 }
 
+function normalizePaletteIndex(value, fallback = 1) {
+  const index = Number(value);
+  const fallbackValue = Number(fallback);
+  const safeFallback = Number.isFinite(fallbackValue) ? (Math.trunc(fallbackValue) > 0
+    ? ((Math.trunc(fallbackValue) - 1) % 4 + 4) % 4 + 1
+    : 1) : 1;
+  if (!Number.isFinite(index)) return safeFallback;
+  const normalized = Math.trunc(index);
+  if (normalized <= 0) return safeFallback;
+  return ((normalized - 1) % 4 + 4) % 4 + 1;
+}
+
+function normalizePromptLanguage(value = "es-419") {
+  const normalized = String(value || "es-419").trim().toLowerCase();
+const aliases = {
+    es: "es-mx",
+    "es-mx": "es-mx",
+    "es-419": "es-mx",
+    "es-es": "es-es",
+    "en": "en-us",
+    "en-us": "en-us",
+    "en-gb": "en-gb",
+    "fr": "fr-fr",
+    "fr-fr": "fr-fr",
+    "pt": "pt-br",
+    "pt-br": "pt-br"
+  };
+  return aliases[normalized] || "es-419";
+}
+
+function resolvePromptLanguageDirective(languageCode = "es-419") {
+  const normalized = normalizePromptLanguage(languageCode);
+  return PROMPT_LANGUAGE_MODES[normalized] || PROMPT_LANGUAGE_MODES["es-419"];
+}
+
+function parseStationIndex(rawValue, fallback = 1) {
+  const normalized = String(rawValue || "").trim().toLowerCase();
+  if (!normalized || normalized === "todas") {
+    return normalizePaletteIndex(fallback, fallback);
+  }
+  const byName = {
+    "primera estación": 1,
+    "segunda estación": 2,
+    "tercera estación": 3,
+    "cuarta estación": 4
+  };
+  if (Object.prototype.hasOwnProperty.call(byName, normalized)) {
+    return byName[normalized];
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  return normalizePaletteIndex(parsed, fallback);
+}
+
+function resolveRoomColorPalette({ index = 0, formData = {} }) {
+  const missionIndex = Number.isFinite(Number(index)) ? Number(index) : 0;
+  const safeRoomIndex = Math.max(0, missionIndex) + 1;
+  const unidadTemaMode = getAcademicFieldMode();
+  const isSecondary = unidadTemaMode === "Secundaria";
+  const stationSource = normalizeString(formData.estacion, isSecondary ? "Todas" : "");
+  const levelIndex = isSecondary && stationSource && stationSource.toLowerCase() !== "todas"
+    ? parseStationIndex(stationSource, safeRoomIndex)
+    : normalizePaletteIndex(safeRoomIndex, safeRoomIndex);
+  const themeSource = isSecondary ? normalizeString(formData.temaSecundaria, "1") : normalizeString(formData.unidad, "1");
+  const themeIndex = normalizePaletteIndex(parseInt(themeSource, 10), 1);
+  return {
+    levelColor: MISSION_LEVEL_COLORS[levelIndex] || MISSION_LEVEL_COLORS[1],
+    themeColor: THEME_COMBINE_COLORS[themeIndex] || THEME_COMBINE_COLORS[1],
+    levelIndex,
+    themeIndex
+  };
+}
+
+function buildImageTextPolicyLine({ formData = {}, allowOptionalText = true }) {
+  const isStrict = Boolean(formData.strictImagePromptMode);
+  if (!isStrict) {
+    return "Regla de coherencia: usa solo el idioma indicado para cualquier texto de apoyo; evita mezclar idiomas."
+      + " Si hay texto, mantenlo breve, claro y funcional."
+      + " Prioriza instrucciones visuales descriptivas sobre texto."
+      + " Si no es imprescindible, no incluyas texto legible."
+      + " Si decides incluirlo, no mezcles idiomas en una misma imagen.";
+  }
+  if (!allowOptionalText) {
+    return [
+      "MODO ESTRICTO DE TEXTO EN IMAGEN: No agregar texto legible en la imagen",
+      "ni rótulos, ni señales, ni marcas didácticas. Mantén la imagen 100% visual."
+    ].join(" ");
+  }
+  return [
+    "MODO ESTRICTO DE TEXTO EN IMAGEN: no uses texto como parte principal de la composición.",
+    "Solo puedes incluir máximo una frase muy corta cuando sea absolutamente necesario y exclusivamente en el idioma indicado."
+  ].join(" ");
+}
+
 function buildAcademicFormState(project = {}) {
   if (!project || typeof project !== "object") return {};
   const nivel = normalizeString(project.nivel, "");
@@ -513,7 +807,7 @@ function syncAcademicFields() {
   }
   if (elements.estacionSelect) {
     elements.estacionSelect.required = isSecondary;
-    if (!isSecondary) elements.estacionSelect.value = "Primera estación";
+    if (!isSecondary) elements.estacionSelect.value = "Todas";
   }
 }
 
@@ -549,6 +843,10 @@ function serializeFormState() {
   elements.form.querySelectorAll("input, select, textarea").forEach((field) => {
     if (!field.id) return;
     if (field.type === "button" || field.type === "submit" || field.type === "reset") return;
+    if (field.type === "checkbox") {
+      formState[field.id] = Boolean(field.checked);
+      return;
+    }
     formState[field.id] = field.value;
   });
   if (elements.modeloSelect?.id) {
@@ -563,7 +861,12 @@ function applyFormState(formState = {}) {
   try {
     Object.entries(formState).forEach(([fieldId, value]) => {
       const field = document.getElementById(fieldId);
-      if (field) field.value = value;
+      if (!field) return;
+      if (field.type === "checkbox") {
+        field.checked = Boolean(value);
+        return;
+      }
+      field.value = value;
     });
   } finally {
     state.formPersistenceSuspended = false;
@@ -761,17 +1064,106 @@ async function createRemoteSession({ title, project = null, formState = null, ac
 async function uploadImageIfDataUrl(value, path) {
   if (!isDataUrl(value)) return value;
   if (!state.currentUser?.uid) return value;
+  const pathHint = String(path || "");
   try {
     const storageInstance = getStorage(app);
     const refInstance = storageRef(storageInstance, path);
-    const mimeMatch = value.match(/^data:([^;]+);/);
-    const contentType = mimeMatch ? mimeMatch[1] : "image/png";
+    const parseResult = parseDataUrl(value);
+    const contentType = parseResult?.contentType || "image/png";
     await uploadString(refInstance, value, "data_url", { contentType });
     return await getDownloadURL(refInstance);
   } catch (error) {
-    console.warn("No se pudo subir la imagen a Firebase Storage:", error);
-    return value;
+    const isLikelyCorsOrNetwork = /xmlhttprequest|network|cors|fetch|storage|permission/i.test(String(error?.message || ""));
+    if (!isLikelyCorsOrNetwork) {
+      console.warn("No se pudo subir la imagen a Firebase Storage:", error);
+      return value;
+    }
+    try {
+      const uploadedUrl = await uploadImageToBackendForFallback(value, pathHint, "replacement");
+      if (uploadedUrl) {
+        return uploadedUrl;
+      }
+      return value;
+    } catch (fallbackError) {
+      console.warn("Fallback de imagen por backend no disponible:", fallbackError);
+      return value;
+    }
   }
+}
+
+function parseDataUrl(value = "") {
+  const raw = String(value || "").trim();
+  const match = raw.match(DATA_URL_PATTERN);
+  if (!match) return null;
+  const contentType = String(match[1] || "image/png").trim() || "image/png";
+  const encoded = String(match[3] || "").trim();
+  if (!encoded || !raw.includes(";base64,")) {
+    return null;
+  }
+  return { contentType, encoded };
+}
+
+function toBackendStoragePath(path, uid) {
+  const safePath = String(path || "").trim().replace(/^\/+/, "");
+  const safeUid = String(uid || "").trim();
+  if (!safePath || !safeUid) return "";
+  if (safePath.startsWith("unidadesGeneradasAssets/")) return safePath;
+  const escapedPrefix = `escaperooms/${safeUid}/`;
+  if (safePath.startsWith(escapedPrefix)) {
+    return `unidadesGeneradasAssets/${safeUid}/${safePath.slice(escapedPrefix.length)}`;
+  }
+  if (safePath.startsWith(`escaperooms/${safeUid}`)) {
+    return `unidadesGeneradasAssets/${safeUid}/${safePath.slice(`escaperooms/${safeUid}`.length).replace(/^\/+/, "")}`;
+  }
+  return `unidadesGeneradasAssets/${safeUid}/${safePath.replace(/^\/+/, "")}`;
+}
+
+async function uploadImageToBackendForFallback(value, path, role = "imagen") {
+  const uid = state.currentUser?.uid;
+  if (!uid) return "";
+  const parsed = parseDataUrl(value);
+  if (!parsed) return "";
+  const storagePath = toBackendStoragePath(path, uid);
+  if (!storagePath) return "";
+  const endpoint = buildApiUrl(SUPPORT_GRAPHIC_UPLOAD_ENDPOINT);
+  if (!endpoint) return "";
+
+  const response = await authFetchJson(endpoint, {
+    method: "POST",
+    body: {
+      path: storagePath,
+      mimeType: parsed.contentType || "image/png",
+      dataBase64: parsed.encoded,
+      metadata: { role, subtema: "escaperoom" }
+    }
+  });
+  return response?.downloadUrl || "";
+}
+
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!(file instanceof File)) {
+      reject(new Error("No se recibió un archivo de imagen válido."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo seleccionado."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function buildActivityImagePath({ missionIndex, questionIndex }) {
+  const safeMission = Number.isFinite(Number(missionIndex)) ? Math.max(0, Number(missionIndex)) : 0;
+  if (Number.isFinite(Number(questionIndex))) {
+    const safeQuestion = Math.max(0, Number(questionIndex));
+    return `question_${safeMission}_${safeQuestion}_${Date.now()}.png`;
+  }
+  return `mission_${safeMission}_${Date.now()}.png`;
+}
+
+function getActivityImageFileInput() {
+  return elements.activityImageInput;
 }
 
 async function uploadProjectImagesToFirebaseStorage(sessionId) {
@@ -1290,6 +1682,8 @@ function getFormData() {
   const unidadTemaModo = getAcademicFieldMode();
   const unidadTemaValor = String(document.getElementById("unidadTemaSelect")?.value || "").trim();
   return {
+    idioma: elements.idiomaSelect?.value || "es-419",
+    strictImagePromptMode: Boolean(elements.strictImagePromptMode?.checked),
     nivel: document.getElementById("nivelSelect")?.value || "Primaria",
     grado: document.getElementById("gradoSelect")?.value || "Primero",
     trimestre: document.getElementById("trimestreSelect")?.value || "1",
@@ -1301,7 +1695,7 @@ function getFormData() {
     tema: temaLines.join(" / "),
     temaPrincipal: temaLines[0] || "",
     temas: temaLines,
-    estacion: unidadTemaModo === "Secundaria" ? (document.getElementById("estacionSelect")?.value || "Primera estación") : "",
+    estacion: unidadTemaModo === "Secundaria" ? (document.getElementById("estacionSelect")?.value || "Todas") : "",
     misiones: Number(document.getElementById("numMisionesInput")?.value || 4),
     preguntasPorSala: Number(document.getElementById("preguntasPorSalaInput")?.value || 1),
     modelo: ALLOWED_TEXT_MODELS.has(String(elements.modeloSelect?.value || "").trim())
@@ -1326,11 +1720,12 @@ function buildPrompt(data) {
     ? `Otra narrativa: ${data.narrativaPersonalizada || "personalizada"}`
     : data.narrativa;
   const estiloImagen = normalizeString(data.estiloImagen, "Ilustración editorial educativa coherente con la narrativa");
+  const languageMode = resolvePromptLanguageDirective(data.idioma);
 
   return `
 Eres un experto en gamificación, narrativa educativa y diseño de escape rooms profesionales.
 Responde únicamente con JSON válido.
-Escribe todo en español latinoamericano neutral (es-419), sin modismos de España.
+${languageMode.directive}
 Diseña una experiencia para alumnado de ${data.grado} de ${data.nivel}.
 
 Brief:
@@ -1362,6 +1757,7 @@ ${objetivosTematicos}
 - Cada sala del mapa debe incluir una lista "preguntas" con exactamente ${data.preguntasPorSala} preguntas internas.
 - Las preguntas internas de una misma sala pueden resolverse en cualquier orden.
 - Cada pregunta interna debe tener su propio "tipo_interaccion", "reto", "respuesta_correcta" o estructura equivalente, y feedback no vacío.
+- Cada pregunta interna debe tener su propia pista escrita y accionable (no vacía y no genérica), basada en una pista textual concreta del reto, sin revelar la respuesta.
 - Cada sala debe declarar qué otras salas desbloquea al resolverse. Usa una estructura simple de mapa libre.
 - No dejes respuestas vacías ni feedback vacío; cada sala y cada pregunta debe poder validarse de forma inequívoca.
 
@@ -1391,7 +1787,7 @@ Devuelve SOLO un JSON con esta estructura:
           "opciones": ["Opción A", "Opción B", "Opción C"],
           "parejas": [{ "izquierda": "Elemento 1", "derecha": "Respuesta 1" }],
           "media": { "tipo": "imagen | audio | video", "url": "URL o data", "alt": "Texto alternativo" },
-          "pista": "Pista sutil",
+          "pista": "Usa la condición exacta del enunciado para descartar opciones y hallar la respuesta.",
           "retroalimentacion_correcta": "Mensaje de éxito",
           "retroalimentacion_incorrecta": "Mensaje de error",
           "imagen_prompt": "Descripción visual opcional",
@@ -1416,6 +1812,11 @@ function extractGeneratedJson(rawText = "") {
     if (match) return JSON.parse(match[0]);
   }
   throw new Error("No se pudo interpretar el JSON devuelto por la IA.");
+}
+
+function extractJsonFromGeminiResponse(rawResponse = {}) {
+  const text = String(rawResponse?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+  return extractGeneratedJson(text);
 }
 
 function extractGeminiImageData(imageData = {}) {
@@ -1464,12 +1865,17 @@ function buildCoverVisualPrompt(data = {}) {
 }
 
 function buildRoomVisualPrompt({ data, mission, index }) {
+  const palette = resolveRoomColorPalette({ index, formData: data || {} });
   const visual = buildVisualDirection(data);
+  const languageMode = resolvePromptLanguageDirective(data?.idioma);
   return [
     `Escena funcional para la sala ${index + 1} (${normalizeString(mission.titulo, `Sala ${String(index + 1).padStart(2, "0")}`)}).`,
     `Tema principal: ${visual.temaResumen}.`,
     `Dirección visual: ${visual.line}.`,
+    `Idioma de cualquier texto de apoyo en la imagen: ${languageMode.name}.`,
+    buildImageTextPolicyLine({ formData: data, allowOptionalText: false }),
     visual.ambientacion ? `Ambientación: ${visual.ambientacion}.` : "",
+    `Paleta obligatoria de sala: color de nivel ${palette.levelColor} y color de tema ${palette.themeColor}.`,
     `La imagen debe apoyar el reto: ${normalizeString(mission.reto, "Resolver la sala.")}`,
     `REGLA ESTRICTA: La imagen es un apoyo visual o pista para que el estudiante resuelva el reto. Bajo ninguna circunstancia muestres o escribas la respuesta correcta o solución final directamente sobre el dibujo.`,
     normalizeString(mission.imagen_prompt, "") || "Sin texto legible y útil para resolver la sala."
@@ -1477,13 +1883,18 @@ function buildRoomVisualPrompt({ data, mission, index }) {
 }
 
 function buildQuestionVisualPrompt({ data, mission, question, roomIndex, questionIndex }) {
+  const palette = resolveRoomColorPalette({ index: roomIndex, formData: data || {} });
   const visual = buildVisualDirection(data);
+  const languageMode = resolvePromptLanguageDirective(data?.idioma);
   return [
     `Escena funcional para la pregunta ${questionIndex + 1} de la sala ${roomIndex + 1} (${normalizeString(mission.titulo, `Sala ${String(roomIndex + 1).padStart(2, "0")}`)}).`,
     `Pregunta interna: ${normalizeString(question.titulo, `Pregunta ${questionIndex + 1}`)}.`,
     `Tema principal: ${visual.temaResumen}.`,
     `Dirección visual: ${visual.line}.`,
+    `Idioma de cualquier texto de apoyo en la imagen: ${languageMode.name}.`,
+    buildImageTextPolicyLine({ formData: data, allowOptionalText: false }),
     visual.ambientacion ? `Ambientación: ${visual.ambientacion}.` : "",
+    `Paleta obligatoria de sala: color de nivel ${palette.levelColor} y color de tema ${palette.themeColor}.`,
     `La imagen debe apoyar el reto: ${normalizeString(question.reto, "Resolver la pregunta.")}`,
     `REGLA ESTRICTA: La imagen es un apoyo visual o pista para resolver el ejercicio. Bajo ninguna circunstancia muestres, dibujes o escribas la respuesta correcta o el valor de la solución final de forma explícita en la imagen. La solución debe quedar oculta para que el estudiante la deduzca.`,
     normalizeString(question.imagen_prompt, "") || normalizeString(question.media?.texto || question.media?.alt, "") || "Sin texto legible y útil para resolver la pregunta."
@@ -1516,18 +1927,53 @@ async function generateCoverImage(project, context) {
     return "";
   }
 }
-async function generateMissionImages(project, context, onProgress) {
+
+function resolveImageGenerationScope(project, options = {}) {
+  const missionIndexes = Array.isArray(options.missionIndexes)
+    ? options.missionIndexes
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value < (project?.misiones?.length || 0))
+    : null;
+  const questionScope = options.questionScope && Number.isInteger(Number(options.questionScope.missionIndex)) && Number.isInteger(Number(options.questionScope.questionIndex))
+    ? {
+        missionIndex: Number(options.questionScope.missionIndex),
+        questionIndex: Number(options.questionScope.questionIndex)
+      }
+    : null;
+  return {
+    missionIndexes: missionIndexes ? new Set(missionIndexes) : null,
+    questionScope,
+    includeMissionImage: options.includeMissionImage !== false,
+    includeQuestions: options.includeQuestions !== false,
+    forceQuestionImages: options.forceQuestionImages === true
+  };
+}
+
+function questionNeedsImage(question = {}) {
+  const hasMedia = question.media && (question.media.tipo === "imagen" || !question.media.tipo);
+  return question.tipo_interaccion === "multimedia" || question.imagen_prompt || question.imagen || hasMedia;
+}
+
+async function generateMissionImages(project, context, onProgress, options = {}) {
+  const scope = resolveImageGenerationScope(project, options);
   let generated = 0;
   let failed = 0;
   let total = 0;
 
   // Calcular total de imágenes a generar de antemano
   for (const [index, mission] of project.misiones.entries()) {
-    total += 1;
+    if (scope.missionIndexes && !scope.missionIndexes.has(index)) {
+      continue;
+    }
+    if (scope.includeMissionImage) {
+      total += 1;
+    }
     for (const [questionIndex, question] of (Array.isArray(mission.preguntas) ? mission.preguntas.entries() : [])) {
       if (!question) continue;
-      const hasMedia = question.media && (question.media.tipo === "imagen" || !question.media.tipo);
-      const needsImage = question.tipo_interaccion === "multimedia" || question.imagen_prompt || question.imagen || hasMedia;
+      if (scope.questionScope && (scope.questionScope.missionIndex !== index || scope.questionScope.questionIndex !== questionIndex)) {
+        continue;
+      }
+      const needsImage = scope.includeQuestions && (scope.forceQuestionImages || questionNeedsImage(question));
       if (!needsImage) continue;
       total += 1;
     }
@@ -1536,35 +1982,38 @@ async function generateMissionImages(project, context, onProgress) {
   let processed = 0;
 
   for (const [index, mission] of project.misiones.entries()) {
-    processed += 1;
-    if (onProgress) onProgress(processed, total);
+    if (scope.missionIndexes && !scope.missionIndexes.has(index)) {
+      continue;
+    }
+    if (scope.includeMissionImage) {
+      processed += 1;
+      if (onProgress) onProgress(processed, total);
 
-    try {
-      const image = await generateGeminiImage(buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index }), { aspectRatio: "4:3" });
-      mission.imagen = image;
-      mission.imagen_alt = mission.imagen_alt || mission.media?.alt || `Imagen de la sala ${index + 1}`;
-      if (mission.media) {
-        mission.media.url = image;
-        if (!mission.media.tipo) mission.media.tipo = "imagen";
-      } else {
+      try {
+        const image = await generateGeminiImage(buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index }), { aspectRatio: "4:3" });
+        mission.imagen = image;
+        mission.imagen_alt = mission.imagen_alt || mission.media?.alt || `Imagen de la sala ${index + 1}`;
         mission.media = {
+          ...(mission.media || {}),
           tipo: "imagen",
           url: image,
           alt: mission.imagen_alt,
-          titulo: mission.titulo,
-          texto: ""
+          titulo: mission.media?.titulo || mission.titulo,
+          texto: mission.media?.texto || mission.reto
         };
+        generated += 1;
+      } catch (error) {
+        console.warn(`No se pudo generar la imagen de la sala ${index + 1}:`, error);
+        failed += 1;
       }
-      generated += 1;
-    } catch (error) {
-      console.warn(`No se pudo generar la imagen de la sala ${index + 1}:`, error);
-      failed += 1;
     }
 
     for (const [questionIndex, question] of (Array.isArray(mission.preguntas) ? mission.preguntas.entries() : [])) {
       if (!question) continue;
-      const hasMedia = question.media && (question.media.tipo === "imagen" || !question.media.tipo);
-      const needsImage = question.tipo_interaccion === "multimedia" || question.imagen_prompt || question.imagen || hasMedia;
+      if (scope.questionScope && (scope.questionScope.missionIndex !== index || scope.questionScope.questionIndex !== questionIndex)) {
+        continue;
+      }
+      const needsImage = scope.includeQuestions && (scope.forceQuestionImages || questionNeedsImage(question));
       if (!needsImage) continue;
 
       processed += 1;
@@ -1574,18 +2023,14 @@ async function generateMissionImages(project, context, onProgress) {
         const image = await generateGeminiImage(buildQuestionVisualPrompt({ data: { ...project, ...context }, mission, question, roomIndex: index, questionIndex }), { aspectRatio: "4:3" });
         question.imagen = image;
         question.imagen_alt = question.imagen_alt || question.media?.alt || `Imagen de la pregunta ${questionIndex + 1}`;
-        if (question.media) {
-          question.media.url = image;
-          if (!question.media.tipo) question.media.tipo = "imagen";
-        } else {
-          question.media = {
-            tipo: "imagen",
-            url: image,
-            alt: question.imagen_alt,
-            titulo: question.titulo,
-            texto: ""
-          };
-        }
+        question.media = {
+          ...(question.media || {}),
+          tipo: "imagen",
+          url: image,
+          alt: question.imagen_alt,
+          titulo: question.media?.titulo || question.titulo,
+          texto: question.media?.texto || question.reto
+        };
         generated += 1;
       } catch (error) {
         console.warn(`No se pudo generar la imagen de la pregunta ${questionIndex + 1} de la sala ${index + 1}:`, error);
@@ -1596,9 +2041,335 @@ async function generateMissionImages(project, context, onProgress) {
   return { generated, failed, total };
 }
 
+function buildRoomRegenerationPrompt({ formData = {}, missionIndex = 0, sourceMission = {}, questionCount = 1 }) {
+  const safeIndex = Math.max(0, Number(missionIndex) || 0);
+  const palette = resolveRoomColorPalette({ index: safeIndex, formData });
+  const visual = buildVisualDirection(formData);
+  const languageMode = resolvePromptLanguageDirective(formData.idioma);
+  const strictTextPolicy = buildImageTextPolicyLine({ formData, allowOptionalText: false });
+  return [
+    "Regenera una sola sala del escape room, como objeto JSON estricto.",
+    `Genera exactamente la sala #${safeIndex + 1} y ${questionCount} preguntas internas.`,
+    `Debe devolver solo JSON con esta forma: {"mission": {...}}.`,
+    `Idioma objetivo del contenido: ${languageMode.name}.`,
+    "Mantén el nivel de detalle, coherencia narrativa y dificultad de la experiencia original.",
+    `Nivel de color principal de sala: ${palette.levelColor}.`,
+    `Color de tema: ${palette.themeColor}.`,
+    strictTextPolicy,
+    `Tema principal: ${formData.temaPrincipal || formData.tema}.`,
+    `Narrativa: ${formData.narrativa || "general"}.`,
+    `Estilo visual general: ${visual.line}.`,
+    `La sala debe incluir: id, titulo, release, historia, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, desbloquea y bloqueada_inicial.`,
+    "Dentro de preguntas usa la estructura esperada por la app con: id, titulo, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, imagen_prompt, imagen_alt e imagen.",
+    `Si no hay suficientes respuestas u opciones, usa defaults claros y consistentes con preguntas de nivel ${formData.nivel}.`,
+    `Si la sala anterior ya existía, conserva su id si aplica: ${sourceMission.id || "m" + (safeIndex + 1)}`
+  ].filter(Boolean).join("\n");
+}
+
+function buildQuestionRegenerationPrompt({ formData = {}, mission = {}, missionIndex = 0, questionIndex = 0, sourceQuestion = {} }) {
+  const safeQuestionIndex = Math.max(0, Number(questionIndex) || 0);
+  const palette = resolveRoomColorPalette({ index: missionIndex, formData });
+  const visual = buildVisualDirection(formData);
+  const languageMode = resolvePromptLanguageDirective(formData.idioma);
+  const strictTextPolicy = buildImageTextPolicyLine({ formData, allowOptionalText: false });
+  return [
+    "Regenera una sola pregunta interna, como objeto JSON estricto.",
+    "Devuelve solo JSON con esta forma: {\"question\": {...}}.",
+    "No cambies otras preguntas ni la sala.",
+    `La pregunta es la #${safeQuestionIndex + 1} de la sala #${Number(missionIndex) + 1}.`,
+    `Idioma objetivo del contenido: ${languageMode.name}.`,
+    `Nivel de color principal de sala: ${palette.levelColor}.`,
+    `Color de tema: ${palette.themeColor}.`,
+    strictTextPolicy,
+    `Tema principal: ${formData.temaPrincipal || formData.tema}.`,
+    `Narrativa de la sala: ${mission.reto || mission.historia || ""}.`,
+    `Estilo visual base: ${visual.line}.`,
+    "La pregunta debe incluir: id, titulo, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, imagen_prompt, imagen_alt, imagen y pista textual.",
+    "Regenera una pista específica y accionable: menciona 1 o 2 detalles concretos del reto (número, personaje, lugar, condición o relación) para guiar al alumnado sin dar la respuesta.",
+    `Mantén coherencia pedagógica para ${formData.nivel} y dificulta de forma similar al entorno actual.`,
+    `Si puedes, conserva la intención de: ${sourceQuestion?.reto || "reto existente"} y ${sourceQuestion?.respuesta_correcta || "respuesta correcta"}.`
+  ].join("\n");
+}
+
+function pickMissionFromGeminiPayload(parsed = {}) {
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("La IA no devolvió una misión válida.");
+  }
+  if (parsed.mission && typeof parsed.mission === "object") return parsed.mission;
+  if (parsed.misiones && Array.isArray(parsed.misiones) && parsed.misiones.length) return parsed.misiones[0];
+  if (parsed.title) return parsed;
+  throw new Error("La IA no devolvió una estructura de misión reconocible.");
+}
+
+function pickQuestionFromGeminiPayload(parsed = {}) {
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("La IA no devolvió una pregunta válida.");
+  }
+  if (parsed.question && typeof parsed.question === "object") return parsed.question;
+  if (parsed.pregunta && typeof parsed.pregunta === "object") return parsed.pregunta;
+  if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length) return parsed.questions[0];
+  throw new Error("La IA no devolvió una estructura de pregunta reconocible.");
+}
+
+async function replaceActivityImage({ missionIndex, questionIndex, file }) {
+  if (!state.currentUser?.uid) {
+    setStatus("Debes iniciar sesión para guardar imágenes en Firebase.", "warning");
+    return;
+  }
+  if (!state.project) {
+    setStatus("Genera un escape room antes de sustituir una imagen.", "warning");
+    return;
+  }
+  const targetMission = Number(missionIndex);
+  const targetQuestion = Number.isFinite(Number(questionIndex)) ? Number(questionIndex) : null;
+
+  const mission = state.project.misiones?.[targetMission];
+  if (!mission) {
+    setStatus("No se encontró la sala objetivo.", "bad");
+    return;
+  }
+  if (targetQuestion !== null && !mission.preguntas?.[targetQuestion]) {
+    setStatus("No se encontró la pregunta objetivo.", "bad");
+    return;
+  }
+
+  if (!file) {
+    setStatus("Selecciona una imagen para sustituir.", "warning");
+    return;
+  }
+
+  if (!file.type.startsWith("image/")) {
+    setStatus("El archivo seleccionado no parece ser una imagen.", "warning");
+    return;
+  }
+
+  state.isGenerating = true;
+  renderMissionEditor();
+  const activityLabel = targetQuestion === null
+    ? `sala ${targetMission + 1}`
+    : `pregunta ${targetQuestion + 1} de la sala ${targetMission + 1}`;
+  setStatus(`Subiendo imagen para ${activityLabel}...`, "info");
+
+  try {
+    const sessionId = await ensureActiveRemoteSession();
+    if (!sessionId) {
+      throw new Error("No se pudo crear o recuperar la sesión activa.");
+    }
+    const uid = state.currentUser.uid;
+    const imageDataUrl = await readImageFileAsDataUrl(file);
+    const fileName = buildActivityImagePath({
+      missionIndex: targetMission,
+      questionIndex: targetQuestion
+    });
+    const storagePath = `escaperooms/${uid}/${sessionId}/${fileName}`;
+    const storageUrl = await uploadImageIfDataUrl(imageDataUrl, storagePath);
+
+    if (targetQuestion === null) {
+      mission.imagen = storageUrl;
+      mission.imagen_alt = mission.imagen_alt || mission.media?.alt || `Imagen de la sala ${targetMission + 1}`;
+      mission.media = {
+        ...(mission.media || {}),
+        tipo: "imagen",
+        url: storageUrl,
+        alt: mission.imagen_alt,
+        titulo: mission.media?.titulo || mission.titulo,
+        texto: mission.media?.texto || mission.reto
+      };
+    } else {
+      const question = mission.preguntas[targetQuestion];
+      question.imagen = storageUrl;
+      question.imagen_alt = question.imagen_alt || question.media?.alt || `Imagen de la pregunta ${targetQuestion + 1}`;
+      question.media = {
+        ...(question.media || {}),
+        tipo: "imagen",
+        url: storageUrl,
+        alt: question.imagen_alt,
+        titulo: question.media?.titulo || question.titulo,
+        texto: question.media?.texto || question.reto
+      };
+    }
+
+    renderOutputsNow();
+    const savedMessage = isDataUrl(storageUrl)
+      ? `Imagen sustituida para ${activityLabel}, pero no se pudo guardar en Storage en este entorno.`
+      : `Imagen sustituida y guardada para ${activityLabel}.`;
+    setStatus(savedMessage, isDataUrl(storageUrl) ? "warning" : "success");
+  } catch (error) {
+    console.error("No se pudo sustituir la imagen:", error);
+    setStatus(`No fue posible sustituir la imagen de ${activityLabel}.`, "bad");
+  } finally {
+    state.isGenerating = false;
+    refreshPanels();
+  }
+}
+
+async function regenerateMissionContent(index) {
+  if (!state.project) {
+    setStatus("Genera un escape room antes de regenerar una sala.", "warning");
+    return;
+  }
+  const missionIndex = Number(index);
+  if (!Number.isInteger(missionIndex) || missionIndex < 0 || missionIndex >= state.project.misiones.length) {
+    setStatus("Selecciona una sala válida para regenerar.", "warning");
+    return;
+  }
+
+  const sourceMission = state.project.misiones[missionIndex];
+  const formData = getFormData();
+  const questionCount = Math.max(1, Array.isArray(sourceMission.preguntas) ? sourceMission.preguntas.length : Number(formData.preguntasPorSala || 1));
+  const prompt = buildRoomRegenerationPrompt({
+    formData,
+    missionIndex,
+    sourceMission,
+    questionCount
+  });
+
+  state.isGenerating = true;
+  setStatus(`Regenerando sala ${missionIndex + 1}...`, "info");
+  renderMissionEditor();
+  try {
+    const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+      method: "POST",
+      body: {
+        model: formData.modelo || TEXT_MODEL_DEFAULT,
+        payload: {
+          systemInstruction: {
+            parts: [{
+              text: "Responde únicamente con JSON válido. Sin texto adicional."
+            }]
+          },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.72
+          }
+        }
+      }
+    });
+
+    const missionPayload = pickMissionFromGeminiPayload(extractJsonFromGeminiResponse(response));
+    const normalized = createMissionDraft(missionIndex, {
+      ...missionPayload,
+      id: missionPayload.id || sourceMission.id,
+      release: sourceMission.release || `SALA ${String(missionIndex + 1).padStart(2, "0")}`,
+      bloqueada_inicial: missionIndex !== 0
+    }, questionCount);
+
+    state.project.misiones[missionIndex] = normalized;
+    state.project = withDefaultRoutes(state.project);
+
+    state.project.misiones[missionIndex].release = `SALA ${String(missionIndex + 1).padStart(2, "0")}`;
+    if (!state.project.misiones[missionIndex].media) {
+      state.project.misiones[missionIndex].media = null;
+    }
+
+    const imageStats = await generateMissionImages(state.project, formData, (current, total) => {
+      setStatus(`Regenerando sala ${missionIndex + 1} (${current}/${total})`, "info");
+      renderMissionEditor();
+    }, {
+      missionIndexes: [missionIndex],
+      includeMissionImage: true,
+      includeQuestions: true,
+      forceQuestionImages: true
+    });
+
+    renderMissionEditor();
+    renderOutputsNow();
+    setStatus(
+      `Sala ${missionIndex + 1} regenerada · ${imageStats.generated}/${imageStats.total} imágenes listas${imageStats.failed ? ` · ${imageStats.failed} sin imagen` : ""}.`,
+      "success"
+    );
+  } catch (error) {
+    console.error("No se pudo regenerar la sala:", error);
+    setStatus("No se pudo regenerar la sala. Intenta de nuevo.", "bad");
+  } finally {
+    state.isGenerating = false;
+    refreshPanels();
+  }
+}
+
+async function regenerateQuestionContent(missionIndex, questionIndex) {
+  if (!state.project) {
+    setStatus("Genera un escape room antes de regenerar una pregunta.", "warning");
+    return;
+  }
+  const roomIndex = Number(missionIndex);
+  const qIndex = Number(questionIndex);
+  const mission = state.project.misiones?.[roomIndex];
+  const question = mission?.preguntas?.[qIndex];
+  if (!mission || !question) {
+    setStatus("Selecciona una pregunta válida para regenerar.", "warning");
+    return;
+  }
+
+  const formData = getFormData();
+  const prompt = buildQuestionRegenerationPrompt({
+    formData,
+    mission,
+    missionIndex: roomIndex,
+    questionIndex: qIndex,
+    sourceQuestion: question
+  });
+  state.isGenerating = true;
+  setStatus(`Regenerando pregunta ${qIndex + 1} de la sala ${roomIndex + 1}...`, "info");
+
+  try {
+    const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+      method: "POST",
+      body: {
+        model: formData.modelo || TEXT_MODEL_DEFAULT,
+        payload: {
+          systemInstruction: {
+            parts: [{
+              text: "Responde únicamente con JSON válido. Sin texto adicional."
+            }]
+          },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.7
+          }
+        }
+      }
+    });
+
+    const questionPayload = pickQuestionFromGeminiPayload(extractJsonFromGeminiResponse(response));
+    const normalized = createQuestionDraft(roomIndex, qIndex, {
+      ...questionPayload,
+      id: question.id
+    });
+    mission.preguntas[qIndex] = normalized;
+    state.project = withDefaultRoutes(state.project);
+
+    const imageStats = await generateMissionImages(state.project, formData, (current, total) => {
+      setStatus(`Regenerando pregunta ${qIndex + 1} (${current}/${total})`, "info");
+      renderMissionEditor();
+    }, {
+      missionIndexes: [roomIndex],
+      includeMissionImage: false,
+      includeQuestions: true,
+      forceQuestionImages: true,
+      questionScope: { missionIndex: roomIndex, questionIndex: qIndex }
+    });
+
+    renderMissionEditor();
+    renderOutputsNow();
+    setStatus(
+      `Pregunta ${qIndex + 1} de sala ${roomIndex + 1} regenerada · ${imageStats.generated}/${imageStats.total} imágenes listas${imageStats.failed ? ` · ${imageStats.failed} sin imagen` : ""}.`,
+      "success"
+    );
+  } catch (error) {
+    console.error("No se pudo regenerar la pregunta:", error);
+    setStatus("No se pudo regenerar la pregunta. Intenta de nuevo.", "bad");
+  } finally {
+    state.isGenerating = false;
+    refreshPanels();
+  }
+}
+
 function createQuestionDraft(roomIndex = 0, questionIndex = 0, partial = {}) {
   const title = partial.titulo || `Pregunta ${String(questionIndex + 1).padStart(2, "0")}`;
-  const question = normalizeQuestion({
+  const draftQuestion = {
     id: partial.id || `question-${roomIndex + 1}-${questionIndex + 1}`,
     titulo: title,
     reto: partial.reto || "Define aquí el desafío interno de la pregunta.",
@@ -1613,13 +2384,20 @@ function createQuestionDraft(roomIndex = 0, questionIndex = 0, partial = {}) {
       { izquierda: "Elemento 3", derecha: "Respuesta 3" }
     ],
     media: partial.media || null,
-    pista: partial.pista || "Añade una pista útil, pero no obvia.",
+    pista: partial.pista || "",
     retroalimentacion_correcta: partial.retroalimentacion_correcta || "",
     retroalimentacion_incorrecta: partial.retroalimentacion_incorrecta || "",
     imagen_prompt: partial.imagen_prompt || "",
     imagen_alt: partial.imagen_alt || "",
     imagen: partial.imagen || "",
     bloqueada_inicial: partial.bloqueada_inicial ?? false
+  };
+  const normalizedHintQuestion = {
+    ...draftQuestion,
+    pista: normalizeQuestionHint(draftQuestion, `Sala ${roomIndex + 1}`, "")
+  };
+  const question = normalizeQuestion({
+    ...normalizedHintQuestion
   }, roomIndex, questionIndex);
 
   question._correctOptionIndex = typeof partial._correctOptionIndex === "number"
@@ -1659,10 +2437,16 @@ function createMissionDraft(index = 0, partial = {}, questionCount = 1) {
     preguntas
   }, index);
 
-  mission._correctOptionIndex = typeof partial._correctOptionIndex === "number"
+  const repairedMission = repairMissionAnswers({
+    ...mission,
+    ...partial,
+    preguntas
+  }, index);
+
+  repairedMission._correctOptionIndex = typeof partial._correctOptionIndex === "number"
     ? partial._correctOptionIndex
-    : findCorrectOptionIndex(mission);
-  return mission;
+    : findCorrectOptionIndex(repairedMission);
+  return repairedMission;
 }
 
 function getMissionLabel(index = 0, mission = {}) {
@@ -1719,11 +2503,14 @@ function findCorrectOptionIndex(mission = {}) {
 }
 
 function repairQuestionAnswers(question = {}, roomIndex = 0, questionIndex = 0) {
+  const missionLabel = `Sala ${roomIndex + 1}`;
   const repaired = {
     ...question,
     retroalimentacion_correcta: normalizeString(question.retroalimentacion_correcta, "Correcto."),
-    retroalimentacion_incorrecta: normalizeString(question.retroalimentacion_incorrecta, "Respuesta incorrecta. Intenta de nuevo.")
+    retroalimentacion_incorrecta: normalizeString(question.retroalimentacion_incorrecta, "Respuesta incorrecta. Intenta de nuevo."),
+    pista: ""
   };
+  repaired.pista = normalizeQuestionHint(repaired, missionLabel);
 
   if (repaired.tipo_interaccion === "opcion_multiple") {
     const optionIndex = typeof repaired._correctOptionIndex === "number" && repaired._correctOptionIndex >= 0
@@ -2255,6 +3042,12 @@ function renderQuestionCard(missionIndex, questionIndex, question) {
         </div>
         <div class="er-question-summary-actions">
           <span class="er-badge">${escapeHtml(question.tipo_interaccion)}</span>
+            <button type="button" class="er-icon-button" data-question-action="replace-question-image" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" title="Sustituir imagen de pregunta con archivo local">
+            <i class="fas fa-image"></i>
+          </button>
+          <button type="button" class="er-icon-button" data-question-action="regenerate-question" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" title="Regenerar pregunta completa (texto + imagen)">
+            <i class="fas fa-rotate-right"></i>
+          </button>
           <button type="button" class="er-icon-button" data-question-action="delete-question" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}">
             <i class="fas fa-trash"></i>
           </button>
@@ -2424,6 +3217,9 @@ function renderMissionEditor() {
   });
 
   elements.missionEditorList.innerHTML = state.project.misiones.map((mission, index) => {
+    const formData = getFormData();
+    const roomPalette = resolveRoomColorPalette({ index, formData });
+    const roomStyle = `--room-level-color: ${roomPalette.levelColor}; --room-theme-color: ${roomPalette.themeColor};`;
     const nextMission = state.project.misiones[index + 1] || null;
     const unlockSummary = nextMission
       ? `<div class="er-muted">Esta sala desbloquea automáticamente: <strong>${escapeHtml(nextMission.titulo)}</strong> <small>(${escapeHtml(nextMission.id)})</small></div>`
@@ -2453,8 +3249,8 @@ function renderMissionEditor() {
       ? mission.respuestas_aceptadas.join("\n")
       : "";
 
-  return `
-      <details class="er-mission-card ${mission.bloqueada_inicial ? "is-locked" : ""}" data-mission-card data-index="${index}">
+    return `
+      <details class="er-mission-card ${mission.bloqueada_inicial ? "is-locked" : ""}" data-mission-card data-index="${index}" style="${roomStyle}">
         <summary class="er-mission-head">
           <div class="er-drag-handle" title="Arrastrar para reordenar">
             <i class="fas fa-grip-vertical"></i>
@@ -2471,6 +3267,12 @@ function renderMissionEditor() {
             </div>
           </div>
           <div class="er-mission-actions">
+            <button type="button" class="er-icon-button" data-action="replace-mission-image" data-index="${index}" title="Sustituir imagen de sala con archivo local">
+            <i class="fas fa-image"></i>
+          </button>
+            <button type="button" class="er-icon-button" data-action="regenerate-mission" data-index="${index}" title="Regenerar sala completa (texto + imagenes)">
+            <i class="fas fa-rotate-right"></i>
+          </button>
             <button type="button" class="er-icon-button" data-action="delete-mission" data-index="${index}">
               <i class="fas fa-trash"></i>
             </button>
@@ -2979,6 +3781,16 @@ function wireMissionEditorEvents() {
       if (questionAction === "remove-option") removeQuestionOption(missionIndex, questionIndex, Number(button.dataset.questionOptionIndex));
       if (questionAction === "add-pair") addQuestionPair(missionIndex, questionIndex);
       if (questionAction === "remove-pair") removeQuestionPair(missionIndex, questionIndex, Number(button.dataset.questionPairIndex));
+      if (questionAction === "replace-question-image") {
+        const fileInput = getActivityImageFileInput();
+        if (!fileInput) return;
+        state.pendingImageReplacementTarget = { missionIndex, questionIndex };
+        fileInput.value = "";
+        fileInput.click();
+      }
+      if (questionAction === "regenerate-question") {
+        void regenerateQuestionContent(missionIndex, questionIndex);
+      }
       return;
     }
 
@@ -2990,6 +3802,32 @@ function wireMissionEditorEvents() {
     if (action === "remove-option") removeOption(index, Number(button.dataset.optionIndex));
     if (action === "add-pair") addPair(index);
     if (action === "remove-pair") removePair(index, Number(button.dataset.pairIndex));
+    if (action === "replace-mission-image") {
+      const fileInput = getActivityImageFileInput();
+      if (!fileInput) return;
+      state.pendingImageReplacementTarget = { missionIndex: index, questionIndex: null };
+      fileInput.value = "";
+      fileInput.click();
+    }
+    if (action === "regenerate-mission") {
+      void regenerateMissionContent(index);
+    }
+  });
+
+  elements.activityImageInput?.addEventListener("change", (event) => {
+    const input = event.target;
+    const file = input.files?.[0] || null;
+    const target = state.pendingImageReplacementTarget;
+    state.pendingImageReplacementTarget = null;
+    input.value = "";
+    if (!file || !target) {
+      return;
+    }
+    void replaceActivityImage({
+      missionIndex: target.missionIndex,
+      questionIndex: target.questionIndex,
+      file
+    });
   });
 }
 
@@ -3078,6 +3916,20 @@ function wirePreviewThemeEvents() {
   elements.btnPreviewThemeReset?.addEventListener("click", () => {
     applyPreviewTheme(PREVIEW_THEME_DEFAULT);
   });
+
+  elements.previewRoomPaletteReference?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-preview-palette-copy]");
+    if (!button) return;
+    const color = String(button.dataset.previewPaletteCopy || "").trim();
+    if (!color) return;
+    const copied = await copyTextToClipboard(color);
+    setStatus(
+      copied ? `Color ${color} copiado al portapapeles.` : `No se pudo copiar ${color} automáticamente.`,
+      copied ? "success" : "warning"
+    );
+  });
+
+  renderPreviewRoomPaletteReference();
 }
 
 function isRemoteUrl(value) {
@@ -3358,7 +4210,7 @@ elements.form.addEventListener("submit", async (event) => {
             parts: [{
               text: [
                 "Responde únicamente con JSON válido.",
-                "Escribe en español latinoamericano neutral (es-419).",
+                resolvePromptLanguageDirective(formData.idioma || "es-419").directive,
                 "Mantén coherencia visual por escape room.",
                 "Respeta exactamente la cantidad de salas y preguntas solicitadas.",
                 "Cada sala debe tener progresión clara y rutas de desbloqueo simples."
@@ -3559,8 +4411,9 @@ function buildObjectiveFinalPrompt({ tema, narrativa, numMisiones, preguntasPorS
   ].join("\n");
 }
 
-async function generateObjectiveText(prompt, temperature = 0.85) {
+async function generateObjectiveText(prompt, temperature = 0.85, language = "es-419") {
   const model = elements.modeloSelect?.value || TEXT_MODEL_DEFAULT;
+  const languageMode = resolvePromptLanguageDirective(language);
   const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
     method: "POST",
     body: {
@@ -3568,7 +4421,7 @@ async function generateObjectiveText(prompt, temperature = 0.85) {
       payload: {
         systemInstruction: {
           parts: [{
-            text: "Eres un experto diseñador instruccional y de escape rooms educativos. Escribe única y exclusivamente en español latinoamericano neutro (es-419). Queda estrictamente prohibido utilizar modismos o conjugaciones verbales típicas de España. Devuelve solo texto plano, sin markdown, sin encabezados y sin HTML."
+            text: `Eres un experto diseñador instruccional y de escape rooms educativos. ${languageMode.directive} Queda estrictamente prohibido usar modismos o estilo ajenos al idioma indicado. Devuelve solo texto plano, sin markdown, sin encabezados y sin HTML.`
           }]
         },
         contents: [{
@@ -3608,7 +4461,11 @@ async function sugerirObjetivoFinal() {
   const originalText = btn ? btn.innerHTML : "";
   setButtonLoading(btn, true, "Preparando ideas...", originalText);
   try {
-    const seedText = await generateObjectiveText(buildObjectiveSeedPrompt(context), 0.82);
+    const seedText = await generateObjectiveText(
+      buildObjectiveSeedPrompt(context),
+      0.82,
+      elements.idiomaSelect?.value || "es-419"
+    );
     if (!seedText) {
       setStatus("No se recibió un borrador inicial claro. Intenta de nuevo.", "warning");
       return;
@@ -3644,7 +4501,11 @@ async function generateFinalObjectiveFromIdeas() {
   const originalText = button ? button.innerHTML : "";
   setButtonLoading(button, true, "Generando objetivo...", originalText);
   try {
-    const generatedText = await generateObjectiveText(buildObjectiveFinalPrompt({ ...context, userIdeas }), 0.88);
+    const generatedText = await generateObjectiveText(
+      buildObjectiveFinalPrompt({ ...context, userIdeas }),
+      0.88,
+      elements.idiomaSelect?.value || "es-419"
+    );
     if (!generatedText) {
       setStatus("No se recibió un objetivo final claro. Intenta de nuevo.", "warning");
       return;

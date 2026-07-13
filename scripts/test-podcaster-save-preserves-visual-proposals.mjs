@@ -31,13 +31,19 @@ assert.match(
 
 assert.match(
   store,
-  /const rawPayload = deps\.buildCloudSessionPayload\(target\);[\s\S]*body: JSON\.stringify\(\{ session: payload \}\)/s,
-  "El guardado manual debe enviar el payload completo de sesión al backend."
+  /const rawPayload = deps\.buildCloudSessionPayload\(target\);[\s\S]*const useSessionSaveApi = options\?\.useApi === true && deps\.hasAvailableApiBase\?\.\(\);/s,
+  "El guardado manual debe construir el payload completo y usar API sólo cuando se pide explícitamente."
 );
 
 assert.match(
   store,
-  /: await saveSessionDirectToCloud\(payload, deps\)/,
+  /sameOrigin: true,[\s\S]*body: JSON\.stringify\(\{ session: payload \}\)/s,
+  "Si se fuerza el endpoint de guardado, debe ir por same-origin para no salir directo a snoopy-export."
+);
+
+assert.match(
+  store,
+  /else \{\s*response = await saveSessionDirectToCloud\(payload, deps\);\s*\}/m,
   "El fallback directo de guardado también debe vivir dentro de podcaster-session-store.js."
 );
 

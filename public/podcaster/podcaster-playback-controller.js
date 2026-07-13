@@ -952,6 +952,39 @@ export class PodcasterPlaybackController extends EventEmitter {
     return this.videoPrewarmPromise;
   }
 
+  collectDialogueRowIds(session = null, entries = [], segments = []) {
+    const ids = new Set();
+    const add = (value) => {
+      const key = String(value || "").trim();
+      if (key) ids.add(key);
+    };
+    (Array.isArray(entries) ? entries : []).forEach((entry) => add(entry?.rowId));
+    const rows = Array.isArray(session?.script?.rows) ? session.script.rows : [];
+    rows.forEach((row) => add(row?.id));
+    const configSegments = session?.videoConfig?.geminiDialogueTrack?.segments;
+    (Array.isArray(configSegments) ? configSegments : []).forEach((segment) => add(segment?.rowId));
+    (Array.isArray(segments) ? segments : []).forEach((segment) => add(segment?.rowId));
+    return ids;
+  }
+
+  hideStageVideoElementPreservingSource(video = null, options = {}) {
+    if (!video) return;
+    try { video.pause(); } catch (_) { }
+    if (options.clearRowId === true) {
+      delete video.dataset.rowId;
+      delete video.dataset.stageMode;
+    }
+    this.resetEntryVisualStateOnSurface(video);
+    video.hidden = true;
+    video.muted = true;
+    video.volume = 0;
+    video.style.opacity = options.opacity ?? "0";
+    video.style.visibility = "hidden";
+    video.style.transform = "";
+    video.style.filter = "";
+    video.style.transition = "";
+  }
+
   // --- Lifecycle ---
   init(els, deps) {
     this.els = els;
@@ -1528,8 +1561,6 @@ export class PodcasterPlaybackController extends EventEmitter {
   async syncAudio(currentMs, speed) {
     const session = this.state.session || this.deps?.getActiveSession?.();
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
-    const currentTimelineRowIds = new Set(entries.map((entry) => String(entry?.rowId || "").trim()).filter(Boolean));
-
     const config = this.deps?.getPodcastVideoConfig?.(session) || {};
     const audioTrack = config.geminiDialogueTrack || { segments: [], enabled: true };
     this.state.audioTrack = audioTrack;
@@ -1549,6 +1580,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         };
       });
     }
+    const currentTimelineRowIds = this.collectDialogueRowIds(session, entries, segments);
     const segmentLookupToleranceMs = this.getTimelineLookupToleranceMs();
     const activeSegments = segments.filter((segment) => {
       const rowId = String(segment?.rowId || "").trim();
@@ -1690,6 +1722,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!panelCfg || panelCfg.sourceType === "none") { this.stopBackgroundMusic(); return; }
 
     const sourceItems = Array.isArray(panelCfg.sourceItems) ? panelCfg.sourceItems : [];
+    const loopEnabled = panelCfg.loopEnabled !== false;
     const backgroundLookupToleranceMs = this.getTimelineLookupToleranceMs();
     const uniqueSourceKeys = new Set(
       sourceItems
@@ -1738,7 +1771,7 @@ export class PodcasterPlaybackController extends EventEmitter {
             ...(firstSegment || {}),
             sourceUrl: firstSegment?.sourceUrl || panelCfg.sourceUrl || "",
             volume: panelCfg.volume,
-            loop: panelCfg.loopEnabled !== false,
+            loop: loopEnabled,
             startOffsetMs: trackStartMs,
             endOffsetMs: trackEndMs,
             trimInMs: Math.max(0, Number(panelCfg.trimInMs || firstSegment?.trimInMs || 0) || 0),
@@ -1764,9 +1797,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (this.backgroundAudio && !this.backgroundAudio.paused) {
         this.backgroundAudio.pause();
       }
-      this.backgroundSrc = "";
-      this.backgroundSourceKey = "";
-      this.backgroundSegmentIdentity = "";
+      // Keep the loaded background audio/source alive while the playhead is outside
+      // a music segment. Manual seeks often cross tiny gaps; clearing the key here
+      // forces the same track to be fetched and recreated on the next seek.
       this.backgroundSegmentSkewMs = null;
       this.backgroundSegmentIndex = -1;
       this.backgroundSyncAnchorMs = null;
@@ -2366,19 +2399,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   clearAllStageVisualSurfaces() {
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt, this.els?.podcastActiveSpeakerBackdropVideo, this.els?.podcastActiveSpeakerBackdropVideoAlt].forEach((video) => {
       if (!video) return;
-      try { video.pause(); } catch (_) { }
-      this.releaseTransientStageVideoObjectUrl(video);
-      video.removeAttribute("src");
-      delete video.dataset.src;
-      delete video.dataset.rowId;
-      delete video.dataset.stageMode;
-      this.resetEntryVisualStateOnSurface(video);
-      video.style.opacity = 0;
-      video.style.visibility = "hidden";
-      video.style.transform = "";
-      video.style.filter = "";
-      video.style.transition = "";
-      video.hidden = true;
+      this.hideStageVideoElementPreservingSource(video, { clearRowId: true });
     });
     [this.els?.podcastActiveSpeakerImage, this.els?.podcastActiveSpeakerImageAlt].forEach((imageEl) => {
       if (!imageEl) return;
@@ -3503,15 +3524,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!key) {
       this.syncOverlay(Number((this.deps?.podcastVideoState || window.podcastVideoState)?.montageCursorMs || 0), { rowId: "", forceRow: false });
       this.getStageVideoElements().forEach((video) => {
-        try { video.pause(); } catch (_) { }
-        this.releaseTransientStageVideoObjectUrl(video);
-        video.removeAttribute("src");
-        delete video.dataset.src;
-        video.hidden = true;
-        video.style.opacity = "";
-        video.style.transform = "";
-        video.style.filter = "";
-        video.style.transition = "";
+        this.hideStageVideoElementPreservingSource(video, { clearRowId: true });
       });
       const preview = this.els?.podcastVideoStage?.querySelector(".podcast-video-preview") || this.els?.podcastVideoStage;
       if (preview) {
@@ -3554,7 +3567,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const clipCfg = clipMap[key] || null;
     const hasCustomBg = clipCfg && clipCfg.backgroundColor && clipCfg.backgroundColor !== "";
 
-    const playbackActive = this.state.isPlaying === true || (this.deps?.podcastPlaybackState || window.podcastPlaybackState)?.active === true;
+    const playbackActive = this.state.isPlaying === true;
     const isSpeaking = (this.deps?.podcastVideoState || window.podcastVideoState)?.speaking === true;
     const mediaSignature = [
       String(src || "").trim(),
@@ -3626,15 +3639,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           fallbackUrl: downloadUrl,
           afterSwap: () => {
             this.getStageVideoElements().forEach((video) => {
-              try { video.pause(); } catch (_) { }
-              this.releaseTransientStageVideoObjectUrl(video);
-              video.removeAttribute("src");
-              delete video.dataset.src;
-              video.hidden = true;
-              video.style.opacity = "";
-              video.style.transform = "";
-              video.style.filter = "";
-              video.style.transition = "";
+              this.hideStageVideoElementPreservingSource(video);
             });
             setPortrait?.(false);
             updateUi?.();
@@ -3714,30 +3719,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
 
       if (inactiveVideo && inactiveVideo !== stageVideo) {
-        try { inactiveVideo.pause(); } catch (_) { }
-        this.releaseTransientStageVideoObjectUrl(inactiveVideo);
-        inactiveVideo.removeAttribute("src");
-        delete inactiveVideo.dataset.src;
-        inactiveVideo.hidden = true;
-        inactiveVideo.muted = true;
-        inactiveVideo.volume = 0;
-        inactiveVideo.style.opacity = "";
-        inactiveVideo.style.transform = "";
-        inactiveVideo.style.filter = "";
-        inactiveVideo.style.transition = "";
+        this.hideStageVideoElementPreservingSource(inactiveVideo);
       }
       if (inactiveBackdrop && inactiveBackdrop !== stageBackdrop) {
-        try { inactiveBackdrop.pause(); } catch (_) { }
-        this.releaseTransientStageVideoObjectUrl(inactiveBackdrop);
-        inactiveBackdrop.removeAttribute("src");
-        delete inactiveBackdrop.dataset.src;
-        inactiveBackdrop.hidden = true;
-        inactiveBackdrop.muted = true;
-        inactiveBackdrop.volume = 0;
-        inactiveBackdrop.style.opacity = "";
-        inactiveBackdrop.style.transform = "";
-        inactiveBackdrop.style.filter = "";
-        inactiveBackdrop.style.transition = "";
+        this.hideStageVideoElementPreservingSource(inactiveBackdrop);
         inactiveBackdrop.classList.remove("is-layout-active");
       }
 

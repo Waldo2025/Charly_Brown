@@ -18,7 +18,7 @@ const requirements = [
   [timelineUiSource, "data-action=\"timeline-toggle-background-audio-loop\"", "Timeline audio track label must render the loop toggle button."],
   [podcasterSource, "togglePanelMusicTrackLoopEnabled(trackKind);", "Podcaster click handler must call the loop toggle."],
   [playbackSource, "const loopEnabled = panelCfg.loopEnabled !== false;", "Preview playback must read the loopEnabled flag."],
-  [playbackSource, "const maxLoopCount = loopEnabled ? 120 : 1;", "Preview playback fallback must not scan repeated loops when disabled."],
+  [playbackSource, "loop: loopEnabled,", "Preview playback must carry loopEnabled into the active background segment."],
   [exportSource, "const loopEnabled = panelMusic?.loopEnabled !== false;", "Montage export must read the loopEnabled flag."],
   [exportSource, "if (!loopEnabled && loopIndex > 0) break;", "Montage export must not emit repeated background segments when disabled."],
   [payloadSource, "loopEnabled: panelMusicConfig.loopEnabled !== false,", "Cloud session payload must preserve top-level loopEnabled."],
