@@ -1,8 +1,8 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.473";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.487";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.522";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.491";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -49,10 +49,10 @@ import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.473";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.487";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
-import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js";
+import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.489";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
@@ -534,6 +534,11 @@ const els = {
   geminiCreativityValueLabel: document.getElementById("geminiCreativityValueLabel"),
   geminiCreativitySceneLabel: document.getElementById("geminiCreativitySceneLabel"),
   podcastVideoLoader: document.getElementById("podcastVideoLoader"),
+  podcastSessionShareMenuWrap: document.getElementById("podcastSessionShareMenuWrap"),
+  podcastSessionShareMenu: document.getElementById("podcastSessionShareMenu"),
+  sharePodcastVideoSessionBtn: document.getElementById("sharePodcastVideoSessionBtn"),
+  copyPodcastVideoSessionLinkBtn: document.getElementById("copyPodcastVideoSessionLinkBtn"),
+  openPodcastVideoSessionLinkBtn: document.getElementById("openPodcastVideoSessionLinkBtn"),
   closePodcastVideoBtn: document.getElementById("closePodcastVideoBtn"),
   podcastVideoShell: document.getElementById("podcastVideoShell"),
   togglePodcastStudioInspectorBtn: document.getElementById("togglePodcastStudioInspectorBtn"),
@@ -543,6 +548,11 @@ const els = {
   podcastVideoLibraryCollapsedHandle: document.getElementById("podcastVideoLibraryCollapsedHandle"),
   togglePodcastVideoLibraryBtn: document.getElementById("togglePodcastVideoLibraryBtn"),
   podcastVideoStage: document.getElementById("podcastVideoStage"),
+  podcastVideoModal: document.getElementById("podcastVideoModal"),
+  podcastTimelineFloatingPreviewBar: document.getElementById("podcastTimelineFloatingPreviewBar"),
+  podcastTimelineFloatingPreviewPlayBtn: document.getElementById("podcastTimelineFloatingPreviewPlayBtn"),
+  podcastTimelineFloatingPreviewPauseBtn: document.getElementById("podcastTimelineFloatingPreviewPauseBtn"),
+  podcastTimelineFloatingPreviewStopBtn: document.getElementById("podcastTimelineFloatingPreviewStopBtn"),
   podcastStudioTrackHead: document.querySelector(".podcast-studio-track-head"),
   podcastStudioTrackTitle: document.getElementById("podcastStudioTrackTitle"),
   podcastStudioTrackHeadTime: document.getElementById("podcastStudioTrackHeadTime"),
@@ -9641,6 +9651,68 @@ async function copyTextToClipboard(text = "") {
   }
 }
 
+function getActiveSessionVideoPlayerLink() {
+  const sessionId = String(getActiveSession()?.id || state.activeSessionId || "").trim();
+  if (!sessionId) return "";
+
+  const shareUrl = new URL("video-player.html", window.location.href);
+  shareUrl.search = "";
+  shareUrl.hash = "";
+  shareUrl.searchParams.set("sessionId", sessionId);
+  return shareUrl.href;
+}
+
+function setPodcastSessionShareMenuOpen(isOpen) {
+  const open = Boolean(isOpen);
+  if (els.podcastSessionShareMenu) els.podcastSessionShareMenu.hidden = !open;
+  els.sharePodcastVideoSessionBtn?.setAttribute("aria-expanded", String(open));
+  if (open) els.copyPodcastVideoSessionLinkBtn?.focus();
+}
+
+async function copyActiveSessionVideoPlayerLink() {
+  const shareUrl = getActiveSessionVideoPlayerLink();
+  if (!shareUrl) {
+    setPodcastSessionShareMenuOpen(false);
+    setGenerationStatus("No hay una sesión activa para compartir.", "is-error");
+    return;
+  }
+
+  const copied = await copyTextToClipboard(shareUrl);
+  setPodcastSessionShareMenuOpen(false);
+  if (!copied) {
+    setGenerationStatus("No se pudo copiar el enlace de la sesión.", "is-error");
+    return;
+  }
+
+  setGenerationStatus("Enlace de la sesión copiado.", "is-live");
+  const button = els.sharePodcastVideoSessionBtn;
+  const icon = button?.querySelector("i");
+  if (!button || !icon) return;
+  const originalClassName = icon.className;
+  button.title = "Enlace copiado";
+  button.setAttribute("aria-label", "Enlace copiado");
+  icon.className = "fas fa-check";
+  window.setTimeout(() => {
+    if (!button.isConnected) return;
+    button.title = "Copiar enlace para compartir la sesión";
+    button.setAttribute("aria-label", "Copiar enlace para compartir la sesión");
+    icon.className = originalClassName;
+  }, 1600);
+}
+
+function openActiveSessionVideoPlayerLink() {
+  const shareUrl = getActiveSessionVideoPlayerLink();
+  setPodcastSessionShareMenuOpen(false);
+  if (!shareUrl) {
+    setGenerationStatus("No hay una sesión activa para compartir.", "is-error");
+    return;
+  }
+  const openedWindow = window.open(shareUrl, "_blank", "noopener,noreferrer");
+  if (!openedWindow) {
+    setGenerationStatus("El navegador bloqueó la pestaña nueva.", "is-error");
+  }
+}
+
 function buildOptions(options, selected) {
   return options.map((option) => (
     `<option value="${escapeHtml(option)}"${option === selected ? " selected" : ""}>${escapeHtml(option)}</option>`
@@ -13563,7 +13635,7 @@ exportPreviewController.init(exportPreviewEls, {
   },
   secondsToClock,
   setPodcastVideoStatus: () => { }, // No mostramos status en el preview
-  updatePodcastVideoTransportUi: (isPlaying) => {
+  updatePodcastVideoTransportUi: (isPlaying = exportPreviewController.state.isPlaying) => {
     if (els.montageExportPreviewPlayBtn) els.montageExportPreviewPlayBtn.hidden = isPlaying;
     if (els.montageExportPreviewPauseBtn) els.montageExportPreviewPauseBtn.hidden = !isPlaying;
   },
@@ -13583,20 +13655,9 @@ exportPreviewController.init(exportPreviewEls, {
     }
   },
   getTransitionForEdge,
-  primePodcastStageVideoSource: (video, url) => {
-    if (video) video.src = url;
-  },
-  setPodcastStageVideoSource: (video, url) => {
-    if (video) {
-      video.src = url;
-      video.play().catch(() => { });
-    }
-  },
-  setPodcastStageVideoSourceForElement: (video, url) => {
-    if (!video) return false;
-    video.src = url;
-    return true;
-  },
+  primePodcastStageVideoSource: (_video, url) => exportPreviewController.primeStageVideoSource(url),
+  setPodcastStageVideoSource: (video, url, options = {}) => exportPreviewController.setStageVideoSourceForElement(video, url, options),
+  setPodcastStageVideoSourceForElement: (video, url, options = {}) => exportPreviewController.setStageVideoSourceForElement(video, url, options),
   setTimelinePreviewsSuspended: () => { },
   buildTimelineRuntimeEntries,
   getTimelineTotalDurationMs,
@@ -13706,47 +13767,40 @@ function setMontageExportPreviewTransportPlaying(isPlaying = false) {
   if (els.montageExportPreviewPauseBtn) els.montageExportPreviewPauseBtn.hidden = !Boolean(isPlaying);
 }
 
-function playMontageExportPreviewMedia() {
-  const mediaEl = getVisibleMontageExportPreviewMediaEl();
-  if (!mediaEl) return;
-  if (mediaEl.tagName === "VIDEO") {
-    try {
-      mediaEl.muted = true;
-      const playPromise = mediaEl.play?.();
-      if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => { });
-      setMontageExportPreviewTransportPlaying(true);
-    } catch (_) { }
-    return;
+async function playMontageExportPreviewMedia() {
+  const startAt = Number(els.montageExportPreviewSeekbar?.value || 0) || 0;
+  const playButton = els.montageExportPreviewPlayBtn;
+  if (playButton) {
+    playButton.disabled = true;
+    playButton.title = "Preparando escenas...";
   }
-  setMontageExportPreviewTransportPlaying(true);
+  try {
+    await exportPreviewController.play(startAt, { prepare: true, lookAheadMs: 9000 });
+  } finally {
+    if (playButton) {
+      playButton.disabled = false;
+      playButton.title = "Reproducir";
+    }
+  }
 }
 
 function pauseMontageExportPreviewMedia() {
-  [els.montageExportPreviewVideo, els.montageExportPreviewVideoAlt].forEach((video) => {
-    try { video?.pause?.(); } catch (_) { }
-  });
+  exportPreviewController.pause();
+}
+
+async function stopMontageExportPreviewMedia() {
+  await exportPreviewController.stop({ keepCursor: false });
+  if (els.montageExportPreviewSeekbar) els.montageExportPreviewSeekbar.value = "0";
+  if (els.montageExportPreviewTimer) {
+    const totalMs = Math.max(0, Number(exportPreviewController.state?.totalDurationMs || 0) || 0);
+    els.montageExportPreviewTimer.textContent = `${secondsToClock(0)} / ${secondsToClock(totalMs / 1000)}`;
+  }
   setMontageExportPreviewTransportPlaying(false);
 }
 
-function stopMontageExportPreviewMedia() {
-  pauseMontageExportPreviewMedia();
-  [els.montageExportPreviewVideo, els.montageExportPreviewVideoAlt].forEach((video) => {
-    try { if (video) video.currentTime = 0; } catch (_) { }
-  });
-  if (els.montageExportPreviewSeekbar) els.montageExportPreviewSeekbar.value = "0";
-  syncMontageExportPreviewOverlayFromMedia(getVisibleMontageExportPreviewMediaEl());
-}
-
 function seekMontageExportPreviewMedia(targetMs = 0) {
-  const mediaEl = getVisibleMontageExportPreviewMediaEl();
   const ms = Math.max(0, Number(targetMs || 0) || 0);
-  if (mediaEl?.tagName === "VIDEO") {
-    const frontendPreview = window.montageExportPreviewState?.frontendPreview || {};
-    const timelineStartMs = Math.max(0, Number(frontendPreview?.timelineStartMs || 0) || 0);
-    const localMs = Math.max(0, ms - timelineStartMs);
-    try { mediaEl.currentTime = localMs / 1000; } catch (_) { }
-  }
-  syncMontageExportPreviewOverlayFromMedia(mediaEl);
+  void exportPreviewController.seek(ms, { lightweight: false, prepare: true, lookAheadMs: 7000 });
 }
 
 // Eventos del preview de exportación
@@ -13757,11 +13811,21 @@ if (els.montageExportPreviewPauseBtn) {
   els.montageExportPreviewPauseBtn.addEventListener("click", () => pauseMontageExportPreviewMedia());
 }
 if (els.montageExportPreviewStopBtn) {
-  els.montageExportPreviewStopBtn.addEventListener("click", () => stopMontageExportPreviewMedia());
+  els.montageExportPreviewStopBtn.addEventListener("click", () => { void stopMontageExportPreviewMedia(); });
 }
 if (els.montageExportPreviewSeekbar) {
+  let pendingPreviewSeekMs = 0;
+  let previewSeekFrame = 0;
   els.montageExportPreviewSeekbar.addEventListener("input", () => {
-    seekMontageExportPreviewMedia(Number(els.montageExportPreviewSeekbar.value));
+    pendingPreviewSeekMs = Number(els.montageExportPreviewSeekbar.value || 0) || 0;
+    if (previewSeekFrame) return;
+    previewSeekFrame = requestAnimationFrame(() => {
+      previewSeekFrame = 0;
+      seekMontageExportPreviewMedia(pendingPreviewSeekMs);
+    });
+  });
+  els.montageExportPreviewSeekbar.addEventListener("change", () => {
+    seekMontageExportPreviewMedia(Number(els.montageExportPreviewSeekbar.value || 0));
   });
 }
 if (els.montageExportRefreshPreviewBtn) {
@@ -13775,6 +13839,121 @@ const podcastPreviewStageEl = els.podcastActiveSpeakerVideo?.closest?.(".podcast
 const podcastPreviewControlsEl = document.querySelector(".podcast-video-transport-group.is-middle");
 const montageExportPreviewStageEl = document.getElementById("montageExportPreviewContainer");
 const montageExportControlsEl = document.querySelector(".montage-export-preview-transport");
+
+const PODCAST_TIMELINE_FLOATING_PREVIEW_POSITION_KEY = "cb_podcast_timeline_floating_preview_v1";
+let podcastTimelineFloatingPreviewDrag = null;
+let podcastTimelineFloatingPreviewFrame = 0;
+
+function readPodcastTimelineFloatingPreviewPosition() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PODCAST_TIMELINE_FLOATING_PREVIEW_POSITION_KEY) || "{}");
+    return { left: Math.max(8, Math.round(Number(parsed?.left || 0) || 0)), top: Math.max(8, Math.round(Number(parsed?.top || 0) || 0)) };
+  } catch (_) {
+    return { left: 24, top: 88 };
+  }
+}
+
+function persistPodcastTimelineFloatingPreviewPosition(left = 0, top = 0) {
+  try {
+    localStorage.setItem(PODCAST_TIMELINE_FLOATING_PREVIEW_POSITION_KEY, JSON.stringify({ left: Math.max(0, Math.round(Number(left || 0) || 0)), top: Math.max(0, Math.round(Number(top || 0) || 0)) }));
+  } catch (_) {
+    // noop
+  }
+}
+
+function setPodcastTimelineFloatingPreviewVisible(visible = false) {
+  if (!podcastPreviewStageEl || !els.podcastTimelineFloatingPreviewBar) return;
+  const shouldShow = visible === true;
+  const wasFloating = podcastPreviewStageEl.classList.contains("is-timeline-floating-preview");
+  const previewShell = podcastPreviewStageEl.parentElement || null;
+  const naturalRect = podcastPreviewStageEl.getBoundingClientRect();
+  if (shouldShow && !wasFloating && previewShell && naturalRect.height > 0) {
+    previewShell.style.minHeight = `${Math.round(naturalRect.height)}px`;
+  }
+  podcastPreviewStageEl.classList.toggle("is-timeline-floating-preview", shouldShow);
+  els.podcastTimelineFloatingPreviewBar.hidden = !shouldShow;
+  if (!shouldShow) {
+    if (previewShell) previewShell.style.minHeight = "";
+    podcastPreviewStageEl.style.left = "";
+    podcastPreviewStageEl.style.top = "";
+    return;
+  }
+  const rect = podcastPreviewStageEl.getBoundingClientRect();
+  const saved = readPodcastTimelineFloatingPreviewPosition();
+  podcastPreviewStageEl.style.left = `${Math.min(Math.max(8, (window.innerWidth || 0) - Math.min(rect.width || 420, window.innerWidth || 420) - 8), saved.left)}px`;
+  podcastPreviewStageEl.style.top = `${Math.min(Math.max(8, (window.innerHeight || 0) - Math.min(rect.height || 240, window.innerHeight || 240) - 8), saved.top)}px`;
+}
+
+function syncPodcastTimelineFloatingPreview() {
+  podcastTimelineFloatingPreviewFrame = 0;
+  if (!podcastPreviewStageEl || !els.podcastVideoModal || els.podcastVideoModal.hidden || window.innerWidth < 760) {
+    setPodcastTimelineFloatingPreviewVisible(false);
+    return;
+  }
+  const stageRect = podcastPreviewStageEl.getBoundingClientRect();
+  const timelineRect = els.podcastVideoTimeline?.getBoundingClientRect?.() || null;
+  const timelineIsVisible = Boolean(timelineRect && timelineRect.bottom > 64 && timelineRect.top < (window.innerHeight || 0));
+  const studioScrollEl = els.podcastVideoStage?.closest(".podcast-studio-layout") || null;
+  const hasScrolledPastStage = Number(studioScrollEl?.scrollTop || 0) > 48;
+  if (podcastPreviewStageEl.classList.contains("is-timeline-floating-preview") && !hasScrolledPastStage) {
+    setPodcastTimelineFloatingPreviewVisible(false);
+    return;
+  }
+  const shouldRemainFloating = podcastPreviewStageEl.classList.contains("is-timeline-floating-preview")
+    ? hasScrolledPastStage && timelineIsVisible
+    : stageRect.bottom < 56 && timelineIsVisible;
+  setPodcastTimelineFloatingPreviewVisible(shouldRemainFloating);
+}
+
+function schedulePodcastTimelineFloatingPreviewSync() {
+  if (podcastTimelineFloatingPreviewFrame) return;
+  podcastTimelineFloatingPreviewFrame = window.requestAnimationFrame(syncPodcastTimelineFloatingPreview);
+}
+
+function beginPodcastTimelineFloatingPreviewDrag(event = null) {
+  if (!event || !podcastPreviewStageEl || !podcastPreviewStageEl.classList.contains("is-timeline-floating-preview")) return;
+  const rect = podcastPreviewStageEl.getBoundingClientRect();
+  podcastTimelineFloatingPreviewDrag = { pointerId: Number(event.pointerId || 0), startClientX: Number(event.clientX || 0), startClientY: Number(event.clientY || 0), startLeft: Number(rect.left || 0), startTop: Number(rect.top || 0), width: Number(rect.width || 0), height: Number(rect.height || 0) };
+  document.body.classList.add("is-dragging-timeline-floating-preview");
+  try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch (_) { }
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function movePodcastTimelineFloatingPreview(event = null) {
+  const drag = podcastTimelineFloatingPreviewDrag;
+  if (!drag || !event || !podcastPreviewStageEl || Number(event.pointerId || 0) !== drag.pointerId) return;
+  const maxLeft = Math.max(8, (window.innerWidth || 0) - Math.min(drag.width, window.innerWidth || drag.width) - 8);
+  const maxTop = Math.max(8, (window.innerHeight || 0) - Math.min(drag.height, window.innerHeight || drag.height) - 8);
+  const left = Math.max(8, Math.min(maxLeft, drag.startLeft + Number(event.clientX || 0) - drag.startClientX));
+  const top = Math.max(8, Math.min(maxTop, drag.startTop + Number(event.clientY || 0) - drag.startClientY));
+  podcastPreviewStageEl.style.left = `${Math.round(left)}px`;
+  podcastPreviewStageEl.style.top = `${Math.round(top)}px`;
+  event.preventDefault();
+}
+
+function endPodcastTimelineFloatingPreviewDrag(event = null) {
+  const drag = podcastTimelineFloatingPreviewDrag;
+  if (!drag || (event && Number(event.pointerId || 0) !== drag.pointerId)) return;
+  persistPodcastTimelineFloatingPreviewPosition(Number.parseFloat(podcastPreviewStageEl?.style.left || "0"), Number.parseFloat(podcastPreviewStageEl?.style.top || "0"));
+  podcastTimelineFloatingPreviewDrag = null;
+  document.body.classList.remove("is-dragging-timeline-floating-preview");
+}
+
+if (els.podcastTimelineFloatingPreviewBar) {
+  els.podcastTimelineFloatingPreviewBar.querySelector("[data-action='drag-timeline-floating-preview']")?.addEventListener("pointerdown", beginPodcastTimelineFloatingPreviewDrag);
+}
+els.podcastTimelineFloatingPreviewPlayBtn?.addEventListener("click", () => els.podcastVideoPlayBtn?.click());
+els.podcastTimelineFloatingPreviewPauseBtn?.addEventListener("click", () => els.podcastVideoPauseBtn?.click());
+els.podcastTimelineFloatingPreviewStopBtn?.addEventListener("click", () => els.podcastVideoStopBtn?.click());
+window.addEventListener("scroll", schedulePodcastTimelineFloatingPreviewSync, { passive: true });
+els.podcastVideoShell?.addEventListener("scroll", schedulePodcastTimelineFloatingPreviewSync, { passive: true });
+els.podcastVideoStage?.closest(".podcast-studio-layout")?.addEventListener("scroll", schedulePodcastTimelineFloatingPreviewSync, { passive: true });
+window.addEventListener("resize", schedulePodcastTimelineFloatingPreviewSync, { passive: true });
+window.addEventListener("pointermove", movePodcastTimelineFloatingPreview);
+window.addEventListener("pointerup", endPodcastTimelineFloatingPreviewDrag);
+window.addEventListener("pointercancel", endPodcastTimelineFloatingPreviewDrag);
+schedulePodcastTimelineFloatingPreviewSync();
 
 createPodcasterStageFullscreenController({
   targetEl: podcastPreviewStageEl,
@@ -17644,7 +17823,16 @@ function attachEvents() {
       const session = getActiveSession();
       if (!(session?.script?.rows || []).length) return;
       const startMs = Number(podcastVideoState.montageCursorMs || 0);
-      playbackController.play(startMs);
+      if (els.podcastVideoPlayBtn.disabled) return;
+      els.podcastVideoPlayBtn.disabled = true;
+      try {
+        await playbackController.play(startMs, {
+          prepare: true,
+          lookAheadMs: 12000
+        });
+      } finally {
+        els.podcastVideoPlayBtn.disabled = false;
+      }
     });
   }
   if (els.podcastVideoPauseBtn) {
@@ -17654,12 +17842,7 @@ function attachEvents() {
   }
   if (els.podcastVideoStopBtn) {
     els.podcastVideoStopBtn.addEventListener("click", () => {
-      const wasPlaying = playbackController.state.isPlaying;
-      if (wasPlaying) {
-        playbackController.stop({ keepCursor: true });
-      } else {
-        playbackController.stop();
-      }
+      playbackController.stop();
     });
   }
   if (els.podcastVideoPrevBtn) {
@@ -17710,6 +17893,30 @@ function attachEvents() {
   if (els.podcastSceneZoomOutBtn) {
     els.podcastSceneZoomOutBtn.addEventListener("click", () => {
       adjustActiveTimelineSceneMediaScale(-1);
+    });
+  }
+  if (els.sharePodcastVideoSessionBtn) {
+    els.sharePodcastVideoSessionBtn.addEventListener("click", () => {
+      setPodcastSessionShareMenuOpen(Boolean(els.podcastSessionShareMenu?.hidden));
+    });
+  }
+  if (els.copyPodcastVideoSessionLinkBtn) {
+    els.copyPodcastVideoSessionLinkBtn.addEventListener("click", copyActiveSessionVideoPlayerLink);
+  }
+  if (els.openPodcastVideoSessionLinkBtn) {
+    els.openPodcastVideoSessionLinkBtn.addEventListener("click", openActiveSessionVideoPlayerLink);
+  }
+  if (els.podcastSessionShareMenuWrap) {
+    document.addEventListener("click", (event) => {
+      if (!els.podcastSessionShareMenuWrap.contains(event.target)) {
+        setPodcastSessionShareMenuOpen(false);
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !els.podcastSessionShareMenu?.hidden) {
+        setPodcastSessionShareMenuOpen(false);
+        els.sharePodcastVideoSessionBtn?.focus();
+      }
     });
   }
   if (els.exportMontageBtn) {
@@ -17890,13 +18097,24 @@ function attachEvents() {
     const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
     const nextMs = Math.max(0, Math.min(durationMs, studioScrubberSeekTargetMs));
     studioScrubberSeekRafId = 0;
-    playbackController.seek(nextMs, {
-      lightweight: true,
+    podcastVideoState.montageCursorMs = nextMs;
+    if (els.podcastStudioTime) {
+      els.podcastStudioTime.textContent = `${secondsToClock(nextMs / 1000)} / ${secondsToClock(durationMs / 1000)}`;
+    }
+    syncPodcastOnScreenTextOverlay(session, { currentMs: nextMs });
+    updatePodcastVideoTransportUi();
+  };
+  const commitPodcastStudioScrubberSeek = async () => {
+    if (studioScrubberSeekRafId) {
+      cancelAnimationFrame(studioScrubberSeekRafId);
+      studioScrubberSeekRafId = 0;
+    }
+    flushPodcastStudioScrubberSeek();
+    if (playbackController.state.isPlaying) playbackController.pause();
+    await playbackController.seek(studioScrubberSeekTargetMs, {
+      lightweight: false,
       suppressAutoScroll: true
     });
-    if (podcastVideoState.montageActive) {
-      playbackController.stop({ keepStatus: true, keepCursor: true });
-    }
   };
   if (els.podcastStudioScrubber) {
     els.podcastStudioScrubber.addEventListener("input", () => {
@@ -17908,6 +18126,7 @@ function attachEvents() {
       if (studioScrubberSeekRafId) return;
       studioScrubberSeekRafId = requestAnimationFrame(flushPodcastStudioScrubberSeek);
     });
+    els.podcastStudioScrubber.addEventListener("change", commitPodcastStudioScrubberSeek);
   }
   if (els.podcastTimelineRuler) {
     els.podcastTimelineRuler.addEventListener("mousedown", (event) => {
@@ -19782,7 +20001,13 @@ function attachEvents() {
       if (!session || !session.id) return;
 
       const isChecked = target.checked;
-      session.publicar = isChecked;
+      const sessionId = String(session.id || "").trim();
+      const updatedAt = nowIso();
+      state.sessions = state.sessions.map((item) => (
+        String(item?.id || "").trim() === sessionId
+          ? { ...item, publicar: isChecked, updatedAt }
+          : item
+      ));
 
       // Sincronizar todas las instancias
       document.querySelectorAll("[id^='sessionPublishToggle']").forEach(el => {
@@ -19791,7 +20016,16 @@ function attachEvents() {
 
       // Persistir localmente de inmediato
       persistSessions();
-      sessionStore.markDirty(String(session.id || "").trim(), "publish-toggle");
+      sessionStore.markDirty(sessionId, "publish-toggle");
+      renderSessions();
+
+      try {
+        await saveSessionToCloud(sessionId, { render: false, silent: true });
+        setGenerationStatus(isChecked ? "Sesión publicada y guardada." : "Sesión cambiada a borrador y guardada.", "is-live");
+      } catch (error) {
+        console.error("[podcaster][sessions] No se pudo guardar automáticamente el estado de publicación.", error);
+        setGenerationStatus("El estado cambió localmente, pero no se pudo sincronizar con Firebase.", "");
+      }
     }
   });
 

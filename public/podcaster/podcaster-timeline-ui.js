@@ -185,7 +185,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     videoEl.preload = preferAuto ? "auto" : "metadata";
 
     if (typeof playbackController?.getBlobUrl === "function") {
-      playbackController.getBlobUrl(nextSrc).then((blobUrl) => {
+      playbackController.getBlobUrl(nextSrc, { persistent: true }).then((blobUrl) => {
         if (blobUrl && videoEl.dataset.previewSrc === nextSrc) {
           if (videoEl.src !== blobUrl) {
             videoEl.src = blobUrl;
@@ -1340,7 +1340,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                 const selectionKey = buildTimelinePanelAudioSelectionKey(panelMusicState.selectedTrackKind, loopIndex);
                 const isSelected = String(podcastVideoState.timelineAudioSelection.panelLoopKey || "").trim() === selectionKey;
                 return `
-                  <div class="podcast-audio-timeline-chip has-audio${fadeInMs > 0 ? " has-fadein" : ""}${fadeOutMs > 0 ? " has-fadeout" : ""}${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}${isSelected ? " is-selected" : ""}" data-action="timeline-select-audio-loop" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;--audio-fadein-width:${fadeInWidthPx.toFixed(3)}px;--audio-fadein-node-left:${fadeInNodeLeftPx.toFixed(3)}px;--audio-fadeout-width:${fadeOutWidthPx.toFixed(3)}px;--audio-fadeout-node-left:${fadeOutNodeLeftPx.toFixed(3)}px" title="${escapeHtml(`${panelTrackTitle} · Loop ${loopIndex + 1}`)}">
+                  <div class="podcast-audio-timeline-chip has-audio${fadeInMs > 0 ? " has-fadein" : ""}${fadeOutMs > 0 ? " has-fadeout" : ""}${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}${isSelected ? " is-selected" : ""}" data-action="timeline-select-audio-loop" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" data-start-ms="${Math.max(0, Math.round(Number(segment?.startMs || 0) || 0))}" data-duration-ms="${Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(segmentLoopMs))}" data-trim-in-ms="${Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0))}" data-trim-out-ms="${Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.trimOutMs || segmentLoopMs) || segmentLoopMs))}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;--audio-fadein-width:${fadeInWidthPx.toFixed(3)}px;--audio-fadein-node-left:${fadeInNodeLeftPx.toFixed(3)}px;--audio-fadeout-width:${fadeOutWidthPx.toFixed(3)}px;--audio-fadeout-node-left:${fadeOutNodeLeftPx.toFixed(3)}px" title="${escapeHtml(`${panelTrackTitle} · Loop ${loopIndex + 1}`)}">
                     <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" aria-label="Recortar inicio de audio"></button>
                     <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" aria-label="Recortar final de audio"></button>
                     <button class="podcast-audio-fadein-handle" type="button" data-action="timeline-audio-fadein-handle" data-loop-index="${loopIndex}" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" aria-label="Ajustar fade in del audio"></button>

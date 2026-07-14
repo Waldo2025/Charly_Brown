@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.473"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.522"></script>
   <script data-cache-src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Snoopy Podcast Creator</title>
@@ -1182,6 +1182,23 @@
         </div>
 
         <div class="floating-panel-head-actions">
+          <div id="podcastSessionShareMenuWrap" class="podcast-session-share-menu-wrap">
+            <button id="sharePodcastVideoSessionBtn" class="row-icon-btn" type="button"
+              title="Compartir sesión" aria-label="Compartir sesión" aria-haspopup="menu" aria-expanded="false"
+              aria-controls="podcastSessionShareMenu">
+              <i class="fas fa-share-alt" aria-hidden="true"></i>
+            </button>
+            <div id="podcastSessionShareMenu" class="podcast-session-share-menu" role="menu" hidden>
+              <button id="copyPodcastVideoSessionLinkBtn" type="button" role="menuitem">
+                <i class="fas fa-link" aria-hidden="true"></i>
+                <span>Copiar enlace</span>
+              </button>
+              <button id="openPodcastVideoSessionLinkBtn" type="button" role="menuitem">
+                <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+                <span>Abrir enlace</span>
+              </button>
+            </div>
+          </div>
           <button id="closePodcastVideoBtn" class="row-icon-btn" type="button" title="Cerrar video">
             <i class="fas fa-times"></i>
           </button>
@@ -1267,6 +1284,18 @@
                 </div>
               </div>
               <div class="podcast-video-preview">
+                <div id="podcastTimelineFloatingPreviewBar" class="podcast-timeline-floating-preview-bar" hidden>
+                  <div class="podcast-timeline-floating-preview-drag" data-action="drag-timeline-floating-preview"
+                    title="Arrastrar visor flotante" aria-label="Arrastrar visor flotante">
+                    <i class="fas fa-grip-lines" aria-hidden="true"></i>
+                    <span>Montaje</span>
+                  </div>
+                  <div class="podcast-timeline-floating-preview-actions" aria-label="Controles del montaje">
+                    <button id="podcastTimelineFloatingPreviewPlayBtn" class="row-icon-btn" type="button" title="Reproducir montaje" aria-label="Reproducir montaje"><i class="fas fa-play" aria-hidden="true"></i></button>
+                    <button id="podcastTimelineFloatingPreviewPauseBtn" class="row-icon-btn" type="button" title="Pausar montaje" aria-label="Pausar montaje"><i class="fas fa-pause" aria-hidden="true"></i></button>
+                    <button id="podcastTimelineFloatingPreviewStopBtn" class="row-icon-btn" type="button" title="Detener montaje" aria-label="Detener montaje"><i class="fas fa-stop" aria-hidden="true"></i></button>
+                  </div>
+                </div>
                 <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
                 <button id="podcastPreviewFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
                   aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">

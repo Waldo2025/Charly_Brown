@@ -570,8 +570,8 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
       id: docSnap.id,
       title: data.title || sessionData?.title || "Sin título",
       updatedAt: data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()),
-      archived: data.archived === true,
-      publicar: data.publicar === true,
+      archived: typeof data.archived === "boolean" ? data.archived : sessionData?.archived === true,
+      publicar: typeof data.publicar === "boolean" ? data.publicar : sessionData?.publicar === true,
       isStub: !sessionData || isShallowSession,
       cloudMeta: {
         ownerId: String(data.ownerId || "").trim() || null,
@@ -707,6 +707,9 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     if (!localSession) return cloudSession;
     const localRows = Array.isArray(localSession?.script?.rows) ? localSession.script.rows : [];
     const cloudRows = Array.isArray(cloudSession?.script?.rows) ? cloudSession.script.rows : [];
+    const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
+    const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
+    const preferLocalSessionFlags = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt >= cloudUpdatedAt);
     const localHasContent = hasLocalSessionContent(localSession);
     const cloudHasContent = hasLocalSessionContent(cloudSession);
     if (localHasContent && !cloudHasContent) {
@@ -717,8 +720,8 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
         title: cloudSession?.title || localSession?.title || "Sin título",
         updatedAt: cloudSession?.updatedAt || localSession?.updatedAt,
         cloudMeta: cloudSession?.cloudMeta || localSession?.cloudMeta || null,
-        archived: cloudSession?.archived === true || localSession?.archived === true,
-        publicar: cloudSession?.publicar === true || localSession?.publicar === true,
+        archived: preferLocalSessionFlags ? localSession?.archived === true : cloudSession?.archived === true,
+        publicar: preferLocalSessionFlags ? localSession?.publicar === true : cloudSession?.publicar === true,
         isStub: false
       };
     }
@@ -731,8 +734,6 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const finalRows = hasConcreteCloudRows
       ? mergeRowsByUpdatedAt(cloudRows, localRows)
       : resolvedRows;
-    const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
-    const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
     const preferLocalVideoConfig = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
     const preferLocalDialogueAudioMap = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
     // Compatibility: podcastVideoConfig: preferLocalVideoConfig ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {}) : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {})
@@ -743,6 +744,8 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     return {
       ...localSession,
       ...cloudSession,
+      archived: preferLocalSessionFlags ? localSession?.archived === true : cloudSession?.archived === true,
+      publicar: preferLocalSessionFlags ? localSession?.publicar === true : cloudSession?.publicar === true,
       dialogueAudioMap: preferLocalDialogueAudioMap
         ? mergeDialogueAudioMapByEntryUpdatedAt(localSession?.dialogueAudioMap || {}, cloudSession?.dialogueAudioMap || {})
         : mergeDialogueAudioMapByEntryUpdatedAt(cloudSession?.dialogueAudioMap || {}, localSession?.dialogueAudioMap || {}),

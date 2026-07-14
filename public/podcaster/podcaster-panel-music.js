@@ -211,12 +211,14 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(item.trimInMs || 0) || 0)));
       const rawTrimOutMs = Math.round(Number(item.trimOutMs || maxDurationMs) || maxDurationMs);
       const trimOutMs = Math.max(trimInMs + minClipMs, Math.min(maxDurationMs, rawTrimOutMs));
+      const rawStartMs = Number(item.startMs);
       map.set(loopIndex, {
         loopIndex,
         trimInMs,
         trimOutMs,
         fadeInMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeInMs || 0) || 0))),
-        fadeOutMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeOutMs || 0) || 0)))
+        fadeOutMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeOutMs || 0) || 0))),
+        ...(Number.isFinite(rawStartMs) ? { startMs: Math.max(0, Math.round(rawStartMs)) } : {})
       });
     });
     return Array.from(map.values()).sort((a, b) => a.loopIndex - b.loopIndex);
@@ -719,11 +721,16 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const override = overrides.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex);
       if (!override) return segment;
       const durationMs = Math.max(minClipMs, Math.round(Number(segment?.endMs || 0) - Number(segment?.startMs || 0) || 0));
-      const nextStart = Math.max(0, Math.min(totalDurationMs - durationMs, Math.round(Number(override.startMs || 0) || 0)));
+      const nextStart = Math.max(0, Math.min(totalDurationMs - minClipMs, Math.round(Number(override.startMs || 0) || 0)));
+      const visibleDurationMs = Math.max(minClipMs, Math.min(durationMs, totalDurationMs - nextStart));
       return {
         ...segment,
         startMs: nextStart,
-        endMs: nextStart + durationMs
+        endMs: nextStart + visibleDurationMs,
+        trimOutMs: Math.max(
+          Math.max(0, Number(segment?.trimInMs || 0) || 0) + minClipMs,
+          Math.max(0, Number(segment?.trimInMs || 0) || 0) + visibleDurationMs
+        )
       };
     });
     if (uploadedTracks.length === 1) {
@@ -763,7 +770,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
           trackIndex: fullTrackIndex,
           localMediaCacheKey: single.localMediaCacheKey || uploadedLocalMediaCacheKey,
           startMs,
-          endMs: startMs + trimOutMs,
+          endMs: startMs + visibleDurationMs,
           durationSec: getPanelMusicTrackDurationSec(single),
           trimInMs,
           trimOutMs,
@@ -857,16 +864,21 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         minClipMs,
         Math.round(Number(loopSetting?.trimOutMs || sourceDurationMs) || sourceDurationMs) - Math.round(Number(loopSetting?.trimInMs || 0) || 0)
       );
+      const hasManualStart = Number.isFinite(Number(loopSetting?.startMs));
+      const segmentStartMs = hasManualStart
+        ? Math.max(0, Math.min(totalDurationMs - minClipMs, Number(loopSetting.startMs || 0) || 0))
+        : cursorMs;
+      const visibleLoopMs = Math.max(minClipMs, Math.min(effectiveLoopMs, totalDurationMs - segmentStartMs));
       segments.push({
         loopIndex,
-        startMs: cursorMs,
+        startMs: segmentStartMs,
         trimInMs: Math.max(0, Number(loopSetting?.trimInMs || 0) || 0),
-        trimOutMs: Math.max(minClipMs, Number(loopSetting?.trimOutMs || sourceDurationMs) || sourceDurationMs),
-        effectiveLoopMs,
-        fadeInMs: Math.max(0, Math.min(effectiveLoopMs, Number(loopSetting?.fadeInMs || 0) || 0)),
-        fadeOutMs: Math.max(0, Math.min(effectiveLoopMs, Number(loopSetting?.fadeOutMs || 0) || 0))
+        trimOutMs: Math.max(minClipMs, Number(loopSetting?.trimInMs || 0) || 0) + visibleLoopMs,
+        effectiveLoopMs: visibleLoopMs,
+        fadeInMs: Math.max(0, Math.min(visibleLoopMs, Number(loopSetting?.fadeInMs || 0) || 0)),
+        fadeOutMs: Math.max(0, Math.min(visibleLoopMs, Number(loopSetting?.fadeOutMs || 0) || 0))
       });
-      cursorMs += effectiveLoopMs;
+      cursorMs = Math.max(cursorMs + effectiveLoopMs, segmentStartMs + visibleLoopMs);
       loopIndex += 1;
     }
     return segments;

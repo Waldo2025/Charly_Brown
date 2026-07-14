@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.522"></script>
+  <meta charset="UTF-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reproductor de video | Charly Brown</title>
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" data-cache-href="home.css">
+  <link rel="stylesheet" data-cache-href="podcaster.css">
+  <style>
+    html:not(.video-player-authenticated) #videoPlayerPage {
+      visibility: hidden;
+    }
+  </style>
+  <script type="module" src="js/video-player-auth-guard.js?v=2026-1.0.10.522"></script>
+</head>
+<body class="is-shared-video-view">
+  <div id="appLoadingScreen">
+    <img src="SnoopyPodcastCreator.png" alt="Cargando reproductor" class="loading-spinner-snoopy">
+    <div class="loading-dots"><span></span><span></span><span></span></div>
+  </div>
+  <main id="videoPlayerPage" class="video-player-page">
+    <section class="video-player-shell multimedia-player-card">
+      <div class="multimedia-player-head">
+        <div class="player-info">
+          <i class="fas fa-video"></i>
+          <div class="player-titles">
+            <strong id="playerTitle">Reproductor</strong>
+          </div>
+        </div>
+        <div class="player-head-actions">
+          <div id="playerUpdateBadge" class="player-update-badge hidden">
+             <i class="fas fa-sync-alt"></i>
+             <span>Cambios disponibles</span>
+          </div>
+          <button id="btnOpenExportModal" class="player-action-btn" title="Exportar Video">
+            <i class="fas fa-file-export"></i>
+          </button>
+          <button id="btnToggleSceneInfo" class="player-action-btn" title="Datos de la escena">
+            <i class="fas fa-info-circle"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="multimedia-player-content">
+        <div class="multimedia-player-main">
+          <div id="playerStage" class="player-stage">
+            <video id="podcastActiveSpeakerBackdropVideo" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <video id="playerVideoA" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <video id="podcastActiveSpeakerBackdropVideoAlt" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <video id="playerVideoB" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <img id="podcastActiveSpeakerImage" class="podcast-active-speaker-image" alt="Scene image" hidden crossorigin="anonymous">
+            <img id="podcastActiveSpeakerImageAlt" class="podcast-active-speaker-image podcast-active-speaker-image-alt" alt="Scene image transition" hidden crossorigin="anonymous">
+            <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
+            <button id="playerStageFullscreenBtn" class="player-action-btn podcast-stage-fullscreen-btn" type="button"
+              aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
+              <i class="fas fa-expand" aria-hidden="true"></i>
+            </button>
+            <div id="podcastStylizedTextOverlay" class="podcast-stylized-text-overlay"></div>
+            <div id="playerOverlay" class="player-overlay"></div>
+          <style>
+            .player-stage {
+              position: relative;
+              width: 100%;
+              max-width: 800px;
+              aspect-ratio: 16 / 9;
+              background: #020617;
+              overflow: hidden;
+              border-radius: 14px;
+              margin: 0 auto;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            }
+            .player-stage.is-reel-mode {
+              aspect-ratio: 9 / 16 !important;
+              max-width: 340px;
+              margin: 0 auto;
+              border-radius: 20px;
+              box-shadow: 0 25px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+            }
+            .player-stage.is-reel-mode .player-video:not(.player-video-backdrop) {
+              object-fit: cover !important;
+            }
+            .player-stage.is-reel-mode .podcast-active-speaker-image {
+              object-fit: cover !important;
+            }
+            .player-stage.is-reel-mode .player-video-backdrop {
+              display: none !important;
+            }
+            .player-video {
+              position: absolute;
+              inset: 0;
+              width: 100%;
+              height: 100%;
+              object-fit: contain;
+              object-position: center center;
+              opacity: 0;
+              visibility: hidden;
+              z-index: 1;
+              display: block !important;
+              transition: opacity 0.4s ease, transform 0.4s ease;
+              background: #020617;
+              will-change: opacity, transform;
+            }
+            .player-video-backdrop {
+              object-fit: cover;
+              filter: blur(26px) saturate(1.08);
+              transform: scale(1.12);
+              z-index: 0;
+            }
+            .player-video.is-blur-backdrop-foreground {
+              inset: 0;
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+              object-position: center center;
+              box-shadow: 0 28px 60px rgba(2, 6, 23, 0.44), 0 0 0 1px rgba(255, 255, 255, 0.08);
+              z-index: 2;
+            }
+            .podcast-active-speaker-image {
+              position: absolute;
+              top: var(--pod-scene-media-top, 0px);
+              left: var(--pod-scene-media-left, 0px);
+              width: var(--pod-scene-media-width, 100%);
+              height: var(--pod-scene-media-height, 100%);
+              object-fit: contain;
+              object-position: center center;
+              opacity: 0;
+              visibility: hidden;
+              z-index: 1;
+              background: #020617;
+              will-change: opacity, transform, filter;
+            }
+            .podcast-active-speaker-image.is-visible {
+              opacity: 1;
+              visibility: visible;
+            }
+            .player-video:not(.player-video-backdrop) {
+              top: 0;
+              left: 0;
+              right: auto;
+              bottom: auto;
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+              object-position: center center;
+            }
+            .podcast-active-speaker-image {
+              top: var(--pod-scene-media-top, 0px);
+              left: var(--pod-scene-media-left, 0px);
+              right: auto;
+              bottom: auto;
+              width: var(--pod-scene-media-width, 100%);
+              height: var(--pod-scene-media-height, 100%);
+              scale: var(--pod-scene-media-scale, 1);
+            }
+            /* El controlador aplicará estilos en línea que sobreescribirán esto */
+            .player-overlay {
+              position: absolute;
+              inset: 0;
+              z-index: 20;
+              pointer-events: none;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+            /* Texto en pantalla compartido con podcaster.css */
+            .multimedia-render-btn {
+              background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+              color: white !important;
+              border-radius: 6px !important;
+              padding: 0 1rem !important;
+              margin-left: 10px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              font-size: 13px;
+              height: 36px;
+            }
+
+            .multimedia-render-btn:hover {
+              filter: brightness(1.1);
+            }
+
+            .player-update-badge {
+              background: #fbbf24;
+              color: #0f172a;
+              padding: 0 0.75rem;
+              height: 28px;
+              border-radius: 14px;
+              display: flex;
+              align-items: center;
+              gap: 6px;
+              font-size: 11px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-right: 12px;
+              box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+              animation: playerBadgePulse 2s infinite;
+              transition: transform 0.2s;
+            }
+            .player-update-badge:hover {
+              transform: scale(1.05);
+            }
+            html,
+            body.is-shared-video-view {
+              width: 100%;
+              min-height: 100%;
+              margin: 0;
+            }
+            body.is-shared-video-view {
+              overflow: hidden;
+              background: #070b14;
+            }
+            #videoPlayerPage.video-player-page {
+              box-sizing: border-box;
+              width: 100vw !important;
+              min-width: 100vw;
+              max-width: none !important;
+              min-height: 100dvh;
+              height: 100dvh !important;
+              display: flex;
+              margin: 0 !important;
+              padding: 0 !important;
+              align-items: stretch;
+              align-self: stretch;
+              background:
+                radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.13), transparent 42%),
+                #070b14;
+            }
+            .video-player-shell.multimedia-player-card {
+              box-sizing: border-box;
+              width: 100% !important;
+              min-width: 0;
+              max-width: none !important;
+              min-height: 100dvh !important;
+              height: 100dvh !important;
+              max-height: none;
+              margin: 0;
+              border: 0;
+              border-radius: 0;
+              display: flex;
+              flex-direction: column;
+              overflow: hidden;
+            }
+            .video-player-shell .multimedia-player-content {
+              flex: 1;
+              min-height: 0;
+              height: auto !important;
+              align-items: stretch;
+            }
+            .video-player-shell .multimedia-player-head {
+              flex: 0 0 auto;
+              min-height: 72px;
+              color: #f8fafc !important;
+            }
+            .video-player-shell .player-info {
+              min-width: 0;
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              color: #f8fafc !important;
+            }
+            .video-player-shell .player-info > i {
+              flex: 0 0 auto;
+              color: #38bdf8 !important;
+              font-size: 1.15rem;
+            }
+            .video-player-shell .player-titles {
+              min-width: 0;
+              display: flex;
+              flex-direction: row;
+              align-items: center;
+              gap: 10px;
+              white-space: nowrap;
+            }
+            .video-player-shell #playerTitle {
+              overflow: hidden;
+              color: #f8fafc !important;
+              font-size: 1rem;
+              font-weight: 750;
+              text-overflow: ellipsis;
+            }
+            .video-player-shell .multimedia-player-main,
+            .video-player-shell .player-side-panel {
+              min-height: 0;
+              height: 100% !important;
+            }
+            .video-player-shell .multimedia-player-main {
+              overflow: hidden !important;
+              padding-bottom: 0 !important;
+            }
+            .video-player-shell #playerStage {
+              width: min(100%, 124dvh) !important;
+              max-width: none !important;
+              height: auto !important;
+              aspect-ratio: 16 / 9 !important;
+              flex: 0 1 auto;
+              margin: 0 auto !important;
+            }
+            .video-player-shell #playerStage.is-reel-mode {
+              width: min(100%, 39dvh) !important;
+              max-width: none !important;
+              height: auto !important;
+              aspect-ratio: 9 / 16 !important;
+            }
+            @media (max-height: 700px) {
+              .video-player-shell #playerStage {
+                width: min(100%, 112dvh) !important;
+              }
+              .video-player-shell #playerStage.is-reel-mode {
+                width: min(100%, 35dvh) !important;
+              }
+            }
+            .video-player-shell #playerControls {
+              flex: 0 0 auto;
+              width: auto;
+              left: 1.5rem;
+              right: 1.5rem;
+              bottom: 10px;
+              position: absolute;
+              transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .video-player-shell:has(.player-side-panel.is-open) #playerControls {
+              right: calc(var(--player-side-panel-width, 360px) + 1.5rem);
+            }
+            body.is-resizing-scene-panel .video-player-shell #playerControls {
+              transition: none;
+            }
+            .video-player-shell .player-side-panel {
+              position: relative;
+              flex: 0 0 auto;
+            }
+            .video-player-shell .player-side-panel.is-open {
+              width: var(--player-side-panel-width, 360px) !important;
+            }
+            .player-side-panel-resize-handle {
+              position: absolute;
+              top: 0;
+              bottom: 0;
+              left: -5px;
+              z-index: 30;
+              width: 10px;
+              cursor: col-resize;
+              touch-action: none;
+            }
+            .player-side-panel-resize-handle::after {
+              content: "";
+              position: absolute;
+              top: 0;
+              bottom: 0;
+              left: 4px;
+              width: 2px;
+              background: transparent;
+              transition: background 160ms ease;
+            }
+            .player-side-panel-resize-handle:hover::after,
+            body.is-resizing-scene-panel .player-side-panel-resize-handle::after {
+              background: #38bdf8;
+            }
+            .player-side-panel:not(.is-open) .player-side-panel-resize-handle {
+              display: none;
+            }
+            .video-player-shell #btnShowNewProposal {
+              width: 100%;
+              min-height: 46px;
+              margin-top: 10px;
+              padding: 11px 16px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 9px;
+              border: 1px solid rgba(56, 189, 248, 0.38);
+              border-radius: 10px;
+              background: rgba(56, 189, 248, 0.12);
+              color: #7dd3fc;
+              font-size: 0.88rem;
+              font-weight: 750;
+              cursor: pointer;
+              transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+            }
+            .video-player-shell #btnShowNewProposal:hover {
+              border-color: #38bdf8;
+              background: rgba(56, 189, 248, 0.2);
+              color: #f0f9ff;
+            }
+            body.is-resizing-scene-panel {
+              cursor: col-resize !important;
+              user-select: none;
+            }
+            body.is-shared-video-view .shared-video-error {
+              width: min(520px, calc(100% - 40px));
+              margin: auto;
+              padding: 40px;
+              border: 1px solid rgba(148, 163, 184, 0.2);
+              border-radius: 20px;
+              background: rgba(15, 23, 42, 0.92);
+              color: #e2e8f0;
+              text-align: center;
+              box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+            }
+            body.is-shared-video-view .shared-video-error i {
+              color: #f59e0b;
+              font-size: 34px;
+            }
+            body.is-shared-video-view .shared-video-error a {
+              display: inline-flex;
+              margin-top: 18px;
+              padding: 10px 16px;
+              border-radius: 9px;
+              background: #2563eb;
+              color: #fff;
+              text-decoration: none;
+              font-weight: 700;
+            }
+            @keyframes playerBadgePulse {
+              0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6); }
+              70% { box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); }
+              100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+            }
+          </style>
+        </div>
+          <div id="playerControls" class="player-controls">
+            <div class="player-transport-btns">
+              <button id="playerPrevBtn" class="player-btn" title="Escena anterior"><i class="fas fa-step-backward"></i></button>
+              <button id="playerPlayBtn" class="player-btn is-play" title="Reproducir"><i class="fas fa-play"></i></button>
+              <button id="playerPauseBtn" class="player-btn" title="Pausar" style="display: none;"><i class="fas fa-pause"></i></button>
+              <button id="playerStopBtn" class="player-btn" title="Detener"><i class="fas fa-stop"></i></button>
+              <button id="playerNextBtn" class="player-btn" title="Siguiente escena"><i class="fas fa-step-forward"></i></button>
+            </div>
+            <div class="player-timeline-wrapper">
+              <input type="range" id="playerTimeline" class="player-timeline" value="0" min="0" max="100">
+              <span id="playerTimeLabel" class="player-time-label">00:00 / 00:00</span>
+            </div>
+          </div>
+        </div> <!-- Fin multimedia-player-main -->
+
+        <aside id="playerSidePanel" class="player-side-panel is-open">
+          <div id="playerSidePanelResizeHandle" class="player-side-panel-resize-handle" role="separator" aria-label="Redimensionar panel de datos" aria-orientation="vertical"></div>
+          <div class="side-panel-header">
+            <h3>Monitor de Escena</h3>
+          </div>
+          <div id="sceneInfoContent" class="side-panel-content">
+            <div class="info-group">
+              <span class="info-label">Número de Escena</span>
+              <div id="infoSceneNumber" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label">Guion / Diálogo</span>
+              <div id="infoSceneScript" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label">Descripción de Escena</span>
+              <div id="infoSceneDesc" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label">Texto en Pantalla</span>
+              <div id="infoSceneOST" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label">Elemento Visual</span>
+              <div id="infoSceneVisual" class="info-value-box">--</div>
+              <button id="btnShowNewProposal" type="button" title="Proponer cambios nuevos">
+                <i class="fas fa-plus-circle" aria-hidden="true"></i>
+                <span>Proponer nuevos cambios</span>
+              </button>
+            </div>
+
+            <div class="info-group">
+              <span class="info-label">Referencia Visual</span>
+              <div id="infoSceneReference" class="inspector-row-reference" style="margin-top: 8px;">
+                <div class="inspector-row-reference-empty" style="color: #64748b; font-size: 11px; font-style: italic; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 12px; text-align: center;">
+                  Sin imagen de referencia
+                </div>
+              </div>
+            </div>
+
+            <div class="info-group" id="infoSceneActiveProposalGroup" style="display: none;">
+              <span class="info-label" style="color: #fbbf24; display: flex; align-items: center; justify-content: space-between;">
+                Propuesta Pendiente
+                <div style="display: flex; gap: 8px;">
+                  <button id="btnApplyActiveProposal" title="Aplicar esta propuesta" style="background: none; border: none; color: #10b981; cursor: pointer; font-size: 14px; padding: 0;">
+                    <i class="fas fa-check-circle"></i>
+                  </button>
+                  <button id="btnDeleteActiveProposal" title="Marcar propuesta como realizada" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 14px; padding: 0;">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </span>
+              <div id="infoSceneActiveProposal" class="info-value-box" style="border-color: #fbbf24; background: rgba(251, 191, 36, 0.05);">--</div>
+            </div>
+
+            <div class="info-group" id="infoSceneProposalsGroup" style="display: none;">
+              <span class="info-label">Historial de Propuestas</span>
+              <div id="infoSceneProposalsList" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                <!-- Lista de propuestas -->
+              </div>
+            </div>
+
+            <div id="newProposalContainer" class="info-group" style="display: none; margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.5rem;">
+              <span class="info-label">Proponer Cambios Nuevos</span>
+              <p style="font-size: 11px; color: #64748b; margin-bottom: 0.75rem;">Sugiere una mejora para la generación de este elemento visual.</p>
+              <textarea id="infoSceneProposalText" class="info-textarea" placeholder="Escribe aquí tu propuesta de cambio visual..."></textarea>
+
+              <!-- Adjuntar imagen de referencia -->
+              <div style="margin: 10px 0;">
+                <button type="button" id="btnAttachProposalReference" data-action="attach-row-reference-image" class="btn-attach-reference" style="background: rgba(56, 189, 248, 0.1); border: 1px dashed rgba(56, 189, 248, 0.3); color: #38bdf8; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+                  <i class="fas fa-paperclip"></i> Adjuntar imagen de referencia
+                </button>
+                <input type="file" id="proposalReferenceFileInput" accept="image/*" style="display: none;">
+                <div id="proposalReferencePreviewContainer" style="display: none; margin-top: 8px; position: relative; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
+                  <img id="proposalReferencePreviewImg" style="width: 100%; max-height: 120px; object-fit: contain; background: #000;">
+                  <button type="button" id="btnRemoveProposalReference" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.6); border: none; color: #ef4444; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;">
+                    <i class="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+
+              <button id="btnSaveVisualProposal" class="btn-save-proposal">
+                <i class="fas fa-save"></i> Guardar Propuesta
+              </button>
+            </div>
+            
+            <div class="info-group" style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+              <span class="info-label">Tiempo Actual</span>
+              <span id="infoSceneTime" style="color: #38bdf8; font-family: monospace; font-size: 1.2rem;">00:00.0</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="montageExportModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-montage-export-modal"
+      aria-label="Cerrar exportación"></button>
+    <section class="montage-export-panel floating-panel-card" role="dialog" aria-modal="true"
+      aria-label="Exportación de montaje">
+      <div class="floating-panel-head">
+        <h3>Exportación</h3>
+        <div class="floating-panel-session-title" title="Nombre de la sesión"></div>
+        <button id="closeMontageExportBtn" class="row-icon-btn" type="button" title="Cerrar exportación"
+          aria-label="Cerrar exportación">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="montage-export-body">
+        <div class="montage-export-grid">
+          <label class="row-field">
+            <span>Modo</span>
+            <select id="montageExportMode">
+              <option value="normal" selected>Normal</option>
+              <option value="review">Revisión</option>
+            </select>
+          </label>
+          <label class="row-field">
+            <span>Motor de Render</span>
+            <select id="montageExportRenderMode">
+              <option value="browser" selected>Navegador (Playwright)</option>
+            </select>
+          </label>
+          <div class="row-field">
+            <span>Solo Audio</span>
+            <label class="montage-export-check">
+              <input id="montageExportOnlyAudio" type="checkbox">
+              <span>Exportar solo MP3</span>
+            </label>
+          </div>
+          <label class="row-field">
+            <span>Formato</span>
+            <select id="montageExportFormat">
+              <option value="mp4_h264">MP4 (H.264) · Compatible</option>
+              <option value="webm_vp9">WebM (VP9) · Web moderno</option>
+            </select>
+          </label>
+          <label class="row-field">
+            <span>Resolución</span>
+            <select id="montageExportResolution">
+              <option value="source" selected>Fuente original</option>
+              <option value="1080p">1080p final (1920×1080)</option>
+              <option value="720p">720p final (1280×720)</option>
+              <option value="480p">480p final (854×480)</option>
+            </select>
+            <small>Si el video original es menor, el export puede escalarlo sin añadir detalle real.</small>
+          </label>
+          <div class="row-field montage-export-quality">
+            <span>Calidad</span>
+            <div class="montage-export-quality-buttons" role="group" aria-label="Preset de calidad">
+              <button class="timeline-mode-btn" type="button" data-quality="high">Alta</button>
+              <button class="timeline-mode-btn is-active" type="button" data-quality="balanced">Balanceada</button>
+              <button class="timeline-mode-btn" type="button" data-quality="small">Ligera</button>
+            </div>
+            <small>Usa CRF + preset: alta calidad con menor peso.</small>
+          </div>
+          <label class="row-field">
+            <span>Control de Bitrate</span>
+            <select id="montageExportBitrateMode">
+              <option value="vbr" selected>Variable (Inteligente)</option>
+              <option value="cbr">Constante (Fijo)</option>
+              <option value="custom">Manual (Avanzado)</option>
+            </select>
+          </label>
+          <div id="montageExportCustomBitrateBox" class="montage-export-custom-bitrate" hidden>
+            <label class="row-field">
+              <span>Bitrate Máximo (Mbps)</span>
+              <input id="montageExportMaxBitrate" type="number" min="0.1" max="50" step="0.1" value="5">
+            </label>
+            <label class="row-field">
+              <span>Calidad / CRF (0-51)</span>
+              <input id="montageExportMinBitrate" type="number" min="0" max="51" step="1" value="20">
+            </label>
+          </div>
+          <label class="row-field montage-export-filename">
+            <span>Nombre del archivo</span>
+            <input id="montageExportFilename" type="text" value="montage">
+          </label>
+          <div class="row-field">
+            <span>Logo del video</span>
+            <label class="montage-export-check">
+              <input id="montageExportIncludeLogo" type="checkbox" checked>
+              <span>Incluir logo ASC en la esquina</span>
+            </label>
+          </div>
+          <div class="row-field">
+            <span>Modo Karaoke</span>
+            <label class="montage-export-check">
+              <input id="montageExportPartyKaraoke" type="checkbox" checked>
+              <span>Activar modo party karaoke (subtítulo sincronizado por palabras)</span>
+            </label>
+          </div>
+          <div id="montageExportReviewExcelField" class="row-field montage-export-review-excel" hidden>
+            <span>Archivo adicional</span>
+            <label class="montage-export-check">
+              <input id="montageExportIncludeReviewExcel" type="checkbox" checked>
+              <span>Descargar Excel de revisión con una fila por escena</span>
+            </label>
+            <small>Incluye la tabla del guión y una columna final llamada “Cambios sugeridos”.</small>
+          </div>
+        </div>
+        <section id="montageExportPreviewBox" class="montage-export-preview" data-mode="normal" data-state="idle"
+          aria-live="polite">
+          <div class="montage-export-preview-head">
+            <div>
+              <strong>Preview de exportación</strong>
+              <span id="montageExportPreviewMeta">Visualiza el montaje completo antes de exportar.</span>
+            </div>
+            <div class="montage-export-preview-actions">
+              <span id="montageExportPreviewBadge" class="montage-export-preview-badge">En vivo</span>
+              <button id="montageExportRefreshPreviewBtn" class="row-icon-btn" type="button" title="Actualizar preview">
+                <i class="fas fa-sync-alt"></i>
+              </button>
+            </div>
+          </div>
+          <div class="montage-export-preview-stage">
+            <div id="montageExportPreviewContainer" class="montage-export-preview-container">
+              <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
+              <button id="montageExportFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
+                aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
+                <i class="fas fa-expand" aria-hidden="true"></i>
+              </button>
+              <video id="montageExportPreviewVideo" class="podcast-active-speaker-video" playsinline muted loop autoplay
+                preload="metadata" hidden></video>
+              <img id="montageExportPreviewImage" class="podcast-active-speaker-image" src=""
+                alt="Preview de exportación" hidden>
+              <video id="montageExportPreviewVideoAlt"
+                class="podcast-active-speaker-video podcast-active-speaker-video-alt" playsinline muted loop autoplay
+                preload="metadata" hidden></video>
+              <img id="montageExportPreviewImageAlt"
+                class="podcast-active-speaker-image podcast-active-speaker-image-alt" src=""
+                alt="Preview de exportación" hidden>
+              <div id="montageExportPreviewPlaceholder" class="montage-export-preview-placeholder">Preparando motor de
+                preview…</div>
+              <canvas id="montageExportPreviewSubtitleCanvas" class="montage-export-preview-subtitle-canvas" aria-hidden="true"
+                hidden></canvas>
+              <div id="montageExportStylizedTextOverlay" class="podcast-stylized-text-overlay" hidden></div>
+              <div id="montageExportPreviewOverlay" class="podcast-onscreen-text-overlay" aria-hidden="true" hidden>
+              </div>
+            </div>
+
+            <div class="montage-export-preview-transport">
+              <button id="montageExportPreviewPlayBtn" class="row-icon-btn" type="button" title="Reproducir"><i
+                  class="fas fa-play"></i></button>
+              <button id="montageExportPreviewPauseBtn" class="row-icon-btn" type="button" title="Pausar" hidden><i
+                  class="fas fa-pause"></i></button>
+              <button id="montageExportPreviewStopBtn" class="row-icon-btn" type="button" title="Detener"><i
+                  class="fas fa-stop"></i></button>
+              <div class="montage-export-preview-seekbar-wrap">
+                <input id="montageExportPreviewSeekbar" type="range" min="0" max="100" value="0"
+                  class="montage-export-preview-seekbar">
+                <span id="montageExportPreviewTimer" class="montage-export-preview-timer">00:00 / 00:00</span>
+              </div>
+            </div>
+          </div>
+        </section>
+        <div id="montageExportStatusBox" class="montage-export-status" aria-live="polite" data-tone="neutral">
+          <div class="montage-export-status-row">
+            <div class="montage-export-spinner" aria-hidden="true"></div>
+            <div id="montageExportStatus" class="montage-export-status-text">Listo para exportar.</div>
+          </div>
+          <div id="montageExportHint" class="montage-export-status-hint"></div>
+          <div class="montage-export-progress" aria-hidden="true">
+            <div id="montageExportProgressBar" class="montage-export-progress-bar"></div>
+          </div>
+        </div>
+      </div>
+      <div class="montage-export-actions">
+        <button id="cancelMontageExportBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+          type="button">Cancelar</button>
+        <button id="continueMontageExportBtn" class="row-icon-btn dialogue-video-directive-action" type="button" hidden>
+          <i class="fas fa-play-circle" aria-hidden="true"></i>
+          <span>Continuar exportación</span>
+        </button>
+        <select id="montageExportDownloadBtn" class="dialogue-video-directive-action is-primary montage-export-download-select"
+          aria-label="Exportaciones MP4 descargadas" hidden>
+          <option value="">Seleccionar exportación</option>
+        </select>
+        <button id="confirmMontageExportBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+          type="button">
+          <i class="fas fa-file-export" aria-hidden="true"></i>
+          <span>Exportar</span>
+        </button>
+      </div>
+    </section>
+  </div>
+  <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
+  <script data-cache-src="podcaster/podcaster-text-render.js"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-playback-controller.js"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-overlay-cards.js"></script>
+  <script type="module" data-cache-src="js/home.js"></script>
+</body>
+</html>

@@ -162,7 +162,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     const clickedTrackKind = resolvePanelMusicTrackKind(
       trimTarget?.dataset?.trackKind || chip?.dataset?.trackKind || panelMusicState.selectedTrackKind
     );
-    if (clickedTrackKind === "uploaded" && trimTarget?.dataset?.trackIndex != null) {
+    if (clickedTrackKind === "uploaded" && rawRequestedTrackIndex != null) {
       selectUploadedPanelMusicTrackByIndex(requestedTrackIndex);
     } else if (clickedTrackKind && clickedTrackKind !== panelMusicState.selectedTrackKind) {
       selectPanelMusicTrackKind(clickedTrackKind, { notify: false });
@@ -212,6 +212,32 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       previewTranslatePx: 0,
       nextStartOffsetMs: Math.max(0, Number(track.startOffsetMs || 0) || 0),
       maxStartOffsetMs
+    };
+    document.body.classList.add("podcast-timeline-dragging");
+  }
+
+  function beginPanelAudioLoopMoveDrag(event = null) {
+    const chip = event?.target?.closest?.(".podcast-audio-timeline-chip.has-audio[data-track-kind][data-loop-index]");
+    if (!chip) return;
+    const trackKind = resolvePanelMusicTrackKind(chip.dataset.trackKind || panelMusicState.selectedTrackKind);
+    if (trackKind === "uploaded" || chip.dataset.trackIndex != null) return;
+    const session = getActiveSession();
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(chip.dataset.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
+    const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
+    const initialTrimInMs = Math.max(0, Number(chip.dataset.trimInMs || 0) || 0);
+    const initialTrimOutMs = Math.max(initialTrimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Number(chip.dataset.trimOutMs || 0) || durationMs);
+    podcastVideoState.timelineDrag = {
+      mode: "panel-loop-move",
+      startClientX: Number(event.clientX || 0),
+      loopIndex: Math.max(0, Math.floor(Number(chip.dataset.loopIndex || 0) || 0)),
+      selectedTrackKind: trackKind,
+      initialStartOffsetMs: Math.max(0, Number(chip.dataset.startMs || 0) || 0),
+      nextStartOffsetMs: Math.max(0, Number(chip.dataset.startMs || 0) || 0),
+      initialTrimInMs,
+      initialTrimOutMs,
+      maxStartOffsetMs: Math.max(0, totalMs - STUDIO_TIMELINE_MIN_CLIP_MS),
+      previewChip: chip,
+      previewTranslatePx: 0
     };
     document.body.classList.add("podcast-timeline-dragging");
   }
@@ -417,7 +443,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
           startMs: Math.max(0, Math.round(Number(segment?.startMs || 0) || 0)),
           durationMs,
-          maxStartMs: Math.max(0, totalMs - durationMs)
+          maxStartMs: Math.max(0, totalMs - STUDIO_TIMELINE_MIN_CLIP_MS)
         };
       })
       .filter(Boolean);
@@ -622,6 +648,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       || dragMode === "audio-fadein"
       || dragMode === "audio-fadeout"
       || dragMode === "audio-move"
+      || dragMode === "panel-loop-move"
     ) {
       if (dragMode === "audio-move") {
         const drag = podcastVideoState.timelineDrag;
@@ -631,12 +658,43 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           ...track,
           startOffsetMs: nextStartOffsetMs
         }), { render: false, sync: false });
+      } else if (dragMode === "panel-loop-move") {
+        const drag = podcastVideoState.timelineDrag;
+        const trackKind = resolvePanelMusicTrackKind(drag?.selectedTrackKind || panelMusicState.selectedTrackKind);
+        const nextStartMs = Math.max(0, Number(drag?.nextStartOffsetMs ?? drag?.initialStartOffsetMs ?? 0) || 0);
+        const loopIndex = Math.max(0, Math.floor(Number(drag?.loopIndex || 0) || 0));
+        const trimInMs = Math.max(0, Number(drag?.initialTrimInMs || 0) || 0);
+        const availableVisibleMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(getTimelineTotalDurationMs(getActiveSession()) || 0) - nextStartMs);
+        const trimOutMs = Math.max(
+          trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
+          Math.min(Number(drag?.initialTrimOutMs || trimInMs + availableVisibleMs) || trimInMs + availableVisibleMs, trimInMs + availableVisibleMs)
+        );
+        updatePanelMusicTrack(trackKind, (track) => ({
+          ...track,
+          loopSettings: upsertPanelMusicLoopSetting(track.loopSettings || [], loopIndex, {
+            startMs: nextStartMs,
+            trimInMs,
+            trimOutMs
+          })
+        }), { render: false, sync: false });
       }
       flushSessionLocalPersistNow("", "background-music").catch(() => { });
     }
     clearPodcastTimelineDragUi();
     const session = getActiveSession();
-    renderPodcastVideoTimeline(session, { reason: "drag-end" });
+    const isAudioOnlyDrag = [
+      "audio-trim-start",
+      "audio-trim-end",
+      "audio-fadein",
+      "audio-fadeout",
+      "audio-move",
+      "panel-loop-move",
+      "uploaded-segment-move"
+    ].includes(dragMode);
+    renderPodcastVideoTimeline(session, {
+      lightweight: isAudioOnlyDrag,
+      reason: isAudioOnlyDrag ? "audio-drag-end" : "drag-end"
+    });
     syncPodcastStudioInspector(session);
     syncTimelineModeButtons(session);
     syncPodcastVideoSpeakerCardVisibility();
@@ -657,6 +715,32 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     const geminiChip = event.target.closest(".podcast-gemini-audio-chip.has-audio[data-row-id]");
     if (geminiChip) {
       beginGeminiSegmentMoveDrag(event);
+      event.preventDefault();
+      return;
+    }
+    const audioTrimControl = event.target.closest("[data-action='timeline-audio-trim-start'],[data-action='timeline-audio-trim-end'],[data-action='timeline-audio-fadein-handle'],[data-action='timeline-audio-fadeout-handle']");
+    if (audioTrimControl) {
+      const action = String(audioTrimControl.dataset.action || "");
+      const mode = action === "timeline-audio-trim-start"
+        ? "audio-trim-start"
+        : action === "timeline-audio-trim-end"
+          ? "audio-trim-end"
+          : action === "timeline-audio-fadein-handle"
+            ? "audio-fadein"
+            : "audio-fadeout";
+      beginAudioTrimDrag(mode, event);
+      event.preventDefault();
+      return;
+    }
+    const uploadedAudioChip = event.target.closest(".podcast-audio-timeline-chip.has-audio[data-track-index][data-loop-index]");
+    if (uploadedAudioChip && !event.target.closest(".podcast-audio-loop-mute-btn")) {
+      beginUploadedAudioSegmentMoveDrag(event);
+      event.preventDefault();
+      return;
+    }
+    const panelAudioLoopChip = event.target.closest(".podcast-audio-timeline-chip.has-audio[data-track-kind][data-loop-index]");
+    if (panelAudioLoopChip && !event.target.closest(".podcast-audio-loop-mute-btn")) {
+      beginPanelAudioLoopMoveDrag(event);
       event.preventDefault();
       return;
     }
@@ -1170,6 +1254,15 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         updatePanelMusicTrack(trackKind, (track) => ({
           ...track,
           startOffsetMs: nextStartOffsetMs,
+          ...(trackKind === "uploaded"
+            ? {
+              segmentStartOverrides: [
+                ...(Array.isArray(track.segmentStartOverrides) ? track.segmentStartOverrides : [])
+                  .filter((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) !== loopIndex),
+                { loopIndex, startMs: nextStartOffsetMs }
+              ]
+            }
+            : {}) ,
           loopSettings: upsertPanelMusicLoopSetting(track.loopSettings || [], loopIndex, {
             trimInMs: actualTrimIn,
             trimOutMs: Math.max(actualTrimIn + minTrimLen, Number(drag.initialTrimOutMs || sourceDurationMs) || sourceDurationMs),
@@ -1259,6 +1352,17 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       const trimOutMs = Math.max(trimInMs + minTrimLen, Number(track?.trimOutMs || Math.round(durationSec * 1000) || minTrimLen) || minTrimLen);
       const effectiveLoopMs = Math.max(minTrimLen, trimOutMs - trimInMs);
       const maxStartOffsetMs = Math.max(0, Number(drag.maxStartOffsetMs || 0) || (Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session)) - effectiveLoopMs));
+      const nextStartOffsetMs = Math.max(
+        0,
+        Math.min(maxStartOffsetMs, snapTimelineMsWithStep(Number(drag.initialStartOffsetMs || 0) + deltaMsRaw, dragStepMs))
+      );
+      drag.nextStartOffsetMs = nextStartOffsetMs;
+      syncAudioMoveDragPreview(drag, nextStartOffsetMs, session);
+      return;
+    }
+    if (drag.mode === "panel-loop-move") {
+      const session = getActiveSession();
+      const maxStartOffsetMs = Math.max(0, Number(drag.maxStartOffsetMs || 0) || 0);
       const nextStartOffsetMs = Math.max(
         0,
         Math.min(maxStartOffsetMs, snapTimelineMsWithStep(Number(drag.initialStartOffsetMs || 0) + deltaMsRaw, dragStepMs))

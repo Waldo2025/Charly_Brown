@@ -13,7 +13,7 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.522";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
@@ -50,16 +50,21 @@ onAuthStateChanged(auth, async (user) => {
 
     });
 
-    // — Logic moved to sidebar.js —
-    configurarEventos();
-    configurarBuscador();
-    configurarBusquedaWorkbench();
-    initDashboardNavigation();
+    const sharedVideoSessionId = getSharedVideoSessionId();
+    if (sharedVideoSessionId) {
+      await openSharedVideoSession(sharedVideoSessionId);
+    } else {
+      // — Logic moved to sidebar.js —
+      configurarEventos();
+      configurarBuscador();
+      configurarBusquedaWorkbench();
+      initDashboardNavigation();
 
-    await loadUserLecturas();
-    await loadUserAprende();
-    await renderImagenesCompartidas();
-    await loadUserStats();
+      await loadUserLecturas();
+      await loadUserAprende();
+      await renderImagenesCompartidas();
+      await loadUserStats();
+    }
 
     // Finalización de carga - Ocultar splash screen
     const loader = document.getElementById("appLoadingScreen");
@@ -921,18 +926,11 @@ const configurarEventos = () => {
     // 6. PLAY MULTIMEDIA
     const btnPlay = e.target.closest('.btn-multimedia-play');
     if (btnPlay) {
-      try {
-        const docRefPlay = doc(db, "podcaster_sessions", id);
-        const snapPlay = await getDoc(docRefPlay);
-        if (snapPlay.exists()) {
-          const dataPlay = snapPlay.data();
-          const shallowSession = createDashboardSessionFallback(dataPlay, id);
-          const sessionPlay = await loadFullDashboardPodcasterSession(id, shallowSession);
-          abrirReproductorMultimedia(sessionPlay);
-        }
-      } catch (err) {
-        console.error("Error al cargar sesión:", err);
-      }
+      const playerUrl = new URL("video-player.html", window.location.href);
+      playerUrl.search = "";
+      playerUrl.hash = "";
+      playerUrl.searchParams.set("sessionId", id);
+      window.open(playerUrl.href, "_blank", "noopener");
       return;
     }
 
@@ -1307,8 +1305,8 @@ const comentarBtn = document.getElementById('comentarBtn');
 const comentariosLista = document.getElementById('comentarios-lista');
 let selectedText = "";
 
-// Detectar selección de texto
-document.getElementById("modalTextoLectura").addEventListener('mouseup', () => {
+// Detectar selección de texto (solo existe en el dashboard completo)
+document.getElementById("modalTextoLectura")?.addEventListener('mouseup', () => {
   const selection = window.getSelection().toString().trim();
   if (selection) {
     selectedText = selection;
@@ -1336,6 +1334,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const comentarBtn = document.getElementById('comentarBtn');
   const modalComentario = document.getElementById('modalComentario');
+  const modalTextoLectura = document.getElementById("modalTextoLectura");
+  if (!comentarBtn || !modalComentario || !modalTextoLectura) return;
   const cerrarModal = modalComentario.querySelector(".cerrar-modal");
   const guardarComentarioBtn = document.getElementById("guardarComentarioBtn");
   const inputComentario = document.getElementById("inputComentario");
@@ -1344,7 +1344,7 @@ document.addEventListener('DOMContentLoaded', function () {
   let selectedText = "";
 
   // Detectar selección de texto
-  document.getElementById("modalTextoLectura").addEventListener('mouseup', () => {
+  modalTextoLectura.addEventListener('mouseup', () => {
     selectedText = window.getSelection().toString().trim();
     if (selectedText) {
       comentarBtn.style.display = 'inline-block'; // Mostrar el botón de comentar
@@ -1437,7 +1437,7 @@ async function agregarComentario(seccion, comentario) {
 
 
 // Lógica para manejar la acción de "comentar" y mostrar el modal
-comentarBtn.addEventListener("click", () => {
+comentarBtn?.addEventListener("click", () => {
   const commentModal = document.createElement('div');
   commentModal.classList.add('comment-modal');
 
@@ -1661,7 +1661,7 @@ window.exportarLecturaComoTaggedText = exportarLecturaComoTaggedText;
 
 
 
-document.getElementById("exportarModalInDesignBtn").addEventListener("click", () => {
+document.getElementById("exportarModalInDesignBtn")?.addEventListener("click", () => {
   const contenidoHTML = document.getElementById("modalTextoLectura").innerHTML;
 
   if (!contenidoHTML || contenidoHTML.trim() === "") {
@@ -2919,6 +2919,41 @@ async function loadFullDashboardPodcasterSession(sessionId = "", fallbackSession
   }
 }
 
+function getSharedVideoSessionId() {
+  return String(new URLSearchParams(window.location.search).get("sessionId") || "").trim();
+}
+
+async function openSharedVideoSession(sessionId = "") {
+  const cleanId = String(sessionId || "").trim();
+  if (!cleanId) return false;
+
+  document.body.classList.add("is-shared-video-view");
+  try {
+    const session = await loadFullDashboardPodcasterSession(cleanId, { id: cleanId });
+    if (!session || !extractDashboardSessionRows(session).length) {
+      throw new Error("La sesión no existe o no contiene escenas disponibles.");
+    }
+    await abrirReproductorMultimedia(session);
+    document.title = `${String(session.title || "Video compartido").trim()} | Charly Brown`;
+    return true;
+  } catch (error) {
+    console.error("[Dashboard] No se pudo abrir el enlace compartido:", error);
+    const modal = document.getElementById("videoPlayerPage");
+    if (modal) {
+      modal.classList.remove("hidden");
+      modal.innerHTML = `
+        <div class="shared-video-error" role="alert">
+          <i class="fas fa-exclamation-circle" aria-hidden="true"></i>
+          <h1>No se pudo abrir el video</h1>
+          <p>${escapeHtml(error?.message || "Comprueba que el enlace y tus permisos sean correctos.")}</p>
+          <a href="home.html">Volver al inicio</a>
+        </div>
+      `;
+    }
+    return false;
+  }
+}
+
 function createDashboardSessionFallback(data = null, sessionId = "") {
   const base = buildDashboardSessionFromPodcasterDoc(data, sessionId);
   if (!base || typeof base !== "object") {
@@ -3755,7 +3790,6 @@ function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
   const finalRate = normalizeDialogueAudioPlaybackRate(rate);
   
   if (clip || rate !== 1) {
-    console.log(`[Playback:Resolution] ${key} -> Rate: ${finalRate.toFixed(2)} (Clip: ${clip ? 'Encontrado' : 'No encontrado'}, MapKeys: ${Object.keys(audioMap).length})`);
   }
   
   return finalRate;
@@ -3862,15 +3896,23 @@ function applyHomeSceneMediaScaleToStage({
 
   if (!spec) return;
 
-  surfaceEl.style.left = "0px";
-  surfaceEl.style.top = "0px";
+  surfaceEl.style.setProperty("--pod-scene-media-left", `${Number(spec.leftPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-top", `${Number(spec.topPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-width", `${Number(spec.scaledRect?.width || stage.clientWidth || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-height", `${Number(spec.scaledRect?.height || stage.clientHeight || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-translate-x", "0px");
+  surfaceEl.style.setProperty("--pod-scene-media-translate-y", "0px");
+  surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
+  surfaceEl.style.left = "var(--pod-scene-media-left, 0px)";
+  surfaceEl.style.top = "var(--pod-scene-media-top, 0px)";
   surfaceEl.style.right = "auto";
   surfaceEl.style.bottom = "auto";
-  surfaceEl.style.width = "100%";
-  surfaceEl.style.height = "100%";
+  surfaceEl.style.width = "var(--pod-scene-media-width, 100%)";
+  surfaceEl.style.height = "var(--pod-scene-media-height, 100%)";
   surfaceEl.style.objectFit = "cover";
-  surfaceEl.style.objectPosition = `${(50 + (nextX * 100)).toFixed(3)}% ${(50 + (nextY * 100)).toFixed(3)}%`;
-  surfaceEl.style.transform = `scale(${nextScale})`;
+  surfaceEl.style.objectPosition = "center center";
+  surfaceEl.style.transform = "";
 }
 
 let cachedRuntimeEntries = null;
@@ -4493,9 +4535,7 @@ const multimediaPlaybackDeps = {
   syncPodcastTimelinePlayhead: (ms, total, s) => {
     // Already handled by updatePodcastVideoTransportUi
   },
-  setPodcastVideoStatus: (status) => {
-    console.log(`[Player] Status: ${status}`);
-  },
+  setPodcastVideoStatus: () => { },
   getPlaybackSpeed: () => {
     const s = currentMultimediaSession;
     const cfg = s?.podcastVideoConfig || s?.session?.podcastVideoConfig || {};
@@ -4541,12 +4581,45 @@ function initMultimediaPlayer() {
   const stopBtn = document.getElementById("playerStopBtn");
   const prevBtn = document.getElementById("playerPrevBtn");
   const nextBtn = document.getElementById("playerNextBtn");
+  const scenePanel = document.getElementById("playerSidePanel");
+  const scenePanelResizeHandle = document.getElementById("playerSidePanelResizeHandle");
 
   if (playBtn) playBtn.onclick = () => multimediaPlaybackController.play();
   if (pauseBtn) pauseBtn.onclick = () => multimediaPlaybackController.pause();
   if (stopBtn) stopBtn.onclick = () => multimediaPlaybackController.stop();
   if (prevBtn) prevBtn.onclick = () => multimediaPlaybackController.prev();
   if (nextBtn) nextBtn.onclick = () => multimediaPlaybackController.next();
+
+  if (scenePanel && scenePanelResizeHandle) {
+    const playerShell = scenePanel.closest(".video-player-shell");
+    scenePanelResizeHandle.onpointerdown = (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = scenePanel.getBoundingClientRect().width;
+      const minWidth = 280;
+      const maxWidth = Math.max(minWidth, Math.min(720, window.innerWidth - 420));
+      document.body.classList.add("is-resizing-scene-panel");
+      scenePanelResizeHandle.setPointerCapture?.(event.pointerId);
+
+      const onPointerMove = (moveEvent) => {
+        const nextWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + startX - moveEvent.clientX));
+        const widthValue = `${Math.round(nextWidth)}px`;
+        scenePanel.style.setProperty("--player-side-panel-width", widthValue);
+        playerShell?.style.setProperty("--player-side-panel-width", widthValue);
+      };
+      const onPointerEnd = () => {
+        document.body.classList.remove("is-resizing-scene-panel");
+        scenePanelResizeHandle.removeEventListener("pointermove", onPointerMove);
+        scenePanelResizeHandle.removeEventListener("pointerup", onPointerEnd);
+        scenePanelResizeHandle.removeEventListener("pointercancel", onPointerEnd);
+      };
+
+      scenePanelResizeHandle.addEventListener("pointermove", onPointerMove);
+      scenePanelResizeHandle.addEventListener("pointerup", onPointerEnd);
+      scenePanelResizeHandle.addEventListener("pointercancel", onPointerEnd);
+    };
+  }
 
   const timeline = document.getElementById("playerTimeline");
   if (timeline) {
@@ -4569,7 +4642,7 @@ function initMultimediaPlayer() {
       multimediaPlayerUnsubscribe();
       multimediaPlayerUnsubscribe = null;
     }
-    document.getElementById("modalMultimediaPlayer").classList.add("hidden");
+    document.getElementById("videoPlayerPage")?.classList.add("hidden");
   });
 
   document.getElementById("renderizarMultimedia")?.addEventListener("click", async () => {
@@ -4697,7 +4770,7 @@ async function abrirReproductorMultimedia(session) {
     multimediaPlayerUnsubscribe = null;
   }
 
-  const modal = document.getElementById("modalMultimediaPlayer");
+  const modal = document.getElementById("videoPlayerPage");
   const title = document.getElementById("playerTitle");
   const btnToggle = document.getElementById("btnToggleSceneInfo");
   const sidePanel = document.getElementById("playerSidePanel");
@@ -4729,7 +4802,6 @@ async function abrirReproductorMultimedia(session) {
         const currentUpdateAt = getMs(currentMultimediaSession?.updatedAt || currentMultimediaSession?.cloudMeta?.savedAt);
 
         if (currentMultimediaSession && incomingUpdateAt > currentUpdateAt && !hasPendingChanges) {
-           console.log("[Dashboard] Cambio detectado remoto:", { incomingUpdateAt, currentUpdateAt });
            hasPendingChanges = true;
            showPlaybackUpdateBadge();
            return;
@@ -4780,14 +4852,12 @@ async function abrirReproductorMultimedia(session) {
         if (!badge) return;
         badge.classList.remove("hidden");
         badge.onclick = async () => {
-          console.log("[Dashboard] Iniciando descarga de actualización manual para sesión:", sessionId);
           hidePlaybackUpdateBadge();
           
           try {
             // Forzar recarga completa de la sesión actual desde Firebase
             const freshSession = await loadFullDashboardPodcasterSession(sessionId, currentMultimediaSession);
             if (freshSession) {
-              console.log("[Dashboard] Sesión fresca cargada con éxito. Sincronizando controlador...");
               currentMultimediaSession = freshSession;
               
               // Importante: invalidar caches de filas que pudieran haber cambiado su audio
@@ -4796,7 +4866,6 @@ async function abrirReproductorMultimedia(session) {
               
               multimediaPlaybackController.sync(currentMultimediaSession);
               multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-              console.log("[Dashboard] Sincronización completada.");
             } else {
               console.warn("[Dashboard] No se pudo obtener una sesión fresca.");
             }
@@ -4810,8 +4879,8 @@ async function abrirReproductorMultimedia(session) {
     }
 
     if (title) title.textContent = session.title || "Sin título";
-    if (sidePanel) sidePanel.classList.remove("is-open");
-    if (btnToggle) btnToggle.classList.remove("active");
+    if (sidePanel) sidePanel.classList.add("is-open");
+    if (btnToggle) btnToggle.classList.add("active");
 
     // Forzar un primer renderizado de la UI de transporte (que incluye el monitor de escena)
     multimediaPlaybackDeps.updatePodcastVideoTransportUi();
@@ -5231,6 +5300,43 @@ let exportJobState = {
   isBusy: false
 };
 
+function setViewerMontageExportStatus(text = "", hint = "", tone = "neutral", progress = null) {
+  const modal = document.getElementById("montageExportModal");
+  const statusBox = document.getElementById("montageExportStatusBox");
+  const status = document.getElementById("montageExportStatus");
+  const hintEl = document.getElementById("montageExportHint");
+  const progressBar = document.getElementById("montageExportProgressBar");
+  if (status) status.textContent = String(text || "").trim();
+  if (hintEl) hintEl.textContent = String(hint || "").trim();
+  if (statusBox) statusBox.dataset.tone = String(tone || "neutral");
+  const normalizedProgress = Number(progress);
+  const hasProgress = Number.isFinite(normalizedProgress);
+  modal?.classList.toggle("is-progress", hasProgress);
+  if (progressBar && hasProgress) {
+    progressBar.style.setProperty("--montage-export-progress", `${Math.round(Math.max(0, Math.min(1, normalizedProgress)) * 1000) / 10}%`);
+  }
+}
+
+async function cancelViewerMontageExport() {
+  const jobId = String(exportJobState.jobId || "").trim();
+  if (exportJobState.pollTimer) clearTimeout(exportJobState.pollTimer);
+  exportJobState.pollTimer = null;
+  if (jobId) {
+    try {
+      await authFetchJson(buildExportApiUrl("/api/podcaster/montage/export-cancel"), {
+        method: "POST",
+        body: { jobId }
+      });
+    } catch (_) { }
+  }
+  exportJobState.jobId = null;
+  exportJobState.isBusy = false;
+  document.getElementById("montageExportModal")?.classList.remove("is-busy", "is-progress");
+  const confirmButton = document.getElementById("confirmMontageExportBtn");
+  if (confirmButton) confirmButton.disabled = false;
+  setViewerMontageExportStatus("Exportación cancelada.", "Puedes ajustar la configuración e intentarlo nuevamente.", "warning");
+}
+
 function buildDashboardBrandOverlay() {
   return {
     enabled: true,
@@ -5244,49 +5350,51 @@ function buildDashboardBrandOverlay() {
 
 function initExportUiEvents() {
   const btnOpen = document.getElementById("btnOpenExportModal");
-  const modal = document.getElementById("videoExportModal");
-  const btnConfirm = document.getElementById("btnConfirmExport");
-
-  const rangeBitrate = document.getElementById("exportBitrateMbps");
-  const labelBitrate = document.getElementById("exportBitrateValue");
-  const rangeCrf = document.getElementById("exportCrfValue");
-  const labelCrf = document.getElementById("exportCrfLabel");
-
-  const radioBitrateMode = document.getElementsByName("exportBitrateMode");
-  const groupBitrateValue = document.getElementById("exportBitrateValueGroup");
-  const groupCrfValue = document.getElementById("exportCrfValueGroup");
+  const modal = document.getElementById("montageExportModal");
+  const btnConfirm = document.getElementById("confirmMontageExportBtn");
+  const bitrateMode = document.getElementById("montageExportBitrateMode");
+  const customBitrateBox = document.getElementById("montageExportCustomBitrateBox");
+  const filenameInput = document.getElementById("montageExportFilename");
+  const sessionTitle = modal?.querySelector(".floating-panel-session-title");
 
   btnOpen?.addEventListener("click", () => {
-    if (!currentMultimediaSession) return;
-    modal?.classList.remove("hidden");
+    const sessionId = String(currentMultimediaSession?.id || "").trim();
+    if (!sessionId) return;
+    const title = String(currentMultimediaSession?.title || "montage").trim() || "montage";
+    if (filenameInput && !filenameInput.dataset.userEdited) filenameInput.value = title;
+    if (sessionTitle) sessionTitle.textContent = title;
+    modal.hidden = false;
+    setViewerMontageExportStatus("Listo para exportar.", "Configura el montaje y revisa las opciones antes de iniciar.", "neutral");
   });
 
-  rangeBitrate?.addEventListener("input", (e) => {
-    if (labelBitrate) labelBitrate.textContent = `${e.target.value} Mbps`;
+  filenameInput?.addEventListener("input", () => {
+    filenameInput.dataset.userEdited = "true";
   });
 
-  rangeCrf?.addEventListener("input", (e) => {
-    const val = parseInt(e.target.value);
-    let desc = "Balanceado";
-    if (val < 18) desc = "Muy Alta Calidad";
-    else if (val < 21) desc = "Alta Calidad";
-    else if (val > 28) desc = "Baja Calidad (Pequeño)";
-    else if (val > 24) desc = "Calidad Estándar-Baja";
-
-    if (labelCrf) labelCrf.textContent = `${val} (${desc})`;
+  bitrateMode?.addEventListener("change", () => {
+    if (customBitrateBox) customBitrateBox.hidden = bitrateMode.value !== "custom";
   });
 
-  radioBitrateMode.forEach(radio => {
-    radio.addEventListener("change", (e) => {
-      if (e.target.value === "cbr") {
-        groupBitrateValue.style.display = "flex";
-        groupCrfValue.style.display = "none";
-      } else {
-        groupBitrateValue.style.display = "none";
-        groupCrfValue.style.display = "flex";
-      }
+  modal?.querySelectorAll("[data-quality]").forEach((button) => {
+    button.addEventListener("click", () => {
+      modal.querySelectorAll("[data-quality]").forEach((item) => item.classList.toggle("is-active", item === button));
     });
   });
+
+  modal?.querySelector("[data-action='close-montage-export-modal']")?.addEventListener("click", () => {
+    if (!exportJobState.isBusy) modal.hidden = true;
+  });
+  document.getElementById("closeMontageExportBtn")?.addEventListener("click", () => {
+    if (!exportJobState.isBusy) modal.hidden = true;
+  });
+  document.getElementById("cancelMontageExportBtn")?.addEventListener("click", async () => {
+    if (exportJobState.isBusy || exportJobState.jobId) await cancelViewerMontageExport();
+    else modal.hidden = true;
+  });
+  document.getElementById("montageExportPreviewPlayBtn")?.addEventListener("click", () => multimediaPlaybackController.play());
+  document.getElementById("montageExportPreviewPauseBtn")?.addEventListener("click", () => multimediaPlaybackController.pause());
+  document.getElementById("montageExportPreviewStopBtn")?.addEventListener("click", () => multimediaPlaybackController.stop());
+  document.getElementById("montageExportRefreshPreviewBtn")?.addEventListener("click", () => multimediaPlaybackController.seek(0));
 
   btnConfirm?.addEventListener("click", () => startMontageExport());
 }
@@ -5295,14 +5403,22 @@ async function startMontageExport() {
   if (exportJobState.isBusy) return;
   if (!currentMultimediaSession) return;
 
-  const btnConfirm = document.getElementById("btnConfirmExport");
-  const modal = document.getElementById("videoExportModal");
+  const btnConfirm = document.getElementById("confirmMontageExportBtn");
+  const modal = document.getElementById("montageExportModal");
 
   // Recoger opciones
-  const resolution = document.querySelector('input[name="exportResolution"]:checked')?.value || "source";
-  const bitrateMode = document.querySelector('input[name="exportBitrateMode"]:checked')?.value || "custom";
-  const maxBitrateMbps = parseFloat(document.getElementById("exportBitrateMbps")?.value || "5");
-  const minBitrateCrf = parseInt(document.getElementById("exportCrfValue")?.value || "23");
+  const resolution = document.getElementById("montageExportResolution")?.value || "source";
+  const bitrateMode = document.getElementById("montageExportBitrateMode")?.value || "vbr";
+  const maxBitrateMbps = parseFloat(document.getElementById("montageExportMaxBitrate")?.value || "5");
+  const minBitrateCrf = parseInt(document.getElementById("montageExportMinBitrate")?.value || "20");
+  const qualityPreset = String(modal?.querySelector("[data-quality].is-active")?.dataset?.quality || "balanced");
+  const format = document.getElementById("montageExportFormat")?.value || "mp4_h264";
+  const exportMode = document.getElementById("montageExportMode")?.value || "normal";
+  const renderMode = document.getElementById("montageExportRenderMode")?.value || "browser";
+  const onlyAudio = document.getElementById("montageExportOnlyAudio")?.checked === true;
+  const filename = String(document.getElementById("montageExportFilename")?.value || "montage").trim() || "montage";
+  const includeLogo = document.getElementById("montageExportIncludeLogo")?.checked !== false;
+  const partyKaraoke = document.getElementById("montageExportPartyKaraoke")?.checked !== false;
 
   const bitrateSettings = {
     mode: bitrateMode,
@@ -5312,6 +5428,8 @@ async function startMontageExport() {
 
   try {
     exportJobState.isBusy = true;
+    modal?.classList.add("is-busy");
+    setViewerMontageExportStatus("Preparando exportación…", "Construyendo escenas, audio, textos y configuración del montaje.", "neutral", 0.04);
     btnConfirm?.classList.add("btn-export-loading");
     btnConfirm.disabled = true;
 
@@ -5373,10 +5491,20 @@ async function startMontageExport() {
     const payload = {
       sessionId: currentMultimediaSession.id,
       title: currentMultimediaSession.title || "Export Dashboard",
+      filename,
+      exportMode,
+      renderMode,
+      renderPipeline: "ffmpeg-preview-runtime-v2",
+      clientBuild: {
+        module: "home-video-player-export",
+        route: "/api/podcaster/montage/export-v2"
+      },
+      onlyAudio,
       resolution: resolution,
       bitrateSettings: bitrateSettings,
-      format: "mp4_h264",
-      qualityPreset: "balanced",
+      format,
+      qualityPreset,
+      partyKaraoke,
       includeBackgroundMusic: true,
       entries: mappedEntries,
       backgroundMusic: effectivePanelMusicConfig || null,
@@ -5390,18 +5518,30 @@ async function startMontageExport() {
         segments: onScreenTextTimeline.segments,
         suppressFallbackFromEntries: onScreenTextTimeline.suppressFallbackFromEntries === true
       } : null,
-      brandOverlay: buildDashboardBrandOverlay()
+      brandOverlay: includeLogo ? buildDashboardBrandOverlay() : { enabled: false }
     };
 
-    const response = await authFetchJson(buildExportApiUrl("/api/podcaster/montage/export"), {
+    payload.previewRuntime = {
+      version: 2,
+      totalDurationMs: mappedEntries.reduce((max, entry) => Math.max(max, Number(entry.timelineEndMs || 0)), 0),
+      entries: mappedEntries.map((entry) => ({
+        rowId: entry.rowId,
+        startMs: entry.timelineStartMs,
+        endMs: entry.timelineEndMs,
+        durationMs: entry.durationMs,
+        trimInMs: entry.trimInMs,
+        timingSegments: []
+      }))
+    };
+
+    const response = await authFetchJson(buildExportApiUrl("/api/podcaster/montage/export-v2"), {
       method: "POST",
       body: payload
     });
 
     if (response.jobId) {
       exportJobState.jobId = response.jobId;
-      modal?.classList.add("hidden");
-      showNotification("🚀 Exportación iniciada. Te avisaremos cuando esté lista.", "info");
+      setViewerMontageExportStatus("Exportación iniciada…", "El backend está preparando los recursos del montaje.", "neutral", 0.08);
       pollExportStatus();
     } else {
       throw new Error("No se recibió jobId del servidor");
@@ -5409,11 +5549,15 @@ async function startMontageExport() {
 
   } catch (err) {
     console.error("[Dashboard] Error al iniciar exportación:", err);
+    setViewerMontageExportStatus("No se pudo iniciar la exportación.", err.message, "error");
     showNotification("❌ Error al iniciar exportación: " + err.message, "error");
   } finally {
-    exportJobState.isBusy = false;
-    btnConfirm?.classList.remove("btn-export-loading");
-    if (btnConfirm) btnConfirm.disabled = false;
+    if (!exportJobState.jobId) {
+      exportJobState.isBusy = false;
+      modal?.classList.remove("is-busy");
+      btnConfirm?.classList.remove("btn-export-loading");
+      if (btnConfirm) btnConfirm.disabled = false;
+    }
   }
 }
 
@@ -5429,6 +5573,7 @@ async function pollExportStatus() {
     if (data.status === "ready") {
       const url = data.downloadUrl || data.export?.downloadUrl;
       if (url) {
+        setViewerMontageExportStatus("Exportación lista.", "El archivo se descargará automáticamente.", "success", 1);
         showNotification("✅ ¡Video listo! Iniciando descarga...", "success");
         const a = document.createElement("a");
         a.href = url;
@@ -5438,13 +5583,27 @@ async function pollExportStatus() {
         a.remove();
       }
       exportJobState.jobId = null;
+      exportJobState.isBusy = false;
+      document.getElementById("montageExportModal")?.classList.remove("is-busy");
+      const confirmButton = document.getElementById("confirmMontageExportBtn");
+      if (confirmButton) confirmButton.disabled = false;
     } else if (data.status === "error") {
+      setViewerMontageExportStatus("La exportación falló.", data.error?.message || "Error desconocido", "error");
       showNotification("❌ Error en la exportación: " + (data.error?.message || "Error desconocido"), "error");
       exportJobState.jobId = null;
+      exportJobState.isBusy = false;
+      document.getElementById("montageExportModal")?.classList.remove("is-busy");
+      const confirmButton = document.getElementById("confirmMontageExportBtn");
+      if (confirmButton) confirmButton.disabled = false;
     } else {
       // Seguimos polleando
       const progress = Math.round((data.progress || 0) * 100);
-      console.log(`[Dashboard] Export progress: ${progress}% - Stage: ${data.stage}`);
+      setViewerMontageExportStatus(
+        data.stage ? `Exportando: ${String(data.stage).replace(/[_-]+/g, " ")}…` : "Exportando montaje…",
+        data.hint || `Progreso ${progress}%`,
+        "neutral",
+        Number(data.progress || 0)
+      );
 
       // Podríamos mostrar el progreso en un toast persistente o en el botón
       exportJobState.pollTimer = setTimeout(() => pollExportStatus(), 3000);
@@ -6151,7 +6310,7 @@ window.addEventListener('word-download-started', async (e) => {
 
 
 // Inicializar el reproductor multimedia del dashboard
-initMultimediaPlayer();
+if (document.getElementById("videoPlayerPage")) initMultimediaPlayer();
 
 /**
  * Abre el viewer de Aprende (reutilizando el diseño de ascEditorBackdrop)

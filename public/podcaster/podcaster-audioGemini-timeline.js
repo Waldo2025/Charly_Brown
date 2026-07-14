@@ -12,9 +12,10 @@ const computeDurationSpeedMultiplier = (text, target, limits) => {
 };
 
 /**
- * Preloads all dialogue audio metadata in the background to ensure timeline chips render at full width.
+ * Preloads dialogue audio through the persistent playback controllers. The metadata probes below remain
+ * only for duration reconciliation; they are no longer the preview playback cache.
  */
-function preloadAllDialogueAudios(session = null) {
+function preloadAllDialogueAudios(session = null, options = {}) {
   const activeSession = session || window.getActiveSession();
   if (!activeSession) return;
   const audioMap = window.getDialogueAudioMap(activeSession);
@@ -22,7 +23,21 @@ function preloadAllDialogueAudios(session = null) {
   const keys = Object.keys(audioMap);
   if (!keys.length) return;
 
+  const targetRowIds = Array.isArray(options.rowIds)
+    ? options.rowIds.map((rowId) => String(rowId || "").trim()).filter(Boolean)
+    : [];
+  [window.playbackController, window.exportPreviewController]
+    .filter((controller) => controller && typeof controller.prewarmDialogueAudios === "function")
+    .forEach((controller) => {
+      if (targetRowIds.length && typeof controller.prewarmDialogueAudioRows === "function") {
+        controller.prewarmDialogueAudioRows(activeSession, targetRowIds);
+      } else {
+        controller.prewarmDialogueAudios(activeSession);
+      }
+    });
+
   keys.forEach((rowId) => {
+    if (targetRowIds.length && !targetRowIds.includes(String(rowId || "").trim())) return;
     const audioClip = audioMap[rowId];
     if (!audioClip) return;
     const audioSrc = window.resolveStorageAudioUrl(audioClip.downloadUrl || "", audioClip.storagePath || "");
@@ -77,7 +92,9 @@ function preloadAllDialogueAudios(session = null) {
             } catch (_) {}
 
             // Forzar renderizado de la línea de tiempo para actualizar el ancho de los chips
-            window.renderPodcastVideoTimeline(window.getActiveSession(), { force: true, reason: "audio-metadata-loaded" });
+            if (options.suppressTimelineRender !== true) {
+              window.renderPodcastVideoTimeline(window.getActiveSession(), { force: true, reason: "audio-metadata-loaded" });
+            }
           }
         }
         cleanup();
@@ -172,7 +189,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
           }
         }
       };
-    }, { render: !options.deferTimelineRender });
+    }, { render: false });
     if (typeof window.upsertPodcastVideoConfig === "function") {
       window.upsertPodcastVideoConfig((cfg) => {
         const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
@@ -191,13 +208,19 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     if (typeof window.playbackController?.invalidateRowAudioCache === "function") {
       window.playbackController.invalidateRowAudioCache(key);
     }
+    if (typeof window.exportPreviewController?.invalidateRowAudioCache === "function") {
+      window.exportPreviewController.invalidateRowAudioCache(key);
+    }
 
     // Medir la nueva duración e incorporar al timeline inmediatamente
-    preloadAllDialogueAudios(window.getActiveSession());
+    preloadAllDialogueAudios(window.getActiveSession(), {
+      rowIds: [key],
+      suppressTimelineRender: true
+    });
 
     // Sincronizar track
     window.syncGeminiDialogueTrackWithRuntime({
-      render: !options.deferTimelineRender,
+      render: false,
       preserveStartMs: true
     });
 

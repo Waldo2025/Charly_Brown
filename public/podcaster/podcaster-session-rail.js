@@ -124,7 +124,6 @@ export function createPodcasterSessionRailApi(deps = {}) {
       <div class="session-thread-list" role="list" aria-label="Chats de la sesión">
         ${threads.map((thread, index) => {
           const isActiveThread = thread.id === session.activeThreadId;
-          const isPublishedThread = session?.publicar === true && isActiveThread;
           return `
             <button
               class="session-thread-item${isActiveThread ? " is-active" : ""}"
@@ -137,7 +136,6 @@ export function createPodcasterSessionRailApi(deps = {}) {
             >
               <span class="session-thread-title-row">
                 <span class="session-thread-title">${escapeHtml(thread.name || `Chat ${index + 1}`)}</span>
-                ${isPublishedThread ? `<span class="session-thread-published-badge" aria-label="Versión publicada" title="Versión publicada"><i class="fas fa-check"></i></span>` : ""}
               </span>
             </button>
           `;
@@ -155,6 +153,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
           <span class="session-card-title">
             <i class="far fa-folder session-card-folder-icon" aria-hidden="true"></i>
             <strong>${escapeHtml(session.title || "Sesión sin título")}</strong>
+            ${session?.publicar === true ? `<span class="session-card-published-badge" role="img" aria-label="Sesión publicada" title="Sesión publicada"></span>` : ""}
           </span>
           <div class="session-card-menu">
             <button class="session-menu-btn" type="button" data-action="toggle-session-menu" data-session-id="${escapeHtml(session.id)}" aria-label="Más opciones" aria-expanded="false">
@@ -309,7 +308,30 @@ export function createPodcasterSessionRailApi(deps = {}) {
     render();
   }
 
-  function archiveSession(sessionId) {
+  async function persistSessionArchivedState(sessionId = "", archived = false) {
+    const cleanSessionId = String(sessionId || "").trim();
+    const targetSession = state.sessions.find((session) => String(session?.id || "").trim() === cleanSessionId) || null;
+    const uid = String(resolveCurrentUid?.() || "").trim();
+    const hasCloudRecord = Boolean(targetSession?.cloudMeta?.ownerId || targetSession?.cloudMeta?.savedAt);
+    if (!cleanSessionId || !uid || !hasCloudRecord || !updateDoc || !doc || !firestoreDb) return false;
+    const updatedAt = String(targetSession?.updatedAt || nowIso()).trim() || nowIso();
+    try {
+      await updateDoc(doc(firestoreDb, "podcaster_sessions", cleanSessionId), {
+        archived: archived === true,
+        "session.archived": archived === true,
+        sessionUpdatedAt: updatedAt,
+        "session.updatedAt": updatedAt,
+        updatedAt: serverTimestamp()
+      });
+      return true;
+    } catch (error) {
+      console.error("[podcaster][sessions] No se pudo persistir el estado archivado.", error);
+      setGenerationStatus?.("El estado de archivo quedó guardado localmente; no se pudo sincronizar con Firebase.", "");
+      return false;
+    }
+  }
+
+  async function archiveSession(sessionId) {
     state.sessions = state.sessions.map((session) => (
       session.id === sessionId
         ? { ...session, archived: true, updatedAt: nowIso() }
@@ -323,9 +345,10 @@ export function createPodcasterSessionRailApi(deps = {}) {
     ensureSession();
     persistSessions();
     render();
+    await persistSessionArchivedState(sessionId, true);
   }
 
-  function restoreSession(sessionId) {
+  async function restoreSession(sessionId) {
     state.sessions = state.sessions.map((session) => (
       session.id === sessionId
         ? { ...session, archived: false, updatedAt: nowIso() }
@@ -333,6 +356,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
     ));
     persistSessions();
     render();
+    await persistSessionArchivedState(sessionId, false);
   }
 
   async function deleteSession(sessionId) {
@@ -431,13 +455,13 @@ export function createPodcasterSessionRailApi(deps = {}) {
           event.preventDefault();
           event.stopPropagation();
           closeMenus();
-          archiveSession(sessionId);
+          await archiveSession(sessionId);
         }
         if (action.dataset.action === "restore-session") {
           event.preventDefault();
           event.stopPropagation();
           closeMenus();
-          restoreSession(sessionId);
+          await restoreSession(sessionId);
         }
         if (action.dataset.action === "share-session") {
           event.preventDefault();

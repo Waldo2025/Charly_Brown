@@ -1,8 +1,24 @@
 {
-  "version": "1.0.10.473",
-  "build": "2026-1.0.10.473",
+  "version": "1.0.10.522",
+  "build": "2026-1.0.10.522",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El primer Play reutiliza un audio de fondo persistente, evita bloquear el reloj por promesas pendientes y aplica desbloqueo compatible con navegadores.",
+    "Corregido: El primer Play espera el arranque real del audio de fondo y reanuda AudioContext antes de iniciar el reloj del montaje.",
+    "Corregido: La precarga persistente ya no confunde una URL HTTP en memoria con un blob hidratado; fuerza IndexedDB o descarga antes de reproducir.",
+    "Corregido: video-player descarga realmente los videos del proxy durante la precarga persistente, los guarda en IndexedDB y cambia escenas desde blobs locales.",
+    "Corregido: video-player incluye las animaciones Ken Burns compartidas para imágenes con zoom y paneo, como el zoom-out de la escena 9.",
+    "Corregido: video-player reproduce los paneos de imágenes en movimiento con su amplitud real y sincronizados con Play/Pause.",
+    "Mejorado: Compartir sesión despliega un menú para copiar el enlace o abrir el visor en una pestaña nueva.",
+    "Añadido: El header del editor Snoopy permite copiar el enlace directo de la sesión activa en video-player.html.",
+    "Corregido: El badge publicado queda a la derecha del título y desaparece al volver a borrador, respetando valores false recientes en lugar de conservar true por OR.",
+    "Corregido: Gemini usa blobs persistentes, cancela arranques tardíos y mantiene una sola voz activa para evitar duplicados entre escenas.",
+    "Mejorado: Podcaster rehidrata la cola completa de escenas desde caché persistente al iniciar, mientras los dos slots de preview esperan blobs locales antes de reproducir.",
+    "Corregido: Podcaster precarga y persiste vídeos del timeline para transiciones fluidas; los drag de audio usan render ligero y no reconstruyen previews de escenas.",
+    "Corregido: Los chips de audio de fondo admiten arrastre individual, con posición manual persistida por loop en el timeline.",
+    "Corregido: Stop del preview de montaje devuelve el playhead al inicio y los botones Play/Pause reflejan el estado real del controlador.",
+    "Corregido: Regenerar un audio Gemini actualiza solo su reproductor y detener el timeline ya no reactiva la carga de escenas de video.",
+    "Corregido: El preview de montaje de Podcaster usa un único controlador de reproducción, precarga escenas y audios Gemini desde caché local, y evita recargar medios al mover el playhead.",
     "Corregido: La biblioteca pública de escenas, la carga de media para reemplazar escenas y las consultas de videos/audios de sesión evitan redirects 307, conservan Authorization y permiten en CORS los headers de carga X-Row-Id, X-Mime-Type y X-Previous-Storage-Path.",
     "Corregido: La biblioteca musical de Podcaster llama directamente a snoopy-export con Authorization en vez de seguir el redirect 307 de Hosting, evitando que el navegador elimine el Bearer token y responda AUTH_FORBIDDEN/401.",
     "Corregido: Podcaster fuerza la carga versionada del panel de música y del cliente API para evitar que usuarios con módulos cacheados ejecuten rutas antiguas de autenticación.",
@@ -431,6 +447,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.473",
-  "updated_at": "2026-07-13T00:00:00.000Z"
+  "cache_version": "2026-1.0.10.522",
+  "updated_at": "2026-07-14T00:00:00.000Z"
 }
