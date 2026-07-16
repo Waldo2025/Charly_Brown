@@ -5,19 +5,19 @@ const source = readFileSync(new URL("../public/podcaster/podcaster-video-generat
 
 assert.match(
   source,
-  /const promptProfile = String\(options\.promptProfile \|\| ""\)\.trim\(\);/,
-  "generateDialogueVideoForRow debe resolver promptProfile desde options."
+  /const PODCASTER_VIDEO_PROMPT_PROFILE = "podcaster_video_v2";/,
+  "El módulo debe declarar un único prompt canónico."
 );
 
 assert.match(
   source,
-  /promptProfile,\s*sessionId,/m,
-  "El body de generateDialogueVideoForRow debe propagar promptProfile al backend."
+  /const promptProfile = PODCASTER_VIDEO_PROMPT_PROFILE;[\s\S]*const body = \{\s*promptProfile,\s*generator:/m,
+  "generateDialogueVideoForRow debe enviar siempre podcaster_video_v2 y el routing explícito."
 );
 
 assert.match(
   source,
-  /const visualNotes = String\([\s\S]*resolveVisualNotesForGeneration\(row\)[\s\S]*\)\.replace\(\/\\s\+\/g, " "\)\.trim\(\);/m,
+  /const rawVisualNotes = String\([\s\S]*resolveVisualNotesForGeneration\(row\)[\s\S]*\)\.replace\(\/\\s\+\/g, " "\)\.trim\(\);[\s\S]*const visualNotes = String\(promptFieldSanitization\.sanitized\.visualNotes \|\| ""\)\.trim\(\);/m,
   "generateDialogueVideoForRow debe reconstruir visualNotes desde la escena."
 );
 
@@ -29,6 +29,24 @@ assert.match(
 
 assert.match(
   source,
-  /promptProfile: options\.promptProfile \|\| "",[\s\S]*regenerate:/m,
-  "runSceneVideoGenerationFlow debe reenviar promptProfile a generateDialogueVideoForRow."
+  /promptProfile:\s*PODCASTER_VIDEO_PROMPT_PROFILE,[\s\S]*regenerate:/m,
+  "runSceneVideoGenerationFlow debe reenviar el perfil canónico a generateDialogueVideoForRow."
+);
+
+assert.match(
+  source,
+  /const body = \{[\s\S]*quality:\s*routing\.quality,[\s\S]*textPolicy,[\s\S]*aspectRatio,[\s\S]*inSceneText,[\s\S]*dialogueAudioUrl,[\s\S]*dialogueAudioStoragePath,[\s\S]*previousInteractionId,/m,
+  "El request v2 debe incluir calidad, política de texto, aspecto, audio canónico y edición Omni."
+);
+
+assert.match(
+  source,
+  /text:\s*hasExternalDialogueAudio \? "" : String\(row\?\.text \|\| ""\)\.trim\(\)/,
+  "Si existe audio externo, el diálogo no debe enviarse al generador visual."
+);
+
+assert.match(
+  source,
+  /const finalClip = \{[\s\S]*generator:[\s\S]*textPolicy:[\s\S]*aspectRatio:[\s\S]*durationSeconds:[\s\S]*resolution:[\s\S]*interactionId:[\s\S]*promptHash:[\s\S]*removedTextDirectives:[\s\S]*promptVersion:/m,
+  "El resultado debe conservar metadatos efectivos del proveedor y del prompt."
 );

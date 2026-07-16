@@ -9,8 +9,8 @@ if (!/const genAllBtn = event\.target\.closest\("\[data-action='timeline-generat
   throw new Error("El botón bulk normal debe delegar en runGenerateMissingDialogueVideos.");
 }
 
-if (!/const regenAllBtn = event\.target\.closest\("\[data-action='timeline-regenerate-scene-video-batch-hq'\]"\);[\s\S]*runGenerateMissingDialogueVideos\(\{ regenerateAll: true, triggerButton: regenAllBtn \}\);/m.test(source)) {
-  throw new Error("El botón bulk HQ debe delegar en runGenerateMissingDialogueVideos con regenerateAll.");
+if (!/const regenAllBtn = event\.target\.closest\("\[data-action='timeline-regenerate-scene-video-batch-hq'\]"\);[\s\S]*runGenerateMissingDialogueVideos\(\{ regenerateAll: true, highQuality: true, triggerButton: regenAllBtn \}\);/m.test(source)) {
+  throw new Error("El botón bulk HQ debe delegar en runGenerateMissingDialogueVideos con regenerateAll y highQuality explícito.");
 }
 
 if (!/for \(let i = 0; i < readyRows\.length; i\+\+\) \{[\s\S]*const row = readyRows\[i\];[\s\S]*const rowId = String\(row\?\.id \|\| ""\)\.trim\(\);[\s\S]*await generateDialogueVideoForRow\(rowId,\s*\{/m.test(source)) {

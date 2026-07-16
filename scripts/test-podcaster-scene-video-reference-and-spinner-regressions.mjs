@@ -23,7 +23,7 @@ if (!/const referenceMode = effectiveReferenceMode;/.test(generatorSource)) {
   throw new Error("La generación de video debe publicar el modo efectivo de referencia en referenceMode.");
 }
 
-if (!/const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget\(effectiveReferenceImages,\s*rowReferenceVideo,\s*continuityReferenceImageDataUrl\);/.test(generatorSource)) {
+if (!/const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget\(\s*effectiveReferenceImages,\s*extendVideo \? null : rowReferenceVideo,\s*continuityReferenceImageDataUrl\s*\);/.test(generatorSource)) {
   throw new Error("El presupuesto inline debe incluir las referencias efectivas de imagen y el video de referencia cuando existan.");
 }
 
@@ -49,6 +49,10 @@ if (!/referenceVideoName:\s*String\(rowReferenceVideo\?\.name \|\| ""\)\.trim\(\
 
 if (!/referenceVideoMimeType:\s*String\(rowReferenceVideo\?\.mimeType \|\| "video\/mp4"\)\.trim\(\) \|\| "video\/mp4",/.test(generatorSource)) {
   throw new Error("El request body debe incluir el mime type del video de referencia.");
+}
+
+if (!/referenceVideoProviderUri:\s*String\(extensionSource\?\.providerVideoUri \|\| ""\)\.trim\(\),/.test(generatorSource)) {
+  throw new Error("La extensión debe transportar la URI del resultado Veo original sin convertirla en inline data.");
 }
 
 console.log("Podcaster scene video reference and spinner regressions OK.");

@@ -219,7 +219,14 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       mimeType,
       type: explicitType || null,
       updatedAt: String(raw.updatedAt || nowIso()).trim() || nowIso(),
-      localMediaCacheKey: String(raw.localMediaCacheKey || "").trim()
+      localMediaCacheKey: String(raw.localMediaCacheKey || "").trim(),
+      providerVideoUri: String(raw.providerVideoUri || "").trim(),
+      providerVideoGeneratedAt: String(raw.providerVideoGeneratedAt || "").trim(),
+      providerVideoGenerator: String(raw.providerVideoGenerator || raw.generator || "").trim().toLowerCase(),
+      providerVideoModel: String(raw.providerVideoModel || raw.model || "").trim(),
+      providerVideoResolution: String(raw.providerVideoResolution || raw.resolution || "").trim(),
+      providerVideoAspectRatio: String(raw.providerVideoAspectRatio || raw.aspectRatio || "").trim(),
+      providerVideoDurationSec: Math.max(0, Number(raw.providerVideoDurationSec ?? raw.durationSec ?? raw.durationSeconds ?? 0) || 0)
     };
   }
 

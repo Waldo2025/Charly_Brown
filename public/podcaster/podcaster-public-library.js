@@ -594,7 +594,15 @@ async function publishCurrentSceneToLibrary(rowId = "", options = {}) {
     thumbDataUrl,
     thumbMimeType: "image/jpeg",
     sceneDescription: String(row.sceneDescription || row.scenePrompt || "").trim(),
-    onScreenText: String(row.onScreenText || "").trim(),
+    headlineText: String(row.headlineText || "").trim(),
+    captionText: String(row.captionText || "").trim(),
+    inSceneText: String(row.inSceneText || "").trim(),
+    overlayMode: String(row.overlayMode || "none").trim() || "none",
+    textSource: String(row.textSource || "migrated").trim() || "migrated",
+    onScreenText: String(typeof runtime.getOnScreenTextClipText === "function"
+      ? runtime.getOnScreenTextClipText(row)
+      : (row.headlineText || row.captionText || row.onScreenText || "")
+    ).trim(),
     transition: String(row.transition || "").trim(),
     visualNotes: String(row.visualNotes || row.notes || "").trim(),
     videoDirective: String(row.videoDirective || "").trim(),

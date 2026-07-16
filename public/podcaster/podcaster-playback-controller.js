@@ -73,6 +73,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundLimiterSettings = normalizePodcasterFinalLimiterSettings();
     this.backgroundDuckFactor = 1.0;
     this.backgroundSrc = "";
+    this.backgroundResolvedSource = "";
     this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
     this.backgroundSegmentSkewMs = null;
@@ -82,6 +83,10 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSyncLastTimelineMs = null;
     this.backgroundSegmentGapStartMs = 0;
     this.backgroundSegmentGapHoldMs = 240;
+    this.backgroundRecoveryTimer = null;
+    this.backgroundRecoveryPromise = null;
+    this.backgroundRecoverySourceKey = "";
+    this.backgroundRecoveryAttempts = 0;
 
     this.stageMachine = {
       loadingSrc: '',
@@ -1151,8 +1156,125 @@ export class PodcasterPlaybackController extends EventEmitter {
     return this.audioCtx;
   }
 
+  bindBackgroundAudioRecovery(audio = null) {
+    if (!audio || audio.__podcasterBackgroundRecoveryBound === true) return;
+    audio.__podcasterBackgroundRecoveryBound = true;
+    const markHealthy = () => {
+      if (String(audio.dataset?.sourceKey || "").trim() !== String(this.backgroundSourceKey || "").trim()) return;
+      if (this.backgroundRecoveryTimer) {
+        clearTimeout(this.backgroundRecoveryTimer);
+        this.backgroundRecoveryTimer = null;
+      }
+      this.backgroundRecoverySourceKey = this.backgroundSourceKey;
+      this.backgroundRecoveryAttempts = 0;
+    };
+    audio.addEventListener("playing", markHealthy);
+    audio.addEventListener("canplay", markHealthy);
+    audio.addEventListener("error", () => {
+      this.scheduleBackgroundAudioRecovery("media-error", { graceMs: 80 });
+    });
+    ["stalled", "waiting"].forEach((eventName) => {
+      audio.addEventListener(eventName, () => {
+        this.scheduleBackgroundAudioRecovery(eventName, {
+          graceMs: 2600,
+          requireUnready: true
+        });
+      });
+    });
+  }
+
+  scheduleBackgroundAudioRecovery(reason = "media-error", options = {}) {
+    const audio = this.backgroundAudio;
+    const sourceKey = String(this.backgroundSourceKey || "").trim();
+    if (!audio || !sourceKey || this.backgroundRecoveryTimer || this.backgroundRecoveryPromise) return false;
+    if (this.backgroundRecoverySourceKey !== sourceKey) {
+      this.backgroundRecoverySourceKey = sourceKey;
+      this.backgroundRecoveryAttempts = 0;
+    }
+    if (this.backgroundRecoveryAttempts >= 4) {
+      this.emitMediaTelemetry("background-audio-recovery-exhausted", {
+        reason,
+        sourceKey,
+        attempts: this.backgroundRecoveryAttempts
+      });
+      return false;
+    }
+    this.backgroundRecoveryAttempts += 1;
+    const exponentialDelayMs = 180 * (2 ** Math.max(0, this.backgroundRecoveryAttempts - 1));
+    const delayMs = Math.max(Number(options?.graceMs || 0) || 0, exponentialDelayMs);
+    const scheduledAudio = audio;
+    this.emitMediaTelemetry("background-audio-recovery-scheduled", {
+      reason,
+      sourceKey,
+      attempt: this.backgroundRecoveryAttempts,
+      delayMs
+    });
+    this.backgroundRecoveryTimer = setTimeout(() => {
+      this.backgroundRecoveryTimer = null;
+      if (this.backgroundAudio !== scheduledAudio || this.backgroundSourceKey !== sourceKey) return;
+      const haveCurrentData = typeof HTMLMediaElement !== "undefined"
+        ? HTMLMediaElement.HAVE_CURRENT_DATA
+        : 2;
+      if (options?.requireUnready === true && !scheduledAudio.error && scheduledAudio.readyState >= haveCurrentData) {
+        this.backgroundRecoveryAttempts = 0;
+        return;
+      }
+      const staleSources = Array.from(new Set([
+        this.backgroundSrc,
+        this.backgroundResolvedSource,
+        String(scheduledAudio.dataset?.originalSrc || "").trim()
+      ].filter((item) => item && !String(item).startsWith("data:"))));
+      this.backgroundRecoveryPromise = (async () => {
+        await Promise.allSettled(staleSources.map((source) => this.invalidateBlobUrl(source)));
+        if (this.backgroundAudio !== scheduledAudio || this.backgroundSourceKey !== sourceKey) return false;
+        try { scheduledAudio.pause(); } catch (_) { }
+        try {
+          scheduledAudio.removeAttribute("src");
+          scheduledAudio.load();
+        } catch (_) { }
+        scheduledAudio.dataset.initialized = "false";
+        scheduledAudio.dataset.playbackStarted = "false";
+        delete scheduledAudio.dataset.originalSrc;
+        delete scheduledAudio.dataset.sourceKey;
+        // Keep the MediaElementSource node associated with this element. The Web
+        // Audio API forbids creating a second node for the same HTMLMediaElement.
+        if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
+        if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
+        this.backgroundGain = null;
+        if (this.backgroundCompressor) { try { this.backgroundCompressor.disconnect(); } catch (_) { } }
+        this.backgroundCompressor = null;
+        if (this.backgroundFinalLimiter) { try { this.backgroundFinalLimiter.disconnect(); } catch (_) { } }
+        this.backgroundFinalLimiter = null;
+        this.backgroundStabilizeEnabled = null;
+        this.backgroundLimiterEnabled = null;
+        this.backgroundSourceKey = "";
+        this.backgroundSegmentIdentity = "";
+        this.backgroundResolvedSource = "";
+        this.emitMediaTelemetry("background-audio-recovery-retry", {
+          reason,
+          sourceKey,
+          attempt: this.backgroundRecoveryAttempts
+        });
+        if (this.state.isPlaying === true) {
+          await this.syncBackgroundMusic(
+            Math.max(0, Number(this.state.currentMs || 0) || 0),
+            this.deps?.getPlaybackSpeed?.() || 1,
+            false
+          );
+        }
+        return true;
+      })().finally(() => {
+        this.backgroundRecoveryPromise = null;
+      });
+    }, delayMs);
+    return true;
+  }
+
   getOrCreateBackgroundAudioElement() {
-    if (this.backgroundAudio) return this.backgroundAudio;
+    if (this.backgroundAudio) {
+      this.bindBackgroundAudioRecovery(this.backgroundAudio);
+      return this.backgroundAudio;
+    }
     if (!this.backgroundAudioRuntimeId) {
       const baseId = "podcasterBackgroundAudioRuntime";
       let candidateId = baseId;
@@ -1178,6 +1300,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     audio.muted = false;
     audio.volume = 1;
     this.backgroundAudio = audio;
+    this.bindBackgroundAudioRecovery(audio);
     return audio;
   }
 
@@ -1210,6 +1333,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       audio.muted = false;
       audio.volume = 1;
       started = await Promise.race([attemptPlay(), waitForTimeout()]);
+    }
+    if (!started && audio.paused) {
+      this.scheduleBackgroundAudioRecovery("play-failed", {
+        graceMs: 900,
+        requireUnready: true
+      });
     }
     return Boolean(started || !audio.paused);
   }
@@ -1264,6 +1393,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.emitMediaTelemetry("background-audio-prepared", {
         atMs: Math.max(0, Number(atMs) || 0),
         sourceKey: this.backgroundSourceKey
+      });
+    } else if (this.backgroundSourceKey) {
+      this.scheduleBackgroundAudioRecovery("prepare-timeout", {
+        graceMs: 120,
+        requireUnready: true
       });
     }
     return ready;
@@ -2116,8 +2250,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         try { this.backgroundAudio.currentTime = 0; } catch (_) { }
         try { this.backgroundAudio.src = ""; } catch (_) { }
       }
+      // A MediaElementSource is permanently associated with its media element.
+      // Preserve that node across URL changes and reconnect it downstream instead
+      // of trying to create a second node (which makes the track silently disappear).
       if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
-      this.backgroundSource = null;
       if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
       this.backgroundGain = null;
       if (this.backgroundCompressor) { try { this.backgroundCompressor.disconnect(); } catch (_) { } }
@@ -2141,11 +2277,15 @@ export class PodcasterPlaybackController extends EventEmitter {
         const blobSrc = this.getBlobUrlSync(resolvedSource) || await this.getBlobUrl(resolvedSource);
         if (!blobSrc) {
           this.backgroundSrc = "";
+          this.backgroundResolvedSource = "";
           this.backgroundSourceKey = "";
           return;
         }
         this.backgroundAudio = this.getOrCreateBackgroundAudioElement();
+        this.backgroundResolvedSource = String(resolvedSource || "").trim();
         this.backgroundAudio.src = blobSrc;
+        this.backgroundAudio.dataset.originalSrc = this.backgroundResolvedSource;
+        this.backgroundAudio.dataset.sourceKey = activeSegmentSourceKey;
         this.backgroundAudio.dataset.initialized = "false";
         this.backgroundAudio.dataset.playbackStarted = "false";
         try { this.backgroundAudio.load(); } catch (_) { }
@@ -2153,6 +2293,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundAudio.loop = sourceIsContinuous ? false : useNativeLoop;
       } catch (e) {
         this.backgroundSrc = "";
+        this.backgroundResolvedSource = "";
         this.backgroundSourceKey = "";
         this.backgroundSegmentIdentity = "";
         return;
@@ -2353,16 +2494,20 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   stopBackgroundMusic() {
+    if (this.backgroundRecoveryTimer) {
+      clearTimeout(this.backgroundRecoveryTimer);
+      this.backgroundRecoveryTimer = null;
+    }
     if (this.backgroundAudio) { 
       try { 
         this.backgroundAudio.pause(); 
         this.backgroundAudio.currentTime = 0;
         this.backgroundAudio.src = "";
       } catch (_) { } 
-      this.backgroundAudio = null; 
     }
     this.backgroundSegmentGapStartMs = 0;
     this.backgroundSrc = "";
+    this.backgroundResolvedSource = "";
     this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
     this.backgroundSegmentSkewMs = null;
@@ -2371,7 +2516,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSyncAnchorOffsetMs = null;
     this.backgroundSyncLastTimelineMs = null;
     if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
-    this.backgroundSource = null;
+    // MediaElementSource remains permanently bound to its HTMLMediaElement.
+    // Keep both references after Stop so the next play can reconnect the same
+    // node instead of attempting the forbidden second association.
     if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
     this.backgroundGain = null;
     if (this.backgroundCompressor) { try { this.backgroundCompressor.disconnect(); } catch (_) { } }
@@ -2380,6 +2527,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundFinalLimiter = null;
     this.backgroundStabilizeEnabled = null;
     this.backgroundLimiterEnabled = null;
+    this.backgroundRecoverySourceKey = "";
+    this.backgroundRecoveryAttempts = 0;
   }
 
   // --- Video ---
@@ -3233,7 +3382,12 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, selected.rowId) || null;
     const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, selected.rowId) || 1;
-    const karaokeWordTimings = normalizeKaraokeWordTimings(audioClip, text);
+    const karaokeTokenOffset = Math.max(0, Number(
+      this.deps?.getPodcasterSceneKaraokeTokenOffset?.(row) || 0
+    ) || 0);
+    const karaokeWordTimings = normalizeKaraokeWordTimings(audioClip, text, {
+      tokenOffset: karaokeTokenOffset
+    });
     const selectedStartMs = Math.max(0, Number(selected?.startMs || 0) || 0);
     const karaokeClipStartMs = editorPreviewMode && shouldShowPreferredRow && Number(currentMs || 0) < selectedStartMs
       ? 0

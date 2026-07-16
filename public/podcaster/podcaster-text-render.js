@@ -71,7 +71,7 @@
     });
   }
 
-  function normalizeKaraokeWordTimings(audioClip = null, subtitleText = "") {
+  function normalizeKaraokeWordTimings(audioClip = null, subtitleText = "", options = {}) {
     const source = Array.isArray(audioClip?.wordTimings)
       ? audioClip.wordTimings
       : Array.isArray(audioClip?.alignment?.words)
@@ -80,10 +80,12 @@
           ? audioClip.words
           : [];
     const subtitleWords = String(subtitleText || "").trim().split(/\s+/).filter(Boolean);
+    const tokenOffset = Math.max(0, Math.round(Number(options?.tokenOffset || 0) || 0));
+    const timedSubtitleWords = subtitleWords.slice(tokenOffset);
     const next = [];
     source.forEach((item, index) => {
       if (!item || typeof item !== "object") return;
-      const text = String(item.text || item.word || item.token || subtitleWords[index] || "").replace(/\s+/g, " ").trim();
+      const text = String(item.text || item.word || item.token || timedSubtitleWords[index] || "").replace(/\s+/g, " ").trim();
       const startMs = Math.max(0, Math.round(normalizeTimingValue(
         item.startMs ?? item.startTimeMs ?? item.start ?? item.offsetMs ?? item.offset
       )));
@@ -95,13 +97,14 @@
         text,
         startMs,
         endMs,
-        tokenIndex: next.length
+        tokenIndex: tokenOffset + next.length
       });
     });
     if (!next.length) {
       const durationMs = audioClip?.durationMs ?? (audioClip?.durationSec != null ? audioClip.durationSec * 1000 : (audioClip?.duration != null ? audioClip.duration * 1000 : 0));
-      if (durationMs > 0 && subtitleWords.length > 0) {
-        return estimateProportionalWordTimings(subtitleWords, durationMs);
+      if (durationMs > 0 && timedSubtitleWords.length > 0) {
+        return estimateProportionalWordTimings(timedSubtitleWords, durationMs)
+          .map((item, index) => ({ ...item, tokenIndex: tokenOffset + index }));
       }
     }
     next.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.tokenIndex - b.tokenIndex);
@@ -109,7 +112,7 @@
       text: item.text,
       startMs: item.startMs,
       endMs: item.endMs,
-      tokenIndex: index
+      tokenIndex: Number.isFinite(Number(item.tokenIndex)) ? Math.max(0, Math.round(Number(item.tokenIndex))) : tokenOffset + index
     }));
   }
 
@@ -1262,7 +1265,8 @@
         if (wordStartSec >= endSec || wordEndSec <= startSec) return;
         const clampedStartSec = Math.max(startSec, wordStartSec);
         const clampedEndSec = Math.min(endSec, Math.max(clampedStartSec + 0.05, wordEndSec));
-        const overlayText = generateKaraokeOverlayText(spec.wrappedText || spec.text || "", index);
+        const activeTokenIndex = Number.isFinite(Number(word?.tokenIndex)) ? Math.max(0, Math.round(Number(word.tokenIndex))) : index;
+        const overlayText = generateKaraokeOverlayText(spec.wrappedText || spec.text || "", activeTokenIndex);
         const wordTextPath = textFileResolver(overlayText);
         const wordEnableExpr = escapeFfmpegExpr(`between(t,${clampedStartSec.toFixed(3)},${clampedEndSec.toFixed(3)})`);
 
@@ -1552,7 +1556,8 @@
         const wordStartSec = startSec + (Math.max(0, Number(word?.startMs || 0) || 0) / 1000);
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
-        const activeText = buildAssActiveWordColorOverlayText(wrappedText, index, activeColor, baseColor, highlight);
+        const activeTokenIndex = Number.isFinite(Number(word?.tokenIndex)) ? Math.max(0, Math.round(Number(word.tokenIndex))) : index;
+        const activeText = buildAssActiveWordColorOverlayText(wrappedText, activeTokenIndex, activeColor, baseColor, highlight);
         const activeOverrides = usesBoxHighlight
           ? `{${baseCommon}\\bord${Math.max(2, Math.round(fontSizePx * 0.16))}\\shad0\\xshad0\\yshad0${formatAssOverrideColor(toAssColor("#020617", 1, "020617"), "1")}${formatAssOverrideColor(toAssColor("#020617", 1, "020617"), "2")}${formatAssOverrideColor(activeColor, "3")}${formatAssOverrideColor(activeColor, "4")}}`
           : `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}${formatAssOverrideColor(activeColor, "1")}${formatAssOverrideColor(activeColor, "2")}${formatAssOverrideColor(outlineColor, "3")}\\4a&HFF&}`;

@@ -39,7 +39,7 @@ test("recognizes Veo 3.1 preview models that support referenceImages", () => {
   assert.equal(veoModelSupportsReferenceImages("veo-3.1-generate-001"), false);
   assert.equal(veoModelSupportsReferenceImages("veo-3.1-fast-generate-001"), false);
   assert.equal(veoModelSupportsReferenceImages("veo-3.1-lite-generate-preview"), false);
-  assert.equal(veoModelSupportsReferenceImages("veo-2.0-generate-001"), false);
+  assert.equal(veoModelSupportsReferenceImages("unknown-video-model"), false);
 });
 
 test("detects and filters referenceImages variants for unsupported models", () => {
@@ -62,7 +62,7 @@ test("detects and filters referenceImages variants for unsupported models", () =
   assert.equal(veoVariantUsesReferenceImages(referenceVariant), true);
   assert.equal(veoVariantUsesReferenceImages(textVariant), false);
   assert.deepEqual(
-    filterVeoVariantsForModel([referenceVariant, textVariant], "veo-2.0-generate-001"),
+    filterVeoVariantsForModel([referenceVariant, textVariant], "veo-3.1-lite-generate-preview"),
     [textVariant]
   );
   assert.deepEqual(

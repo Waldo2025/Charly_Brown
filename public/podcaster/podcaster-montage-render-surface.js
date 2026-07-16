@@ -99,7 +99,9 @@ export function buildMontageRenderAssContent({
       const rowId = String(segment.rowId || "").trim();
       const audioClip = payload?.dialogueAudioMap?.[rowId] || null;
       const wordTimings = payload?.partyKaraoke !== false && typeof normalizeWordTimings === "function"
-        ? normalizeWordTimings(audioClip, text)
+        ? normalizeWordTimings(audioClip, text, {
+          tokenOffset: Math.max(0, Number(segment?.karaokeTokenOffset || 0) || 0)
+        })
         : [];
       const playbackRate = Math.max(0.5, Math.min(10, Number(audioClip?.playbackRate || 1) || 1));
       const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);

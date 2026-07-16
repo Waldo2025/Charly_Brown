@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawn, execSync } = require("node:child_process");
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -44,12 +44,30 @@ const {
   createMontageExportCancelController
 } = require("./montage-export/cancel-controller.js");
 const {
-  filterVeoVariantsForModel,
-  shouldContinueVariantFallback
-} = require("./podcaster-video-variant-fallback.js");
-const {
+  PODCASTER_VIDEO_PROMPT_VERSION,
   buildDialogueVideoPromptBundle
 } = require("./dialogue-video-prompt.js");
+const {
+  normalizePodcasterVisualDirectionsToEnglish
+} = require("./podcaster-video-prompt-translation.js");
+const {
+  OMNI_VIDEO_MODEL,
+  DEFAULT_VEO_VIDEO_MODEL,
+  VIDEO_MODELS,
+  PROVIDER_TIMEOUT_MS,
+  MEDIA_TIMEOUT_MS,
+  normalizeGenerator: normalizePodcasterVideoGenerator,
+  normalizeQuality: normalizePodcasterVideoQuality,
+  normalizeTextPolicy: normalizePodcasterVideoTextPolicy,
+  normalizeAspectRatio: normalizePodcasterVideoAspectRatio,
+  normalizeInSceneText,
+  normalizeVideoModel,
+  resolveVideoGenerator,
+  createOmniVideo,
+  createVeoVideo,
+  validateVeoExtensionSource,
+  materializeGeneratedVideo
+} = require("./podcaster-video-provider.js");
 const {
   buildGeminiUpstreamRetryDelays,
   fetchGeminiWithRetry,
@@ -84,8 +102,13 @@ const {
   buildStreamingMediaPayload
 } = require("./proxy-media-buffer.js");
 const {
-  shouldDestroyProxyMediaUpstream
+  bindProxyMediaStreamLifecycle,
+  fetchProxyMediaWithTimeout,
+  isTransientProxyMediaError
 } = require("./proxy-media-lifecycle.js");
+const {
+  parseGsStorageReference
+} = require("./proxy-media-storage-reference.js");
 const {
   uploadFileToBucketNonResumable
 } = require("./storage-upload.js");
@@ -297,7 +320,7 @@ const MONTAGE_EXPORT_MAX_CONCURRENT = Math.max(1, Number(process.env.MONTAGE_EXP
 const DIALOGUE_VIDEO_MAX_CONCURRENT = Math.max(1, Number(process.env.DIALOGUE_VIDEO_MAX_CONCURRENT || 1) || 1);
 const DIALOGUE_VIDEO_JOB_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
-const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
+const DEFAULT_PODCASTER_VIDEO_MODEL = OMNI_VIDEO_MODEL;
 const DEFAULT_MOODLE_GRAPHIC_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_GEMINI_IMAGE_SIZE = "2K";
 const MOODLE_GRAPHIC_PROMPT_VERSION = "moodle_graphic_render_v1";
@@ -307,14 +330,15 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
   "gemini-2.5-flash-image",
   "gemini-2.0-flash-preview-image-generation"
 ]);
-const PODCASTER_VIDEO_MODEL_CANDIDATES = Object.freeze([
-  "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview",
-  "veo-3.0-generate-001",
-  "veo-3.0-fast-generate-001",
-  "veo-2.0-generate-001"
-]);
+const PODCASTER_VIDEO_MODEL_CANDIDATES = VIDEO_MODELS;
+const DEFAULT_GEMINI_TEXT_MODEL = "gemini-3.5-flash";
+const GEMINI_TEXT_MODEL_ALIASES = Object.freeze({
+  "gemini-2.5-flash": DEFAULT_GEMINI_TEXT_MODEL,
+  "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
+  "gemini-2.5-pro": "gemini-3.1-pro-preview",
+  "gemini-3-flash-preview": DEFAULT_GEMINI_TEXT_MODEL,
+  "gemini-3-pro-preview": "gemini-3.1-pro-preview"
+});
 const GEMINI_LIVE_ALLOWED_VOICE_NAMES = new Set([
   "Zephyr", "Kore", "Orus", "Autonoe", "Umbriel", "Erinome",
   "Laomedeia", "Schedar", "Achird", "Sadachbia", "Puck", "Fenrir",
@@ -348,17 +372,10 @@ const fetchCompat = (...args) => {
   if (typeof fetch === "function") return fetch(...args);
   return import("node-fetch").then(({ default: f }) => f(...args));
 };
-
-function applyVeoHdParameters(parameters = {}, aspectRatio = "16:9", modelName = "") {
-  const next = parameters && typeof parameters === "object" ? { ...parameters } : {};
-  next.aspectRatio = String(next.aspectRatio || aspectRatio).trim() || aspectRatio;
-  if (/^veo-2\.0\b/i.test(String(modelName || "").trim())) {
-    delete next.resolution;
-  } else {
-    next.resolution = "1080p";
-  }
-  return next;
-}
+const PROXY_MEDIA_UPSTREAM_HEADERS_TIMEOUT_MS = Math.max(
+  5000,
+  Math.min(120000, Number(process.env.PROXY_MEDIA_UPSTREAM_HEADERS_TIMEOUT_MS || 30000) || 30000)
+);
 
 const VEO_PROMPT_MAX_CHARS = 3600;
 function compactVeoPromptForRequest(prompt = "") {
@@ -366,7 +383,7 @@ function compactVeoPromptForRequest(prompt = "") {
   if (text.length <= VEO_PROMPT_MAX_CHARS) return text;
   const head = text.slice(0, 2200).trim();
   const tail = text.slice(-1200).trim();
-  return `${head}\n\nResumen tecnico omitido para respetar limite de prompt de Veo.\n\n${tail}`.trim();
+  return `${head}\n\nTechnical details omitted to respect the Veo prompt limit.\n\n${tail}`.trim();
 }
 
 const dialogueVideoJobs = new Map();
@@ -534,6 +551,14 @@ function parseHttpByteRange(rangeHeader = "", total = 0) {
   if (!raw || !totalBytes) return null;
   const match = raw.match(/^bytes=(\d*)-(\d*)$/i);
   if (!match) return null;
+  if (!match[1] && match[2]) {
+    const suffixLength = Math.max(0, Number(match[2] || 0));
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return null;
+    return {
+      start: Math.max(0, totalBytes - suffixLength),
+      end: totalBytes - 1
+    };
+  }
   const start = match[1] ? Math.max(0, Number(match[1] || 0)) : 0;
   const end = match[2] ? Math.min(totalBytes - 1, Number(match[2] || (totalBytes - 1))) : totalBytes - 1;
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= totalBytes) return null;
@@ -1735,10 +1760,12 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
   let lastError = null;
   let lastAuthError = null;
   let lastMissingError = null;
+  let lastTransientError = null;
 
   for (const bucket of candidateBuckets) {
     if (!bucket) continue;
     const file = bucket.file(cleanStoragePath);
+    let streamLifecycle = null;
     try {
       let exists = null;
       let meta = {};
@@ -1751,7 +1778,12 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
           action: "read",
           expires: Date.now() + 5 * 60 * 1000
         });
-        const headRes = await fetchCompat(url, { method: "HEAD" });
+        const headRes = await fetchProxyMediaWithTimeout(
+          fetchCompat,
+          url,
+          { method: "HEAD" },
+          PROXY_MEDIA_UPSTREAM_HEADERS_TIMEOUT_MS
+        );
         if (headRes.ok) {
           exists = true;
           meta.contentType = headRes.headers.get("content-type");
@@ -1795,7 +1827,12 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
           headers.Range = `bytes=${payload.range.start}-${payload.range.end}`;
         }
         // eslint-disable-next-line no-await-in-loop
-        const getRes = await fetchCompat(signedUrl, { method: "GET", headers });
+        const getRes = await fetchProxyMediaWithTimeout(
+          fetchCompat,
+          signedUrl,
+          { method: "GET", headers },
+          PROXY_MEDIA_UPSTREAM_HEADERS_TIMEOUT_MS
+        );
         if (getRes.ok || getRes.status === 206) {
           stream = coerceReadableStream(getRes.body);
         } else {
@@ -1808,18 +1845,27 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
         } : undefined);
       }
 
-      req.once("close", () => {
-        if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
-          stream.destroy();
+      streamLifecycle = bindProxyMediaStreamLifecycle(req, res, stream, {
+        onDisconnect: (reason) => {
+          console.info("[backend][proxy-media] client disconnected from storage stream", {
+            reason,
+            storagePath: cleanStoragePath,
+            bucket: String(bucket?.name || "").trim()
+          });
         }
       });
 
-      await safePipeline(stream, res.status(payload.status || 200));
+      try {
+        await safePipeline(stream, res.status(payload.status || 200));
+      } finally {
+        streamLifecycle.cleanup();
+      }
       return { streamed: true };
     } catch (error) {
       lastError = error;
-      const errorText = String(error?.code || error?.message || "").trim();
-      const isClientAbort = req.destroyed || error?.code === "ERR_STREAM_PREMATURE_CLOSE";
+      const isClientAbort = streamLifecycle?.wasClientDisconnected?.() === true
+        || req.aborted === true
+        || (res.destroyed === true && res.writableFinished !== true);
       if (isClientAbort) {
         return {
           streamed: false,
@@ -1832,6 +1878,7 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
           }
         };
       }
+      if (res.headersSent) throw error;
       const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
       if (status === 401 || status === 403 || /permission|forbidden/i.test(String(error?.message || ""))) {
         lastAuthError = error;
@@ -1841,8 +1888,25 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
         lastMissingError = error;
         continue;
       }
+      if (isTransientProxyMediaError(error)) {
+        lastTransientError = error;
+        continue;
+      }
       continue;
     }
+  }
+
+  if (lastTransientError) {
+    return {
+      streamed: false,
+      status: 503,
+      code: "storage_temporarily_unavailable",
+      detail: {
+        storagePath: cleanStoragePath,
+        lastError: String(lastTransientError?.message || lastTransientError),
+        bucketsTried: candidateBuckets.map((bucket) => String(bucket?.name || "").trim()).filter(Boolean)
+      }
+    };
   }
 
   if (lastAuthError) {
@@ -2928,7 +2992,7 @@ function normalizeModel(input = "") {
     .replace(/^models\//i, "")
     // Algunos clientes mandan el endpoint (como en la REST API), pero aquí lo agregamos nosotros.
     .replace(/:(generateContent|streamGenerateContent)$/i, "");
-  return raw || "gemini-2.5-flash";
+  return GEMINI_TEXT_MODEL_ALIASES[raw] || raw || DEFAULT_GEMINI_TEXT_MODEL;
 }
 
 function normalizeLiveVoiceName(input = "") {
@@ -3276,6 +3340,15 @@ function sanitizePodcasterSession(raw = {}) {
       .map((entry) => clampText(entry || "", 5000))
       .filter(Boolean)
   )).slice(0, 80);
+  const normalizeComparableEditorialText = (value = "") => String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const rowsInput = Array.isArray(raw?.script?.rows) ? raw.script.rows : [];
   const rows = rowsInput.slice(0, 400).map((row, index) => {
     const nextRow = { ...row };
@@ -3289,7 +3362,35 @@ function sanitizePodcasterSession(raw = {}) {
     nextRow.text = clampText(row?.text || row?.Guion || row?.guion || row?.guión || row?.voiceOverText || "", 12000);
     nextRow.voiceOverText = clampText(row?.voiceOverText || row?.text || row?.Guion || row?.guion || row?.guión || "", 12000);
     nextRow.sceneDescription = clampText(row?.sceneDescription || row?.description || row?.Descripción || row?.scenePrompt || "", 5000);
-    nextRow.onScreenText = clampText(row?.onScreenText || row?.["Texto en pantalla"] || row?.["Texto en Pantalla"] || "", 1600);
+    const legacyOnScreenText = clampText(row?.onScreenText || row?.["Texto en pantalla"] || row?.["Texto en Pantalla"] || "", 10000);
+    const normalizedDialogue = normalizeComparableEditorialText(nextRow.voiceOverText || nextRow.text || "");
+    const normalizedLegacyText = normalizeComparableEditorialText(legacyOnScreenText);
+    const legacyMustRemainLiteral = row?.onScreenTextNoSummarize === true
+      || row?.noSummarizeOnScreenText === true
+      || (normalizedLegacyText && normalizedDialogue && normalizedLegacyText === normalizedDialogue);
+    const hasCanonicalTextFields = Object.prototype.hasOwnProperty.call(row || {}, "headlineText")
+      || Object.prototype.hasOwnProperty.call(row || {}, "captionText");
+    nextRow.headlineText = hasCanonicalTextFields
+      ? clampText(row?.headlineText || "", 48)
+      : (legacyMustRemainLiteral ? "" : clampText(legacyOnScreenText, 48));
+    nextRow.captionText = hasCanonicalTextFields
+      ? clampText(row?.captionText || "", 10000)
+      : (legacyMustRemainLiteral ? legacyOnScreenText : "");
+    nextRow.inSceneText = normalizeInSceneText(row?.inSceneText || "", { truncate: true });
+    const requestedOverlayMode = String(row?.overlayMode || "").trim().toLowerCase();
+    nextRow.overlayMode = ["none", "headline", "captions", "both"].includes(requestedOverlayMode)
+      ? requestedOverlayMode
+      : (nextRow.headlineText && nextRow.captionText
+        ? "both"
+        : (nextRow.headlineText ? "headline" : (nextRow.captionText ? "captions" : "none")));
+    const requestedTextSource = String(row?.textSource || "").trim().toLowerCase();
+    nextRow.textSource = ["generated", "manual", "migrated"].includes(requestedTextSource)
+      ? requestedTextSource
+      : (!hasCanonicalTextFields && legacyOnScreenText ? "migrated" : "generated");
+    // Alias de lectura durante una versión. Vacío permanece vacío; nunca cae a row.text.
+    nextRow.onScreenText = hasCanonicalTextFields
+      ? (nextRow.headlineText || nextRow.captionText || "")
+      : (legacyOnScreenText || nextRow.headlineText || nextRow.captionText || "");
     nextRow.visualNotes = clampText(row?.visualNotes || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "", 5000);
     nextRow.visualNotesProposal = clampText(row?.visualNotesProposal || "", 5000);
     nextRow.publicSceneLibraryId = clampText(row?.publicSceneLibraryId || "", 140);
@@ -3473,11 +3574,35 @@ function sanitizePodcasterSession(raw = {}) {
       return {
         id: clampText(segment?.id || `${key}-seg-${idx + 1}`, 120) || `${key}-seg-${idx + 1}`,
         index: Math.max(0, Number(segment?.index) || idx),
-        durationSec: clampNumber(segment?.durationSec, 0, 8, 0),
+        durationSec: clampNumber(segment?.durationSec, 0, 12, 0),
+        requestedDurationSec: clampNumber(segment?.requestedDurationSec, 0, 12, 0),
         downloadUrl: segUrl,
         storagePath: segPath,
         mimeType: clampText(segMimeType || (segType === "image" ? "image/jpeg" : "video/mp4"), 120) || "video/mp4",
+        generator: ["omni", "veo"].includes(String(segment?.generator || "").trim().toLowerCase())
+          ? String(segment.generator).trim().toLowerCase()
+          : "",
+        provider: clampText(segment?.provider || "gemini", 40) || "gemini",
+        model: clampText(segment?.model || "", 140),
         variant: clampText(segment?.variant || "", 120),
+        quality: String(segment?.quality || "").trim().toLowerCase() === "draft" ? "draft" : "final",
+        textPolicy: String(segment?.textPolicy || "").trim().toLowerCase() === "in_scene" ? "in_scene" : "overlay_only",
+        aspectRatio: String(segment?.aspectRatio || "").trim() === "9:16" ? "9:16" : "16:9",
+        resolution: clampText(segment?.resolution || "", 40),
+        interactionId: clampText(segment?.interactionId || "", 220),
+        operationName: clampText(segment?.operationName || "", 500),
+        providerVideoUri: clampText(segment?.providerVideoUri || "", 3200),
+        providerVideoGeneratedAt: clampText(segment?.providerVideoGeneratedAt || "", 80),
+        providerVideoGenerator: clampText(segment?.providerVideoGenerator || "", 20),
+        providerVideoModel: clampText(segment?.providerVideoModel || "", 140),
+        providerVideoResolution: clampText(segment?.providerVideoResolution || "", 40),
+        providerVideoAspectRatio: clampText(segment?.providerVideoAspectRatio || "", 20),
+        providerVideoDurationSec: clampNumber(segment?.providerVideoDurationSec, 0, 141, 0),
+        promptVersion: clampText(segment?.promptVersion || PODCASTER_VIDEO_PROMPT_VERSION, 80) || PODCASTER_VIDEO_PROMPT_VERSION,
+        promptHash: clampText(segment?.promptHash || "", 80),
+        headlineText: clampText(segment?.headlineText || "", 48),
+        captionText: clampText(segment?.captionText || "", 10000),
+        inSceneText: normalizeInSceneText(segment?.inSceneText || "", { truncate: true }),
         targetSpeechLine: clampText(segment?.targetSpeechLine || "", 2200)
       };
     }).filter(Boolean);
@@ -3492,7 +3617,25 @@ function sanitizePodcasterSession(raw = {}) {
       mimeType: clampText(clipMimeType || (clipType === "image" ? "image/jpeg" : "video/mp4"), 120) || "video/mp4",
       type: normalizedType,
       model: clampText(clip?.model || DEFAULT_PODCASTER_VIDEO_MODEL, 140) || DEFAULT_PODCASTER_VIDEO_MODEL,
-      promptVersion: clampText(clip?.promptVersion || "podcaster_veo_v1", 80) || "podcaster_veo_v1",
+      generator: ["omni", "veo"].includes(String(clip?.generator || "").trim().toLowerCase())
+        ? String(clip.generator).trim().toLowerCase()
+        : (String(clip?.model || "").trim().toLowerCase().startsWith("veo-") ? "veo" : "omni"),
+      provider: clampText(clip?.provider || "gemini", 40) || "gemini",
+      quality: String(clip?.quality || "").trim().toLowerCase() === "draft" ? "draft" : "final",
+      textPolicy: String(clip?.textPolicy || "").trim().toLowerCase() === "in_scene" ? "in_scene" : "overlay_only",
+      aspectRatio: String(clip?.aspectRatio || "").trim() === "9:16" ? "9:16" : "16:9",
+      resolution: clampText(clip?.resolution || "", 40),
+      interactionId: clampText(clip?.interactionId || "", 220),
+      operationName: clampText(clip?.operationName || "", 500),
+      providerVideoUri: clampText(clip?.providerVideoUri || "", 3200),
+      providerVideoGeneratedAt: clampText(clip?.providerVideoGeneratedAt || "", 80),
+      providerVideoGenerator: clampText(clip?.providerVideoGenerator || "", 20),
+      providerVideoModel: clampText(clip?.providerVideoModel || "", 140),
+      providerVideoResolution: clampText(clip?.providerVideoResolution || "", 40),
+      providerVideoAspectRatio: clampText(clip?.providerVideoAspectRatio || "", 20),
+      providerVideoDurationSec: clampNumber(clip?.providerVideoDurationSec, 0, 141, 0),
+      promptVersion: clampText(clip?.promptVersion || PODCASTER_VIDEO_PROMPT_VERSION, 80) || PODCASTER_VIDEO_PROMPT_VERSION,
+      promptHash: clampText(clip?.promptHash || "", 80),
       videoDirective: clampText(clip?.videoDirective || "", 1400),
       scenePrompt: clampText(clip?.scenePrompt || "", 1200),
       imagePrompts: Array.isArray(clip?.imagePrompts)
@@ -3503,6 +3646,16 @@ function sanitizePodcasterSession(raw = {}) {
           .filter(Boolean)
           .slice(0, 3),
       durationSec: clampNumber(clip?.durationSec, 0, 240, 0),
+      requestedDurationSec: clampNumber(clip?.requestedDurationSec, 0, 240, 0),
+      headlineText: clampText(clip?.headlineText || "", 48),
+      captionText: clampText(clip?.captionText || "", 10000),
+      inSceneText: normalizeInSceneText(clip?.inSceneText || "", { truncate: true }),
+      overlayMode: ["none", "headline", "captions", "both"].includes(String(clip?.overlayMode || "").trim().toLowerCase())
+        ? String(clip.overlayMode).trim().toLowerCase()
+        : "none",
+      textSource: ["generated", "manual", "migrated"].includes(String(clip?.textSource || "").trim().toLowerCase())
+        ? String(clip.textSource).trim().toLowerCase()
+        : "generated",
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
       segments,
       updatedAt: clampText(clip?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
@@ -3658,39 +3811,11 @@ function sanitizePodcasterSession(raw = {}) {
     });
     return next;
   };
-  const sanitizeOnScreenTextTrack = (trackRaw = {}) => ({
-    enabled: trackRaw?.enabled !== false,
-    showTrack: trackRaw?.showTrack !== false,
-    fontFamily: clampText(trackRaw?.fontFamily || "unbounded", 80) || "unbounded",
-    fontSizePx: clampNumber(trackRaw?.fontSizePx, 16, 96, 44),
-    stylePreset: clampText(trackRaw?.stylePreset || "3d", 40) || "3d",
-    fontWeight: clampText(trackRaw?.fontWeight || "bold", 24) || "bold",
-    fontStyle: clampText(trackRaw?.fontStyle || "normal", 24) || "normal",
-    textAlign: clampText(trackRaw?.textAlign || "center", 24) || "center",
-    textColor: clampText(trackRaw?.textColor || "#FFFFFF", 24) || "#FFFFFF",
-    karaokeHighlightColor: clampText(trackRaw?.karaokeHighlightColor || "#facc15", 24) || "#facc15",
-    karaokeHighlightStyle: ["glow", "text", "pill", "rect", "underline"].includes(String(trackRaw?.karaokeHighlightStyle || "").trim().toLowerCase())
-      ? String(trackRaw.karaokeHighlightStyle).trim().toLowerCase()
-      : "pill",
-    karaokeHighlightOpacity: clampNumber(trackRaw?.karaokeHighlightOpacity, 0, 1, 0.92),
-    karaokeHighlightPaddingXPx: clampNumber(trackRaw?.karaokeHighlightPaddingXPx, 0, 40, 10),
-    karaokeHighlightPaddingYPx: clampNumber(trackRaw?.karaokeHighlightPaddingYPx, 0, 28, 4),
-    karaokeHighlightRadiusPx: clampNumber(trackRaw?.karaokeHighlightRadiusPx, 0, 40, 12),
-    strokeColor: clampText(trackRaw?.strokeColor || "#0f172a", 24) || "#0f172a",
-    strokeWidthPx: clampNumber(trackRaw?.strokeWidthPx, 0, 12, 2),
-    textOpacity: clampNumber(trackRaw?.textOpacity, 0, 1, 1),
-    bgPreset: clampText(trackRaw?.bgPreset || "none", 40) || "none",
-    bgOpacity: clampNumber(trackRaw?.bgOpacity, 0, 1, 0),
-    bgScale: clampNumber(trackRaw?.bgScale, 0.6, 2.5, 1),
-    shadowEnabled: trackRaw?.shadowEnabled !== false,
-    shadowBlurPx: clampNumber(trackRaw?.shadowBlurPx, 0, 80, 18),
-    shadowOffsetXPx: clampNumber(trackRaw?.shadowOffsetXPx, -80, 80, 0),
-    shadowOffsetYPx: clampNumber(trackRaw?.shadowOffsetYPx, -80, 80, 8),
-    shadowOpacity: clampNumber(trackRaw?.shadowOpacity, 0, 1, 0.48),
-    boxWidthPct: clampNumber(trackRaw?.boxWidthPct, 0.22, 0.92, 0.58),
-    overlayXPct: clampNumber(trackRaw?.overlayXPct, 0, 1, 0.5),
-    overlayYPct: clampNumber(trackRaw?.overlayYPct, 0, 1, 0.82)
-  });
+  // Reuse the renderer's canonical normalizer so cloud round-trips cannot alter
+  // existing typography, stroke, shadow or layout settings.
+  const sanitizeOnScreenTextTrack = (trackRaw = {}) => normalizeOnScreenTextTrackSettings(
+    trackRaw && typeof trackRaw === "object" ? trackRaw : {}
+  );
   const sanitizeOnScreenTextClipsByRowId = (rawClips = {}) => {
     const source = rawClips && typeof rawClips === "object" ? rawClips : {};
     const next = {};
@@ -3792,13 +3917,25 @@ function sanitizePodcasterSession(raw = {}) {
       : [],
     composerGenerationMode: String(rawStudioUiState?.composerGenerationMode || "").trim().toLowerCase() === "video" ? "video" : "script"
   };
+  const persistedVideoGenerator = normalizePodcasterVideoGenerator(
+    raw?.podcastVideoConfig?.videoGenerator || "",
+    raw?.podcastVideoConfig?.videoModel || ""
+  );
+  const persistedVideoQuality = normalizePodcasterVideoQuality(raw?.podcastVideoConfig?.videoQuality || "final");
+  const persistedVideoModel = persistedVideoGenerator === "auto"
+    ? "auto"
+    : normalizeVideoModel(
+      raw?.podcastVideoConfig?.videoModel || DEFAULT_PODCASTER_VIDEO_MODEL,
+      persistedVideoGenerator,
+      persistedVideoQuality
+    );
   const podcastVideoConfig = {
     enabled: raw?.podcastVideoConfig?.enabled === true,
     editorEnabled: raw?.podcastVideoConfig?.editorEnabled === true,
     autoGenerateScenarioImages: raw?.podcastVideoConfig?.autoGenerateScenarioImages === true,
     autoGeneratePortraits: raw?.podcastVideoConfig?.autoGeneratePortraits === true,
     allowLivePreviewWithoutStoredAudio: raw?.podcastVideoConfig?.allowLivePreviewWithoutStoredAudio === true,
-    cheapVideoMode: raw?.podcastVideoConfig?.cheapVideoMode !== false,
+    cheapVideoMode: raw?.podcastVideoConfig?.cheapVideoMode === true,
     transitionsByEdge,
     audioMode: audioModeRaw === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene",
     masterVolume: clampNumber(raw?.podcastVideoConfig?.masterVolume, 0, 100, 100),
@@ -3813,9 +3950,10 @@ function sanitizePodcasterSession(raw = {}) {
     timelineOnScreenTextDefaultsVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineOnScreenTextDefaultsVersion) || 1))),
     timelineTrackHeightsById: sanitizeTimelineTrackHeightsById(raw?.podcastVideoConfig?.timelineTrackHeightsById || {}),
     timelineViewMode: timelineViewModeRaw === "normal" ? "normal" : "tracks",
-    videoModel: PODCASTER_VIDEO_MODEL_CANDIDATES.includes(String(raw?.podcastVideoConfig?.videoModel || "").trim())
-      ? String(raw.podcastVideoConfig.videoModel).trim()
-      : (raw?.podcastVideoConfig?.cheapVideoMode === false ? "veo-3.1-generate-preview" : "veo-3.1-lite-generate-preview"),
+    videoRoutingVersion: 2,
+    videoGenerator: persistedVideoGenerator,
+    videoQuality: persistedVideoQuality,
+    videoModel: persistedVideoModel,
     onScreenTextTrack: sanitizeOnScreenTextTrack(raw?.podcastVideoConfig?.onScreenTextTrack || {}),
     geminiDialogueTrack: sanitizeGeminiDialogueTrack(raw?.podcastVideoConfig?.geminiDialogueTrack || {}),
     geminiDialogueTrackIndex: Math.max(0, Math.min(999, Math.floor(Number(raw?.podcastVideoConfig?.geminiDialogueTrackIndex) || 0))),
@@ -5835,10 +5973,10 @@ async function buildDialogueVideoRegenerationAnalysis(options = {}) {
     });
   });
   const upstream = await fetchCompat(
-    `${GEMINI_BASE}/models/${encodeURIComponent("gemini-2.5-flash")}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    `${GEMINI_BASE}/models/${encodeURIComponent(DEFAULT_GEMINI_TEXT_MODEL)}:generateContent`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
       body: JSON.stringify({
         contents: [{
           role: "user",
@@ -5880,7 +6018,7 @@ async function safeUnlink(filePath = "") {
   }
 }
 
-async function probeMediaWithFfmpeg(inputPath = "", label = "probe") {
+async function probeMediaWithFfmpeg(inputPath = "", label = "probe", timeoutMs = 0) {
   const source = String(inputPath || "").trim();
   if (!source) return { label, videoCodec: "", audioCodec: "", duration: "" };
   const probeResult = await runFfmpegCommand([
@@ -5890,14 +6028,14 @@ async function probeMediaWithFfmpeg(inputPath = "", label = "probe") {
     "-f",
     "null",
     "-"
-  ], { stage: `${label}_probe` });
+  ], { stage: `${label}_probe`, timeoutMs });
   return {
     label,
     ...extractMediaStreamInfoFromFfmpegStderr(probeResult.stderr || "")
   };
 }
 
-async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), sourceMimeType = "video/mp4") {
+async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), sourceMimeType = "video/mp4", options = {}) {
   const source = Buffer.isBuffer(inputBuffer) ? inputBuffer : Buffer.from(inputBuffer || []);
   if (!source.length) {
     const err = new Error("empty_video_buffer");
@@ -5917,10 +6055,29 @@ async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), source
   const outputPath = path.join("/tmp", `cb-dialogue-video-out-${randomUUID()}.mp4`);
   let inputProbe = { videoCodec: "", audioCodec: "", duration: "" };
   let outputProbe = { videoCodec: "", audioCodec: "", duration: "" };
+  const timeoutBudgetMs = Math.max(1000, Number(options?.timeoutMs || MEDIA_TIMEOUT_MS) || MEDIA_TIMEOUT_MS);
+  const requestedDeadlineAt = Number(options?.deadlineAt || 0);
+  const deadlineAt = Number.isFinite(requestedDeadlineAt) && requestedDeadlineAt > Date.now()
+    ? requestedDeadlineAt
+    : Date.now() + timeoutBudgetMs;
+  const remainingMs = (stage = "transcode") => {
+    const remaining = Math.floor(deadlineAt - Date.now());
+    if (remaining > 0) return remaining;
+    const error = new Error("video_media_processing_timeout");
+    error.code = "video_media_processing_timeout";
+    error.stage = stage;
+    error.status = 504;
+    throw error;
+  };
 
   try {
     await fs.promises.writeFile(inputPath, source);
-    inputProbe = await probeMediaWithFfmpeg(inputPath, "input").catch(() => ({ videoCodec: "", audioCodec: "", duration: "" }));
+    try {
+      inputProbe = await probeMediaWithFfmpeg(inputPath, "input", remainingMs("input_probe"));
+    } catch (error) {
+      if (Date.now() >= deadlineAt || error?.code === "video_media_processing_timeout") throw error;
+      inputProbe = { videoCodec: "", audioCodec: "", duration: "" };
+    }
     const hasInputAudio = Boolean(String(inputProbe?.audioCodec || "").trim());
     const inputVideoCodec = String(inputProbe?.videoCodec || "").trim().toLowerCase();
     const inputAudioCodec = String(inputProbe?.audioCodec || "").trim().toLowerCase();
@@ -5998,7 +6155,11 @@ async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), source
         "+faststart",
         outputPath
       ];
-    await runFfmpegCommand(transcodeArgs, { stage: "transcode" });
+    await runFfmpegCommand(transcodeArgs, {
+      stage: "transcode",
+      timeoutMs: remainingMs("transcode"),
+      timeoutCode: "video_media_processing_timeout"
+    });
     const outputBuffer = await fs.promises.readFile(outputPath);
     if (!outputBuffer.length) {
       const err = new Error("empty_transcoded_video");
@@ -6006,7 +6167,11 @@ async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), source
       err.stage = "output";
       throw err;
     }
-    outputProbe = await probeMediaWithFfmpeg(outputPath, "output").catch(() => ({ videoCodec: "h264", audioCodec: "aac", duration: "" }));
+    const outputProbeBudgetMs = Math.floor(deadlineAt - Date.now());
+    if (outputProbeBudgetMs > 1000) {
+      outputProbe = await probeMediaWithFfmpeg(outputPath, "output", outputProbeBudgetMs)
+        .catch(() => ({ videoCodec: "h264", audioCodec: "aac", duration: "" }));
+    }
     return {
       buffer: outputBuffer,
       mimeType: "video/mp4",
@@ -6195,10 +6360,10 @@ async function generateMoodleModuleGraphicAsset({
 
   for (const modelName of modelCandidates) {
     const upstream = await fetchCompat(
-      `${GEMINI_BASE}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      `${GEMINI_BASE}/models/${encodeURIComponent(modelName)}:generateContent`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
         body: JSON.stringify(payload)
       }
     );
@@ -8147,7 +8312,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
     let mimeType = "image/png";
     let resolvedModel = imageModels[0] || DEFAULT_PODCASTER_IMAGE_MODEL;
     for (const imageModel of imageModels) {
-      const requestUrl = `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+      const requestUrl = `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent`;
       const requestWithOptionalReference = async (includeScenarioReference) => {
         const parts = [
           { text: prompt },
@@ -8172,7 +8337,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
         ];
         const upstream = await fetchCompat(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify({
             contents: [{
               role: "user",
@@ -8326,10 +8491,10 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
     let resolvedModel = imageModels[0] || DEFAULT_PODCASTER_IMAGE_MODEL;
     for (const imageModel of imageModels) {
       const upstream = await fetchCompat(
-        `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify({
             contents: [{
               role: "user",
@@ -8539,11 +8704,20 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const voiceName = clampText(req.body?.voiceName || "", 80);
     const genderGroup = clampText(req.body?.genderGroup || "", 40);
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
-    const promptProfile = clampText(req.body?.promptProfile || "", 80);
+    const promptProfile = clampText(req.body?.promptProfile || PODCASTER_VIDEO_PROMPT_VERSION, 80) || PODCASTER_VIDEO_PROMPT_VERSION;
     let scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
     const sceneDescription = clampText(req.body?.sceneDescription || "", 1600);
     const visualNotes = clampText(req.body?.visualNotes || "", 2200);
     const onScreenText = clampText(req.body?.onScreenText || "", 1200);
+    const headlineText = clampText(req.body?.headlineText || "", 48);
+    const captionText = clampText(req.body?.captionText || "", 10000);
+    const inSceneText = normalizeInSceneText(req.body?.inSceneText || "");
+    const overlayMode = ["none", "headline", "captions", "both"].includes(String(req.body?.overlayMode || "").trim().toLowerCase())
+      ? String(req.body.overlayMode).trim().toLowerCase()
+      : (headlineText && captionText ? "both" : (headlineText ? "headline" : (captionText ? "captions" : "none")));
+    const textSource = ["generated", "manual", "migrated"].includes(String(req.body?.textSource || "").trim().toLowerCase())
+      ? String(req.body.textSource).trim().toLowerCase()
+      : "generated";
     const transition = clampText(req.body?.transition || "", 1200);
     const videoDirective = clampText(req.body?.videoDirective || "", 1400);
     const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
@@ -8584,8 +8758,14 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const originalText = clampText(req.body?.originalText || "", 1600);
     const targetSpeechLine = clampText(req.body?.targetSpeechLine || req.body?.text || "", 1600);
     const text = targetSpeechLine || clampText(req.body?.text || "", 1600);
-    const dialogueAudioUrl = clampText(req.body?.dialogueAudioUrl || "", 3200);
-    const dialogueAudioStoragePath = clampText(req.body?.dialogueAudioStoragePath || "", 700);
+    const dialogueAudioUrl = clampText(
+      req.body?.dialogueAudioUrl || req.body?.audioUrl || req.body?.audioDownloadUrl || "",
+      3200
+    );
+    const dialogueAudioStoragePath = clampText(
+      req.body?.dialogueAudioStoragePath || req.body?.audioStoragePath || "",
+      700
+    );
     const audioDurationSecInput = clampNumber(req.body?.audioDurationSec, 0, 180, 0);
     const requestedDurationSecInput = clampNumber(req.body?.requestedDurationSec, 4, 8, 0);
     const portraitUrl = clampText(req.body?.portraitUrl || "", 3200);
@@ -8611,6 +8791,15 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const referenceVideoDataUrl = referenceMode === "video" ? String(inlineReferenceBudget?.referenceVideoDataUrl || "").trim() : "";
     const referenceVideoName = clampText(req.body?.referenceVideoName || "", 180);
     const referenceVideoMimeType = clampText(req.body?.referenceVideoMimeType || "video/mp4", 120) || "video/mp4";
+    const referenceVideoProviderUri = clampText(req.body?.referenceVideoProviderUri || req.body?.providerVideoUri || "", 3200);
+    const referenceVideoProviderGeneratedAt = clampText(req.body?.referenceVideoProviderGeneratedAt || req.body?.providerVideoGeneratedAt || "", 80);
+    const referenceVideoProviderGenerator = clampText(req.body?.referenceVideoProviderGenerator || req.body?.providerVideoGenerator || "", 20);
+    const referenceVideoProviderModel = clampText(req.body?.referenceVideoProviderModel || req.body?.providerVideoModel || "", 140);
+    const referenceVideoProviderResolution = clampText(req.body?.referenceVideoProviderResolution || req.body?.providerVideoResolution || "", 40);
+    const referenceVideoProviderAspectRatio = clampText(req.body?.referenceVideoProviderAspectRatio || req.body?.providerVideoAspectRatio || "", 20);
+    const referenceVideoProviderDurationSec = Number(
+      req.body?.referenceVideoProviderDurationSec ?? req.body?.providerVideoDurationSec
+    );
     const relateWithPreviousScene = req.body?.relateWithPreviousScene === true;
     const previousSceneRaw = req.body?.previousScene && typeof req.body.previousScene === "object" ? req.body.previousScene : null;
     const previousScene = previousSceneRaw ? {
@@ -8634,18 +8823,24 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const analysisVideoDownloadUrl = clampText(req.body?.analysisVideoDownloadUrl || "", 3200);
     const analysisVideoStoragePath = clampText(req.body?.analysisVideoStoragePath || "", 700);
     const analysisVideoMimeType = clampText(req.body?.analysisVideoMimeType || "video/mp4", 80) || "video/mp4";
+    const requestedGenerator = normalizePodcasterVideoGenerator(req.body?.generator || "", req.body?.model || "");
+    const requestedQuality = normalizePodcasterVideoQuality(req.body?.quality || "final");
+    const highQuality = req.body?.highQuality === true;
+    const requestedTextPolicy = normalizePodcasterVideoTextPolicy(req.body?.textPolicy, inSceneText);
+    const requestedAspectRatio = normalizePodcasterVideoAspectRatio(req.body?.aspectRatio, isReel);
+    const previousInteractionId = clampText(req.body?.previousInteractionId || "", 220);
+    const correctInSceneText = req.body?.correctInSceneText === true;
+    const extendVideo = req.body?.extendVideo === true || req.body?.videoExtension === true;
+    const explicitLastFrameRequested = Boolean(req.body?.hasLastFrame === true || req.body?.lastFrameDataUrl);
+    const hasLastFrameRequest = explicitLastFrameRequested;
     const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
-    const requestedModel = normalizeModel(req.body?.model || DEFAULT_PODCASTER_VIDEO_MODEL);
-    const mergedModels = Array.from(new Set([
-      requestedModel,
-      ...requestedCandidates.map((item) => normalizeModel(item || "")),
-      ...PODCASTER_VIDEO_MODEL_CANDIDATES
-    ].filter(Boolean)));
+    const requestedModelRaw = normalizeModel(req.body?.model || "auto");
     const hasExplicitSceneReferenceInput = Boolean(
       referenceImageDataUrls.length
       || referenceImages.length
       || referenceImageDataUrl
       || referenceVideoDataUrl
+      || referenceVideoProviderUri
       || continuityReferenceImageDataUrl
     );
     const traceReferenceVideo = (step = "", details = {}) => {
@@ -8660,22 +8855,25 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         });
       } catch (_) { }
     };
-    const canPreferFastModel = !strictIdentity && !portraitUrl && !portraitStoragePath && !hasExplicitSceneReferenceInput;
-    const filteredModels = mergedModels.filter((modelName) => {
-      const lowerModelName = String(modelName || "").toLowerCase();
-      if ((strictIdentity || hasExplicitSceneReferenceInput) && /lite/i.test(lowerModelName)) return false;
-      return true;
+    const resolvedGenerator = resolveVideoGenerator({
+      generator: requestedGenerator,
+      model: requestedModelRaw,
+      textPolicy: requestedTextPolicy,
+      inSceneText,
+      previousInteractionId,
+      correctInSceneText,
+      quality: requestedQuality,
+      highQuality,
+      hasReferenceVideo: Boolean(referenceVideoDataUrl || referenceVideoProviderUri),
+      hasLastFrame: hasLastFrameRequest,
+      extendVideo
     });
-    const prioritizedModels = strictIdentity
-      ? filteredModels
-      : filteredModels.slice().sort((a, b) => {
-        const aFast = /fast/i.test(String(a || ""));
-        const bFast = /fast/i.test(String(b || ""));
-        if (aFast === bFast) return 0;
-        if (canPreferFastModel) return aFast ? -1 : 1;
-        return aFast ? 1 : -1;
-      });
-    const videoModels = prioritizedModels.length ? prioritizedModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
+    const requestedModel = normalizeVideoModel(requestedModelRaw, resolvedGenerator, requestedQuality, { highQuality });
+    // No fallback silencioso: una solicitud aceptada usa exactamente un proveedor/modelo.
+    const videoModels = [requestedModel];
+    const mergedModels = [requestedModel, ...requestedCandidates
+      .map((item) => normalizeVideoModel(item || "", resolvedGenerator, requestedQuality, { highQuality }))
+      .filter((item) => item === requestedModel)];
     const requestDebugTag = `dialogue-video:${sessionId || "no-session"}:${rowId || "no-row"}`;
     updateDialogueVideoJob({
       status: "running",
@@ -8703,9 +8901,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       console.warn(`[backend][${requestDebugTag}] reject 400 missing speakerLabel`, { sessionId, rowId });
       return res.status(400).json({ error: "Falta speakerLabel." });
     }
-    if (!text) {
-      console.warn(`[backend][${requestDebugTag}] reject 400 missing text`, { sessionId, rowId, speakerLabel });
-      return res.status(400).json({ error: "Falta texto de diálogo." });
+    if (!text && !dialogueAudioStoragePath && !dialogueAudioUrl) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 missing text and audio`, { sessionId, rowId, speakerLabel });
+      return res.status(400).json({ error: "Falta texto de diálogo o audio externo." });
     }
     if (strictIdentity && !portraitUrl && !portraitStoragePath) {
       console.warn(`[backend][${requestDebugTag}] reject 400 strictIdentity without portrait`, {
@@ -8880,7 +9078,22 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const useSceneReferenceAsInitImage = hasSceneReference && !strictIdentity;
     let sceneReferenceVideoFrameBase64 = "";
     let sceneReferenceVideoFrameMimeType = "image/png";
-    if (referenceMode === "video" && referenceVideoDataUrl) {
+    let sceneReferenceVideoInput = null;
+    if (extendVideo) {
+      sceneReferenceVideoInput = validateVeoExtensionSource({
+        video: {
+          uri: referenceVideoProviderUri,
+          mimeType: referenceVideoMimeType
+        },
+        generator: referenceVideoProviderGenerator,
+        model: referenceVideoProviderModel,
+        generatedAt: referenceVideoProviderGeneratedAt,
+        resolution: referenceVideoProviderResolution,
+        aspectRatio: referenceVideoProviderAspectRatio,
+        durationSec: referenceVideoProviderDurationSec
+      });
+      strictIdentity = false;
+    } else if (referenceMode === "video" && referenceVideoDataUrl) {
       logHeavyWorkMemory("dialogue_video", "extract_reference_frame", {
         jobId,
         sessionId,
@@ -8890,6 +9103,10 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       if (!String(decodedVideo.mimeType || referenceVideoMimeType).toLowerCase().startsWith("video/")) {
         return res.status(400).json({ error: "El video de referencia no es válido." });
       }
+      sceneReferenceVideoInput = {
+        data: decodedVideo.buffer.toString("base64"),
+        mimeType: String(decodedVideo.mimeType || referenceVideoMimeType || "video/mp4").trim().toLowerCase() || "video/mp4"
+      };
       try {
         const frameBuffer = await extractLastVideoFramePng(decodedVideo.buffer, String(decodedVideo.mimeType || referenceVideoMimeType || "video/mp4"));
         if (frameBuffer?.length) {
@@ -8904,7 +9121,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
       strictIdentity = false;
     }
-    const hasSceneReferenceVideo = Boolean(sceneReferenceVideoFrameBase64);
+    const hasSceneReferenceVideo = Boolean(sceneReferenceVideoFrameBase64 || sceneReferenceVideoInput);
 
     const shouldForceImmediateSceneChange = (source = "") => {
       const text = String(source || "").toLowerCase();
@@ -8989,6 +9206,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       hasPortraitStoragePath: Boolean(portraitStoragePath),
       textLength: String(text || "").length,
       requestedModel,
+      requestedGenerator,
+      resolvedGenerator,
+      requestedQuality,
+      highQuality,
+      requestedTextPolicy,
+      requestedAspectRatio,
       mergedModels,
       effectiveModelCandidates: videoModels,
       imageReferenceNames: referenceImageNames,
@@ -9005,13 +9228,11 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         inferredAudioDurationSec = 0;
       }
     }
-    const inferredTargetDurationSec = strictIdentity
-      ? 8
-      : (requestedDurationSecInput > 0
+    const inferredTargetDurationSec = requestedDurationSecInput > 0
       ? Math.round(clampNumber(requestedDurationSecInput, 4, 8, 8))
       : (inferredAudioDurationSec > 0
         ? Math.round(clampNumber(inferredAudioDurationSec, 5, 8, 8))
-        : 8));
+        : 8);
     const characterPrompt = (educationalVideo && !isReel)
       ? ""
       : buildBackendPodcasterCharacterPrompt({
@@ -9033,7 +9254,18 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         expression,
         contentMode
       });
-    const timelineScenePromptBundle = buildDialogueVideoPromptBundle({
+    const estimatedProviderImageCount = (hasPortraitAsset ? 1 : 0)
+      + sceneReferenceImages.length
+      + (sceneReferenceVideoFrameBase64 && !extendVideo ? 1 : 0)
+      + (resolvedGenerator === "omni" && continuityFrameBase64 ? 1 : 0);
+    const imageInputRole = extendVideo
+      ? "video_extension"
+      : (resolvedGenerator === "omni"
+        ? (estimatedProviderImageCount === 1 && !strictIdentity ? "first_frame" : (estimatedProviderImageCount > 0 ? "references" : "none"))
+        : ((sceneReferenceVideoFrameBase64 || continuityFrameBase64 || explicitLastFrameRequested)
+          ? "first_frame"
+          : (estimatedProviderImageCount > 0 ? "references" : "none")));
+    const timelineScenePromptOptions = {
       promptProfile,
       educationalVideo,
       speakerName,
@@ -9047,9 +9279,20 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       sceneDescription,
       visualNotes,
       onScreenText,
+      headlineText,
+      captionText,
+      inSceneText,
+      overlayMode,
+      textSource,
+      textPolicy: requestedTextPolicy,
+      generator: resolvedGenerator,
+      aspectRatio: requestedAspectRatio,
       transition,
       videoDirective,
       imagePrompts,
+      removedTextDirectives: Array.isArray(req.body?.removedTextDirectives)
+        ? req.body.removedTextDirectives.slice(0, 24)
+        : [],
       performanceDirective,
       previousScene,
       relateWithPreviousScene,
@@ -9064,22 +9307,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       characterPrompt,
       studioScenePrompt,
       useSceneReferenceAsInitImage,
+      imageInputRole,
       referenceImageName,
       hasSceneReferenceVideo,
       referenceVideoName,
-      regenerationAnalysis: null,
       isReel,
       contentMode
-    });
-    const sceneVisualPrompt = timelineScenePromptBundle?.sceneVisualPrompt || (scenePrompt || [
-      educationalVideo ? "Escena educativa basada en guion técnico." : `Escena de ${speakerName}.`,
-      scenarioPrompt ? `Contexto visual: ${scenarioPrompt}` : "",
-      videoDirective ? `Prioridad manual: ${videoDirective}` : ""
-    ].filter(Boolean).join(" ").trim());
-    const sceneImagePromptList = timelineScenePromptBundle?.sceneImagePromptList || (imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
-      `${sceneVisualPrompt} Imagen principal horizontal 16:9.`,
-      `${sceneVisualPrompt} Variante en plano cerrado, y otra toma de apoyo del set.`
-    ] : []));
+    };
 
     let regenerationAnalysis = null;
     if (enhanceFromExistingVideo && (analysisVideoStoragePath || analysisVideoDownloadUrl) && hasGeminiKey() && isFfmpegAvailable()) {
@@ -9114,8 +9348,38 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
     }
 
+    updateDialogueVideoJob({
+      status: "running",
+      stage: "normalize_visual_prompt",
+      progress: 0.16,
+      hint: "Normalizando la dirección visual a inglés antes de generar.",
+      generator: resolvedGenerator,
+      model: requestedModel,
+      promptVersion: PODCASTER_VIDEO_PROMPT_VERSION
+    });
+    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const visualPromptNormalization = await normalizePodcasterVisualDirectionsToEnglish({
+      client,
+      visualOptions: {
+        ...timelineScenePromptOptions,
+        regenerationAnalysis
+      },
+      timeoutMs: 60000
+    });
+    const timelineScenePromptBundle = buildDialogueVideoPromptBundle(
+      visualPromptNormalization.visualOptions
+    );
+    if (!timelineScenePromptBundle?.prompt) {
+      const error = new Error("No se pudo construir el prompt canónico podcaster_video_v2.");
+      error.code = "podcaster_video_prompt_missing";
+      error.status = 500;
+      throw error;
+    }
+    const sceneVisualPrompt = timelineScenePromptBundle.sceneVisualPrompt;
+    const sceneImagePromptList = timelineScenePromptBundle.sceneImagePromptList;
+
     const sceneReferenceAssets = [...sceneReferenceImages];
-    if (sceneReferenceVideoFrameBase64) {
+    if (sceneReferenceVideoFrameBase64 && !extendVideo) {
       sceneReferenceAssets.push({
         image: {
           bytesBase64Encoded: sceneReferenceVideoFrameBase64,
@@ -9125,110 +9389,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       });
     }
 
-    const prompt = timelineScenePromptBundle?.prompt || [
-      educationalVideo
-        ? "Genera un video educativo corto, claro y realista."
-        : "Genera un video cinematográfico corto y realista para podcast.",
-      regenerationAnalysis?.summary ? `Resumen del clip actual a conservar: ${regenerationAnalysis.summary}` : "",
-      regenerationAnalysis?.preserve?.length ? `Conserva del clip existente: ${regenerationAnalysis.preserve.join(" | ")}` : "",
-      regenerationAnalysis?.improve?.length ? `Mejora en la nueva version: ${regenerationAnalysis.improve.join(" | ")}` : "",
-      regenerationAnalysis?.avoid?.length ? `Evita en la nueva version: ${regenerationAnalysis.avoid.join(" | ")}` : "",
-      regenerationAnalysis?.qualityPrompt ? `Instruccion extra de mejora de calidad basada en todo el clip anterior: ${regenerationAnalysis.qualityPrompt}` : "",
-      useSceneReferenceAsInitImage
-        ? `La imagen adjunta${referenceImageName ? ` (${referenceImageName})` : ""} es referencia visual principal de la escena. Debe guiar composición, estilo, ambientación y continuidad.`
-        : "",
-      sceneReferenceAssets.length
-        ? `Las ${sceneReferenceAssets.length === 1 ? "referencia visual adjunta es" : `referencias visuales adjuntas (${sceneReferenceAssets.length}) son`} la fuente de verdad visual de esta escena. Respeta sus elementos dominantes y no inventes objetos, vestuario, personajes, arquitectura, utilería, colores o ambientación que las contradigan.`
-        : "",
-      sceneReferenceAssets.length > 1
-        ? "Si hay varias referencias, combínalas como el mismo universo visual y conserva únicamente los rasgos recurrentes entre ellas. Prioriza coincidencias repetidas sobre cualquier detalle ambiguo del texto."
-        : "",
-      sceneReferenceAssets.length
-        ? "Si alguna instrucción textual contradice las referencias visuales adjuntas, prioriza las referencias adjuntas y ajusta el texto para mantener coherencia visual."
-        : "",
-      hasSceneReferenceVideo
-        ? `El video adjunto${referenceVideoName ? ` (${referenceVideoName})` : ""} se convirtió a un frame de referencia para guiar encuadre, continuidad y estilo visual de la escena.`
-        : "",
-      videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario${educationalVideo ? " para narrativa visual educativa" : " sin romper identidad, sincronía labial ni continuidad del set"}: ${videoDirective}` : "",
-      sceneVisualPrompt ? `${educationalVideo ? "Dirección pedagógica de la escena" : "Dirección visual de la escena"}: ${sceneVisualPrompt}` : "",
-      sceneImagePromptList.length ? `Prompts de imagen para la escena: ${sceneImagePromptList.map((item, idx) => `${idx + 1}. ${item}`).join(" | ")}` : "",
-      performanceDirective ? `Prioridad máxima de actuación visual: ejecuta estas acciones físicas o expresivas de forma visible en pantalla, sin convertirlas en texto en pantalla ni alterar el diálogo hablado: ${performanceDirective}` : "",
-      educationalVideo ? "" : `Locutor: ${speakerName} (${speakerLabel}).`,
-      educationalVideo ? "" : (voiceName ? `Voz de referencia: ${voiceName}.` : ""),
-      educationalVideo ? "" : (genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : ""),
-      educationalVideo ? "" : `Expresión: ${expression}.`,
-      characterPrompt ? `Identidad del personaje obligatoria: ${characterPrompt}` : "",
-      studioScenePrompt ? `Escenario de locución obligatorio: ${studioScenePrompt}` : "",
-      previousScene?.speakerLabel
-        ? `Continuidad narrativa: esta es la escena posterior a la escena ${Math.max(1, Number(previousScene.sceneNumber) || 1)} de ${previousScene.speakerName || previousScene.speakerLabel}.`
-        : "",
-      previousScene?.targetSpeechLine
-        ? `Escena previa (texto objetivo): "${String(previousScene.targetSpeechLine).replace(/"/g, '\\"')}"`
-        : "",
-      previousScene?.previousVideoTargetSpeechLine
-        ? `Escena previa (texto usado en video): "${String(previousScene.previousVideoTargetSpeechLine).replace(/"/g, '\\"')}"`
-        : "",
-      previousScene?.expression
-        ? `Transición emocional: evoluciona de "${previousScene.expression}" hacia "${expression}" de forma natural y coherente.`
-        : "",
-      relateWithPreviousScene && continuityFrameBase64
-        ? (forceImmediateChange
-          ? "Continuidad solo en el primer fotograma: el primer fotograma del nuevo clip debe coincidir con el último fotograma del clip anterior (mismo encuadre, posición, iluminación). Luego, dentro de los siguientes 0.2–0.8 segundos, realiza un corte o transición visible para cumplir el nuevo Elemento visual/Descripción de escena (cambio inmediato de plano/entorno/composición). No te quedes con la imagen del frame anterior durante todo el clip."
-          : "Continuidad exacta: el primer fotograma del nuevo clip debe coincidir con el último fotograma del clip anterior (mismo encuadre, posición, iluminación y continuidad de movimiento). No debe notarse corte.")
-        : relateWithPreviousScene
-          ? "Continuidad: intenta continuar exactamente desde el final del clip anterior (sin salto visual)."
-          : "",
-      previousScene?.hasVideo
-        ? (forceImmediateChange
-          ? "Tras el primer fotograma, prioriza el nuevo Elemento visual aunque implique un cambio claro de plano, contenido o composición respecto al clip previo."
-          : (educationalVideo
-            ? "Mantén continuidad visual y de estilo con el clip previo (paleta, ritmo, tipo de recurso visual y composición)."
-            : "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía)."))
-        : "Si no hay clip previo disponible, conserva continuidad narrativa usando el texto de la escena anterior.",
-      educationalVideo ? "" : (hasPortraitAsset ? "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base." : ""),
-      educationalVideo ? "" : (hasPortraitAsset ? "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje." : ""),
-      educationalVideo
-        ? "Escena en entorno educativo profesional con apoyo visual limpio y composición editorial."
-        : "Escena en cabina profesional de podcast con micrófono de estudio.",
-      educationalVideo
-        ? "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del guion técnico."
-        : "Usa el mismo escenario global del podcast, pero cada locutor debe ocupar una zona física distinta dentro del set.",
-      educationalVideo
-        ? "Puedes mostrar escenas sin personas si el recurso visual lo pide (mapas, gráficos, objetos, documentos, animaciones)."
-        : "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
-      educationalVideo
-        ? "Prohibido estilo podcast: no cabina de radio, no micrófonos, no set de entrevista, no host hablando a cámara."
-        : "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
-      educationalVideo
-        ? "Si aparece una persona, debe ser secundaria al recurso didáctico y nunca parecer conductor de podcast."
-        : "El locutor debe verse en conversación real: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un punto fuera de cámara dentro del set.",
-      educationalVideo
-        ? "Prioriza planos de recurso visual, detalle y contexto que refuercen la voz en off."
-        : "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara.",
-      educationalVideo
-        ? "Mantén narrativa didáctica clara y coherencia con transición solicitada."
-        : "Debe verse un solo locutor identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje.",
-      educationalVideo ? "" : "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
-      educationalVideo
-        ? "Si la escena exige figura humana, evitar frontalidad y mantener foco en el contenido didáctico."
-        : "Si hace falta sugerir conversacion, hacerlo solo con direccion de mirada, postura y composicion del set; nunca agregando otra figura humana.",
-      educationalVideo
-        ? "No incluir texto incrustado; la explicación textual ocurre en voz en off y edición."
-        : "Solo se permiten microglances incidentales; la eyeline dominante nunca debe caer directamente sobre la cámara.",
-      educationalVideo
-        ? "Plano, luz y composición deben parecer pieza educativa premium de 16:9."
-        : "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación neutra.",
-      dialogueAudioStoragePath || dialogueAudioUrl
-        ? (educationalVideo
-          ? `El clip debe durar ~${inferredTargetDurationSec} segundos y reforzar visualmente la locución pregrabada (sin requerir lectura labial).`
-          : `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`)
-        : "",
-      "Las acotaciones escénicas o instrucciones de actuación son visuales; no deben aparecer como texto en pantalla ni modificar literalmente el diálogo hablado.",
-      originalText ? `Línea original (referencia): "${String(originalText).replace(/"/g, '\\"')}"` : "",
-      "Sin texto, sin subtítulos, sin captions, sin closed captions, sin lower thirds, sin burned-in text, sin karaoke text, sin overlays de UI, sin logos, sin marcas de agua.",
-      "Prohibido cualquier texto incrustado en imagen o video: no titulos, no nombres, no etiquetas, no transcripcion en pantalla, no texto decorativo.",
-      `Diálogo objetivo: "${String(text).replace(/"/g, '\\"')}"`
-    ].filter(Boolean).join("\n");
+    const prompt = timelineScenePromptBundle.prompt;
     const veoPrompt = compactVeoPromptForRequest(prompt);
     traceReferenceVideo("prompt-prepared", {
       promptChars: prompt.length,
@@ -9237,743 +9398,173 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       maxPromptChars: VEO_PROMPT_MAX_CHARS
     });
 
-    const pollUntilDone = async (operationName = "", options = {}) => {
-      const maxAttempts = Math.max(12, Math.min(54, Math.floor(Number(options?.maxAttempts || 54) || 54)));
-      const baseDelayMs = 10000;
-      const computePollDelayMs = (attempt = 0) => {
-        const attemptGroup = Math.max(0, Math.floor(Number(attempt) || 0));
-        const multiplier = Math.min(6, 1 + Math.floor(attemptGroup / 4));
-        return Math.min(30000, baseDelayMs * multiplier);
-      };
-      const requireResolvedMedia = options?.requireResolvedMedia === true;
-      const resolveResult = typeof options?.resolveResult === "function" ? options.resolveResult : null;
-      const postDoneGraceAttempts = Math.max(0, Math.floor(Number(options?.postDoneGraceAttempts || 0) || 0));
-      const postDoneGraceDelayMs = Math.max(250, Number(options?.postDoneGraceDelayMs || baseDelayMs) || baseDelayMs);
-      const onPoll = typeof options?.onPoll === "function" ? options.onPoll : null;
-      let latest = null;
-      let doneWithoutMediaAttempts = 0;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (onPoll) {
-          onPoll({
-            attempt: attempt + 1,
-            maxAttempts,
-            doneWithoutMediaAttempts,
-            operationName
-          });
-        }
-        // eslint-disable-next-line no-await-in-loop
-        const opResponse = await fetchCompat(
-          `${GEMINI_BASE}/${operationName}?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-          { method: "GET" }
-        );
-        // eslint-disable-next-line no-await-in-loop
-        const opData = await safeJson(opResponse);
-        latest = opData;
-        if (!opResponse.ok) {
-          const detail = String(opData?.error?.message || opData?.error || `HTTP ${opResponse.status}`).trim();
-          const err = new Error(`Error consultando operación Veo: ${detail}`);
-          err.status = Number(opResponse.status || 502);
-          throw err;
-        }
-        if (opData?.done === true) {
-          if (!requireResolvedMedia || !resolveResult) return opData;
-          const resolved = resolveResult(opData);
-          if (resolved?.uri || resolved?.inlineData?.data) return opData;
-          if (doneWithoutMediaAttempts >= postDoneGraceAttempts) return opData;
-          doneWithoutMediaAttempts += 1;
-          // eslint-disable-next-line no-await-in-loop
-          await new Promise((resolve) => setTimeout(resolve, postDoneGraceDelayMs));
-          continue;
-        }
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, computePollDelayMs(attempt)));
-      }
-      const err = new Error("Tiempo de espera agotado al generar video de diálogo.");
-      err.status = 504;
-      err.code = "veo_operation_poll_timeout";
-      err.operationName = operationName;
-      err.latest = latest;
-      throw err;
-    };
-
-    if (strictIdentity && !hasPortraitAsset) {
-      console.warn(`[backend][${requestDebugTag}] reject 400 strictIdentity without portrait asset`, {
-        hasPortraitUrl: Boolean(portraitUrl),
-        hasPortraitStoragePath: Boolean(portraitStoragePath),
-        hasPortraitAsset
-      });
-      return res.status(400).json({
-        error: "strictIdentity requiere portraitUrl o portraitStoragePath para referenceImages."
-      });
-    }
-    const requestVariants = [];
-    const derivedHasSceneReference = sceneReferenceAssets.length > 0;
-    const derivedUseSceneReferenceAsInitImage = derivedHasSceneReference && !strictIdentity;
-    const continuityReferenceImage = continuityFrameBase64
-      ? {
-        image: {
-          bytesBase64Encoded: continuityFrameBase64,
-          mimeType: continuityFrameMimeType
-        },
-        referenceType: "asset"
-      }
-      : null;
-    const buildVeoReferenceImages = (...groups) => groups
-      .flatMap((group) => (Array.isArray(group) ? group : (group ? [group] : [])))
-      .filter(Boolean)
-      .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
-    const sceneContinuityReferenceImages = buildVeoReferenceImages(
-      sceneReferenceAssets,
-      continuityReferenceImage
-    );
-    const referenceDurationSec = (sceneReferenceAssets.length || continuityReferenceImage || hasPortraitAsset)
-      ? 8
-      : inferredTargetDurationSec;
-
-    if (sceneReferenceAssets.length && derivedUseSceneReferenceAsInitImage) {
-      requestVariants.push(
-        {
-          label: "reference-scene+aspect+duration",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: sceneContinuityReferenceImages
-            }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: referenceDurationSec
-            }
-          }
-        },
-        {
-          label: "reference-scene+aspect",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: sceneContinuityReferenceImages
-            }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-
-    if (continuityReferenceImage && !strictIdentity) {
-      requestVariants.push(
-        {
-          label: "reference-continuity+aspect+duration",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: [continuityReferenceImage]
-            }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: referenceDurationSec
-            }
-          }
-        },
-        {
-          label: "reference-continuity+aspect",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: [continuityReferenceImage]
-            }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-    if (portraitGcsUri) {
-      requestVariants.push(
-        {
-          label: "reference-gcs+aspect+duration",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: [{
-                image: {
-                  gcsUri: portraitGcsUri,
-                  mimeType: portraitMimeType
-                },
-                referenceType: "asset"
-              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
-            }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: referenceDurationSec
-            }
-          }
-        },
-        {
-          label: "reference-gcs+aspect",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: [{
-                image: {
-                  gcsUri: portraitGcsUri,
-                  mimeType: portraitMimeType
-                },
-                referenceType: "asset"
-              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
-            }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-    if (portraitBase64) {
-      requestVariants.push(
-        {
-          label: "reference-bytes+aspect+duration",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: [{
-                image: {
-                  bytesBase64Encoded: portraitBase64,
-                  mimeType: portraitMimeType
-                },
-                referenceType: "asset"
-              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
-            }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: referenceDurationSec
-            }
-          }
-        },
-        {
-          label: "reference-bytes+aspect",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              referenceImages: [{
-                image: {
-                  bytesBase64Encoded: portraitBase64,
-                  mimeType: portraitMimeType
-                },
-                referenceType: "asset"
-              }, ...buildVeoReferenceImages(sceneReferenceAssets, continuityReferenceImage).slice(0, Math.max(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT - 1))]
-            }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-    if (!strictIdentity && portraitBase64) {
-      requestVariants.push(
-        {
-          label: "image+aspect+duration",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              image: {
-                bytesBase64Encoded: portraitBase64,
-                mimeType: portraitMimeType
-              }
-            }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: inferredTargetDurationSec
-            }
-          }
-        },
-        {
-          label: "image+aspect",
-          body: {
-            instances: [{
-              prompt: veoPrompt,
-              image: {
-                bytesBase64Encoded: portraitBase64,
-                mimeType: portraitMimeType
-              }
-            }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-    if (!hasPortraitAsset) {
-      requestVariants.push(
-        {
-          label: "text-only+aspect+duration",
-          body: {
-            instances: [{ prompt: veoPrompt }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: inferredTargetDurationSec
-            }
-          }
-        },
-        {
-          label: "text-only+aspect",
-          body: {
-            instances: [{ prompt: veoPrompt }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-    if (strictIdentity) {
-      requestVariants.push(
-        {
-          label: "strict-fallback-text-only+aspect+duration",
-          body: {
-            instances: [{ prompt: veoPrompt }],
-            parameters: {
-              aspectRatio: "16:9",
-              durationSeconds: inferredTargetDurationSec
-            }
-          }
-        },
-        {
-          label: "strict-fallback-text-only+aspect",
-          body: {
-            instances: [{ prompt: veoPrompt }],
-            parameters: {
-              aspectRatio: "16:9"
-            }
-          }
-        }
-      );
-    }
-
     let lastStatus = 502;
-    let lastErrorDetail = "No se pudo generar video con los modelos y variantes disponibles.";
+    let lastErrorDetail = "No se pudo generar video con Gemini.";
+    let lastErrorCode = "video_generation_failed";
     const attemptErrors = [];
     let finalVideoBuffer = null;
     let finalVideoMimeType = "video/mp4";
-    let resolvedModel = videoModels[0] || DEFAULT_PODCASTER_VIDEO_MODEL;
+    let resolvedModel = requestedModel;
     let resolvedVariant = "";
-    const resolveVeoVideoResult = (operationDone = {}) => {
-      const op = operationDone && typeof operationDone === "object" ? operationDone : {};
-      const response = op.response && typeof op.response === "object"
-        ? op.response
-        : (op.result && typeof op.result === "object"
-          ? op.result
-          : (op.output && typeof op.output === "object" ? op.output : op));
-      const uriCandidates = [
-        response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
-        response?.generateVideoResponse?.generatedSamples?.[0]?.videoUri,
-        response?.generateVideoResponse?.generatedSamples?.[0]?.uri,
-        response?.generateVideoResponse?.generatedSamples?.[0]?.video?.fileUri,
-        response?.generate_video_response?.generated_samples?.[0]?.video?.uri,
-        response?.generate_video_response?.generated_samples?.[0]?.video_uri,
-        response?.generate_video_response?.generated_samples?.[0]?.uri,
-        response?.generate_video_response?.generated_samples?.[0]?.video?.file_uri,
-        response?.generatedVideos?.[0]?.video?.uri,
-        response?.generatedVideos?.[0]?.videoUri,
-        response?.generatedVideos?.[0]?.uri,
-        response?.generated_videos?.[0]?.video?.uri,
-        response?.generated_videos?.[0]?.video_uri,
-        response?.generated_videos?.[0]?.uri,
-        response?.videos?.[0]?.video?.uri,
-        response?.videos?.[0]?.uri,
-        response?.video?.fileUri,
-        response?.video?.file_uri,
-        response?.video?.uri,
-        response?.videoUri,
-        response?.video_uri,
-        response?.fileData?.fileUri,
-        response?.fileData?.uri,
-        response?.file_data?.file_uri,
-        response?.file_data?.uri
-      ];
-      for (const candidate of uriCandidates) {
-        const uri = String(candidate || "").trim();
-        if (uri) return { uri };
-      }
-      const inlineCandidates = [
-        response?.generateVideoResponse?.generatedSamples?.[0]?.video?.inlineData,
-        response?.generateVideoResponse?.generatedSamples?.[0]?.inlineData,
-        response?.generatedVideos?.[0]?.video?.inlineData,
-        response?.generatedVideos?.[0]?.inlineData,
-        response?.generate_video_response?.generated_samples?.[0]?.video?.inline_data,
-        response?.generate_video_response?.generated_samples?.[0]?.inline_data,
-        response?.generated_videos?.[0]?.video?.inline_data,
-        response?.generated_videos?.[0]?.inline_data
-      ].filter(Boolean);
-      for (const inlineData of inlineCandidates) {
-        const data = String(inlineData?.data || inlineData?.bytesBase64Encoded || inlineData?.bytes_base64_encoded || "").trim();
-        const mimeType = String(inlineData?.mimeType || inlineData?.mime_type || "video/mp4").trim() || "video/mp4";
-        if (data) return { inlineData: { data, mimeType } };
-      }
-      const parts = Array.isArray(response?.candidates?.[0]?.content?.parts)
-        ? response.candidates[0].content.parts
-        : [];
-      for (const part of parts) {
-        const fileUri = String(part?.fileData?.fileUri || part?.fileData?.uri || part?.file_data?.file_uri || part?.file_data?.uri || "").trim();
-        if (fileUri) return { uri: fileUri };
-        const partUri = String(part?.video?.uri || part?.videoUri || part?.uri || "").trim();
-        if (partUri) return { uri: partUri };
-        const data = String(part?.inlineData?.data || part?.inlineData?.bytesBase64Encoded || part?.inlineData?.bytes_base64_encoded || part?.inline_data?.data || part?.inline_data?.bytesBase64Encoded || part?.inline_data?.bytes_base64_encoded || "").trim();
-        const mimeType = String(part?.inlineData?.mimeType || part?.inlineData?.mime_type || part?.inline_data?.mimeType || part?.inline_data?.mime_type || "").trim();
-        if (data && mimeType.toLowerCase().startsWith("video/")) return { inlineData: { data, mimeType } };
-      }
-      return null;
+    let resolvedInteractionId = "";
+    let resolvedOperationName = "";
+    let resolvedProviderVideoUri = "";
+    let resolvedProviderVideoGeneratedAt = "";
+    let effectiveDurationSec = inferredTargetDurationSec;
+    let effectiveResolution = resolvedGenerator === "veo" ? (highQuality ? "1080p" : "720p") : null;
+    let mediaProcessingDeadlineAt = 0;
+    const promptHash = createHash("sha256").update(prompt, "utf8").digest("hex").slice(0, 24);
+    const providerImages = [];
+    const pushProviderImage = (image = null) => {
+      const data = String(image?.data || image?.bytesBase64Encoded || image?.imageBytes || "").trim();
+      const gcsUri = String(image?.gcsUri || "").trim();
+      if (!data && !gcsUri) return;
+      providerImages.push({
+        data,
+        gcsUri,
+        mimeType: String(image?.mimeType || "image/png").trim() || "image/png"
+      });
     };
-    if (isReel) {
-      for (const variant of requestVariants) {
-        if (variant?.body?.parameters) {
-          variant.body.parameters.aspectRatio = "9:16";
-        }
+    if (portraitBase64 || portraitGcsUri) {
+      pushProviderImage({ data: portraitBase64, gcsUri: portraitBase64 ? "" : portraitGcsUri, mimeType: portraitMimeType });
+    }
+    const sceneProviderImageStartIndex = providerImages.length;
+    for (const reference of sceneReferenceAssets) {
+      pushProviderImage(reference?.image || reference);
+    }
+    if (resolvedGenerator === "omni" && continuityFrameBase64) {
+      pushProviderImage({ data: continuityFrameBase64, mimeType: continuityFrameMimeType });
+    }
+    let explicitLastFrame = null;
+    if (String(req.body?.lastFrameDataUrl || "").trim().startsWith("data:image/")) {
+      const loadedLastFrame = await loadOptionalImageReference({ dataUrl: String(req.body.lastFrameDataUrl).trim() });
+      if (loadedLastFrame?.buffer?.length) {
+        explicitLastFrame = {
+          data: loadedLastFrame.buffer.toString("base64"),
+          mimeType: loadedLastFrame.mimeType || "image/png"
+        };
       }
     }
-    for (const variant of requestVariants) {
-      if (!variant?.body) continue;
-      variant.body.parameters = {
-        ...(variant.body.parameters || {}),
-        aspectRatio: isReel ? "9:16" : "16:9"
-      };
+    if (explicitLastFrameRequested && !explicitLastFrame) {
+      const error = new Error("lastFrame requiere una imagen válida en lastFrameDataUrl.");
+      error.code = "veo_last_frame_invalid";
+      error.status = 400;
+      throw error;
     }
-    const requestRequiresSceneReference = referenceMode === "image" && sceneReferenceAssets.length > 0 && !strictIdentity;
-    const requestedMaxVariantAttempts = Math.max(1, Math.min(
-      requestVariants.length || 1,
-      Math.floor(clampNumber(req.body?.maxVariantAttempts, 1, requestVariants.length || 1, requestVariants.length || 1))
-    ));
-    const effectiveRequestVariants = requestVariants.slice(0, requestRequiresSceneReference ? 1 : requestedMaxVariantAttempts);
-    const requestedMaxOperationPollAttempts = Math.max(12, Math.min(
-      54,
-      Math.floor(clampNumber(req.body?.maxOperationPollAttempts, 12, 54, 54))
-    ));
-    const sceneReferenceCompatibleModels = requestRequiresSceneReference
-      ? videoModels.filter((modelName) => filterVeoVariantsForModel(effectiveRequestVariants, modelName).some((variant) => /reference-/i.test(String(variant?.label || ""))))
-      : [];
-    const requestedModelLimit = Math.max(1, Math.min(
-      videoModels.length || 1,
-      Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
-    ));
-    const requestedReferenceModelRetries = requestRequiresSceneReference
-      ? Math.max(1, Math.floor(clampNumber(req.body?.maxModelAttempts, 1, 999, 6)))
-      : 1;
-    const modelExecutionPlan = requestRequiresSceneReference
-      ? [(sceneReferenceCompatibleModels.length ? sceneReferenceCompatibleModels[0] : DEFAULT_PODCASTER_VIDEO_MODEL)]
-      : videoModels.slice(0, requestedModelLimit);
-    traceReferenceVideo("execution-plan", {
-      requestedMaxVariantAttempts,
-      requestedMaxOperationPollAttempts,
-      requestedModelLimit,
-      requestedReferenceModelRetries,
-      effectiveVideoModels: modelExecutionPlan,
-      effectiveVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim()),
-      promptChars: prompt.length,
-      veoPromptChars: veoPrompt.length
-    });
-
-    for (const videoModel of modelExecutionPlan) {
-      const modelRequestVariants = filterVeoVariantsForModel(effectiveRequestVariants, videoModel)
-        .filter((variant) => !requestRequiresSceneReference || /reference-/i.test(String(variant?.label || "")));
-      if (!modelRequestVariants.length) {
-        traceReferenceVideo("model-skipped-no-compatible-variants", {
-          model: videoModel,
-          requestedVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim()).filter(Boolean)
-        });
-        continue;
-      }
-      const modelAttemptLimit = requestRequiresSceneReference ? requestedReferenceModelRetries : 1;
-      let modelReturnedDoneWithoutMedia = false;
-      for (let modelAttempt = 0; modelAttempt < modelAttemptLimit; modelAttempt += 1) {
-        modelReturnedDoneWithoutMedia = false;
-        for (const [variantIndex, variant] of modelRequestVariants.entries()) {
-          if (requestRequiresSceneReference && modelAttempt > 0) {
-            traceReferenceVideo("reference-model-retry-attempt", {
-              model: videoModel,
-              attempt: modelAttempt + 1,
-              maxAttempts: modelAttemptLimit,
-              remainingVariants: modelRequestVariants.length
-            });
-          }
-          if (modelAttempt > 0) {
-            updateDialogueVideoJob({
-              status: "running",
-              stage: "request_variant",
-              progress: 0.18,
-              hint: `Reintentando ${videoModel} · ${String(variant?.label || "").trim() || "variant"} (${modelAttempt + 1}/${modelAttemptLimit}).`,
-              model: videoModel,
-              variant: String(variant?.label || "").trim(),
-              segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
-              segmentCount: Number(req.body?.segmentCount || 0) || 0
-            });
-          }
-          traceReferenceVideo("variant-start", {
-            model: videoModel,
-            variant: String(variant?.label || "").trim(),
-            variantIndex: variantIndex + 1,
-            variantCount: modelRequestVariants.length,
-            modelAttempt: modelAttempt + 1,
-            modelAttemptLimit
-          });
-          updateDialogueVideoJob({
+    let firstFrame = extendVideo
+      ? null
+      : (sceneReferenceVideoFrameBase64
+        ? { data: sceneReferenceVideoFrameBase64, mimeType: sceneReferenceVideoFrameMimeType }
+        : (continuityFrameBase64 ? { data: continuityFrameBase64, mimeType: continuityFrameMimeType } : null));
+    if (explicitLastFrame && !firstFrame) {
+      firstFrame = providerImages[sceneProviderImageStartIndex] || providerImages[0] || null;
+    }
+    try {
+      updateDialogueVideoJob({
+        status: "running",
+        stage: "request_provider",
+        progress: 0.18,
+        hint: `Generando con ${resolvedGenerator === "omni" ? "Gemini Omni" : "Veo 3.1"}.`,
+        generator: resolvedGenerator,
+        model: requestedModel,
+        promptVersion: PODCASTER_VIDEO_PROMPT_VERSION
+      });
+      const generated = resolvedGenerator === "omni"
+        ? await createOmniVideo({
+          client,
+          prompt,
+          images: providerImages,
+          referenceImages: providerImages.length > 1 || strictIdentity,
+          aspectRatio: requestedAspectRatio,
+          inSceneText,
+          previousInteractionId,
+          correctInSceneText,
+          timeoutMs: PROVIDER_TIMEOUT_MS
+        })
+        : await createVeoVideo({
+          client,
+          model: requestedModel,
+          prompt: veoPrompt,
+          images: (firstFrame || extendVideo || explicitLastFrame) ? [] : providerImages,
+          video: extendVideo ? sceneReferenceVideoInput : null,
+          firstFrame,
+          lastFrame: explicitLastFrame,
+          aspectRatio: requestedAspectRatio,
+          quality: requestedQuality,
+          highQuality,
+          durationSeconds: inferredTargetDurationSec,
+          extendVideo,
+          externalDialogueAudio: Boolean(dialogueAudioStoragePath || dialogueAudioUrl),
+          timeoutMs: PROVIDER_TIMEOUT_MS,
+          onPoll: () => updateDialogueVideoJob({
             status: "running",
-            stage: "request_variant",
-            progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, modelRequestVariants.length)) * 0.2))),
-            hint: `Probando ${videoModel} · ${String(variant?.label || "").trim() || "variant"}${requestRequiresSceneReference && modelAttempt > 0 ? ` (reintento ${modelAttempt + 1}/${modelAttemptLimit})` : ""}.`,
-            model: videoModel,
-            variant: String(variant?.label || "").trim(),
-            variantAttempt: variantIndex + 1,
-            modelAttempt: modelAttempt + 1,
-            segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
-            segmentCount: Number(req.body?.segmentCount || 0) || 0
-          });
-          const variantBody = {
-            ...variant.body,
-            parameters: applyVeoHdParameters(
-              variant.body.parameters,
-              isReel ? "9:16" : "16:9",
-              videoModel
-            )
-          };
-          const createOpResponse = await fetchCompat(
-            `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(variantBody)
-            }
-          );
-          const createData = await safeJson(createOpResponse);
-          if (!createOpResponse.ok) {
-            const detail = String(createData?.error?.message || createData?.error || `HTTP ${createOpResponse.status}`).trim();
-            lastStatus = Number(createOpResponse.status || 502);
-            lastErrorDetail = `${videoModel} [${variant.label}]: ${detail}`;
-            attemptErrors.push(lastErrorDetail);
-            if ([400, 401, 403, 404].includes(lastStatus)) continue;
-            return res.status(lastStatus).json(createData);
-          }
-          const operationName = String(createData?.name || "").trim();
-          if (!operationName) {
-            lastStatus = 502;
-            lastErrorDetail = `${videoModel} [${variant.label}]: no devolvió nombre de operación`;
-            attemptErrors.push(lastErrorDetail);
-            continue;
-          }
-          traceReferenceVideo("variant-operation-created", {
-            model: videoModel,
-            variant: String(variant?.label || "").trim(),
-            operationName,
-            modelAttempt: modelAttempt + 1,
-            modelAttemptLimit
-          });
-
-          let operationDone = null;
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            operationDone = await pollUntilDone(operationName, {
-              maxAttempts: requestedMaxOperationPollAttempts,
-              requireResolvedMedia: true,
-              resolveResult: resolveVeoVideoResult,
-              postDoneGraceAttempts: 6,
-              postDoneGraceDelayMs: 2500,
-              onPoll: ({ attempt, maxAttempts }) => {
-                if (attempt === 1 || attempt % 5 === 0) {
-                  traceReferenceVideo("variant-poll", {
-                    model: videoModel,
-                    variant: String(variant?.label || "").trim(),
-                    operationName,
-                    attempt,
-                    maxAttempts,
-                    modelAttempt: modelAttempt + 1,
-                    modelAttemptLimit
-                  });
-                }
-                if (attempt === 1 || attempt % 5 === 0) {
-                  logHeavyWorkMemory("dialogue_video", "poll_operation", {
-                    jobId,
-                    sessionId,
-                    rowId,
-                    attempt,
-                    maxAttempts
-                  });
-                  updateDialogueVideoJob({
-                    status: "running",
-                    stage: "poll_operation",
-                    progress: Math.max(0.22, Math.min(0.92, 0.22 + ((attempt / Math.max(1, maxAttempts)) * 0.56))),
-                    hint: `Esperando respuesta de Veo (${attempt}/${maxAttempts}).`,
-                    model: videoModel,
-                    variant: String(variant?.label || "").trim(),
-                    attempt,
-                    segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
-                    segmentCount: Number(req.body?.segmentCount || 0) || 0,
-                    modelAttempt: modelAttempt + 1,
-                    modelAttemptLimit
-                  });
-                }
-              }
-            });
-          } catch (error) {
-            lastStatus = Number(error?.status || 504) || 504;
-            lastErrorDetail = `${videoModel} [${variant.label}]: ${String(error?.message || "Error al esperar operación Veo.")}`;
-            attemptErrors.push(lastErrorDetail);
-            if (error?.code === "veo_operation_poll_timeout") {
-              traceReferenceVideo("variant-poll-timeout-stop", {
-                model: videoModel,
-                variant: String(variant?.label || "").trim(),
-                operationName: String(error?.operationName || operationName || "").trim(),
-                maxAttempts: requestedMaxOperationPollAttempts
-              });
-              return res.status(504).json({
-                error: "veo_operation_poll_timeout",
-                code: "veo_operation_poll_timeout",
-                message: "Veo sigue procesando la operación y no devolvió video antes del límite de espera. No se lanzaron variantes adicionales para evitar reiniciar la generación.",
-                detail: {
-                  model: videoModel,
-                  variant: String(variant?.label || "").trim(),
-                  operationName: String(error?.operationName || operationName || "").trim(),
-                  maxAttempts: requestedMaxOperationPollAttempts
-                }
-              });
-            }
-            continue;
-          }
-
-          const resolved = resolveVeoVideoResult(operationDone);
-          const videoUri = String(resolved?.uri || "").trim();
-          if (!videoUri && resolved?.inlineData?.data) {
-            traceReferenceVideo("variant-inline-video", {
-              model: videoModel,
-              variant: String(variant?.label || "").trim(),
-              operationName,
-              mimeType: String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4",
-              modelAttempt: modelAttempt + 1,
-              modelAttemptLimit
-            });
-            const mimeType = String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4";
-            const downloadedBuffer = Buffer.from(String(resolved.inlineData.data || ""), "base64");
-            if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
-              lastStatus = 413;
-              lastErrorDetail = `${videoModel} [${variant.label}]: video inline demasiado grande o vacío.`;
-              attemptErrors.push(lastErrorDetail);
-              continue;
-            }
-            finalVideoBuffer = downloadedBuffer;
-            finalVideoMimeType = mimeType.toLowerCase().startsWith("video/") ? mimeType : "video/mp4";
-            resolvedModel = videoModel;
-            resolvedVariant = String(variant?.label || "").trim();
-            break;
-          }
-          if (!videoUri) {
-            lastStatus = 502;
-            lastErrorDetail = `${videoModel} [${variant.label}]: operación completada sin URI de video`;
-            attemptErrors.push(lastErrorDetail);
-            modelReturnedDoneWithoutMedia = true;
-            const fallbackDecision = shouldContinueVariantFallback({
-              status: lastStatus,
-              reason: "done_without_media",
-              variantIndex,
-              variantCount: modelRequestVariants.length
-            });
-            traceReferenceVideo("variant-finished-without-media", {
-              model: videoModel,
-              variant: String(variant?.label || "").trim(),
-              operationName,
-              remainingVariants: fallbackDecision.remainingVariants,
-              continueCurrentModel: fallbackDecision.continueCurrentModel,
-              logReason: fallbackDecision.logReason
-            });
-            if (fallbackDecision.continueCurrentModel) {
-              continue;
-            }
-            break;
-          }
-          traceReferenceVideo("variant-video-uri", {
-            model: videoModel,
-            variant: String(variant?.label || "").trim(),
-            operationName,
-            videoUri,
-            modelAttempt: modelAttempt + 1,
-            modelAttemptLimit
-          });
-
-          // eslint-disable-next-line no-await-in-loop
-          const videoResponse = await fetchCompat(videoUri, {
-            method: "GET",
-            headers: {
-              "x-goog-api-key": GEMINI_API_KEY
-            }
-          });
-          logHeavyWorkMemory("dialogue_video", "download_generated_video", {
-            jobId,
-            sessionId,
-            rowId,
-            model: videoModel,
-            variant: String(variant?.label || "").trim()
-          });
-          if (!videoResponse.ok) {
-            // eslint-disable-next-line no-await-in-loop
-            const detail = await safeJson(videoResponse);
-            lastStatus = Number(videoResponse.status || 502) || 502;
-            lastErrorDetail = `${videoModel} [${variant.label}]: no se pudo descargar video (${String(detail?.error?.message || detail?.error || `HTTP ${videoResponse.status}`)})`;
-            attemptErrors.push(lastErrorDetail);
-            continue;
-          }
-
-          // eslint-disable-next-line no-await-in-loop
-          const downloadedBuffer = Buffer.from(await videoResponse.arrayBuffer());
-          if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
-            lastStatus = 413;
-            lastErrorDetail = `${videoModel} [${variant.label}]: video generado demasiado grande.`;
-            attemptErrors.push(lastErrorDetail);
-            continue;
-          }
-
-          finalVideoBuffer = downloadedBuffer;
-          finalVideoMimeType = String(videoResponse.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
-          if (!String(finalVideoMimeType).toLowerCase().startsWith("video/")) {
-            finalVideoMimeType = "video/mp4";
-          }
-          resolvedModel = videoModel;
-          resolvedVariant = String(variant?.label || "").trim();
-          break;
-        }
-        if (finalVideoBuffer) break;
-        if (!requestRequiresSceneReference) break;
-        if (!modelReturnedDoneWithoutMedia) break;
-        if (modelAttempt + 1 >= modelAttemptLimit) break;
-        traceReferenceVideo("reference-model-retry-scheduled", {
-          model: videoModel,
-          attempt: modelAttempt + 2,
-          maxAttempts: modelAttemptLimit
+            stage: "poll_operation",
+            progress: 0.52,
+            hint: "Esperando respuesta de Veo 3.1.",
+            generator: "veo",
+            model: requestedModel
+          })
         });
+      if (resolvedGenerator === "veo" && String(generated?.uri || "").trim()) {
+        resolvedProviderVideoUri = String(generated.uri).trim();
+        resolvedProviderVideoGeneratedAt = new Date().toISOString();
       }
-      if (finalVideoBuffer) break;
-      if (requestRequiresSceneReference && modelReturnedDoneWithoutMedia) {
-        traceReferenceVideo("reference-model-retries-exhausted", {
-          model: videoModel,
-          attemptedVariants: effectiveRequestVariants.length,
-          compatibleVariants: modelRequestVariants.length,
-          lastErrorDetail
-        });
-      } else if (modelReturnedDoneWithoutMedia) {
-        traceReferenceVideo("switch-model-after-empty-media", {
-          failedModel: videoModel,
-          nextCandidates: modelExecutionPlan.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
-          attemptedVariants: effectiveRequestVariants.length,
-          compatibleVariants: modelRequestVariants.length,
-          lastErrorDetail
-        });
-        updateDialogueVideoJob({
-          status: "running",
-          stage: "switch_model",
-          progress: 0.72,
-          hint: `Cambiando de modelo tras respuesta vacia de ${videoModel}.`,
-          model: videoModel
-        });
-      }
+      updateDialogueVideoJob({
+        status: "running",
+        stage: "download_generated_video",
+        progress: 0.82,
+        hint: "Descargando el video generado.",
+        generator: generated.generator,
+        model: generated.model
+      });
+      mediaProcessingDeadlineAt = Date.now() + MEDIA_TIMEOUT_MS;
+      const materialized = await materializeGeneratedVideo({
+        media: generated,
+        apiKey: GEMINI_API_KEY,
+        apiBase: GEMINI_BASE,
+        fetchFn: fetchCompat,
+        maxBytes: MAX_DIALOGUE_VIDEO_BYTES,
+        timeoutMs: Math.max(1000, mediaProcessingDeadlineAt - Date.now())
+      });
+      finalVideoBuffer = Buffer.from(materialized.buffer);
+      finalVideoMimeType = String(materialized.mimeType || generated.mimeType || "video/mp4").trim() || "video/mp4";
+      resolvedModel = String(generated.model || requestedModel).trim() || requestedModel;
+      resolvedVariant = String(generated.variant || "official-sdk").trim() || "official-sdk";
+      resolvedInteractionId = String(generated.interactionId || "").trim();
+      resolvedOperationName = String(generated.operationName || "").trim();
+      effectiveDurationSec = Number(generated.durationSeconds || inferredTargetDurationSec) || inferredTargetDurationSec;
+      effectiveResolution = String(generated.resolution || effectiveResolution || "").trim() || null;
+      console.info(`[backend][${requestDebugTag}] video-provider-complete`, {
+        generator: resolvedGenerator,
+        model: resolvedModel,
+        promptVersion: PODCASTER_VIDEO_PROMPT_VERSION,
+        promptHash,
+        textPolicy: requestedTextPolicy,
+        aspectRatio: requestedAspectRatio,
+        requestedDurationSec: inferredTargetDurationSec,
+        effectiveDurationSec,
+        resolution: effectiveResolution,
+        promptLanguage: visualPromptNormalization.promptLanguage,
+        promptTranslated: visualPromptNormalization.translated,
+        promptTranslationModel: visualPromptNormalization.model,
+        highQuality,
+        removedDirectiveFields: timelineScenePromptBundle?.removedDirectives?.map((item) => item.field) || [],
+        hasInteractionId: Boolean(resolvedInteractionId),
+        hasOperationName: Boolean(resolvedOperationName)
+      });
+    } catch (error) {
+      lastStatus = Number(error?.status || (error?.name === "AbortError" ? 504 : 502)) || 502;
+      lastErrorDetail = String(error?.message || "No se pudo generar video con Gemini.").trim();
+      lastErrorCode = String(error?.code || (error?.name === "AbortError" ? "video_provider_timeout" : "video_generation_failed")).trim();
+      attemptErrors.push(lastErrorDetail);
+      console.error(`[backend][${requestDebugTag}] video-provider-failed`, {
+        generator: resolvedGenerator,
+        model: requestedModel,
+        code: String(error?.code || "").trim() || undefined,
+        status: lastStatus,
+        message: lastErrorDetail,
+        promptHash
+      });
     }
 
     if (!finalVideoBuffer) {
@@ -9987,12 +9578,14 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       });
       if (strictIdentity) {
         return res.status(lastStatus >= 400 ? lastStatus : 502).json({
-          error: `No se pudo mantener identidad del locutor con referenceImages. ${lastErrorDetail}`
+          error: `No se pudo mantener identidad del locutor con referenceImages. ${lastErrorDetail}`,
+          code: lastErrorCode
         });
       }
       const errorPreview = attemptErrors.slice(-4).join(" | ");
       return res.status(lastStatus >= 400 ? lastStatus : 502).json({
-        error: errorPreview ? `${lastErrorDetail}. Intentos: ${errorPreview}` : lastErrorDetail
+        error: errorPreview ? `${lastErrorDetail}. Intentos: ${errorPreview}` : lastErrorDetail,
+        code: lastErrorCode
       });
     }
 
@@ -10007,7 +9600,10 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         rowId,
         sourceBytes: sourceVideoBytes
       });
-      transcodeMeta = await transcodeDialogueVideoToMp4(finalVideoBuffer, sourceVideoMimeType);
+      transcodeMeta = await transcodeDialogueVideoToMp4(finalVideoBuffer, sourceVideoMimeType, {
+        deadlineAt: mediaProcessingDeadlineAt || (Date.now() + MEDIA_TIMEOUT_MS),
+        timeoutMs: MEDIA_TIMEOUT_MS
+      });
       finalVideoBuffer = Buffer.from(transcodeMeta.buffer);
       finalVideoMimeType = String(transcodeMeta.mimeType || "video/mp4").trim() || "video/mp4";
     } catch (error) {
@@ -10112,7 +9708,20 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         enhanceFromExistingVideo: enhanceFromExistingVideo ? "1" : "0",
         regenerationAnalysisFrames: String(Math.max(0, Number(regenerationAnalysis?.frameCount || 0) || 0)),
         usedSceneReference: (hasSceneReferenceVideo || useSceneReferenceAsInitImage) ? "1" : "0",
+        generator: resolvedGenerator,
         model: resolvedModel,
+        promptVersion: PODCASTER_VIDEO_PROMPT_VERSION,
+        promptHash,
+        textPolicy: requestedTextPolicy,
+        aspectRatio: requestedAspectRatio,
+        requestedDurationSec: String(inferredTargetDurationSec),
+        effectiveDurationSec: String(effectiveDurationSec),
+        resolution: String(effectiveResolution || "provider-default"),
+        promptLanguage: visualPromptNormalization.promptLanguage,
+        promptTranslated: visualPromptNormalization.translated ? "1" : "0",
+        promptTranslationModel: String(visualPromptNormalization.model || "none"),
+        highQuality: highQuality ? "1" : "0",
+        removedDirectiveFields: (timelineScenePromptBundle?.removedDirectives || []).map((item) => item.field).join(",").slice(0, 220),
         sourceMimeType: sourceVideoMimeType,
         videoCodec: String(transcodeMeta?.videoCodec || "h264").trim() || "h264",
         audioCodec: String(transcodeMeta?.audioCodec || "aac").trim() || "aac",
@@ -10137,13 +9746,43 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         audioCodec: String(transcodeMeta?.audioCodec || "aac").trim() || "aac",
         transcoded: dialogueVideoWasTranscoded,
         model: resolvedModel,
+        generator: resolvedGenerator,
+        provider: "gemini",
         variant: resolvedVariant || null,
-        promptVersion: "podcaster_veo_v1",
+        promptVersion: PODCASTER_VIDEO_PROMPT_VERSION,
+        promptHash,
+        promptLanguage: visualPromptNormalization.promptLanguage,
+        promptTranslated: visualPromptNormalization.translated,
+        promptTranslationModel: visualPromptNormalization.model,
+        quality: requestedQuality,
+        highQuality,
+        textPolicy: requestedTextPolicy,
+        aspectRatio: requestedAspectRatio,
+        resolution: effectiveResolution,
+        interactionId: resolvedInteractionId || null,
+        operationName: resolvedOperationName || null,
+        providerVideoUri: resolvedProviderVideoUri || null,
+        providerVideoGeneratedAt: resolvedProviderVideoGeneratedAt || null,
+        providerVideoGenerator: resolvedProviderVideoUri ? "veo" : null,
+        providerVideoModel: resolvedProviderVideoUri ? resolvedModel : null,
+        providerVideoResolution: resolvedProviderVideoUri ? effectiveResolution : null,
+        providerVideoAspectRatio: resolvedProviderVideoUri ? requestedAspectRatio : null,
+        providerVideoDurationSec: resolvedProviderVideoUri ? effectiveDurationSec : null,
+        removedTextDirectives: (timelineScenePromptBundle?.removedDirectives || []).map((item) => ({
+          field: clampText(item?.field || "", 80),
+          count: Math.max(1, Math.min(100, Math.round(Number(item?.count) || 1)))
+        })).filter((item) => item.field),
         videoDirective,
         scenePrompt: sceneVisualPrompt,
         imagePrompts: sceneImagePromptList,
         contentMode: educationalVideo ? "educational" : "podcast",
-        durationSec: inferredTargetDurationSec,
+        durationSec: effectiveDurationSec,
+        requestedDurationSec: inferredTargetDurationSec,
+        headlineText,
+        captionText,
+        inSceneText,
+        overlayMode,
+        textSource,
         targetSpeechLine: text,
         updatedAt: new Date().toISOString(),
         storagePath: asset.path,
@@ -10380,10 +10019,10 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       }
 
       const legacyUpstream = await fetchCompat(
-        `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify(legacyPayload)
         }
       );
@@ -11269,6 +10908,7 @@ function normalizeMontageExportRequestBody(body = {}) {
       id: clampText(segment?.id || `text-${idx + 1}`, 140) || `text-${idx + 1}`,
       rowId: clampText(segment?.rowId || "", 140),
       sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || idx + 1) || idx + 1)),
+      karaokeTokenOffset: Math.max(0, Math.min(10000, Math.round(Number(segment?.karaokeTokenOffset || 0) || 0))),
       text,
       wrappedText,
       startMs,
@@ -13382,7 +13022,9 @@ async function appendMontageSceneOnScreenTextAssFilters({
     );
     const audioClip = resolveMontageKaraokeAudioClip(input, String(segment.rowId || "").trim());
     const wordTimings = input.partyKaraoke !== false
-      ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim())
+      ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim(), {
+        tokenOffset: segment.karaokeTokenOffset
+      })
       : [];
     return {
       startSec,
@@ -15311,7 +14953,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
           const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
           const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
-          let wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim()) : [];
+          let wordTimings = input.partyKaraoke !== false
+            ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim(), {
+              tokenOffset: segment.karaokeTokenOffset
+            })
+            : [];
           const playbackRate = Math.max(0.5, Math.min(10, Number(segment.playbackRate || audioClip?.playbackRate || 1) || 1));
           return {
             startSec,
@@ -17445,10 +17091,10 @@ app.post("/api/moodle/module-graphics/analyze-element", async (req, res) => {
     ].join("\n");
 
     const upstream = await fetchCompat(
-      `${GEMINI_BASE}/models/${encodeURIComponent("gemini-2.5-flash")}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      `${GEMINI_BASE}/models/${encodeURIComponent(DEFAULT_GEMINI_TEXT_MODEL)}:generateContent`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
         body: JSON.stringify({
           contents: [{
             role: "user",
@@ -17516,23 +17162,28 @@ app.get("/api/gemini/generate", (_req, res) => {
 app.post("/api/gemini/generate", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
-    const model = normalizeModel(req.body?.model);
-    const originalPayload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const requestedModel = normalizeModel(req.body?.model);
+    const rawPayload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const taskProfile = clampText(
+      req.body?.taskProfile
+        || req.body?.task
+        || rawPayload?.taskProfile
+        || rawPayload?.metadata?.taskProfile
+        || "",
+      100
+    ).toLowerCase();
+    const originalPayload = JSON.parse(JSON.stringify(rawPayload || {}));
+    delete originalPayload.taskProfile;
+    if (taskProfile && String(originalPayload?.task || "").trim().toLowerCase() === taskProfile) {
+      delete originalPayload.task;
+    }
+    const isHeadlineTask = taskProfile === "podcaster_headline_copy_v2";
+    const isCreativeVideoTask = taskProfile === "podcaster_creative_video_script_v2";
+    const model = isHeadlineTask ? DEFAULT_GEMINI_TEXT_MODEL : requestedModel;
 
     const isCreativeVideoPayload = (payload = {}) => {
-      try {
-        const systemText = String(payload?.systemInstruction?.parts?.map((p) => p?.text).filter(Boolean).join(" ") || "").toLowerCase();
-        const userText = String(payload?.contents?.map((c) => c?.parts?.map((p) => p?.text).filter(Boolean).join("\n")).filter(Boolean).join("\n") || "").toLowerCase();
-        return (
-          systemText.includes("videos cortos creativos")
-          || systemText.includes("video corto creativo")
-          || systemText.includes("video creativo")
-          || userText.includes("video creativo")
-          || userText.includes("video corto creativo")
-        );
-      } catch (_) {
-        return false;
-      }
+      void payload;
+      return isCreativeVideoTask;
     };
 
     const looksLikeEducationalTemplateText = (text = "") => {
@@ -17573,7 +17224,14 @@ app.post("/api/gemini/generate", async (req, res) => {
     };
 
     const shouldAugmentCreative = isCreativeVideoPayload(originalPayload);
-    const payload = shouldAugmentCreative ? augmentCreativeVideoPayload(originalPayload) : originalPayload;
+    let payload = shouldAugmentCreative ? augmentCreativeVideoPayload(originalPayload) : originalPayload;
+    if (isHeadlineTask) {
+      payload = JSON.parse(JSON.stringify(payload || {}));
+      payload.generationConfig = payload.generationConfig && typeof payload.generationConfig === "object"
+        ? payload.generationConfig
+        : {};
+      payload.generationConfig.temperature = 0.25;
+    }
 
     const serialized = JSON.stringify(payload || {});
     if (Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
@@ -17586,19 +17244,17 @@ app.post("/api/gemini/generate", async (req, res) => {
         payloadSize: serialized.length,
         hasRowsSchema: Boolean(payload?.generationConfig?.responseJsonSchema?.properties?.rows),
         responseMimeType: String(payload?.generationConfig?.responseMimeType || ""),
-        promptPreview: String(
-          payload?.contents?.map((c) => c?.parts?.map((p) => p?.text).filter(Boolean).join("\n")).filter(Boolean).join("\n") || ""
-        ).slice(0, 240)
+        taskProfile
       });
     } else {
-      console.log(`[GEMINI] model=${model}, payloadSize=${serialized.length}`);
+      console.log(`[GEMINI] model=${model}, payloadSize=${serialized.length}, taskProfile=${taskProfile || "generic"}`);
     }
 
-    const endpoint = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+    const endpoint = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
     const doRequest = async (bodyJson) => {
       const upstream = await fetchCompat(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
         body: bodyJson
       });
       const data = await safeJson(upstream);
@@ -17633,7 +17289,7 @@ app.post("/api/gemini/generate", async (req, res) => {
           blockReasonMessage: String(data?.promptFeedback?.blockReasonMessage || ""),
           safetyRatings: Array.isArray(data?.promptFeedback?.safetyRatings) ? data.promptFeedback.safetyRatings.length : 0
         } : null,
-        textPreview: text.slice(0, 260),
+        responseTextLength: text.length,
         looksEducational: looksLikeEducationalTemplateText(text)
       });
     }
@@ -17675,9 +17331,9 @@ app.get("/api/gemini/models", async (_req, res) => {
   if (!ensureGeminiGenerativeServiceEnabled(res)) return;
   if (!ensureGeminiKey(res)) return;
   try {
-    const upstream = await fetchCompat(`${GEMINI_BASE}/models?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    const upstream = await fetchCompat(`${GEMINI_BASE}/models`, {
       method: "GET",
-      headers: { "Content-Type": "application/json" }
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY }
     });
     const data = await safeJson(upstream);
     return res.status(upstream.status).json(data);
@@ -17985,16 +17641,21 @@ app.get("/api/assets/montage-download", async (req, res) => {
 
 app.get("/api/assets/proxy-media", async (req, res) => {
   const requestId = randomUUID().slice(0, 8);
+  let upstreamLifecycle = null;
   try {
     applyAssetCorsHeaders(req, res);
     const ignoreRange = String(req.query?.noRange || "").trim() === "1" || String(req.query?.noRange || "").trim().toLowerCase() === "true";
-    const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
+    const rawStoragePath = clampText(req.query?.storagePath || "", 700);
+    const gsStorageReference = parseGsStorageReference(rawStoragePath);
+    const storagePath = normalizeStorageFilePath(rawStoragePath);
+    const storageBucketFromReference = String(gsStorageReference?.bucketName || "").trim();
     const rawUrl = String(req.query?.url || "").trim();
     const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
     const rangeHeader = ignoreRange ? "" : String(req.headers.range || "").trim();
     console.info("[backend][proxy-media][request-start]", {
       requestId,
       storagePath: storagePath || undefined,
+      storageBucket: storageBucketFromReference || undefined,
       rawUrl: rawUrl ? redactUrlForLogs(rawUrl) : undefined,
       normalizedUrl: normalizedUrl ? redactUrlForLogs(normalizedUrl) : undefined,
       hasRange: Boolean(rangeHeader),
@@ -18008,7 +17669,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         hasRange: Boolean(rangeHeader)
       });
       const storageResult = await streamStorageObjectToResponse(req, res, storagePath, rangeHeader, {
-        bucketFromUrl: ""
+        bucketFromUrl: storageBucketFromReference
       });
       console.info("[backend][proxy-media][storage-result]", {
         requestId,
@@ -18023,7 +17684,12 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       if (storageResult?.status) {
         applyAssetCorsHeaders(req, res);
         return res.status(storageResult.status).json({
-          error: storageResult.status === 403 ? "Archivo no accesible en Storage." : "Archivo no encontrado en Storage.",
+          error: storageResult.status === 403
+            ? "Archivo no accesible en Storage."
+            : storageResult.status === 503
+              ? "Storage cerró temporalmente la conexión; vuelve a intentar."
+              : "Archivo no encontrado en Storage.",
+          code: storageResult.code || undefined,
           detail: storageResult.detail || {
             storagePath
           }
@@ -18111,10 +17777,15 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       hasRange: !!rangeHeader
     });
 
-    const upstream = await fetchCompat(finalRequestUrl, {
-      method: "GET",
-      headers: proxyHeaders
-    });
+    const upstream = await fetchProxyMediaWithTimeout(
+      fetchCompat,
+      finalRequestUrl,
+      {
+        method: "GET",
+        headers: proxyHeaders
+      },
+      PROXY_MEDIA_UPSTREAM_HEADERS_TIMEOUT_MS
+    );
     if (!upstream.ok && upstream.status !== 206) {
       applyAssetCorsHeaders(req, res);
       const body = await safeJson(upstream);
@@ -18145,46 +17816,43 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       contentRange: contentRange || null,
       acceptRanges
     });
-    let responseFinished = false;
-    res.once("finish", () => {
-      responseFinished = true;
-    });
-    const maybeDestroyUpstream = (reason = "response-close") => {
-      const shouldDestroy = shouldDestroyProxyMediaUpstream({
-        requestAborted: req.destroyed === true || reason === "request-aborted",
-        responseFinished,
-        responseClosed: reason === "response-close"
-      });
-      if (!shouldDestroy) return;
-      if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
+    upstreamLifecycle = bindProxyMediaStreamLifecycle(req, res, stream, {
+      onDisconnect: (reason) => {
         console.info("[backend][proxy-media] closing upstream body stream", {
           requestId,
           reason
         });
-        stream.destroy();
       }
-    };
-    req.once("aborted", () => {
-      maybeDestroyUpstream("request-aborted");
-    });
-    res.once("close", () => {
-      maybeDestroyUpstream("response-close");
     });
     res.setHeader("Content-Type", mime);
     if (contentLength) res.setHeader("Content-Length", contentLength);
     if (contentRange) res.setHeader("Content-Range", contentRange);
     if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
     if (cacheControl) res.setHeader("Cache-Control", cacheControl);
-    await safePipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
+    try {
+      await safePipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
+    } finally {
+      upstreamLifecycle.cleanup();
+    }
     return;
   } catch (error) {
-    const errorText = String(error?.code || error?.message || "").trim();
-    const isClientAbort = req.destroyed || error?.code === "ERR_STREAM_PREMATURE_CLOSE";
+    const isClientAbort = upstreamLifecycle?.wasClientDisconnected?.() === true
+      || req.aborted === true
+      || (res.destroyed === true && res.writableFinished !== true);
     if (isClientAbort) {
       console.info("[backend][proxy-media] request closed before completion", {
         requestId,
         message: String(error?.message || error)
       });
+      return;
+    }
+    if (res.headersSent) {
+      console.error("[backend][proxy-media][stream-error-after-headers]", {
+        requestId,
+        message: String(error?.message || error),
+        code: String(error?.code || "").trim() || null
+      });
+      if (!res.destroyed) res.destroy(error);
       return;
     }
     applyAssetCorsHeaders(req, res);

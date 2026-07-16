@@ -4,6 +4,14 @@ function parseHttpByteRange(rangeHeader = "", total = 0) {
   if (!raw || !totalBytes) return null;
   const match = raw.match(/^bytes=(\d*)-(\d*)$/i);
   if (!match) return null;
+  if (!match[1] && match[2]) {
+    const suffixLength = Math.max(0, Number(match[2] || 0));
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return null;
+    return {
+      start: Math.max(0, totalBytes - suffixLength),
+      end: totalBytes - 1
+    };
+  }
   const start = match[1] ? Math.max(0, Number(match[1] || 0)) : 0;
   const end = match[2] ? Math.min(totalBytes - 1, Number(match[2] || (totalBytes - 1))) : totalBytes - 1;
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= totalBytes) return null;

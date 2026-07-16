@@ -1,44 +1,51 @@
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(
-  new URL("../public/podcaster/podcaster-video-generator.js", import.meta.url),
-  "utf8"
+const frontendSource = readFileSync(new URL("../public/podcaster/podcaster-video-generator.js", import.meta.url), "utf8");
+const backendSource = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
+const providerSource = readFileSync(new URL("../backend/podcaster-video-provider.js", import.meta.url), "utf8");
+
+assert.match(
+  frontendSource,
+  /maxModelAttempts:\s*1/,
+  "La escena debe declarar un único intento de modelo."
 );
-const backendSource = readFileSync(
-  new URL("../backend/server.js", import.meta.url),
-  "utf8"
+assert.doesNotMatch(
+  frontendSource,
+  /maxModelAttempts:\s*options\.maxModelAttempts \|\| [2-9]/,
+  "El cliente no debe pedir fallback silencioso hacia otros modelos."
+);
+assert.match(
+  backendSource,
+  /const videoModels = \[requestedModel\];/,
+  "El backend debe ejecutar exactamente el modelo resuelto."
+);
+assert.match(
+  backendSource,
+  /No fallback silencioso: una solicitud aceptada usa exactamente un proveedor\/modelo/,
+  "La regla de no fallback debe quedar documentada junto al routing."
 );
 
-if (!/maxModelAttempts:\s*options\.maxModelAttempts \|\| 3,/.test(source)) {
-  throw new Error("La generación de escena debe permitir fallback por defecto hacia un tercer modelo cuando los dos primeros no resuelven media.");
-}
+assert.match(
+  frontendSource,
+  /await runtime\.hydrateSessionReferenceMedia\(session\)/,
+  "La generación debe rehidratar las referencias antes de construir el payload."
+);
 
-if (!/maxVariantAttempts:\s*options\.maxVariantAttempts \|\| 6/.test(source)) {
-  throw new Error("La generación de escena debe permitir suficientes variantes por defecto para alcanzar los fallbacks después de reference-scene.");
-}
+assert.match(
+  providerSource,
+  /error\.code = "veo_operation_poll_timeout";/,
+  "El timeout de polling debe conservar un código estable."
+);
+assert.match(
+  providerSource,
+  /No se inició otro modelo/,
+  "El timeout debe explicar que no se inició otro modelo."
+);
+assert.doesNotMatch(
+  providerSource,
+  /fallbackModels|nextModel|modelIndex \+= 1/,
+  "El adaptador no debe continuar con otro modelo tras timeout o aceptación."
+);
 
-if (!/await runtime\.hydrateSessionReferenceMedia\(session\)/.test(source)) {
-  throw new Error("La generación de escena debe rehidratar referencias locales antes de construir el payload para Veo.");
-}
-
-if (!/err\.code\s*=\s*"veo_operation_poll_timeout"/.test(backendSource)) {
-  throw new Error("El timeout de polling de Veo debe marcarse con un código estable para diferenciarlo de fallbacks recuperables.");
-}
-
-if (!/variant-poll-timeout-stop/.test(backendSource)) {
-  throw new Error("El backend debe registrar cuando detiene los fallbacks por timeout de polling de Veo.");
-}
-
-if (!/error:\s*"veo_operation_poll_timeout"[\s\S]*?No se lanzaron variantes adicionales para evitar reiniciar la generación/.test(backendSource)) {
-  throw new Error("El backend debe responder 504 en timeout de polling sin lanzar variantes adicionales que reinicien la espera.");
-}
-
-if (/scene_reference_image_unavailable/.test(backendSource)) {
-  throw new Error("Una referencia de escena no disponible no debe abortar toda la generación cuando el backend puede continuar con retrato/prompt.");
-}
-
-if (!/stage:\s*"scene_reference_unavailable"[\s\S]*?se continuará con el retrato y el prompt/.test(backendSource)) {
-  throw new Error("El backend debe reportar referencia de escena no disponible como warning recuperable.");
-}
-
-console.log("Podcaster scene video reference variant fallback budget OK.");
+console.log("Podcaster single-model video operation budget v2 OK.");

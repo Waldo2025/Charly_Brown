@@ -30,13 +30,37 @@ const STUDIO_GEMINI_SCENE_DELAY_MS = readRuntimeNumber("STUDIO_GEMINI_SCENE_DELA
 const VIDEO_SCENE_MAX_SEC = readRuntimeNumber("VIDEO_SCENE_MAX_SEC", 8);
 const STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS = readRuntimeNumber("STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS", 7000);
 const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
+  "auto",
+  "gemini-omni-flash-preview",
   "veo-3.1-generate-preview",
   "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview",
-  "veo-3.0-generate-001",
-  "veo-3.0-fast-generate-001",
-  "veo-2.0-generate-001"
+  "veo-3.1-lite-generate-preview"
 ]);
+
+const PODCASTER_VIDEO_ROUTING_VERSION = 2;
+
+function migrateLegacyPodcasterVideoModel(raw = {}) {
+  const requestedModel = String(raw?.videoModel || "").trim();
+  const hasModernRouting = Math.max(0, Number(raw?.videoRoutingVersion || 0) || 0) >= PODCASTER_VIDEO_ROUTING_VERSION;
+  if (!requestedModel) return "auto";
+  if (AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel)) {
+    // Lite used to be the implicit default. Only preserve it after a user has
+    // saved the modern selector at least once; legacy sessions migrate to auto.
+    if (requestedModel === "veo-3.1-lite-generate-preview" && !hasModernRouting) return "auto";
+    return requestedModel;
+  }
+  if (requestedModel === "veo-3.0-fast-generate-001") return "veo-3.1-fast-generate-preview";
+  if (requestedModel === "veo-3.0-generate-001") return "veo-3.1-generate-preview";
+  if (requestedModel === "veo-2.0-generate-001") return "veo-3.1-generate-preview";
+  return "auto";
+}
+
+function resolvePodcasterVideoGeneratorForModel(model = "auto") {
+  const normalized = String(model || "auto").trim();
+  if (normalized === "gemini-omni-flash-preview") return "omni";
+  if (normalized.startsWith("veo-")) return "veo";
+  return "auto";
+}
 
 // Dynamic lookups for functions/vars defined in podcaster.js (loaded after this script)
 const toFiniteNumber = (v, fallback) => (window.toFiniteNumber || ((val, fb) => {
@@ -330,8 +354,14 @@ function normalizeOnScreenTextTrackSettings(raw = {}) {
 }
 
 function getOnScreenTextClipText(row = null) {
+  const canonicalResolver = window.PodcasterOnScreenTextRenderSpec?.resolvePodcasterSceneOverlayText;
+  if (typeof canonicalResolver === "function") {
+    return String(canonicalResolver(row) || "").replace(/\s+/g, " ").trim();
+  }
   return String(
-    row?.onScreenText
+    row?.headlineText
+    || row?.captionText
+    || row?.onScreenText
     || row?.textoPantalla
     || row?.textoEnPantalla
     || ""
@@ -800,7 +830,7 @@ function buildTimelineVariantTrackDescriptor(baseSpeakerKey = "", existingTracks
   };
 }
 
-function buildDefaultTimelineTracks(session = null) {
+export function buildDefaultTimelineTracks(session = null) {
   const activeSession = session || getActiveSession();
   const rows = getSessionRows(activeSession);
   const seenSpeakers = new Set();
@@ -902,19 +932,29 @@ function normalizePodcastVideoConfig(raw = {}) {
     return next;
   })();
   const geminiDialogueTrackIndex = Math.max(0, Math.min(999, Math.floor(toFiniteNumber(raw?.geminiDialogueTrackIndex, 0))));
-  const normalizedVideoModel = (() => {
-    const requestedModel = String(raw?.videoModel || "").trim();
-    if (requestedModel && AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel)) return requestedModel;
-    return raw?.cheapVideoMode === false ? "veo-3.1-generate-preview" : "veo-3.1-lite-generate-preview";
-  })();
+  const routingVersion = Math.max(0, Number(raw?.videoRoutingVersion || 0) || 0);
+  const requestedVideoGenerator = String(raw?.videoGenerator || "").trim().toLowerCase();
+  const hasExplicitModernGenerator = routingVersion >= PODCASTER_VIDEO_ROUTING_VERSION
+    && ["auto", "omni", "veo"].includes(requestedVideoGenerator);
+  let normalizedVideoModel = migrateLegacyPodcasterVideoModel(raw);
+  const normalizedVideoGenerator = hasExplicitModernGenerator
+    ? requestedVideoGenerator
+    : resolvePodcasterVideoGeneratorForModel(normalizedVideoModel);
+  if (normalizedVideoGenerator === "auto") normalizedVideoModel = "auto";
+  if (normalizedVideoGenerator === "omni") normalizedVideoModel = "gemini-omni-flash-preview";
+  if (normalizedVideoGenerator === "veo" && !normalizedVideoModel.startsWith("veo-")) {
+    normalizedVideoModel = "veo-3.1-generate-preview";
+  }
   return {
     enabled: raw?.enabled === true,
     editorEnabled: raw?.editorEnabled === true,
     autoGenerateScenarioImages: raw?.autoGenerateScenarioImages === true,
     autoGeneratePortraits: raw?.autoGeneratePortraits === true,
     allowLivePreviewWithoutStoredAudio: raw?.allowLivePreviewWithoutStoredAudio === true,
-    cheapVideoMode: raw?.cheapVideoMode !== false,
+    cheapVideoMode: normalizedVideoModel === "veo-3.1-lite-generate-preview",
     videoModel: normalizedVideoModel,
+    videoGenerator: normalizedVideoGenerator,
+    videoRoutingVersion: PODCASTER_VIDEO_ROUTING_VERSION,
     timelineVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineVersion, STUDIO_TIMELINE_VERSION))),
     timelineTrackVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineTrackVersion, STUDIO_TIMELINE_TRACK_VERSION))),
     timelineTracks: normalizeTimelineTracks(raw?.timelineTracks || []),

@@ -4105,8 +4105,9 @@ body.is-resizing-podcast-stage {
 .podcast-stage-fullscreen-controls-host {
   position: absolute;
   left: 50%;
-  bottom: 18px;
-  z-index: 14;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  /* Debe quedar sobre cards/overlays interactivos del escenario (z-index 38+). */
+  z-index: 120;
   transform: translateX(-50%);
   width: min(92%, 980px);
   display: none;
@@ -4117,6 +4118,21 @@ body.is-resizing-podcast-stage {
 .is-stage-fullscreen .podcast-stage-fullscreen-controls-host,
 .is-stage-expanded .podcast-stage-fullscreen-controls-host {
   display: flex;
+  pointer-events: auto;
+}
+
+/*
+ * El controlador mueve aquí transportes que originalmente pueden ser
+ * `position:absolute` (por ejemplo #playerControls). Normalizarlos evita un
+ * host de altura cero y garantiza que su superficie visible reciba clicks.
+ */
+.podcast-stage-fullscreen-controls-host > .is-attached-to-stage-fullscreen {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 1;
+  max-width: 100%;
+  transform: none !important;
+  pointer-events: auto !important;
 }
 
 .is-stage-fullscreen .podcast-stage-brand-mark,
@@ -4129,6 +4145,8 @@ body.is-resizing-podcast-stage {
 .is-stage-expanded .podcast-stage-fullscreen-btn {
   right: 18px;
   bottom: 18px;
+  z-index: 130;
+  pointer-events: auto;
 }
 
 .is-stage-fullscreen .podcast-video-transport-group.is-middle,

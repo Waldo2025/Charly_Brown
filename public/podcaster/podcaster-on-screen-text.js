@@ -164,6 +164,11 @@
   const STUDIO_ONSCREEN_TEXT_DEFAULT_BOTTOM_EDGE_PCT = 0.86;
   const STUDIO_ONSCREEN_TEXT_LEGACY_DEFAULT_X_PCT = 0.21;
   const STUDIO_ONSCREEN_TEXT_LEGACY_DEFAULT_Y_PCT = 0.7;
+  const PODCAST_HEADLINE_MIN_WORDS = 2;
+  const PODCAST_HEADLINE_MAX_WORDS = 6;
+  const PODCAST_HEADLINE_MAX_CHARS = 48;
+  const PODCAST_OVERLAY_MODES = new Set(["none", "headline", "captions", "both"]);
+  const PODCAST_TEXT_SOURCES = new Set(["generated", "manual", "migrated"]);
 
   function toFiniteNumber(v, f) {
     const n = Number(v);
@@ -183,6 +188,157 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function normalizePodcasterTextValue(value = "", options = {}) {
+    const preserveLineBreaks = options?.preserveLineBreaks === true;
+    if (!preserveLineBreaks) {
+      return String(value ?? "").replace(/\s+/g, " ").trim();
+    }
+    return String(value ?? "")
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/[\t\f\v ]+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  function countPodcasterTextWords(value = "") {
+    return normalizePodcasterTextValue(value).split(/\s+/).filter(Boolean).length;
+  }
+
+  function isValidPodcasterHeadlineText(value = "") {
+    const text = normalizePodcasterTextValue(value);
+    if (!text) return true;
+    const wordCount = countPodcasterTextWords(text);
+    return text.length <= PODCAST_HEADLINE_MAX_CHARS
+      && wordCount >= PODCAST_HEADLINE_MIN_WORDS
+      && wordCount <= PODCAST_HEADLINE_MAX_WORDS;
+  }
+
+  function normalizePodcasterHeadlineText(value = "", options = {}) {
+    const text = normalizePodcasterTextValue(value);
+    if (!text) return "";
+    if (options?.strict === true && !isValidPodcasterHeadlineText(text)) return "";
+    return text;
+  }
+
+  function normalizePodcasterInSceneText(value = "", options = {}) {
+    const text = normalizePodcasterTextValue(value);
+    if (!text) return "";
+    const isValid = text.length <= PODCAST_HEADLINE_MAX_CHARS
+      && countPodcasterTextWords(text) <= PODCAST_HEADLINE_MAX_WORDS;
+    if (options?.strict === true && !isValid) return "";
+    return text;
+  }
+
+  function normalizePodcasterOverlayMode(value = "", fallback = "none") {
+    const key = String(value || "").trim().toLowerCase();
+    if (PODCAST_OVERLAY_MODES.has(key)) return key;
+    const safeFallback = String(fallback || "none").trim().toLowerCase();
+    return PODCAST_OVERLAY_MODES.has(safeFallback) ? safeFallback : "none";
+  }
+
+  function normalizePodcasterTextSource(value = "", fallback = "manual") {
+    const key = String(value || "").trim().toLowerCase();
+    if (PODCAST_TEXT_SOURCES.has(key)) return key;
+    const safeFallback = String(fallback || "manual").trim().toLowerCase();
+    return PODCAST_TEXT_SOURCES.has(safeFallback) ? safeFallback : "manual";
+  }
+
+  function normalizeComparablePodcasterText(value = "") {
+    return normalizePodcasterTextValue(value)
+      .toLocaleLowerCase("es")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function resolvePodcasterSceneOverlayText(row = null) {
+    const source = row && typeof row === "object" ? row : {};
+    const headlineText = normalizePodcasterHeadlineText(source.headlineText);
+    const captionText = normalizePodcasterTextValue(source.captionText, { preserveLineBreaks: true });
+    const fallbackMode = headlineText && captionText
+      ? "both"
+      : (headlineText ? "headline" : (captionText ? "captions" : "none"));
+    const overlayMode = normalizePodcasterOverlayMode(source.overlayMode, fallbackMode);
+    if (overlayMode === "none") return "";
+    if (overlayMode === "headline") return headlineText;
+    if (overlayMode === "captions") return captionText;
+    if (!headlineText) return captionText;
+    if (!captionText) return headlineText;
+    if (normalizeComparablePodcasterText(headlineText) === normalizeComparablePodcasterText(captionText)) {
+      return headlineText;
+    }
+    return `${headlineText}\n${captionText}`;
+  }
+
+  function getPodcasterSceneKaraokeTokenOffset(row = null) {
+    const source = row && typeof row === "object" ? row : {};
+    const headlineText = normalizePodcasterHeadlineText(source.headlineText);
+    const captionText = normalizePodcasterTextValue(source.captionText, { preserveLineBreaks: true });
+    const overlayMode = normalizePodcasterOverlayMode(
+      source.overlayMode,
+      headlineText && captionText ? "both" : (captionText ? "captions" : (headlineText ? "headline" : "none"))
+    );
+    if (overlayMode !== "both" || !headlineText || !captionText) return 0;
+    if (normalizeComparablePodcasterText(headlineText) === normalizeComparablePodcasterText(captionText)) return 0;
+    return countPodcasterTextWords(headlineText);
+  }
+
+  function normalizePodcasterSceneTextFields(row = null, options = {}) {
+    const source = row && typeof row === "object" ? row : {};
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(source, key);
+    const hasCanonicalOverlayTextFields = ["headlineText", "captionText"]
+      .some((key) => hasOwn(key));
+    const legacyText = normalizePodcasterTextValue(
+      source.onScreenText ?? source.textoPantalla ?? source.textoEnPantalla ?? "",
+      { preserveLineBreaks: true }
+    );
+    const voiceOverText = normalizePodcasterTextValue(
+      source.voiceOverText ?? source.script ?? source.guion ?? source.text ?? "",
+      { preserveLineBreaks: true }
+    );
+
+    let headlineText = normalizePodcasterHeadlineText(source.headlineText);
+    let captionText = normalizePodcasterTextValue(source.captionText, { preserveLineBreaks: true });
+    let textSourceFallback = (headlineText || captionText) ? "manual" : "migrated";
+
+    if (!hasCanonicalOverlayTextFields && legacyText) {
+      const legacyMatchesDialogue = normalizeComparablePodcasterText(legacyText) !== ""
+        && normalizeComparablePodcasterText(legacyText) === normalizeComparablePodcasterText(voiceOverText);
+      const migrateAsCaption = source.onScreenTextNoSummarize === true || legacyMatchesDialogue;
+      if (migrateAsCaption) captionText = legacyText;
+      else headlineText = legacyText;
+      textSourceFallback = "migrated";
+    }
+
+    if (options?.strictHeadline === true && !isValidPodcasterHeadlineText(headlineText)) {
+      headlineText = "";
+    }
+    const inSceneText = normalizePodcasterInSceneText(source.inSceneText, {
+      strict: options?.strictInScene === true
+    });
+    const inferredMode = headlineText && captionText
+      ? "both"
+      : (headlineText ? "headline" : (captionText ? "captions" : "none"));
+    const overlayMode = normalizePodcasterOverlayMode(source.overlayMode, inferredMode);
+    const textSource = normalizePodcasterTextSource(source.textSource, textSourceFallback);
+    const normalized = {
+      headlineText,
+      captionText,
+      inSceneText,
+      overlayMode,
+      textSource
+    };
+    return {
+      ...normalized,
+      // Alias temporal para lectores legacy. Nunca usa `row.text` como fallback.
+      onScreenText: resolvePodcasterSceneOverlayText(normalized)
+    };
   }
 
   function normalizeResolutionKey(value) {
@@ -444,13 +600,8 @@
   }
 
   function getOnScreenTextClipText(row = null) {
-    return String(
-      row?.onScreenText
-      || row?.textoPantalla
-      || row?.textoEnPantalla
-      || row?.text
-      || ""
-    ).replace(/\s+/g, " ").trim();
+    const normalized = normalizePodcasterSceneTextFields(row);
+    return resolvePodcasterSceneOverlayText(normalized);
   }
 
   function normalizeOnScreenTextClipItem(raw = {}, rowId = "") {
@@ -1618,6 +1769,13 @@
     getOnScreenTextBgPresetClass,
     getOnScreenTextFontFamilyCss,
     getOnScreenTextClipText,
+    getPodcasterSceneKaraokeTokenOffset,
+    normalizePodcasterSceneTextFields,
+    resolvePodcasterSceneOverlayText,
+    normalizePodcasterHeadlineText,
+    normalizePodcasterInSceneText,
+    normalizePodcasterOverlayMode,
+    isValidPodcasterHeadlineText,
     buildOnScreenTextPreviewStrokeShadowCss,
     buildOnScreenTextPreviewShadowCss,
     wrapOnScreenTextPreviewText,

@@ -3,9 +3,40 @@ const assert = require("node:assert/strict");
 
 const {
   buildKaraokeSubtitleMarkup,
+  normalizeKaraokeWordTimings,
   buildOnScreenTextRasterSnapshotPlan,
   buildMontageOnScreenTextAss
 } = require("./podcaster-text-render.js");
+
+test("both mode keeps caption timings and shifts token indices past the headline", () => {
+  const text = "UNA IDEA CENTRAL\nEste es el diálogo literal";
+  const timings = normalizeKaraokeWordTimings({
+    wordTimings: [
+      { text: "Este", startMs: 100, endMs: 300 },
+      { text: "es", startMs: 300, endMs: 450 },
+      { text: "el", startMs: 450, endMs: 560 },
+      { text: "diálogo", startMs: 560, endMs: 900 },
+      { text: "literal", startMs: 900, endMs: 1200 }
+    ]
+  }, text, { tokenOffset: 3 });
+
+  assert.deepEqual(timings, [
+    { text: "Este", startMs: 100, endMs: 300, tokenIndex: 3 },
+    { text: "es", startMs: 300, endMs: 450, tokenIndex: 4 },
+    { text: "el", startMs: 450, endMs: 560, tokenIndex: 5 },
+    { text: "diálogo", startMs: 560, endMs: 900, tokenIndex: 6 },
+    { text: "literal", startMs: 900, endMs: 1200, tokenIndex: 7 }
+  ]);
+
+  const html = buildKaraokeSubtitleMarkup(text, timings, timings[0].tokenIndex, {
+    karaokeHighlightStyle: "pill"
+  });
+  assert.match(html, /data-karaoke-index="0"[^>]*>UNA<\/span>/);
+  assert.match(html, /data-karaoke-index="1"[^>]*>IDEA<\/span>/);
+  assert.match(html, /data-karaoke-index="2"[^>]*>CENTRAL<\/span>/);
+  assert.doesNotMatch(html, /is-active[^>]*data-karaoke-index="[012]"/);
+  assert.match(html, /is-active is-highlight-pill[^>]*data-karaoke-index="3"[^>]*>Este<\/span>/);
+});
 
 test("buildMontageOnScreenTextAss preserves bold italic and negative letter spacing for export parity", () => {
   const ass = buildMontageOnScreenTextAss({

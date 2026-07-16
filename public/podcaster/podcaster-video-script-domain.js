@@ -41,7 +41,7 @@ function buildVideoContextualInstructions(context = {}) {
       "REGLA OBLIGATORIA: En la columna de Elemento visual (visualNotes/videoDirective), describe con precisión al presentador ('youtuber') en la zona central de la pantalla (plano medio o primer plano), haciendo contacto visual directo y constante con el lente de la cámara, realizando ademanes enérgicos con las manos, gestos expresivos para dar énfasis, y señalando activamente dibujos sencillos, iconos didácticos o diagramas explicativos flotando a sus costados (overlays). No reutilices el mismo texto en cada fila.",
       "REGLA OBLIGATORIA: El presentador debe ser el único personaje en cámara y el único que habla en la voz en off por escena. No crees diálogos ni uses otros locutores.",
       "Organiza mentalmente cada escena como fila de tabla con estas columnas: Tiempo, Guion, Descripción de escena, Texto en pantalla, Transición y Elemento visual.",
-      "Mapeo obligatorio: Tiempo=durationSec, Guion=voiceOverText, Descripción de escena=sceneDescription, Texto en pantalla=onScreenText, Transición=transition, Elemento visual=visualNotes.",
+      "Mapeo de texto editorial: titular opcional=headlineText, subtítulos literales=captionText, texto natural dentro del escenario=inSceneText. onScreenText es solo un alias legacy y no debe generarse.",
       "Define cada escena con: durationSec, voiceOverText, sceneDescription y transition.",
       "Regla obligatoria: si necesitas ampliar, crea más escenas del mismo locutor en lugar de cortar frases a la mitad.",
       "Regla obligatoria: no cortar frases; segmenta solo por oraciones completas.",
@@ -50,7 +50,10 @@ function buildVideoContextualInstructions(context = {}) {
       "Regla obligatoria: devuelve sceneDescription en cada escena.",
       "Regla obligatoria: devuelve transition en cada escena (ej: corte rápido, disolvencia, barrido).",
       "Regla obligatoria: devuelve scenePrompt e imagePrompts para cada escena.",
-      "Regla obligatoria: onScreenText debe ser una frase o palabra clave muy corta de 2 a 6 palabras en mayúsculas (ej: '¡OJO AL DATO!', '¡BOOM!', '¿CÓMO ES POSIBLE?').",
+      "Regla obligatoria: headlineText es opcional; si aporta valor, debe ser una frase completa de 2 a 6 palabras y máximo 48 caracteres. Si no aporta, usa una cadena vacía.",
+      "captionText debe quedar vacío: los subtítulos literales se derivan del guion sólo cuando el usuario los activa.",
+      "inSceneText debe quedar vacío salvo que la historia requiera palabras naturales visibles en un objeto o letrero; nunca lo confundas con títulos, subtítulos ni overlays editoriales.",
+      "No copies headlineText ni captionText dentro de sceneDescription, visualNotes, videoDirective, scenePrompt o imagePrompts.",
       context?.isRefinement ? "Conserva lo valioso del guion actual y modifica lo necesario segun la nueva instruccion." : ""
     ].filter(Boolean);
   }
@@ -68,8 +71,8 @@ function buildVideoContextualInstructions(context = {}) {
       ? `Locutores preferidos para esta narración de video: ${context.constrainedHosts.join(", ")}.`
       : "Usa voz en off narrativa única (Narrador). Puedes mencionar personajes/acciones en la voz en off and en la descripción de escena.",
     "Define cada escena con: durationSec, voiceOverText, sceneDescription y transition.",
-    "Mapeo obligatorio: Tiempo=durationSec, Guion=voiceOverText, Descripción de escena=sceneDescription (solo ubicación breve del lugar), Texto en pantalla=onScreenText, Transición=transition, Elemento visual=visualNotes.",
-    "Opcional por escena: onScreenText y visualNotes.",
+    "Mapeo de texto editorial: titular opcional=headlineText, subtítulos literales=captionText, texto natural dentro del escenario=inSceneText. onScreenText es solo un alias legacy y no debe generarse.",
+    "Opcional por escena: headlineText, inSceneText y visualNotes.",
     "La voz en off global se configura en el panel; no pidas voz por locutor.",
     "Evita entrevista, mesa redonda, conducción radial o cualquier estructura de podcast. Escribe como guion técnico de video creativo.",
     `Objetivo operativo: cada escena dura ${context?.videoSceneMaxSec || VIDEO_SCENE_MAX_SEC} segundos con narración de ~${context?.videoDialogueMaxSec || VIDEO_DIALOGUE_MAX_SEC} segundos y debe contener una frase completa (sin cortar oraciones).`,
@@ -86,8 +89,10 @@ function buildVideoContextualInstructions(context = {}) {
     "Regla obligatoria: devuelve transition en cada escena (ej: corte rápido, disolvencia, barrido).",
     "Regla obligatoria: devuelve scenePrompt e imagePrompts para cada escena.",
     "Regla obligatoria: sceneDescription debe ser solo una ubicación breve del lugar (ej. interior de una casa, calle nocturna, sótano, cocina, apartamento).",
-    "Regla obligatoria: visualNotes/videoDirective debe describir con detalle el lugar, personajes, acción, cámara, luz y estilo visual; es el prompt de VEO específico y distinto por fila. No reutilices el mismo texto.",
-    "Regla obligatoria: onScreenText debe ser una frase corta completa, de 2 a 6 palabras, clave para la escena.",
+    "Regla obligatoria: visualNotes/videoDirective debe describir con detalle el lugar, personajes, acción, cámara, luz y estilo visual; no debe incluir titulares, subtítulos, rótulos editoriales ni copy overlay. No reutilices el mismo texto.",
+    "Regla obligatoria: headlineText es opcional; si aporta valor, debe ser una frase completa de 2 a 6 palabras y máximo 48 caracteres. Si no aporta, usa una cadena vacía.",
+    "captionText debe quedar vacío. inSceneText sólo puede contener texto natural imprescindible dentro del escenario, nunca un título o subtítulo.",
+    "No copies headlineText ni captionText dentro de sceneDescription, visualNotes, videoDirective, scenePrompt o imagePrompts.",
     context?.videoPreset === "creative"
       ? "Regla obligatoria: devuelve videoDirective en cada escena con acción creativa concreta (bloqueo, gag, tensión, sorpresa, etc.)."
       : "Regla obligatoria: devuelve videoDirective en cada escena con acción pedagógica concreta.",
@@ -100,9 +105,9 @@ function buildVideoContextualInstructions(context = {}) {
 
 function buildVideoSystemInstruction(reelModeEnabled = false) {
   if (reelModeEnabled) {
-    return "Eres un guionista y productor senior experto en la creación de videos cortos verticales (Reels, Shorts de YouTube, TikTok) de divulgación educativa y entretenimiento inteligente. Convierte la idea del usuario en un guion técnico estructurado en formato JSON, diseñado para ser narrado e interpretado individualmente (monólogo) por un único presentador 'youtuber' entusiasta en el centro de la pantalla. Devuelve escenas con durationSec, voiceOverText, sceneDescription y transition; además scenePrompt, imagePrompts y videoDirective para producción visual. Opcionalmente devuelve onScreenText y visualNotes. IMPORTANTE: En cada escena, la descripción de escena (sceneDescription) DEBE ubicar brevemente el set y situar explícitamente al presentador ('youtuber') en el centro del encuadre vertical de frente a la cámara. IMPORTANTE: La columna Elemento visual (visualNotes/videoDirective) DEBE describir en detalle al presentador en la zona central de la pantalla (plano medio o primer plano), haciendo contacto visual directo con el lente de la cámara, realizando ademanes enérgicos con las manos, gestos expresivos para dar énfasis a sus explicaciones y señalar activamente recursos gráficos sencillos, iconos o diagramas didácticos flotando a sus costados (overlays). IMPORTANTE: Cada escena debe tener un diálogo de no más de 17 palabras, natural, fluido y enérgico en español. Responde solo JSON válido, sin markdown. PROHIBIDO incluir metadatos o instrucciones en los campos de texto.";
+    return "Eres un guionista y productor senior experto en videos cortos verticales 9:16. Convierte la idea del usuario en un guion técnico JSON para un único presentador 'youtuber' de frente a la cámara. Devuelve escenas con durationSec, voiceOverText, sceneDescription, transition, scenePrompt, imagePrompts, videoDirective, visualNotes y los campos editoriales headlineText, captionText e inSceneText. headlineText es opcional (2–6 palabras, máximo 48 caracteres), captionText queda vacío e inSceneText sólo se usa para texto natural imprescindible dentro del escenario. Nunca copies titulares o subtítulos en los prompts visuales. En cada Elemento visual mantén al youtuber centrado, mirando al lente, con ademanes enérgicos con las manos y diagramas didácticos flotando sin palabras a sus costados. Cada escena debe tener un diálogo natural de máximo 17 palabras en español. Responde solo JSON válido, sin markdown.";
   }
-  return "Eres un guionista y productor senior de videos cortos creativos para redes sociales. Convierte la idea del usuario en un guion técnico para un editor visual. No uses podcast ni formato de locución radial. Devuelve escenas con durationSec, voiceOverText, sceneDescription y transition; además scenePrompt, imagePrompts y videoDirective para producción visual. Opcionalmente devuelve onScreenText y visualNotes. IMPORTANTE: sceneDescription puede ser breve o más descriptiva, pero debe ser específica y concreta; evita etiquetas vacías. Mientras que visualNotes/videoDirective debe describir en detalle el lugar, personajes y acción. IMPORTANTE: cada escena debe tener un dialogo o guion de no más de 17 palabras, pueden ser menos pero no más. Mantén el tono/estilo del usuario (comedia, terror, acción, etc.). Si el usuario envía mensajes posteriores, revisa y mejora el guion existente. Responde solo JSON válido, sin markdown. PROHIBIDO incluir metadatos o instrucciones en los campos de texto.";
+  return "Eres un guionista y productor senior de videos cortos creativos para redes sociales. Convierte la idea del usuario en un guion técnico JSON, sin formato podcast. Devuelve escenas con durationSec, voiceOverText, sceneDescription, transition, scenePrompt, imagePrompts, videoDirective, visualNotes y los campos editoriales headlineText, captionText e inSceneText. headlineText es opcional (2–6 palabras, máximo 48 caracteres), captionText queda vacío e inSceneText sólo se usa para texto natural imprescindible dentro del escenario. Nunca copies titulares o subtítulos en sceneDescription ni en prompts visuales. Cada escena debe tener diálogo de máximo 17 palabras y dirección visual concreta sin copy overlay. Mantén el tono del usuario. Responde solo JSON válido, sin markdown.";
 }
 
 async function buildCreativeVideoScriptFromPromptTable(prompt = "", session = null) {
@@ -143,11 +148,15 @@ async function buildCreativeVideoScriptFromPromptTable(prompt = "", session = nu
       durationSec: VIDEO_SCENE_MAX_SEC,
       voiceOverText: scriptText,
       sceneDescription,
-      onScreenText: buildCreativeOnScreenText(String(row?.onScreenText || "").trim(), {
+      headlineText: buildCreativeOnScreenText(String(row?.headlineText || row?.onScreenText || "").trim(), {
         voiceOver: scriptText,
         sceneDescription,
         visual: visualElement
       }),
+      captionText: String(row?.captionText || "").trim(),
+      inSceneText: String(row?.inSceneText || "").trim(),
+      overlayMode: String(row?.overlayMode || "headline").trim() || "headline",
+      textSource: String(row?.textSource || "generated").trim() || "generated",
       transition,
       visualNotes: visualElement,
       mediaCue: deriveMediaCueFromTransition(transition),

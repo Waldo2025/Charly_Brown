@@ -88,6 +88,27 @@ export function createPodcasterTimelineUiApi(deps = {}) {
   let podcastTimelinePreviewSyncRafId = 0;
   let podcastTimelinePreviewSyncPayload = null;
 
+  function resolveSceneOverlayText(row = null) {
+    const canonicalResolver = window.PodcasterOnScreenTextRenderSpec?.resolvePodcasterSceneOverlayText;
+    if (typeof canonicalResolver === "function") {
+      return String(canonicalResolver(row) || "").replace(/\s+/g, " ").trim();
+    }
+    return String(row?.headlineText || row?.captionText || row?.onScreenText || "").replace(/\s+/g, " ").trim();
+  }
+
+  function resolveSceneVideoInteractionId(sceneClip = null, primarySegment = null) {
+    const generatedVideos = Array.isArray(sceneClip?.generatedVideos) ? sceneClip.generatedVideos : [];
+    const generatedInteractionId = generatedVideos
+      .map((item) => String(item?.interactionId || item?.video?.interactionId || "").trim())
+      .find(Boolean);
+    return String(
+      sceneClip?.interactionId
+      || primarySegment?.interactionId
+      || generatedInteractionId
+      || ""
+    ).trim();
+  }
+
   function attachPodcastTimelineScrollSync() {
     podcastTimelineScrollSyncCleanup?.();
     podcastTimelineScrollSyncCleanup = null;
@@ -486,7 +507,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         clipEl.style.width = `${widthPx.toFixed(3)}px`;
         clipEl.classList.toggle("is-hidden", clip.hidden === true);
         const row = rowById.get(rowId) || null;
-        const nextText = String(row?.onScreenText || "").trim() || "Sin texto";
+        const nextText = resolveSceneOverlayText(row) || "Sin texto";
         const contentEl = clipEl.querySelector(".podcast-onscreen-text-clip-content");
         if (contentEl) contentEl.textContent = nextText;
       });
@@ -648,7 +669,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               ${items.length ? items.map(({ row, rowId, index, clip, clipLeftPx, clipWidthPx }) => {
                 const isActive = rowId === String(podcastVideoState.activeRowId || "").trim();
                 const isVisible = clip.hidden !== true;
-                const text = String(row?.onScreenText || "").trim() || "Sin texto";
+                const text = resolveSceneOverlayText(row) || "Sin texto";
                 const clippedText = trimWords(text, 18) || "Sin texto";
                 const leftPx = Math.max(0, Number(clipLeftPx || 0));
                 const widthPx = Math.max(minClipPx, Number(clipWidthPx || 0));
@@ -687,6 +708,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const nextRowId = String(rows[index + 1]?.id || "").trim();
         const generatedClip = dialogueMap[rowId] || null;
         const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+        const inSceneText = String(row?.inSceneText || row?.inVideoText || row?.embeddedText || row?.sceneText || "").replace(/\s+/g, " ").trim();
+        const interactionId = resolveSceneVideoInteractionId(activeSession?.dialogueVideoMap?.[rowId] || generatedClip, primarySegment);
         const videoSrc = resolveStorageVideoUrl(
           primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
           primarySegment?.storagePath || generatedClip?.storagePath || "",
@@ -744,6 +767,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               </div>
               <div class="podcast-video-scene-actions">
                 <button class="row-icon-btn" type="button" data-action="timeline-play-scene-video" data-row-id="${escapeHtml(rowId)}" title="Reproducir escena"><i class="fas fa-play"></i></button>
+                <button class="row-icon-btn" type="button" data-action="timeline-edit-in-scene-text" data-row-id="${escapeHtml(rowId)}" title="${escapeHtml(inSceneText ? `Editar texto dentro del video: ${inSceneText}` : "Agregar texto natural dentro del video")}" aria-label="Editar texto dentro del video"><i class="fas fa-quote-right" aria-hidden="true"></i></button>
+                ${interactionId && inSceneText ? `<button class="row-icon-btn" type="button" data-action="timeline-correct-in-scene-text" data-row-id="${escapeHtml(rowId)}" title="Corregir texto conservando el video" aria-label="Corregir texto dentro del video"><i class="fas fa-check-double" aria-hidden="true"></i></button>` : ""}
                 <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video"${isGenerating || isBulkRegenAll ? " disabled" : ""}><i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}"></i></button>
                 <button class="row-icon-btn" type="button" data-action="timeline-delete-scene-video" data-row-id="${escapeHtml(rowId)}" title="Eliminar video"${videoSrc ? "" : " disabled"}><i class="fas fa-trash"></i></button>
               </div>
@@ -939,7 +964,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
             ${items.length ? items.map(({ row, rowId, index, clip, clipLeftPx, clipWidthPx, minWidthPx }) => {
               const isActive = rowId === String(podcastVideoState.activeRowId || "").trim();
               const isVisible = clip.hidden !== true;
-              const text = String(row?.onScreenText || "").trim() || "Sin texto";
+              const text = resolveSceneOverlayText(row) || "Sin texto";
               const clippedText = trimWords(text, 22) || "Sin texto";
               const leftPx = Math.max(0, Number(clipLeftPx || 0));
               const widthPx = Math.max(minWidthPx, Number(clipWidthPx || 0));
@@ -1036,6 +1061,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
             ${trackItems.map(({ row, rowId, index, timelineClip, clipLeftPx, clipWidthPx }) => {
               const generatedClip = dialogueMap[rowId] || null;
               const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+              const inSceneText = String(row?.inSceneText || row?.inVideoText || row?.embeddedText || row?.sceneText || "").replace(/\s+/g, " ").trim();
+              const interactionId = resolveSceneVideoInteractionId(activeSession?.dialogueVideoMap?.[rowId] || generatedClip, primarySegment);
               const videoSrc = resolveStorageVideoUrl(
                 primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
                 primarySegment?.storagePath || generatedClip?.storagePath || "",
@@ -1113,6 +1140,12 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                         <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-regenerate-scene-video-hq" data-row-id="${escapeHtml(rowId)}" title="Regenerar mejorando calidad desde el clip actual" aria-label="Regenerar mejorando calidad"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
                           <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : "fa-wand-magic-sparkles"}" aria-hidden="true"></i>
                         </button>
+                        <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-edit-in-scene-text" data-row-id="${escapeHtml(rowId)}" title="${escapeHtml(inSceneText ? `Editar texto dentro del video: ${inSceneText}` : "Agregar texto natural dentro del video")}" aria-label="Editar texto dentro del video">
+                          <i class="fas fa-quote-right" aria-hidden="true"></i>
+                        </button>
+                        ${interactionId && inSceneText ? `<button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-correct-in-scene-text" data-row-id="${escapeHtml(rowId)}" title="Corregir texto conservando el video" aria-label="Corregir texto dentro del video">
+                          <i class="fas fa-check-double" aria-hidden="true"></i>
+                        </button>` : ""}
                         <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-configure-scene-bg-color" data-row-id="${escapeHtml(rowId)}" title="Color de fondo de escena" aria-label="Color de fondo de escena">
                           <i class="fas fa-palette" aria-hidden="true"></i>
                         </button>

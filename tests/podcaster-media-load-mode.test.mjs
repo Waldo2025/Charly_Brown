@@ -66,6 +66,35 @@ test("normalizePodcastVideoConfig parses and defaults mediaLoadMode correctly", 
   assert.equal(config5.mediaLoadMode, "streaming");
 });
 
+test("normalizePodcastVideoConfig preserves modern automatic video routing", () => {
+  const automatic = normalizePodcastVideoConfig({
+    videoRoutingVersion: 2,
+    videoGenerator: "auto",
+    videoModel: "auto"
+  });
+  assert.equal(automatic.videoGenerator, "auto");
+  assert.equal(automatic.videoModel, "auto");
+
+  const explicitOmni = normalizePodcastVideoConfig({
+    videoRoutingVersion: 2,
+    videoGenerator: "omni",
+    videoModel: "auto"
+  });
+  assert.equal(explicitOmni.videoGenerator, "omni");
+  assert.equal(explicitOmni.videoModel, "gemini-omni-flash-preview");
+});
+
+test("normalizePodcastVideoConfig migrates legacy Veo 2.0 to Veo 3.1 Standard", () => {
+  const migrated = normalizePodcastVideoConfig({
+    videoModel: "veo-2.0-generate-001"
+  });
+
+  assert.equal(migrated.videoModel, "veo-3.1-generate-preview");
+  assert.equal(migrated.videoGenerator, "veo");
+  assert.equal(migrated.videoRoutingVersion, 2);
+  assert.equal(migrated.cheapVideoMode, false);
+});
+
 test("PodcasterPlaybackController.resolveActiveMediaLoadMode behaves correctly", () => {
   const controller = new PodcasterPlaybackController();
   controller.state.config = { mediaLoadMode: "streaming" };

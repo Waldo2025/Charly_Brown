@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
-const firstUse = source.indexOf("sceneReferenceAssets.length");
+const firstUse = source.indexOf("for (const reference of sceneReferenceAssets)");
 const init = source.indexOf("const sceneReferenceAssets = [...sceneReferenceImages];");
 
 if (init === -1) {
@@ -10,7 +10,7 @@ if (init === -1) {
 }
 
 if (firstUse === -1) {
-  throw new Error("No se encontró el uso esperado de sceneReferenceAssets.length en backend/server.js.");
+  throw new Error("No se encontró el consumo esperado de sceneReferenceAssets en backend/server.js.");
 }
 
 if (init > firstUse) {

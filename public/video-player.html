@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.522"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.523"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,7 +16,7 @@
       visibility: hidden;
     }
   </style>
-  <script type="module" src="js/video-player-auth-guard.js?v=2026-1.0.10.522"></script>
+  <script type="module" src="js/video-player-auth-guard.js?v=2026-1.0.10.523"></script>
 </head>
 <body class="is-shared-video-view">
   <div id="appLoadingScreen">
@@ -324,6 +324,30 @@
               bottom: 10px;
               position: absolute;
               transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .video-player-shell #playerStage .podcast-stage-fullscreen-controls-host {
+              z-index: 80 !important;
+              pointer-events: none;
+            }
+            .video-player-shell #playerStage:is(.is-stage-fullscreen, .is-stage-expanded) {
+              isolation: isolate;
+            }
+            .video-player-shell #playerStage:is(.is-stage-fullscreen, .is-stage-expanded) #playerControls.is-attached-to-stage-fullscreen {
+              position: relative !important;
+              inset: auto !important;
+              left: auto !important;
+              right: auto !important;
+              bottom: auto !important;
+              z-index: 1;
+              width: min(100%, 720px) !important;
+              margin: 0 !important;
+              pointer-events: auto !important;
+            }
+            .video-player-shell #playerStage:is(.is-stage-fullscreen, .is-stage-expanded) #playerControls.is-attached-to-stage-fullscreen :is(button, input, select, a) {
+              pointer-events: auto;
+            }
+            .video-player-shell #playerStage:is(.is-stage-fullscreen, .is-stage-expanded) .podcast-stage-fullscreen-btn {
+              z-index: 90 !important;
             }
             .video-player-shell:has(.player-side-panel.is-open) #playerControls {
               right: calc(var(--player-side-panel-width, 360px) + 1.5rem);

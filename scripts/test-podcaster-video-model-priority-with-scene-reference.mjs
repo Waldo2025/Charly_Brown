@@ -1,20 +1,40 @@
-import { readFileSync } from "node:fs";
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
-const source = readFileSync(
-  new URL("../backend/server.js", import.meta.url),
-  "utf8"
+const require = createRequire(import.meta.url);
+const { createVeoVideo, normalizeVideoModel } = require("../backend/podcaster-video-provider.js");
+
+assert.equal(
+  normalizeVideoModel("veo-3.1-fast-generate-preview", "veo", "final"),
+  "veo-3.1-fast-generate-preview",
+  "Fast explícito debe conservarse; sólo el flujo HQ decide forzar Standard."
+);
+assert.equal(
+  normalizeVideoModel("veo-3.1-generate-preview", "veo", "final"),
+  "veo-3.1-generate-preview"
 );
 
-if (!/const hasExplicitSceneReferenceInput = Boolean\(\s*referenceImageDataUrls\.length\s*\|\|\s*referenceImageDataUrl\s*\|\|\s*referenceVideoDataUrl\s*\|\|\s*continuityReferenceImageDataUrl\s*\);/.test(source)) {
-  throw new Error("El backend debe detectar cuando la escena llega con referencias visuales explícitas.");
-}
+let generated = false;
+const client = {
+  models: {
+    async generateVideos() {
+      generated = true;
+      return { name: "operations/unexpected", done: true };
+    }
+  },
+  operations: { async getVideosOperation() { return {}; } }
+};
 
-if (!/const filteredModels = mergedModels\.filter\(\(modelName\) => \{[\s\S]*const lowerModelName = String\(modelName \|\| ""\)\.toLowerCase\(\);[\s\S]*if \(\(strictIdentity \|\| hasExplicitSceneReferenceInput\) && \/lite\/i\.test\(lowerModelName\)\) return false;[\s\S]*return true;[\s\S]*\}\);/m.test(source)) {
-  throw new Error("Con referencias visuales explícitas el backend debe excluir lite, pero no fast.");
-}
+await assert.rejects(
+  createVeoVideo({
+    client,
+    model: "veo-3.1-lite-generate-preview",
+    quality: "draft",
+    prompt: "A continuous scene.",
+    images: [{ data: "aW1hZ2U=", mimeType: "image/png" }]
+  }),
+  (error) => error?.code === "veo_lite_reference_images_unsupported"
+);
+assert.equal(generated, false, "Lite no debe ignorar referencias ni degradar silenciosamente a text-to-video.");
 
-if (!/const canPreferFastModel = !strictIdentity && !portraitUrl && !portraitStoragePath && !hasExplicitSceneReferenceInput;/.test(source)) {
-  throw new Error("Sin referencias visuales explícitas sí puede priorizarse el modelo fast por defecto.");
-}
-
-console.log("Podcaster video model priority with scene reference OK.");
+console.log("Podcaster explicit Veo model and reference policy OK.");

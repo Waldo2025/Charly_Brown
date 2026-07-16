@@ -21,6 +21,48 @@ const escapeHtml = typeof window.escapeHtml === "function"
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const PODCASTER_OVERLAY_MODE_OPTIONS = Object.freeze([
+  ["none", "Sin overlay"],
+  ["headline", "Titular editorial"],
+  ["captions", "Subtítulos / karaoke"],
+  ["both", "Titular + subtítulos"]
+]);
+
+function getSceneTextApi() {
+  return window.PodcasterOnScreenTextRenderSpec && typeof window.PodcasterOnScreenTextRenderSpec === "object"
+    ? window.PodcasterOnScreenTextRenderSpec
+    : null;
+}
+
+function normalizeSceneTextFields(row = {}) {
+  const normalize = getSceneTextApi()?.normalizePodcasterSceneTextFields;
+  if (typeof normalize === "function") return { ...row, ...normalize(row) };
+  const headlineText = String(row?.headlineText ?? row?.onScreenText ?? "").replace(/\s+/g, " ").trim();
+  const captionText = String(row?.captionText || "").replace(/\s+/g, " ").trim();
+  const inSceneText = String(row?.inSceneText || "").replace(/\s+/g, " ").trim();
+  const overlayMode = new Set(["none", "headline", "captions", "both"]).has(String(row?.overlayMode || ""))
+    ? String(row.overlayMode)
+    : (captionText ? "captions" : (headlineText ? "headline" : "none"));
+  return {
+    ...row,
+    headlineText,
+    captionText,
+    inSceneText,
+    overlayMode,
+    textSource: new Set(["generated", "manual", "migrated"]).has(String(row?.textSource || ""))
+      ? String(row.textSource)
+      : "migrated",
+    onScreenText: overlayMode === "captions" ? captionText : (overlayMode === "headline" || overlayMode === "both" ? headlineText : "")
+  };
+}
+
+function buildOverlayModeOptions(selected = "none") {
+  const normalized = String(selected || "none").trim();
+  return PODCASTER_OVERLAY_MODE_OPTIONS
+    .map(([value, label]) => `<option value="${value}"${value === normalized ? " selected" : ""}>${label}</option>`)
+    .join("");
+}
+
 function getScriptEditorRuntime() {
   return requirePodcasterScriptEditorRuntime();
 }
@@ -45,7 +87,7 @@ function autoSizeScriptTextarea(textarea) {
 
 function autoSizeScriptTextareas(root = null) {
   const scope = root && typeof root.querySelectorAll === "function" ? root : document;
-  scope.querySelectorAll("textarea.dialog-editor, textarea[data-field='notes']").forEach((node) => {
+  scope.querySelectorAll("textarea.dialog-editor, textarea[data-field='notes'], textarea[data-field='captionText']").forEach((node) => {
     autoSizeScriptTextarea(node);
   });
 }
@@ -291,7 +333,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
 
   const videoPreset = window.resolveActiveVideoPreset?.(session) || "creative";
   if (isVideo && videoPreset === "creative") {
-    const creativeRow = window.normalizeCreativeRow(row, safeIndex, { videoPreset });
+    const creativeRow = normalizeSceneTextFields(window.normalizeCreativeRow(row, safeIndex, { videoPreset }));
     const creativeRowEditorVisualNotes = window.resolveVisualNotesEditorValue(row);
     const activeVisualProposal = window.resolveActiveVisualProposal(creativeRow);
     return `
@@ -313,26 +355,26 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
               </button>
             </span>
           </span>
-          <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.voiceOverText || "")}</textarea>
+          <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.voiceOverText || creativeRow.text || creativeRow.guion || creativeRow.script || "")}</textarea>
         </label>
         <label class="row-field wide">
           <span>Descripción de escena</span>
-          <textarea rows="4" data-field="sceneDescription" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.sceneDescription || "")}</textarea>
+          <textarea rows="4" data-field="sceneDescription" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.sceneDescription || creativeRow.scenePrompt || creativeRow.descripcionEscena || creativeRow.descripcionDeEscena || "")}</textarea>
         </label>
         <label class="row-field wide">
           <span class="row-field-head">
             <span>Texto en pantalla</span>
             <span class="row-field-inline-actions">
-              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="copy-voiceover-to-onscreen-text" data-row-id="${escapeHtml(creativeRow.id)}" title="Copiar guión → texto en pantalla" aria-label="Copiar guión a texto en pantalla">
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="copy-voiceover-to-onscreen-text" data-row-id="${escapeHtml(creativeRow.id)}" title="Copiar guion → texto en pantalla" aria-label="Copiar guion a texto en pantalla">
                 <i class="fas fa-level-down-alt" aria-hidden="true"></i>
               </button>
             </span>
           </span>
-          <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.onScreenText || "")}" placeholder="Opcional">
+          <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.headlineText || creativeRow.onScreenText || "")}" placeholder="Texto breve en pantalla">
         </label>
         <label class="row-field wide">
           <span>Transición</span>
-          <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.transition || creativeRow.visualNotes || "")}</textarea>
+          <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.transition || "")}</textarea>
         </label>
         <label class="row-field wide">
           <span class="row-field-head">
@@ -691,6 +733,11 @@ function buildBlankScriptRow(session = null, options = {}) {
     voiceOverText: "",
     voiceOverOriginalText: "",
     sceneDescription: "",
+    headlineText: "",
+    captionText: "",
+    inSceneText: "",
+    overlayMode: "none",
+    textSource: "manual",
     onScreenText: "",
     transition: "",
     visualNotes: "",
@@ -710,6 +757,9 @@ function shouldHandleScriptFieldOnInput(event) {
     field === "notes" ||
     field === "voiceOverText" ||
     field === "sceneDescription" ||
+    field === "headlineText" ||
+    field === "captionText" ||
+    field === "inSceneText" ||
     field === "onScreenText" ||
     field === "transition" ||
     field === "visualNotes"
@@ -722,7 +772,7 @@ function shouldHandleScriptFieldOnInput(event) {
 function handleScriptFieldUpdate(event) {
   const target = event.target.closest("[data-row-id][data-field]");
   if (!target) return;
-  if (target.matches?.("textarea.dialog-editor, textarea[data-field='notes']")) {
+  if (target.matches?.("textarea.dialog-editor, textarea[data-field='notes'], textarea[data-field='captionText']")) {
     autoSizeScriptTextarea(target);
   }
   const rowId = target.dataset.rowId;
@@ -749,6 +799,9 @@ function handleScriptFieldUpdate(event) {
       : target.value;
   const affectsMontagePreview = field === "voiceOverText"
     || field === "sceneDescription"
+    || field === "headlineText"
+    || field === "captionText"
+    || field === "overlayMode"
     || field === "onScreenText"
     || field === "visualNotes"
     || field === "transition"
@@ -895,7 +948,7 @@ function handleScriptFieldUpdate(event) {
     scheduleConfirmedLocalPersist();
     return;
   }
-  if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec")) {
+  if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "headlineText" || field === "captionText" || field === "inSceneText" || field === "overlayMode" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec")) {
     const videoPreset = window.resolveActiveVideoPreset(session);
     window.upsertActiveSession((current) => ({
       ...current,
@@ -905,9 +958,24 @@ function handleScriptFieldUpdate(event) {
         rows: updateSingleScriptRow(current, rowId, (row, index) => (
           String(row?.id || "").trim() !== rowId
             ? row
-            : ({
+            : normalizeSceneTextFields({
               ...row,
-              [field]: value,
+              [field === "onScreenText" ? "headlineText" : field]: value,
+              ...(field === "onScreenText"
+                ? {
+                  captionText: "",
+                  overlayMode: String(value || "").trim() ? "headline" : "none",
+                  onScreenTextNoSummarize: false
+                }
+                : {}),
+              ...((field === "headlineText" || field === "onScreenText") && String(value || "").trim()
+                ? (field === "onScreenText"
+                  ? { overlayMode: "headline" }
+                  : { overlayMode: String(row?.overlayMode || "") === "captions" ? "both" : (String(row?.overlayMode || "") === "both" ? "both" : "headline") })
+                : {}),
+              ...(field === "captionText" && String(value || "").trim()
+                ? { overlayMode: String(row?.overlayMode || "") === "headline" ? "both" : (String(row?.overlayMode || "") === "both" ? "both" : "captions") }
+                : {}),
               ...(field === "sceneDescription"
                 ? {
                   scenePrompt: value,
@@ -917,9 +985,10 @@ function handleScriptFieldUpdate(event) {
                   sceneDescriptionEditedStored: true
                 }
                 : {}),
-              ...(field === "onScreenText"
+              ...(["headlineText", "captionText", "inSceneText", "overlayMode", "onScreenText"].includes(field)
                 ? {
-                  onScreenTextNoSummarize: true
+                  onScreenTextNoSummarize: field === "captionText",
+                  textSource: "manual"
                 }
                 : {}),
               ...(field === "visualNotes"
@@ -934,8 +1003,9 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { ...baseSessionUpdateOptions, render: !isLiveInput });
-    if (field === "onScreenText") {
-      const nextText = String(rawValue || "").replace(/\s+/g, " ").trim();
+    if (["headlineText", "captionText", "overlayMode", "onScreenText"].includes(field)) {
+      const updatedRow = (window.getActiveSession()?.script?.rows || []).find((item) => String(item?.id || "").trim() === rowId) || null;
+      const nextText = String(normalizeSceneTextFields(updatedRow || {}).onScreenText || "").replace(/\s+/g, " ").trim();
       if (typeof window.syncOnScreenTextClipVisibilityFromRowText === "function") {
         window.syncOnScreenTextClipVisibilityFromRowText(rowId, nextText, {
           render: false,

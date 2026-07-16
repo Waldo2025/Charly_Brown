@@ -34,10 +34,16 @@ const sourceReuseStart = source.indexOf("} else if (this.backgroundAudio) {", so
 assert.ok(sourceChangeStart > activeSegmentStart && sourceReuseStart > sourceChangeStart, "Debe existir la rama de cambio real de fuente.");
 const sourceChangeBlock = source.slice(sourceChangeStart, sourceReuseStart);
 
+assert.doesNotMatch(
+  sourceChangeBlock,
+  /this\.backgroundSource\s*=\s*null|this\.backgroundAudio\s*=\s*new Audio\(\)/,
+  "Cambiar la URL no debe perder el MediaElementSource ni recrear el elemento asociado."
+);
+
 assert.match(
   sourceChangeBlock,
-  /this\.backgroundAudio = new Audio\(\);/,
-  "El audio de fondo sólo debe recrearse cuando cambia la fuente real."
+  /this\.backgroundAudio = this\.getOrCreateBackgroundAudioElement\(\);/,
+  "El cambio de pista debe reutilizar el elemento de audio gestionado por el controlador."
 );
 
 console.log("Podcaster background music seek keeps loaded source OK.");

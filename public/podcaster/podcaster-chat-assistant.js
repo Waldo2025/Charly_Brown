@@ -169,11 +169,13 @@ function buildCreativeVideoAssistantReply(script = {}, options = {}) {
           || ""
         ).replace(/\s+/g, " ").trim()
         || "Definir elemento visual.";
-      const onScreenText = requirePodcasterScriptGeneratorApiFunction("ensureCompleteSentence")(requirePodcasterScriptGeneratorApiFunction("buildOnScreenText")(row?.onScreenText || "", {
-        voiceOver,
-        sceneDescription,
-        visual: visualElement
-      }));
+      const sceneTextApi = window.PodcasterOnScreenTextRenderSpec;
+      const normalizedTextFields = typeof sceneTextApi?.normalizePodcasterSceneTextFields === "function"
+        ? sceneTextApi.normalizePodcasterSceneTextFields(row)
+        : row;
+      const onScreenText = String(normalizedTextFields?.headlineText || normalizedTextFields?.onScreenText || "")
+        .replace(/\s+/g, " ")
+        .trim();
       const startSec = rows
         .slice(0, index)
         .reduce((acc, item) => acc + Math.max(window.SHORT_SCENE_MIN_SEC, Number(item?.durationSec) || window.SHORT_SCENE_MAX_SEC), 0);
@@ -189,7 +191,7 @@ function buildCreativeVideoAssistantReply(script = {}, options = {}) {
     })
     .map((item) => `| ${item.time} | ${item.script.replace(/\|/g, "\\|")} | ${item.sceneDescription.replace(/\|/g, "\\|")} | ${(item.onScreenText || "").replace(/\|/g, "\\|")} | ${item.transition.replace(/\|/g, "\\|")} | ${item.visual.replace(/\|/g, "\\|")} |`)
     .join("\n");
-  const tableHeader = "| Tiempo | Guion | Descripción de escena | Texto en pantalla | Transición | Elemento visual |\n| --- | --- | --- | --- | --- | --- |";
+  const tableHeader = "| Tiempo | Guion | Descripción de escena | Titular editorial | Transición | Elemento visual |\n| --- | --- | --- | --- | --- | --- |";
   const previewTable = previewRows ? `${tableHeader}\n${previewRows}` : "";
 
   return [

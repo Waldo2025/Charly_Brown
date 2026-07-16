@@ -162,6 +162,15 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
         if (typeof nextRow.voiceOverText === "string") nextRow.voiceOverText = nextRow.voiceOverText.slice(0, 10000);
         if (typeof nextRow.voiceOverOriginalText === "string") nextRow.voiceOverOriginalText = nextRow.voiceOverOriginalText.slice(0, 10000);
         if (typeof nextRow.sceneDescription === "string") nextRow.sceneDescription = nextRow.sceneDescription.slice(0, 4000);
+        if (typeof nextRow.headlineText === "string") nextRow.headlineText = nextRow.headlineText.replace(/\s+/g, " ").trim().slice(0, 48);
+        if (typeof nextRow.captionText === "string") nextRow.captionText = nextRow.captionText.trim().slice(0, 10000);
+        if (typeof nextRow.inSceneText === "string") nextRow.inSceneText = nextRow.inSceneText.replace(/\s+/g, " ").trim().slice(0, 48);
+        nextRow.overlayMode = new Set(["none", "headline", "captions", "both"]).has(String(nextRow.overlayMode || "").trim())
+          ? String(nextRow.overlayMode).trim()
+          : (String(nextRow.captionText || "").trim() ? "captions" : (String(nextRow.headlineText || "").trim() ? "headline" : "none"));
+        nextRow.textSource = new Set(["generated", "manual", "migrated"]).has(String(nextRow.textSource || "").trim())
+          ? String(nextRow.textSource).trim()
+          : "migrated";
         if (typeof nextRow.onScreenText === "string") nextRow.onScreenText = nextRow.onScreenText.slice(0, 1200);
         if (typeof nextRow.transition === "string") nextRow.transition = nextRow.transition.slice(0, 800);
         if (typeof nextRow.visualNotes === "string") nextRow.visualNotes = nextRow.visualNotes.slice(0, 4000);

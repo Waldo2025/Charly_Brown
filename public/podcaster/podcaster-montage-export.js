@@ -5170,7 +5170,9 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
     const audioClip = dialogueAudioMap?.[rowId] || null;
     const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || audioClip?.playbackRate || 1) || 1));
     const rawWordTimings = settings.partyKaraoke !== false
-      ? normalizeWordTimings(audioClip, String(segment?.wrappedText || text).trim())
+      ? normalizeWordTimings(audioClip, String(segment?.wrappedText || text).trim(), {
+        tokenOffset: Math.max(0, Number(segment?.karaokeTokenOffset || 0) || 0)
+      })
       : [];
     const wordTimings = settings.partyKaraoke !== false && typeof scaleWordTimings === "function"
       ? scaleWordTimings(rawWordTimings, playbackRate)
@@ -5191,7 +5193,9 @@ async function buildMontageOnScreenTextRenderedSegmentsForExport({
       if (endMs > startMs) {
         frameSpecs.push({
           kind: "karaoke-word",
-          wordIndex: index,
+          wordIndex: Number.isFinite(Number(word?.tokenIndex))
+            ? Math.max(0, Math.round(Number(word.tokenIndex)))
+            : index,
           text: String(word?.text || "").trim(),
           startMs,
           endMs,
@@ -5482,7 +5486,10 @@ function resolveEffectiveMontageOnScreenTextTimeline({
     if (clip?.hidden === true) return true;
     const rowId = String(clip?.rowId || "").trim();
     const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
-    const text = String(row?.onScreenText || row?.textoPantalla || row?.textoEnPantalla || "").trim();
+    const text = String(typeof window.getOnScreenTextClipText === "function"
+      ? window.getOnScreenTextClipText(row)
+      : (row?.headlineText || row?.captionText || row?.onScreenText || row?.textoPantalla || row?.textoEnPantalla || "")
+    ).trim();
     return !text;
   });
   const shouldSuppressFallback = baseTimeline?.suppressFallbackFromEntries === true || allHidden || !trackVisible;
@@ -5950,7 +5957,10 @@ export function buildMontageExportPayload(session = null) {
           visualLayoutMode: window.normalizeTimelineClipVisualLayoutMode?.(entry?.clip?.visualLayoutMode) || "default",
           voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
           sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
-          onScreenText: String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
+          onScreenText: String(typeof window.getOnScreenTextClipText === "function"
+            ? window.getOnScreenTextClipText(row)
+            : (row?.headlineText || row?.captionText || row?.onScreenText || "")
+          ).replace(/\s+/g, " ").trim(),
           visualNotes: String(row?.visualNotes || "").replace(/\s+/g, " ").trim(),
           videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
           visualEffects: activeSession?.visualEffectsMap?.[rowId] || null,

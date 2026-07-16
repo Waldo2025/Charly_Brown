@@ -15,6 +15,11 @@ import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./po
 import { toMarkdownTableCell } from "./podcaster-markdown-table.js";
 import { normalizeSimpleText, normalizeCreativeFieldText } from "./podcaster-creative-text.js";
 import {
+  normalizeVideoTableHeaderKey as normalizeVideoTableHeaderKeyShared,
+  normalizeEducationalVideoTableRows as normalizeEducationalVideoTableRowsShared,
+  validateDirectVideoTableRows as validateDirectVideoTableRowsShared
+} from "./podcaster-video-table-mapping.js";
+import {
   generateReelPodcastScript,
   buildReelPodcastScriptFromPromptTable
 } from "./podcaster-reel-podcast-generator.js";
@@ -114,7 +119,7 @@ function getRuntimeEls() {
 
 function resolveScriptModelName() {
   const select = getRuntimeEls()?.scriptModelSelect || document.getElementById("scriptModelSelect");
-  return String(select?.value || "").trim() || "gemini-2.5-flash";
+  return String(select?.value || "").trim() || "gemini-3.5-flash";
 }
 
 const getActiveSession = (...args) => callRuntimeFunction("getActiveSession", windowGetActiveSession, args);
@@ -853,8 +858,11 @@ function scriptNeedsCompaction(script = {}) {
   return rows.some((row) => rowNeedsCompaction(row));
 }
 
-function compactScriptForPanelConnection(script = {}, session = null) {
-  const videoMode = isCurrentModeVideo();
+function compactScriptForPanelConnection(script = {}, session = null, options = {}) {
+  const videoMode = options?.videoMode === true
+    || script?.videoMode === true
+    || normalizeVideoContentType(script?.videoContentType) === "creative"
+    || isCurrentModeVideo();
   return normalizeCreativeVideoScriptForDisplay(script, session, {
     preserveExactRows: true,
     videoMode: videoMode
@@ -1022,6 +1030,11 @@ function normalizeScriptPayload(raw = {}, options = {}) {
           voiceOverOriginalText: String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim(),
           sceneDescription: String(row?.sceneDescription || row?.scenePrompt || row?.descripcionEscena || row?.descripcionDeEscena || row?.scene || "").replace(/\s+/g, " ").trim(),
           onScreenText: String(row?.onScreenText || row?.textoPantalla || row?.textoEnPantalla || "").replace(/\s+/g, " ").trim(),
+          headlineText: String(row?.headlineText ?? row?.onScreenText ?? row?.textoPantalla ?? row?.textoEnPantalla ?? "").replace(/\s+/g, " ").trim(),
+          captionText: String(row?.captionText || "").replace(/\s+/g, " ").trim(),
+          inSceneText: String(row?.inSceneText || "").replace(/\s+/g, " ").trim(),
+          overlayMode: String(row?.overlayMode || "").trim(),
+          textSource: String(row?.textSource || "generated").trim() || "generated",
           transition: String(row?.transition || row?.visualNotes || row?.visual || row?.notes || "").replace(/\s+/g, " ").trim(),
           visualNotes: String(row?.visualNotes || row?.visual || row?.elementoVisual || row?.elemento_visual || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "").replace(/\s+/g, " ").trim(),
           videoDirective: String(row?.videoDirective || row?.visualNotes || row?.visual || row?.elementoVisual || row?.elemento_visual || row?.direccionVideo || row?.direcciónVideo || "").replace(/\s+/g, " ").trim(),
@@ -1496,36 +1509,27 @@ function normalizeComparableCreativeText(value = "") {
 }
 
 function summarizeOnScreenTextFromVoiceOver(text = "", options = {}) {
-  const maxWords = Math.max(4, Number(options?.maxWords) || 8);
+  void options;
   const source = normalizeSimpleText(text)
     .replace(/\([^)]*\)/g, " ")
     .replace(/[¡!¿?"“”]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!source) return "";
-  const firstSentence = String((source.match(/[^.!?]+/) || [source])[0] || source).trim();
-  const words = firstSentence.split(/\s+/).filter(Boolean);
-  if (!words.length) return "";
-  const picked = words.slice(0, maxWords);
+  const words = source.split(/\s+/).filter(Boolean);
   const danglingWords = new Set([
     "de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"
   ]);
-  const leadingConnectors = new Set(["pero", "y", "o", "aunque", "sin", "entonces", "ademas", "además"]);
-  while (picked.length > 4 && leadingConnectors.has(String(picked[0] || "").toLowerCase())) {
-    picked.shift();
-  }
-  while (picked.length > 4 && danglingWords.has(String(picked[picked.length - 1] || "").toLowerCase())) {
-    picked.pop();
-  }
-  const summary = picked.join(" ").replace(/[.,;:!?]+$/g, "").trim();
-  return summary;
+  if (source.length > 48 || words.length < 2 || words.length > 6) return "";
+  if (danglingWords.has(String(words[words.length - 1] || "").toLowerCase())) return "";
+  return source.replace(/[.,;:!?]+$/g, "").trim();
 }
 
 function isWeakOnScreenText(value = "") {
   const text = normalizeSimpleText(value);
-  if (!text) return true;
+  if (!text) return false;
   const words = text.split(/\s+/).filter(Boolean);
-  if (words.length < 3) return true;
+  if (text.length > 48 || words.length < 2 || words.length > 6) return true;
   const trailing = String(words[words.length - 1] || "").toLowerCase();
   const danglingWords = new Set([
     "de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"
@@ -1536,8 +1540,9 @@ function isWeakOnScreenText(value = "") {
 }
 
 async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionSnapshot = null) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
   const normalizedRows = normalizeEducationalVideoTableRows(
-    (Array.isArray(rows) ? rows : []).map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual])
+    sourceRows.map((row) => [row.time, row.script, row.sceneDescription, row.headlineText ?? row.onScreenText, row.transition, row.visual])
   );
   if (!normalizedRows.length) return normalizedRows;
   const responseSchema = {
@@ -1549,9 +1554,9 @@ async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionS
           type: "object",
           properties: {
             index: { type: "number" },
-            onScreenText: { type: "string" }
+            headlineText: { type: "string", nullable: true }
           },
-          required: ["index", "onScreenText"]
+          required: ["index", "headlineText"]
         }
       }
     },
@@ -1563,13 +1568,20 @@ async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionS
     descripcionEscena: row.sceneDescription,
     transicion: row.transition,
     elementoVisual: row.visual,
-    textoPantallaActual: row.onScreenText
+    titularActual: String(sourceRows[index]?.headlineText ?? row.onScreenText ?? "").trim()
   }));
   const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
   const payload = {
     systemInstruction: {
       parts: [{
-        text: "Eres editor de guion técnico de video creativo. Reescribe SOLO texto en pantalla por fila con estilo claro y coherente. Debe ser una frase breve de 4 a 9 palabras, completa, y NO debe duplicar literalmente la descripción de escena, transición ni elemento visual. Responde solo JSON válido."
+        text: [
+          "Tarea: podcaster_headline_copy_v2.",
+          "Eres editor de titulares editoriales para video corto en español latinoamericano.",
+          "Devuelve por fila un titular opcional de 2 a 6 palabras y máximo 48 caracteres.",
+          "Debe expresar una idea completa, conservar acentos y no copiar ni truncar las primeras palabras del guion.",
+          "No dupliques literalmente la descripción de escena, transición ni elemento visual.",
+          "Usa null cuando un titular no aporte valor. Responde solo JSON válido."
+        ].join(" ")
       }]
     },
     contents: [{
@@ -1583,13 +1595,16 @@ async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionS
     }],
     generationConfig: {
       responseMimeType: "application/json",
-      responseJsonSchema: responseSchema
+      responseJsonSchema: responseSchema,
+      temperature: 0.25
     }
   };
   const data = await authFetchJson("/api/gemini/generate", {
     method: "POST",
     body: JSON.stringify({
-      model: resolveScriptModelName(),
+      task: "podcaster_headline_copy_v2",
+      taskProfile: "podcaster_headline_copy_v2",
+      model: "gemini-3.5-flash",
       payload
     })
   });
@@ -1599,36 +1614,35 @@ async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionS
   (Array.isArray(parsed?.rows) ? parsed.rows : []).forEach((item) => {
     const index = Number(item?.index);
     if (!Number.isFinite(index) || index < 0) return;
-    mapped.set(index, String(item?.onScreenText || "").trim());
+    const candidate = item?.headlineText == null ? "" : normalizeSimpleText(item.headlineText);
+    mapped.set(index, isWeakOnScreenText(candidate) ? "" : candidate);
   });
-  return normalizedRows.map((row, index) => ({
-    ...row,
-    onScreenText: buildOnScreenText(mapped.get(index) || row.onScreenText || "", {
-      voiceOver: row.script || "",
-      sceneDescription: row.sceneDescription || "",
-      visual: row.visual || ""
-    })
-  }));
+  return normalizedRows.map((row, index) => {
+    const sourceRow = sourceRows[index] || {};
+    const isManual = sourceRow?.textSource === "manual";
+    const headlineText = isManual
+      ? normalizeSimpleText(sourceRow?.headlineText || "")
+      : (mapped.has(index) ? mapped.get(index) : normalizeSimpleText(sourceRow?.headlineText ?? row.onScreenText ?? ""));
+    const captionText = normalizeSimpleText(sourceRow?.captionText || "");
+    const inferredMode = headlineText && captionText
+      ? "both"
+      : (headlineText ? "headline" : (captionText ? "captions" : "none"));
+    return {
+      ...row,
+      headlineText,
+      captionText,
+      inSceneText: normalizeSimpleText(sourceRow?.inSceneText || ""),
+      overlayMode: String(sourceRow?.overlayMode || "").trim() || inferredMode,
+      textSource: isManual ? "manual" : "generated",
+      onScreenText: headlineText && captionText ? `${headlineText}\n${captionText}` : (headlineText || captionText)
+    };
+  });
 }
 
 function buildOnScreenText(value = "", options = {}) {
+  void options;
   const explicit = normalizeSimpleText(value);
-  const voiceOver = normalizeSimpleText(options?.voiceOver || options?.voiceOverText || "");
-  const sceneDescription = normalizeSimpleText(options?.sceneDescription || "");
-  const visual = normalizeSimpleText(options?.visual || options?.visualNotes || "");
-  const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual);
-  if (!explicit) return fallback;
-  if (looksLikeTransitionOnly(explicit)) return fallback;
-  if (isWeakOnScreenText(explicit)) return fallback || explicit;
-  const explicitNorm = normalizeComparableCreativeText(explicit);
-  const visualNorm = normalizeComparableCreativeText(visual);
-  const sceneNorm = normalizeComparableCreativeText(sceneDescription);
-  if (explicitNorm && (explicitNorm === visualNorm || explicitNorm === sceneNorm)) {
-    return fallback || explicit;
-  }
-  if (countWords(explicit) > 12) {
-    return summarizeOnScreenTextFromVoiceOver(explicit) || fallback || explicit;
-  }
+  if (!explicit || looksLikeTransitionOnly(explicit) || isWeakOnScreenText(explicit)) return "";
   return explicit;
 }
 
@@ -1736,7 +1750,15 @@ function expandCreativeVideoRowsForTiming(rows = [], options = {}) {
     }
     const sourceVisualNotes = resolveCreativeVisualNotesText(row);
     const sourceSceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
+    const sourceHeadlineText = normalizeSimpleText(row?.headlineText ?? row?.onScreenText ?? "");
+    const sourceCaptionText = normalizeSimpleText(row?.captionText || "");
+    const captionFollowsDialogue = sourceCaptionText
+      && normalizeComparableCreativeText(sourceCaptionText) === normalizeComparableCreativeText(voiceOverText);
     chunks.forEach((chunk, chunkIndex) => {
+      const headlineText = chunkIndex === 0 ? sourceHeadlineText : "";
+      const captionText = captionFollowsDialogue
+        ? chunk
+        : (chunkIndex === 0 ? sourceCaptionText : "");
       const nextRow = {
         ...row,
         id: makeId("row"),
@@ -1745,14 +1767,14 @@ function expandCreativeVideoRowsForTiming(rows = [], options = {}) {
         text: chunk,
         sceneDescription: sourceSceneDescription || String(row?.sceneDescription || row?.scenePrompt || "").trim(),
         scenePrompt: sourceSceneDescription || String(row?.scenePrompt || row?.sceneDescription || "").trim(),
-        onScreenText: chunkIndex === 0
-          ? String(row?.onScreenText || "").trim()
-          : buildCreativeOnScreenText(chunk, {
-            voiceOver: chunk,
-            sceneDescription: sourceSceneDescription,
-            visual: sourceVisualNotes,
-            prompt: options?.prompt || ""
-          }),
+        headlineText,
+        captionText,
+        inSceneText: chunkIndex === 0 ? normalizeSimpleText(row?.inSceneText || "") : "",
+        overlayMode: headlineText && captionText
+          ? "both"
+          : (headlineText ? "headline" : (captionText ? "captions" : "none")),
+        textSource: String(row?.textSource || "generated").trim() || "generated",
+        onScreenText: headlineText || captionText,
         visualNotes: sourceVisualNotes,
         videoDirective: String(row?.videoDirective || sourceVisualNotes || "").trim(),
         notes: chunkIndex === 0
@@ -1775,12 +1797,20 @@ function buildFallbackSceneDescriptionFromVoiceOver(voiceOver = "", transition =
   return buildFallbackCreativeSceneDescriptionFromVoiceOver(voiceOver, transition, index);
 }
 
+function resolvePodcasterVideoAspectRatio(session = null) {
+  const activeSession = session || (() => {
+    try { return getActiveSession(); } catch (_) { return null; }
+  })();
+  return activeSession?.podcastVideoConfig?.reelModeEnabled === true ? "9:16" : "16:9";
+}
+
 function buildFallbackCreativeSceneDescriptionFromVoiceOver(voiceOver = "", transition = "", index = 0) {
   const narration = normalizeSimpleText(voiceOver);
   const transitionHint = normalizeSimpleText(transition);
   const topic = trimWords(narration || `secuencia ${index + 1}`, 14);
+  const aspectRatio = resolvePodcasterVideoAspectRatio();
   const parts = [
-    `Escena cinematográfica en 16:9 que muestra: ${topic}.`,
+    `Escena cinematográfica en ${aspectRatio} que muestra: ${topic}.`,
     "Priorizar atmósfera, acción clara y un beat visual memorable (sin estilo didáctico).",
     transitionHint ? `Transición sugerida: ${transitionHint}.` : ""
   ].filter(Boolean);
@@ -1898,11 +1928,8 @@ function buildCreativeVisualElementDescription(source = "", sceneDescription = "
 
 function buildCreativeOnScreenText(value = "", options = {}) {
   const explicit = normalizeSimpleText(value);
-  const source = explicit || options?.voiceOver || options?.sceneDescription || options?.visual || options?.prompt || "";
-  const summary = summarizeOnScreenTextFromVoiceOver(source, { maxWords: 5 });
-  const clean = normalizeSimpleText(summary || explicit);
-  if (!clean) return "";
-  return trimWords(clean, 5);
+  void options;
+  return buildOnScreenText(explicit);
 }
 
 function isGenericCreativeVisualText(text = "") {
@@ -1946,13 +1973,13 @@ function buildReelYoutuberVisualNotes(row = {}, index = 0) {
   const expression = String(row?.expression || "Enérgico").trim();
   const gesture = REEL_YOUTUBER_GESTURES[index % REEL_YOUTUBER_GESTURES.length];
   const topicPreview = trimWords(voiceOverText || sceneDescription, 10);
-  const topicClause = topicPreview ? ` mientras explica: "${topicPreview}"` : "";
+  const topicClause = topicPreview ? " mientras explica visualmente el concepto principal de la escena" : "";
   const overlayHints = [
-    "iconos didácticos animados",
-    "diagrama explicativo flotante",
-    "texto gigante colorido en pantalla",
-    "gráfico sencillo de apoyo",
-    "flecha animada señalando el concepto clave"
+    "iconos didácticos animados sin palabras",
+    "diagrama explicativo flotante sin etiquetas",
+    "formas geométricas grandes sin letras",
+    "gráfico sencillo de apoyo sin rótulos",
+    "flecha animada sin texto señalando el concepto clave"
   ][index % 5];
   return `Youtuber educativo centrado en encuadre vertical 9:16, plano medio frontal exactamente en el centro de la pantalla, mirando directamente al lente de la cámara con expresión ${expression.toLowerCase()}${topicClause}. Gesto: ${gesture}. A sus costados aparece un overlay de ${overlayHints} que señala activamente con la mano. Energía alta, contacto visual constante con el espectador.`;
 }
@@ -2064,7 +2091,8 @@ function validateCreativeVideoScriptOutput(script = {}, options = {}) {
     const sceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
     const visualNotes = normalizeSimpleText(row?.visualNotes || row?.visual || "");
     const videoDirective = normalizeSimpleText(row?.videoDirective || "");
-    const onScreenText = normalizeSimpleText(row?.onScreenText || "");
+    const headlineText = normalizeSimpleText(row?.headlineText || "");
+    const inSceneText = normalizeSimpleText(row?.inSceneText || "");
 
     if (!voiceOverText) {
       throw buildCreativeVideoValidationError(stage, "la columna Guion/voz en off está vacía.", index);
@@ -2093,11 +2121,11 @@ function validateCreativeVideoScriptOutput(script = {}, options = {}) {
     if (sceneDescription.toLowerCase() === voiceOverText.toLowerCase()) {
       throw buildCreativeVideoValidationError(stage, "la descripción de escena repite la voz en off.", index);
     }
-    if (onScreenText && onScreenText.length > 60) {
-      throw buildCreativeVideoValidationError(stage, "el texto en pantalla es demasiado largo.", index);
+    if (headlineText && (headlineText.length > 48 || countWords(headlineText) < 2 || countWords(headlineText) > 6)) {
+      throw buildCreativeVideoValidationError(stage, "el titular debe tener 2–6 palabras y máximo 48 caracteres.", index);
     }
-    if (onScreenText && countWords(onScreenText) < 1) {
-      throw buildCreativeVideoValidationError(stage, "el texto en pantalla es demasiado corto.", index);
+    if (inSceneText && (inSceneText.length > 48 || countWords(inSceneText) > 6)) {
+      throw buildCreativeVideoValidationError(stage, "el texto natural dentro de escena debe tener máximo 6 palabras y 48 caracteres.", index);
     }
   });
   return script;
@@ -2136,7 +2164,7 @@ function applyAuthoritativeCreativeTableToScript(script = {}, tableScript = null
     const sceneDescription = normalizeSimpleText(tableRow?.sceneDescription || tableRow?.scenePrompt || "");
     const visualNotes = normalizeSimpleText(tableRow?.visualNotes || tableRow?.visual || tableRow?.elementoVisual || "");
     const videoDirective = normalizeSimpleText(tableRow?.videoDirective || "");
-    const onScreenText = normalizeSimpleText(tableRow?.onScreenText || "");
+    const headlineText = normalizeSimpleText(tableRow?.headlineText ?? tableRow?.onScreenText ?? "");
     if (!voiceOverText) {
       throw buildCreativeVideoValidationError("video/compose", "la columna Guion/voz en off está vacía.", index);
     }
@@ -2155,7 +2183,11 @@ function applyAuthoritativeCreativeTableToScript(script = {}, tableScript = null
       voiceOverText,
       sceneDescription,
       transition: String(tableRow?.transition || tableRow?.visualNotes || tableRow?.notes || "").trim(),
-      onScreenText,
+      headlineText,
+      captionText: normalizeSimpleText(tableRow?.captionText || ""),
+      inSceneText: normalizeSimpleText(tableRow?.inSceneText || ""),
+      overlayMode: String(tableRow?.overlayMode || (headlineText ? "headline" : "none")).trim(),
+      textSource: String(tableRow?.textSource || "manual").trim() || "manual",
       visualNotes,
       scenePrompt: String(tableRow?.sceneDescription || tableRow?.scenePrompt || "").trim(),
       imagePrompts: Array.isArray(tableRow?.imagePrompts) ? tableRow.imagePrompts : []
@@ -2301,7 +2333,15 @@ function mergeWithPreviousScript(generated = {}, previous = {}, options = {}) {
       durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(next.durationSec) || Number(prev.durationSec) || SHORT_SCENE_MAX_SEC)),
       mediaCue: MEDIA_CUES.includes(next.mediaCue) ? next.mediaCue : (prev.mediaCue || "Sin media"),
       text: String(next.text || prev.text || "").trim() || String(prev.text || "").trim(),
-      notes: String(next.notes || prev.notes || "").trim()
+      notes: String(next.notes || prev.notes || "").trim(),
+      ...(prev?.textSource === "manual" ? {
+        headlineText: String(prev?.headlineText || "").trim(),
+        captionText: String(prev?.captionText || "").trim(),
+        inSceneText: String(prev?.inSceneText || "").trim(),
+        overlayMode: String(prev?.overlayMode || "none").trim() || "none",
+        textSource: "manual",
+        onScreenText: String(prev?.onScreenText || "").trim()
+      } : {})
     });
   }
 
@@ -2330,6 +2370,11 @@ function buildScriptGenerationResponseSchema(options = {}) {
     voiceOverText: { type: "string" },
     sceneDescription: { type: "string" },
     onScreenText: { type: "string" },
+    headlineText: { type: "string", nullable: true },
+    captionText: { type: "string" },
+    inSceneText: { type: "string" },
+    overlayMode: { type: "string", enum: ["none", "headline", "captions", "both"] },
+    textSource: { type: "string", enum: ["generated", "manual", "migrated"] },
     transition: { type: "string" },
     visualNotes: { type: "string" },
     videoDirective: { type: "string" },
@@ -2340,7 +2385,7 @@ function buildScriptGenerationResponseSchema(options = {}) {
     }
   };
   const rowRequired = videoMode
-    ? ["durationSec", "voiceOverText", "sceneDescription", "onScreenText", "transition", "visualNotes", "videoDirective", "scenePrompt", "imagePrompts"]
+    ? ["durationSec", "voiceOverText", "sceneDescription", "transition", "visualNotes", "videoDirective", "scenePrompt", "imagePrompts"]
     : ["speaker", "text", "durationSec"];
   return {
     type: "object",
@@ -2608,6 +2653,7 @@ async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, cons
     data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
+        ...(videoMode && videoPreset === "creative" ? { taskProfile: "podcaster_creative_video_script_v2" } : {}),
         model: resolveScriptModelName(),
         payload
       })
@@ -2639,6 +2685,7 @@ async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, cons
     data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
+        ...(videoMode && videoPreset === "creative" ? { taskProfile: "podcaster_creative_video_script_v2" } : {}),
         model: resolveScriptModelName(),
         payload: fallbackPayload
       })
@@ -2836,7 +2883,9 @@ function connectScriptSnapshotToPanel(scriptSnapshot = {}, options = {}) {
   window.backgroundDialogueAudioWarmupToken = 0;
 
   const activeDisfluencyDefaults = normalizeDisfluencyConfig(session?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG);
-  const connectedScript = compactScriptForPanelConnection(scriptSnapshot || {}, session);
+  const connectedScript = compactScriptForPanelConnection(scriptSnapshot || {}, session, {
+    videoMode: options?.videoMode === true
+  });
   const nextScriptWithDisfluency = applyDisfluencyDefaultsToScriptRows(connectedScript, activeDisfluencyDefaults);
   const updatedSession = upsertActiveSession((current) => {
     const hosts = Array.isArray(nextScriptWithDisfluency.hosts) && nextScriptWithDisfluency.hosts.length ? nextScriptWithDisfluency.hosts : getSpeakerOptions(current);
@@ -3332,86 +3381,7 @@ const DIRECT_VIDEO_TABLE_REQUIRED_LABELS = Object.freeze({
 });
 
 function validateDirectVideoTableRows(rawRows = []) {
-  const sourceRows = (Array.isArray(rawRows) ? rawRows : [])
-    .map((row) => (Array.isArray(row) ? row : []).map((cell) => String(cell || "").replace(/\s+/g, " ").trim()))
-    .filter((row) => row.some(Boolean));
-  if (sourceRows.length < 2) {
-    return {
-      ok: false,
-      rows: [],
-      missingColumns: DIRECT_VIDEO_TABLE_REQUIRED_KEYS.map((key) => DIRECT_VIDEO_TABLE_REQUIRED_LABELS[key]),
-      error: "Pega una tabla con encabezados y al menos una fila de escena."
-    };
-  }
-  const header = sourceRows[0] || [];
-  const headerKeys = header.map((cell) => normalizeVideoTableHeaderKey(cell));
-  const missingKeys = DIRECT_VIDEO_TABLE_REQUIRED_KEYS.filter((key) => !headerKeys.includes(key));
-  if (missingKeys.length) {
-    const missingColumns = missingKeys.map((key) => DIRECT_VIDEO_TABLE_REQUIRED_LABELS[key]);
-    return {
-      ok: false,
-      rows: [],
-      missingColumns,
-      error: `Faltan columnas obligatorias: ${missingColumns.join(", ")}.`
-    };
-  }
-  const dataRows = sourceRows.slice(1);
-  const mappedRows = [];
-  const rowErrors = [];
-  dataRows.forEach((row, index) => {
-    if (!row.some(Boolean)) return;
-    const mapped = {
-      time: "",
-      script: "",
-      sceneDescription: "",
-      onScreenText: "",
-      transition: "",
-      visual: ""
-    };
-    headerKeys.forEach((key, cellIndex) => {
-      if (!key) return;
-      mapped[key] = row[cellIndex] || "";
-    });
-    const missingCells = DIRECT_VIDEO_TABLE_REQUIRED_KEYS
-      .filter((key) => !String(mapped[key] || "").trim())
-      .map((key) => DIRECT_VIDEO_TABLE_REQUIRED_LABELS[key]);
-    if (missingCells.length) {
-      rowErrors.push(`fila ${index + 2}: ${missingCells.join(", ")}`);
-      return;
-    }
-    mappedRows.push({
-      time: String(mapped.time || "").trim() || buildEducationalVideoSceneTimeRange(mappedRows.length),
-      script: String(mapped.script || "").trim(),
-      sceneDescription: String(mapped.sceneDescription || "").trim(),
-      onScreenText: String(mapped.onScreenText || "").trim(),
-      transition: String(mapped.transition || "").trim() || "Corte limpio",
-      visual: String(mapped.visual || "").trim()
-    });
-  });
-  if (rowErrors.length) {
-    return {
-      ok: false,
-      rows: [],
-      missingColumns: [],
-      rowErrors,
-      error: `Hay filas incompletas (${rowErrors.slice(0, 4).join("; ")}${rowErrors.length > 4 ? "; ..." : ""}).`
-    };
-  }
-  if (!mappedRows.length) {
-    return {
-      ok: false,
-      rows: [],
-      missingColumns: [],
-      error: "La tabla no contiene filas de escena completas."
-    };
-  }
-  return {
-    ok: true,
-    rows: mappedRows,
-    missingColumns: [],
-    rowErrors: [],
-    error: ""
-  };
+  return validateDirectVideoTableRowsShared(rawRows);
 }
 
 function buildVideoScriptFromUnmodifiedTable(promptText = "", promptHtml = "", sessionSnapshot = null) {
@@ -3429,8 +3399,12 @@ function buildVideoScriptFromUnmodifiedTable(promptText = "", promptHtml = "", s
     durationSec: VIDEO_SCENE_MAX_SEC,
     voiceOverText: row.script,
     sceneDescription: row.sceneDescription,
-    onScreenText: row.onScreenText,
-    onScreenTextNoSummarize: true,
+    headlineText: row.headlineText || row.onScreenText || "",
+    captionText: row.captionText || "",
+    inSceneText: row.inSceneText || "",
+    overlayMode: row.overlayMode || (row.headlineText ? "headline" : (row.captionText ? "captions" : "none")),
+    textSource: "migrated",
+    onScreenText: row.headlineText || row.onScreenText || "",
     transition: row.transition,
     visualNotes: row.visual
   }, index, { videoPreset: "creative" }));
@@ -3513,88 +3487,11 @@ function buildHtmlTableFromRows(rows = []) {
 }
 
 function normalizeVideoTableHeaderKey(label = "") {
-  const clean = String(label || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!clean) return "";
-  if (/(tiempo|duracion|duration|time)/.test(clean)) return "time";
-  if (/(guion|gui[oó]n|voz en off|voice.?over|narracion|narration)/.test(clean)) return "script";
-  if (/(descripcion de (la )?escena|descripci[oó]n de (la )?escena|scene description|descripcion escena)/.test(clean)) return "sceneDescription";
-  if (/(texto en pantalla|on.?screen|caption|subt[ií]tulo)/.test(clean)) return "onScreenText";
-  if (/(transicion|transition|corte|fade|barrido)/.test(clean)) return "transition";
-  if (/(elemento visual|recurso visual|notas visuales|visual notes|visual|imagen|fondo)/.test(clean)) return "visual";
-  return "";
+  return normalizeVideoTableHeaderKeyShared(label);
 }
 
 function normalizeEducationalVideoTableRows(rows = []) {
-  const sourceRows = (Array.isArray(rows) ? rows : [])
-    .map((row) => (
-      Array.isArray(row)
-        ? row.map((cell) => String(cell || "").replace(/\s+/g, " ").trim())
-        : [
-          String(row?.time || "").replace(/\s+/g, " ").trim(),
-          String(row?.script || "").replace(/\s+/g, " ").trim(),
-          String(row?.sceneDescription || "").replace(/\s+/g, " ").trim(),
-          String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
-          String(row?.transition || "").replace(/\s+/g, " ").trim(),
-          String(row?.visual || "").replace(/\s+/g, " ").trim()
-        ]
-    ))
-    .filter((row) => row.some(Boolean));
-  if (!sourceRows.length) return [];
-  const firstRow = sourceRows[0] || [];
-  const headerKeys = firstRow.map((cell) => normalizeVideoTableHeaderKey(cell));
-  const recognizedHeaderCount = headerKeys.filter(Boolean).length;
-  const shortCellCount = firstRow.filter((cell) => String(cell || "").trim().length <= 40).length;
-  const hasLongNarrativeCell = firstRow.some((cell) => {
-    const text = String(cell || "").trim();
-    return text.length > 55 || /[.!?]/.test(text);
-  });
-  const hasCanonicalHeaderPair = headerKeys.includes("time") && headerKeys.includes("script");
-  const hasKnownHeader = (
-    recognizedHeaderCount >= 3
-    && shortCellCount >= Math.max(3, Math.ceil(firstRow.length * 0.66))
-    && !hasLongNarrativeCell
-    && hasCanonicalHeaderPair
-  );
-  const dataRows = hasKnownHeader ? sourceRows.slice(1) : sourceRows;
-  return dataRows
-    .map((row) => {
-      const byIndex = {
-        time: row[0] || "",
-        script: row[1] || "",
-        sceneDescription: row[2] || "",
-        onScreenText: row[3] || "",
-        transition: row[4] || "",
-        visual: row[5] || ""
-      };
-      if (row.length === 4) {
-        byIndex.sceneDescription = "";
-        byIndex.onScreenText = "";
-        byIndex.transition = row[2] || "";
-        byIndex.visual = row[3] || "";
-      }
-      if (hasKnownHeader) {
-        headerKeys.forEach((key, index) => {
-          if (!key) return;
-          byIndex[key] = row[index] || byIndex[key] || "";
-        });
-      }
-      const sceneDescription = String(byIndex.sceneDescription || "").trim();
-      const visual = String(byIndex.visual || "").trim();
-      return {
-        time: String(byIndex.time || "").trim() || "00:00-00:08",
-        script: String(byIndex.script || "").trim() || "Definir voz en off.",
-        sceneDescription: sceneDescription || visual || "Definir descripción de escena.",
-        onScreenText: String(byIndex.onScreenText || "").trim(),
-        transition: String(byIndex.transition || "").trim() || "Corte limpio",
-        visual: visual || sceneDescription || "Definir elemento visual."
-      };
-    })
-    .filter((row) => row.script || row.sceneDescription || row.visual);
+  return normalizeEducationalVideoTableRowsShared(rows);
 }
 
 function buildEducationalVideoTableHtml(rows = []) {
@@ -3761,23 +3658,8 @@ function normalizeSingleSentenceForVideoScene(text = "", options = {}) {
 }
 
 function normalizeOnScreenTextStrict(value = "", options = {}) {
-  const voiceOver = normalizeSimpleText(options?.voiceOver || "");
-  const sceneDescription = normalizeSimpleText(options?.sceneDescription || "");
-  const visual = normalizeSimpleText(options?.visual || "");
-  const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual, { maxWords: 8 });
-  let text = buildOnScreenText(value, { voiceOver, sceneDescription, visual }) || fallback || "";
-  text = normalizeSimpleText(text);
-  if (countWords(text) > 12) text = normalizeSimpleText(trimWords(text, 12));
-  const danglingWords = new Set(["de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"]);
-  const tokens = text.split(/\s+/).filter(Boolean);
-  while (tokens.length > 2 && danglingWords.has(String(tokens[tokens.length - 1] || "").toLowerCase())) {
-    tokens.pop();
-  }
-  text = normalizeSimpleText(tokens.join(" "));
-  if (isWeakOnScreenText(text)) {
-    text = normalizeSimpleText(fallback || text);
-  }
-  return text || normalizeSimpleText(fallback || "Idea clave en pantalla");
+  void options;
+  return buildOnScreenText(value);
 }
 
 function inferTransitionFromSceneContext(options = {}) {
@@ -3809,15 +3691,17 @@ function validateEducationalVideoCanonicalRow(row = {}) {
   const durationSec = Math.round(Number(row?.durationSec) || 0);
   const script = normalizeSimpleText(row?.script || "");
   const sentenceCount = splitTextIntoSentences(script).length;
+  const headlineText = normalizeSimpleText(row?.headlineText ?? row?.onScreenText ?? "");
   if (durationSec !== VIDEO_SCENE_MAX_SEC) issues.push("duration_not_8s");
   if (!/[.!?]$/.test(script)) issues.push("script_sentence_incomplete");
   if (!sentenceCount) issues.push("script_empty");
+  if (headlineText && isWeakOnScreenText(headlineText)) issues.push("headline_invalid");
   return {
     isValid: issues.length === 0,
     issues,
     speechSec: Number(estimateSpeechDurationSec(script).toFixed(2)),
     bufferSec: Number((VIDEO_SCENE_MAX_SEC - estimateSpeechDurationSec(script)).toFixed(2)),
-    onScreenWords: countWords(normalizeSimpleText(row?.onScreenText || ""))
+    onScreenWords: countWords(headlineText)
   };
 }
 
@@ -3849,6 +3733,11 @@ function toEducationalVideoCanonicalRow(raw = {}, index = 0) {
     script,
     sceneDescription: sceneDescription || buildFallbackSceneDescriptionFromVoiceOver(script, transition, index),
     onScreenText,
+    headlineText: onScreenText,
+    captionText: normalizeSimpleText(raw?.captionText || ""),
+    inSceneText: normalizeSimpleText(raw?.inSceneText || ""),
+    overlayMode: String(raw?.overlayMode || (onScreenText ? "headline" : "none")).trim(),
+    textSource: String(raw?.textSource || "migrated").trim() || "migrated",
     transition,
     visual: visual || sceneDescription || "Definir elemento visual.",
     validation: {
@@ -3885,11 +3774,12 @@ function repairEducationalVideoCanonicalRowLocal(row = {}, index = 0) {
     }),
     visual: normalizeSimpleText(row?.visual || row?.sceneDescription || "") || "Definir elemento visual."
   };
-  repaired.onScreenText = normalizeOnScreenTextStrict(row?.onScreenText || "", {
+  repaired.onScreenText = normalizeOnScreenTextStrict(row?.headlineText ?? row?.onScreenText ?? "", {
     voiceOver: repaired.script,
     sceneDescription: repaired.sceneDescription,
     visual: repaired.visual
   });
+  repaired.headlineText = repaired.onScreenText;
   repaired.validation = validateEducationalVideoCanonicalRow(repaired);
   if (!repaired.validation.isValid) {
     const forcedScript = buildCompactEducationalSentence(repaired.script || repaired.sceneDescription || repaired.visual || "la idea principal", 16);
@@ -3901,6 +3791,7 @@ function repairEducationalVideoCanonicalRowLocal(row = {}, index = 0) {
       sceneDescription: repaired.sceneDescription,
       visual: repaired.visual
     });
+    repaired.headlineText = repaired.onScreenText;
     repaired.validation = validateEducationalVideoCanonicalRow(repaired);
   }
   return repaired;
@@ -3912,6 +3803,11 @@ function canonicalRowsToEducationalVideoTableRows(rows = []) {
     script: normalizeSimpleText(row?.script || ""),
     sceneDescription: normalizeSimpleText(row?.sceneDescription || ""),
     onScreenText: normalizeSimpleText(row?.onScreenText || ""),
+    headlineText: normalizeSimpleText(row?.headlineText ?? row?.onScreenText ?? ""),
+    captionText: normalizeSimpleText(row?.captionText || ""),
+    inSceneText: normalizeSimpleText(row?.inSceneText || ""),
+    overlayMode: String(row?.overlayMode || (String(row?.headlineText ?? row?.onScreenText ?? "").trim() ? "headline" : "none")).trim(),
+    textSource: String(row?.textSource || "migrated").trim() || "migrated",
     transition: normalizeSimpleText(row?.transition || "") || "Corte limpio",
     visual: normalizeSimpleText(row?.visual || row?.sceneDescription || "") || "Definir elemento visual."
   }));
@@ -4207,7 +4103,7 @@ function buildEducationalVideoRowsFromNarrativeText(text = "") {
       time: buildEducationalVideoSceneTimeRange(index),
       script: sentence,
       sceneDescription,
-      onScreenText: summarizeOnScreenTextFromVoiceOver(sentence, { maxWords: 8 }) || "",
+      onScreenText: "",
       transition: normalizeTransitionForScene("", {
         script: sentence,
         sceneDescription,
@@ -4234,10 +4130,9 @@ async function repairEducationalVideoCanonicalRowsWithGemini(canonicalRows = [],
           type: "object",
           properties: {
             index: { type: "number" },
-            script: { type: "string" },
-            onScreenText: { type: "string" }
+            script: { type: "string" }
           },
-          required: ["index", "script", "onScreenText"]
+          required: ["index", "script"]
         }
       }
     },
@@ -4249,7 +4144,7 @@ async function repairEducationalVideoCanonicalRowsWithGemini(canonicalRows = [],
     sceneDescription: item.row.sceneDescription,
     transition: item.row.transition,
     visual: item.row.visual,
-    onScreenText: item.row.onScreenText,
+    headlineText: item.row.headlineText ?? item.row.onScreenText ?? "",
     issues: item.row.validation?.issues || []
   }));
   const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
@@ -4258,7 +4153,7 @@ async function repairEducationalVideoCanonicalRowsWithGemini(canonicalRows = [],
       parts: [{
         text: `Corrige solo filas inválidas de guion técnico de video creativo.
 Reglas obligatorias por fila: conservar el contenido textual sin recortar ideas, usar frases completas en "script" y duración total fija de ${VIDEO_SCENE_MAX_SEC}s por escena.
-No repitas literalmente la descripcion de escena ni el elemento visual en onScreenText.
+No modifiques titulares, captions ni texto natural dentro de escena.
 Responde solo JSON válido.`
       }]
     },
@@ -4292,8 +4187,7 @@ Responde solo JSON válido.`
       const index = Number(item?.index);
       if (!Number.isFinite(index) || index < 0) return;
       byIndex.set(index, {
-        script: normalizeSimpleText(item?.script || ""),
-        onScreenText: normalizeSimpleText(item?.onScreenText || "")
+        script: normalizeSimpleText(item?.script || "")
       });
     });
     return rows.map((row, index) => {
@@ -4301,8 +4195,7 @@ Responde solo JSON válido.`
       if (!patch) return row;
       return repairEducationalVideoCanonicalRowLocal({
         ...row,
-        script: patch.script || row.script,
-        onScreenText: patch.onScreenText || row.onScreenText
+        script: patch.script || row.script
       }, index);
     });
   } catch (_) {
@@ -4373,7 +4266,7 @@ async function composeEducationalVideoTable(input = {}, sessionSnapshot = null, 
     return repairEducationalVideoCanonicalRowLocal({
       ...row,
       script: buildCompactEducationalSentence(row?.script || row?.sceneDescription || row?.visual || "la idea principal", 16),
-      onScreenText: summarizeOnScreenTextFromVoiceOver(row?.script || row?.sceneDescription || "", { maxWords: 8 })
+      onScreenText: normalizeOnScreenTextStrict(row?.onScreenText || "")
     }, index);
   });
   const tableRows = canonicalRowsToEducationalVideoTableRows(canonicalRows);
@@ -4453,7 +4346,11 @@ async function composeVideoScriptFromUserInput(promptText = "", promptHtml = "",
     durationSec: VIDEO_SCENE_MAX_SEC,
     voiceOverText: row?.script || row?.voiceOverText || row?.text || "",
     sceneDescription: row?.sceneDescription || "",
-    onScreenText: row?.onScreenText || "",
+    headlineText: row?.headlineText ?? row?.onScreenText ?? "",
+    captionText: row?.captionText || "",
+    inSceneText: row?.inSceneText || "",
+    overlayMode: row?.overlayMode || (String(row?.headlineText ?? row?.onScreenText ?? "").trim() ? "headline" : "none"),
+    textSource: row?.textSource || "migrated",
     transition: row?.transition || "",
     visualNotes: row?.visual || row?.visualNotes || ""
   }, index, { videoPreset: "creative" }));
@@ -4471,6 +4368,7 @@ registerPodcasterScriptGeneratorApi({
   rewriteScenarioPromptForEducationalVideo,
   resolveCreativeVisualNotesText,
   buildOnScreenText,
+  enhanceEducationalVideoOnScreenTextWithGemini,
   ensureCompleteSentence,
   buildMarkdownTableFromRows,
   parseHtmlTableToRows,

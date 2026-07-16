@@ -26,10 +26,14 @@ if (/handleGenerate|composeVideoScriptFromUserInput/.test(noModifyBlock)) {
   throw new Error("El modo No modificar guión no debe llamar a handleGenerate/Gemini.");
 }
 
-for (const key of ["script", "sceneDescription", "onScreenText", "visual"]) {
+for (const key of ["script", "sceneDescription", "visual"]) {
   if (!generator.includes(`"${key}"`)) {
     throw new Error(`La validación de tabla directa debe exigir ${key}.`);
   }
+}
+
+if (/DIRECT_VIDEO_TABLE_REQUIRED_KEYS[\s\S]{0,180}"(?:onScreenText|headlineText|captionText)"/.test(generator)) {
+  throw new Error("Texto en pantalla debe seguir siendo opcional en tablas directas.");
 }
 
 if (!/function buildVideoScriptFromUnmodifiedTable\(promptText = "", promptHtml = "", sessionSnapshot = null\)/.test(generator)) {

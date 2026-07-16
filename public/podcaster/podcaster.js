@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.487";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.522";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.523";
+import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.523";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.491";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
@@ -186,6 +187,20 @@ const getSharedOnScreenTextStylePresetClass = requireOnScreenTextApiFunction("ge
 const getSharedOnScreenTextBgPresetClass = requireOnScreenTextApiFunction("getOnScreenTextBgPresetClass");
 const getSharedOnScreenTextFontFamilyCss = requireOnScreenTextApiFunction("getOnScreenTextFontFamilyCss");
 const getSharedOnScreenTextClipText = requireOnScreenTextApiFunction("getOnScreenTextClipText");
+const getPodcasterSceneKaraokeTokenOffset = requireOnScreenTextApiFunction("getPodcasterSceneKaraokeTokenOffset");
+const normalizePodcasterSceneTextFields = requireOnScreenTextApiFunction("normalizePodcasterSceneTextFields");
+const resolvePodcasterSceneOverlayText = requireOnScreenTextApiFunction("resolvePodcasterSceneOverlayText");
+const isValidPodcasterHeadlineText = requireOnScreenTextApiFunction("isValidPodcasterHeadlineText");
+
+function resolveCreativeHeadlineTextEdit(rawValue = "", previousValue = "") {
+  const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+  const candidate = normalize(rawValue);
+  const accepted = isValidPodcasterHeadlineText(candidate);
+  const previous = normalize(previousValue);
+  const fallback = isValidPodcasterHeadlineText(previous) ? previous : "";
+  return { accepted, value: accepted ? candidate : fallback };
+}
+
 const buildSharedOnScreenTextPreviewStrokeShadowCss = requireOnScreenTextApiFunction("buildOnScreenTextPreviewStrokeShadowCss");
 const buildSharedOnScreenTextPreviewShadowCss = requireOnScreenTextApiFunction("buildOnScreenTextPreviewShadowCss");
 const wrapSharedOnScreenTextPreviewText = requireOnScreenTextApiFunction("wrapOnScreenTextPreviewText");
@@ -248,12 +263,11 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
   "gemini-2.0-flash-preview-image-generation"
 ]);
 const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
+  "auto",
+  "gemini-omni-flash-preview",
   "veo-3.1-generate-preview",
   "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview",
-  "veo-3.0-generate-001",
-  "veo-3.0-fast-generate-001",
-  "veo-2.0-generate-001"
+  "veo-3.1-lite-generate-preview"
 ]);
 const DISFLUENCY_LEVEL_MAX = Object.freeze({
   fillerLevel: 300,
@@ -2095,6 +2109,7 @@ function normalizePodcastSceneLibraryItem(item = null) {
   const downloadUrl = String(item.downloadUrl || item.videoDownloadUrl || item.videoUrl || "").trim();
   const storagePath = String(item.storagePath || item.videoStoragePath || "").trim();
   if (!libraryId || (!downloadUrl && !storagePath)) return null;
+  const editorialText = normalizePodcasterSceneTextFields(item);
   return {
     libraryId,
     title: String(item.title || item.name || item.publicSceneTitle || "Escena pública").trim() || "Escena pública",
@@ -2105,7 +2120,7 @@ function normalizePodcastSceneLibraryItem(item = null) {
     ownerEmail: String(item.ownerEmail || "").trim(),
     durationSec: Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(item.durationSec) || VIDEO_SCENE_MAX_SEC)),
     sceneDescription: String(item.sceneDescription || "").trim(),
-    onScreenText: String(item.onScreenText || "").trim(),
+    ...editorialText,
     transition: String(item.transition || "").trim(),
     visualNotes: String(item.visualNotes || "").trim(),
     videoDirective: String(item.videoDirective || "").trim(),
@@ -2211,6 +2226,7 @@ function buildPublicSceneRowFromLibraryItem(item = null) {
   if (!normalized) return null;
   const title = String(normalized.title || "").trim() || "Escena pública";
   const voiceOverText = String(normalized.voiceOverText || normalized.sceneDescription || title).trim();
+  const editorialText = normalizePodcasterSceneTextFields({ ...normalized, voiceOverText });
   return {
     id: makeId("row"),
     publicSceneLibraryId: "",
@@ -2225,7 +2241,7 @@ function buildPublicSceneRowFromLibraryItem(item = null) {
     voiceOverText,
     voiceOverOriginalText: voiceOverText,
     sceneDescription: String(normalized.sceneDescription || title).trim(),
-    onScreenText: String(normalized.onScreenText || "").trim(),
+    ...editorialText,
     transition: String(normalized.transition || "Corte limpio").trim() || "Corte limpio",
     visualNotes: String(normalized.visualNotes || "").trim(),
     text: voiceOverText,
@@ -3470,31 +3486,25 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
   const persistedVisualNotes = visualNotesEditedStored && officialVisualNotes
     ? officialVisualNotes
     : visualNotes;
-  const rawOnScreenText = normalizeCreativeFieldText(
-    row?.onScreenText,
-    row?.["Texto en pantalla"],
-    row?.["Texto en Pantalla"],
-    row?.textoPantalla,
-    row?.textoEnPantalla
-  );
   const preserveOnScreenText = row?.onScreenTextNoSummarize === true;
-  const resolvedOnScreenText = preserveOnScreenText
-    ? rawOnScreenText
-    : (buildCreativeOnScreenText(rawOnScreenText || "", {
-      voiceOver: voiceOverText,
-      sceneDescription,
-      visual: visualNotes,
-      prompt: options?.prompt || ""
-    }) || rawOnScreenText);
-  const onScreenText = preserveOnScreenText
-    ? sanitize(rawOnScreenText || "")
-    : (strictValidation
-      ? requirePodcasterScriptGeneratorApiFunction("ensureCompleteSentence")(normalizeSimpleText(resolvedOnScreenText))
-      : sanitize(buildCreativeOnScreenText(rawOnScreenText || "", {
-        voiceOver: voiceOverText,
-        sceneDescription,
-        visual: visualNotes
-      })));
+  const normalizedEditorialText = normalizePodcasterSceneTextFields({
+    ...row,
+    voiceOverText,
+    onScreenText: normalizeCreativeFieldText(
+      row?.onScreenText,
+      row?.["Texto en pantalla"],
+      row?.["Texto en Pantalla"],
+      row?.textoPantalla,
+      row?.textoEnPantalla
+    ),
+    onScreenTextNoSummarize: preserveOnScreenText
+  }, {
+    strictHeadline: strictValidation && row?.textSource !== "manual",
+    strictInScene: strictValidation
+  });
+  const editorialText = strictValidation && !Object.prototype.hasOwnProperty.call(row || {}, "textSource")
+    ? { ...normalizedEditorialText, textSource: "generated" }
+    : normalizedEditorialText;
   const fallbackScenePrompt = sceneDescription || buildFallbackCreativeSceneDescriptionFromVoiceOver(
     voiceOverText || row?.text || row?.visualNotes || row?.notes || "",
     transition || row?.visualNotes || row?.notes || "",
@@ -3550,11 +3560,12 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
     onScreenTextNoSummarize: preserveOnScreenText,
     voiceOverText: strictValidation ? voiceOverText : fallbackVoiceOver,
     sceneDescription: strictValidation ? sceneDescription : (sceneDescription || fallbackScenePrompt),
-    onScreenText: strictValidation ? onScreenText : (onScreenText || buildCreativeOnScreenText(fallbackVoiceOver, {
-      voiceOver: fallbackVoiceOver,
-      sceneDescription,
-      visual: visualNotes
-    })),
+    headlineText: editorialText.headlineText,
+    captionText: editorialText.captionText,
+    inSceneText: editorialText.inSceneText,
+    overlayMode: editorialText.overlayMode,
+    textSource: editorialText.textSource,
+    onScreenText: editorialText.onScreenText,
     transition: normalizeTransitionForScene(transition, {
       script: strictValidation ? voiceOverText : fallbackVoiceOver,
       sceneDescription: strictValidation ? sceneDescription : (sceneDescription || fallbackScenePrompt),
@@ -3583,14 +3594,19 @@ function resolveScenarioForVideoMode(session = null, host = "", fallback = "") {
   return base;
 }
 
+function resolvePodcasterSceneAspectRatio(session = null) {
+  const activeSession = session || getActiveSession();
+  return activeSession?.podcastVideoConfig?.reelModeEnabled === true ? "9:16" : "16:9";
+}
+
 function normalizeVideoScenePrompt(value = "", row = null, session = null) {
   const prompt = String(value || "").replace(/\s+/g, " ").trim();
   const isCreativeVideo = resolveActiveVideoPreset(session) === "creative";
+  const aspectRatio = resolvePodcasterSceneAspectRatio(session);
   if (isCreativeVideo) {
     const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
     const visualNotes = String(resolveVisualNotesForGeneration(row) || row?.visual || "").replace(/\s+/g, " ").trim();
     const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
-    const onScreenText = String(row?.onScreenText || "").replace(/\s+/g, " ").trim();
     const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
     const creativeParts = [
       prompt ? `Dirección base: ${prompt}.` : "",
@@ -3598,12 +3614,11 @@ function normalizeVideoScenePrompt(value = "", row = null, session = null) {
       visualNotes ? `Elemento visual obligatorio (prioridad absoluta): ${visualNotes}.` : "",
       transition ? `Transición sugerida: ${transition}.` : "",
       voiceOver ? `Contexto narrativo de voz en off: ${voiceOver}.` : "",
-      onScreenText ? `Texto en pantalla de referencia semántica: ${onScreenText}. No incrustarlo en el video.` : "",
       "Modo visual-first creativo: prioriza acción, atmósfera, objeto o beat narrativo descrito por el guion técnico.",
       "Si existe una referencia de continuidad anterior, úsala para el estilo y consistencia, pero obedece estrictamente el cambio de contenido solicitado.",
       "No forzar presentador humano; si no aporta, genera escena sin personas.",
       "Prohibido estilo podcast: sin micrófono, sin cabina de radio, sin set de entrevista, sin host hablando a cámara.",
-      "Composición cinematográfica horizontal 16:9, limpia y sin texto incrustado."
+      `Composición cinematográfica ${aspectRatio}, limpia y sin titulares, subtítulos ni copy overlay incrustado.`
     ].filter(Boolean);
     return creativeParts.join(" ").trim().slice(0, 1200);
   }
@@ -3622,20 +3637,21 @@ function normalizeVideoScenePrompt(value = "", row = null, session = null) {
     text ? `Diálogo: ${text}` : "",
     notes ? `Notas visuales: ${notes}` : "",
     directive ? `Prioridad manual: ${directive}` : "",
-    "Plano cinematográfico limpio, coherente con un video creativo, iluminación controlada y composición horizontal 16:9."
+    `Plano cinematográfico limpio, coherente con un video creativo, iluminación controlada y composición ${aspectRatio}.`
   ].filter(Boolean).join(" ").trim().slice(0, 1200);
 }
 
 function buildVideoSceneImagePrompts(row = null, session = null) {
   const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
   const isCreativeVideo = resolveActiveVideoPreset(session) === "creative";
+  const aspectRatio = resolvePodcasterSceneAspectRatio(session);
   if (isCreativeVideo) {
     const visualNotes = String(resolveVisualNotesForGeneration(row) || row?.visual || "").replace(/\s+/g, " ").trim();
     const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
     const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
     const base = scenePrompt || [sceneDescription, visualNotes].filter(Boolean).join(". ").trim();
     return normalizeVideoImagePrompts([
-      `${base} Plano principal del recurso visual descrito, 16:9, estilo cinematográfico creativo, sin personas si no son necesarias, sin texto en pantalla.`,
+      `${base} Plano principal del recurso visual descrito, ${aspectRatio}, estilo cinematográfico creativo, sin personas si no son necesarias, sin titulares, subtítulos ni copy overlay.`,
       `${base} Variación de apoyo con detalle del elemento visual y continuidad narrativa. ${transition ? `Transición visual sugerida: ${transition}.` : ""}`.trim(),
       `${base} Toma alternativa de contexto para reforzar el beat visual, sin micrófonos ni set de podcast.`
     ]);
@@ -3653,7 +3669,7 @@ function buildVideoSceneImagePrompts(row = null, session = null) {
     directive ? `Cumple también: ${directive}` : ""
   ].filter(Boolean).join(" ").trim();
   const prompts = [
-    `${base} Imagen principal cinematográfica horizontal 16:9, encuadre medio, iluminación editorial, look premium, sin texto en pantalla.`,
+    `${base} Imagen principal cinematográfica ${aspectRatio}, encuadre medio, iluminación editorial, look premium, sin titulares, subtítulos ni copy overlay.`,
     `${base} Variante en plano más cerrado, énfasis en rostro, manos y recursos visuales de apoyo, continuidad total de la escena.`,
     `${base} Toma de apoyo o recurso visual, profundidad de campo suave, atmósfera creativa, composición limpia y lista para edición.`
   ];
@@ -3831,6 +3847,9 @@ function normalizeDialogueVideoMap(raw = {}) {
         if (!segPath && !segUrl) return null;
         const segMimeType = String(segment.mimeType || "").trim().toLowerCase();
         const segType = String(segment.type || segment.mediaKind || "").trim().toLowerCase();
+        const segmentGenerator = ["omni", "veo"].includes(String(segment.generator || "").trim().toLowerCase())
+          ? String(segment.generator).trim().toLowerCase()
+          : "";
         return {
           id: String(segment.id || `${key}-seg-${idx + 1}`).trim() || `${key}-seg-${idx + 1}`,
           index: Math.max(0, Number(segment.index) || idx),
@@ -3838,7 +3857,28 @@ function normalizeDialogueVideoMap(raw = {}) {
           downloadUrl: segUrl,
           storagePath: segPath,
           mimeType: segMimeType || (segType === "image" ? "image/jpeg" : "video/mp4"),
+          generator: segmentGenerator,
+          provider: String(segment.provider || "").trim(),
+          model: String(segment.model || "").trim(),
           variant: String(segment.variant || "").trim(),
+          promptVersion: String(segment.promptVersion || "").trim(),
+          promptHash: String(segment.promptHash || "").trim(),
+          textPolicy: ["overlay_only", "in_scene"].includes(String(segment.textPolicy || "").trim().toLowerCase())
+            ? String(segment.textPolicy).trim().toLowerCase()
+            : "",
+          aspectRatio: ["16:9", "9:16"].includes(String(segment.aspectRatio || "").trim())
+            ? String(segment.aspectRatio).trim()
+            : "",
+          resolution: String(segment.resolution || "").trim(),
+          interactionId: String(segment.interactionId || "").trim(),
+          operationName: String(segment.operationName || "").trim(),
+          providerVideoUri: String(segment.providerVideoUri || "").trim(),
+          providerVideoGeneratedAt: String(segment.providerVideoGeneratedAt || "").trim(),
+          providerVideoGenerator: String(segment.providerVideoGenerator || "").trim().toLowerCase(),
+          providerVideoModel: String(segment.providerVideoModel || "").trim(),
+          providerVideoResolution: String(segment.providerVideoResolution || "").trim(),
+          providerVideoAspectRatio: String(segment.providerVideoAspectRatio || "").trim(),
+          providerVideoDurationSec: Math.max(0, Number(segment.providerVideoDurationSec || 0) || 0),
           targetSpeechLine: String(segment.targetSpeechLine || "").trim()
         };
       })
@@ -3849,14 +3889,52 @@ function normalizeDialogueVideoMap(raw = {}) {
     const normalizedType = clipType === "image"
       ? "image"
       : (clipType === "video" ? "video" : (clipMimeType.startsWith("image/") ? "image" : "video"));
+    const generator = ["omni", "veo"].includes(String(clip.generator || "").trim().toLowerCase())
+      ? String(clip.generator).trim().toLowerCase()
+      : (String(clip.model || "").trim().startsWith("veo-") ? "veo" : "omni");
+    const quality = String(clip.quality || "").trim().toLowerCase() === "draft" ? "draft" : "final";
+    const textPolicy = String(clip.textPolicy || "").trim().toLowerCase() === "in_scene" ? "in_scene" : "overlay_only";
+    const aspectRatio = String(clip.aspectRatio || "").trim() === "9:16" ? "9:16" : "16:9";
+    const removedTextDirectives = Array.isArray(clip.removedTextDirectives)
+      ? clip.removedTextDirectives.slice(0, 12).map((item) => ({
+        field: String(item?.field || "").trim(),
+        count: Math.max(0, Number(item?.count || 0) || 0)
+      })).filter((item) => item.field)
+      : [];
+    const requestedDurationSec = Math.max(0, Number(
+      clip.requestedDurationSec ?? clip.requestedDurationSeconds ?? 0
+    ) || 0);
+    const durationSec = Math.max(0, Number(
+      clip.durationSec ?? clip.durationSeconds ?? 0
+    ) || 0);
     next[key] = {
       rowId: key,
       speaker: String(clip.speaker || "").trim(),
       mimeType: clipMimeType || (clipType === "image" ? "image/jpeg" : "video/mp4"),
       type: normalizedType,
-      model: String(clip.model || "veo-3.1-generate-preview").trim() || "veo-3.1-generate-preview",
+      generator,
+      provider: String(clip.provider || "gemini").trim() || "gemini",
+      model: String(clip.model || "gemini-omni-flash-preview").trim() || "gemini-omni-flash-preview",
       variant: String(clip.variant || "").trim(),
-      promptVersion: String(clip.promptVersion || "podcaster_veo_v1").trim() || "podcaster_veo_v1",
+      promptVersion: String(clip.promptVersion || "podcaster_video_v2").trim() || "podcaster_video_v2",
+      promptHash: String(clip.promptHash || "").trim(),
+      quality,
+      textPolicy,
+      aspectRatio,
+      resolution: String(clip.resolution || "").trim(),
+      interactionId: String(clip.interactionId || "").trim(),
+      operationName: String(clip.operationName || "").trim(),
+      providerVideoUri: String(clip.providerVideoUri || "").trim(),
+      providerVideoGeneratedAt: String(clip.providerVideoGeneratedAt || "").trim(),
+      providerVideoGenerator: String(clip.providerVideoGenerator || "").trim().toLowerCase(),
+      providerVideoModel: String(clip.providerVideoModel || "").trim(),
+      providerVideoResolution: String(clip.providerVideoResolution || "").trim(),
+      providerVideoAspectRatio: String(clip.providerVideoAspectRatio || "").trim(),
+      providerVideoDurationSec: Math.max(0, Number(clip.providerVideoDurationSec || 0) || 0),
+      requestedDurationSec,
+      requestedDurationSeconds: requestedDurationSec,
+      durationSeconds: durationSec,
+      removedTextDirectives,
       publicSceneLibraryId: String(clip.publicSceneLibraryId || "").trim(),
       publicScenePublishedAt: String(clip.publicScenePublishedAt || "").trim(),
       publicSceneTitle: String(clip.publicSceneTitle || "").trim(),
@@ -3867,7 +3945,16 @@ function normalizeDialogueVideoMap(raw = {}) {
       videoDirective: String(clip.videoDirective || "").replace(/\s+/g, " ").trim(),
       scenePrompt: String(clip.scenePrompt || "").replace(/\s+/g, " ").trim(),
       imagePrompts: normalizeVideoImagePrompts(clip.imagePrompts || []),
-      durationSec: Math.max(0, Number(clip.durationSec) || 0),
+      durationSec,
+      headlineText: String(clip.headlineText || "").replace(/\s+/g, " ").trim().slice(0, 48),
+      captionText: String(clip.captionText || "").trim().slice(0, 10000),
+      inSceneText: String(clip.inSceneText || "").replace(/\s+/g, " ").trim().slice(0, 48),
+      overlayMode: ["none", "headline", "captions", "both"].includes(String(clip.overlayMode || "").trim().toLowerCase())
+        ? String(clip.overlayMode).trim().toLowerCase()
+        : "none",
+      textSource: ["generated", "manual", "migrated"].includes(String(clip.textSource || "").trim().toLowerCase())
+        ? String(clip.textSource).trim().toLowerCase()
+        : "generated",
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       segments,
       updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
@@ -4530,6 +4617,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
       sceneIndex: index + 1,
       text,
       wrappedText,
+      karaokeTokenOffset: getPodcasterSceneKaraokeTokenOffset(row),
       startMs,
       durationMs,
       trimInMs: Math.max(0, Math.round(Number(clip?.trimInMs || 0) || 0)),
@@ -4633,10 +4721,7 @@ function ensureOnScreenTextClipForRowId(session = null, rowId = "", options = {}
 }
 
 function getOnScreenTextClipText(row = null) {
-  return getSharedOnScreenTextClipText({
-    ...row,
-    onScreenText: normalizeCreativeFieldText(row?.onScreenText, row?.textoPantalla, row?.textoEnPantalla, row?.text)
-  });
+  return getSharedOnScreenTextClipText(row);
 }
 
 function normalizeOnScreenTextClipsToSevenSecondsCentered(session = null, options = {}) {
@@ -4807,13 +4892,28 @@ function copyVoiceOverTextToOnScreenText(rowId = "") {
         if (String(item?.id || "").trim() !== key) {
           return isCreative ? normalizeCreativeRow(item, index, { videoPreset }) : item;
         }
+        const migratedItem = { ...item, ...normalizePodcasterSceneTextFields(item) };
+        const candidate = {
+          ...migratedItem,
+          headlineText: voiceOverText,
+          captionText: "",
+          overlayMode: "headline",
+          textSource: "manual",
+          onScreenTextNoSummarize: false
+        };
+        const withEditorialText = {
+          ...candidate,
+          ...normalizePodcasterSceneTextFields(candidate)
+        };
         return isCreative
-          ? normalizeCreativeRow({ ...item, onScreenText: voiceOverText, onScreenTextNoSummarize: true }, index, { videoPreset })
-          : { ...item, onScreenText: voiceOverText, onScreenTextNoSummarize: true };
+          ? normalizeCreativeRow(withEditorialText, index, { videoPreset })
+          : withEditorialText;
       })
     }
   }), { render: false });
-  syncOnScreenTextClipVisibilityFromRowText(key, voiceOverText, { render: false });
+  syncOnScreenTextClipVisibilityFromRowText(key, getOnScreenTextClipText(
+    getSessionRows(getActiveSession()).find((item) => String(item?.id || "").trim() === key)
+  ), { render: false });
   expandOnScreenTextLayoutsForRows(getActiveSession(), [key], { persist: true });
   scheduleSessionLocalPersist("script-edit");
   if (podcastVideoState.enabled) {
@@ -4844,9 +4944,22 @@ function copyVoiceOverTextToOnScreenTextAllScenes() {
         if (!voiceOverText) return isCreative ? normalizeCreativeRow(item, index, { videoPreset }) : item;
         changedAny = true;
         changedRowIds.push(String(item?.id || "").trim());
+        const migratedItem = { ...item, ...normalizePodcasterSceneTextFields(item) };
+        const candidate = {
+          ...migratedItem,
+          headlineText: voiceOverText,
+          captionText: "",
+          overlayMode: "headline",
+          textSource: "manual",
+          onScreenTextNoSummarize: false
+        };
+        const withEditorialText = {
+          ...candidate,
+          ...normalizePodcasterSceneTextFields(candidate)
+        };
         return isCreative
-          ? normalizeCreativeRow({ ...item, onScreenText: voiceOverText, onScreenTextNoSummarize: true }, index, { videoPreset })
-          : { ...item, onScreenText: voiceOverText, onScreenTextNoSummarize: true };
+          ? normalizeCreativeRow(withEditorialText, index, { videoPreset })
+          : withEditorialText;
       })
     }
   }), { render: false });
@@ -5292,7 +5405,7 @@ function buildTimelineVariantTrackDescriptor(baseSpeakerKey = "", existingTracks
 }
 
 function buildDefaultTimelineTracks(session = null) {
-  return window.buildDefaultTimelineTracks(session);
+  return buildDefaultTimelineTracksFromModel(session);
 }
 
 function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
@@ -7062,7 +7175,8 @@ function createSession(overrides = {}) {
       editorEnabled: true,
       masterVolume: 100,
       audioMasterStabilize: false,
-      audioMasterLimiterEnabled: false
+      audioMasterLimiterEnabled: false,
+      onScreenTextTrack: applySharedOnScreenTextLookPresetValue({}, "studio-clean")
     }),
     creativeVideoConfig: normalizeCreativeVideoConfig({
       enabled: false,
@@ -7185,7 +7299,17 @@ function getSessionRows(session) {
 }
 
 function normalizeRows(raw) {
-  if (Array.isArray(raw)) return raw.filter(v => v && typeof v === 'object' && (v.id || v.text || v.speaker));
+  const isRowLike = (value) => value && typeof value === 'object' && (
+    value.id
+    || value.text
+    || value.speaker
+    || value.voiceOverText
+    || value.script
+    || value.guion
+    || value.sceneDescription
+    || value.scenePrompt
+  );
+  if (Array.isArray(raw)) return raw.filter(isRowLike);
   if (raw && typeof raw === 'object') {
     const keys = Object.keys(raw);
     if (keys.length > 0) {
@@ -7195,13 +7319,13 @@ function normalizeRows(raw) {
         const candidates = keys
           .sort((a, b) => parseInt(a) - parseInt(b))
           .map(k => raw[k])
-          .filter(v => v && typeof v === 'object' && (v.id || v.text || v.speaker));
+          .filter(isRowLike);
         if (candidates.length > 0) return candidates;
         // All numeric-keyed values lack row fields → treat as corrupt, return empty
         return [];
       }
       // Case 2: Map of row objects (e.g. keys are row IDs)
-      const rowLike = values.filter(v => v && typeof v === 'object' && (v.id || v.text || v.speaker || v.role || v.voiceOverText));
+      const rowLike = values.filter(v => isRowLike(v) || v?.role);
       if (rowLike.length > 0) {
         return rowLike.sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
       }
@@ -7233,8 +7357,10 @@ function normalizeRowVoiceConfig(row = {}, session = null, options = {}) {
   const voiceNameSource = explicitVoice
     ? normalizeVoiceNameSource(options?.voiceNameSource ?? sourceRow?.voiceNameSource)
     : "host";
+  const editorialText = normalizePodcasterSceneTextFields(sourceRow);
   return {
     ...sourceRow,
+    ...editorialText,
     speaker,
     voiceName,
     voiceNameSource
@@ -8520,7 +8646,13 @@ function buildPortraitImageModelChain() {
 
 function buildPodcasterVideoModelChain(preferredModel = "") {
   const requested = String(preferredModel || "").trim();
-  return Array.from(new Set([requested, ...AVAILABLE_PODCASTER_VIDEO_MODELS].filter(Boolean)));
+  const legacyMap = {
+    "veo-3.0-generate-001": "veo-3.1-generate-preview",
+    "veo-3.0-fast-generate-001": "veo-3.1-fast-generate-preview",
+    "veo-2.0-generate-001": "veo-3.1-generate-preview"
+  };
+  const normalized = legacyMap[requested] || requested;
+  return [AVAILABLE_PODCASTER_VIDEO_MODELS.includes(normalized) ? normalized : "auto"];
 }
 
 function parseSceneSelection(input = "", totalRows = 0) {
@@ -9574,6 +9706,7 @@ function normalizeCreativeVideoScriptForDisplay(script = {}, session = null, opt
       hosts: Array.isArray(script?.hosts) && script.hosts.length ? script.hosts : getSpeakerOptions(session),
       rows: normalizeRows(script?.rows).map((row) => ({
         ...row,
+        voiceOverText: String(row?.voiceOverText || row?.text || row?.guion || row?.script || "").trim(),
         text: String(row?.text || row?.voiceOverText || row?.guion || row?.script || "").trim(),
         notes: String(row?.notes || row?.visualNotes || row?.visual || row?.elementoVisual || "").trim(),
         sceneDescription: String(row?.sceneDescription || row?.scenePrompt || row?.descripcionEscena || row?.descripcionDeEscena || row?.scene || row?.escena || "").trim(),
@@ -9595,7 +9728,7 @@ function normalizeCreativeVideoScriptForDisplay(script = {}, session = null, opt
   base.rows = base.rows.map((row, index) => {
     const scenePrompt = requirePodcasterScriptGeneratorApiFunction("rewriteScenarioPromptForEducationalVideo")(
       String(row?.scenePrompt || row?.sceneDescription || "").replace(/\s+/g, " ").trim()
-      || `Secuencia ${index + 1}: apoyo visual limpio y creativo en 16:9.`
+      || `Secuencia ${index + 1}: apoyo visual limpio y creativo en ${resolvePodcasterSceneAspectRatio(session)}.`
     );
     const imagePrompts = normalizeVideoImagePrompts(row.imagePrompts || []).map((prompt) => {
       const sanitizedPrompt = sanitizeSpeakerMentionsInDialogue(prompt, session, base.hosts);
@@ -10329,12 +10462,16 @@ function buildCloudSessionPayload(session = null) {
   const chat = Array.isArray(source?.chat) ? source.chat : [];
   const isCreative = isCreativeVideoMode(source);
   const videoPreset = isCreative ? resolveActiveVideoPreset(source) : null;
-  const normalizedSourceForCloud = isCreative && source
+  const normalizedSourceForCloud = source
     ? {
       ...source,
       script: {
         ...source.script,
-        rows: normalizeRows(source?.script?.rows).map((row, index) => normalizeCreativeRow(row, index, { videoPreset }))
+        rows: normalizeRows(source?.script?.rows).map((row, index) => (
+          isCreative
+            ? normalizeCreativeRow(row, index, { videoPreset })
+            : { ...row, ...normalizePodcasterSceneTextFields(row) }
+        ))
       }
     }
     : source;
@@ -10676,7 +10813,7 @@ function syncGlobalConfigPanel(session = null) {
   try {
     const videoCfg = getPodcastVideoConfig(session);
     if (els.globalCheapVideoMode) {
-      els.globalCheapVideoMode.value = String(videoCfg.videoModel || "").trim() || "veo-3.1-lite-generate-preview";
+      els.globalCheapVideoMode.value = buildPodcasterVideoModelChain(String(videoCfg.videoModel || "").trim())[0] || "auto";
     }
     if (els.globalMediaLoadMode) {
       els.globalMediaLoadMode.value = String(videoCfg.mediaLoadMode || "streaming").trim().toLowerCase();
@@ -10729,10 +10866,16 @@ function persistGlobalTtsDirectionDraft() {
 }
 
 function readGlobalVideoConfigControls() {
-  const selectedVideoModel = buildPodcasterVideoModelChain(String(els.globalCheapVideoMode?.value || "").trim())[0] || "veo-3.1-lite-generate-preview";
+  const selectedVideoModel = buildPodcasterVideoModelChain(String(els.globalCheapVideoMode?.value || "").trim())[0] || "auto";
   const selectedMediaLoadMode = String(els.globalMediaLoadMode?.value || "streaming").trim().toLowerCase();
+  const videoGenerator = selectedVideoModel === "gemini-omni-flash-preview"
+    ? "omni"
+    : (selectedVideoModel.startsWith("veo-") ? "veo" : "auto");
   return {
     videoModel: selectedVideoModel,
+    videoGenerator,
+    videoQuality: selectedVideoModel === "veo-3.1-lite-generate-preview" ? "draft" : "final",
+    videoRoutingVersion: 2,
     cheapVideoMode: selectedVideoModel === "veo-3.1-lite-generate-preview",
     mediaLoadMode: ["streaming", "blob", "auto"].includes(selectedMediaLoadMode)
       ? selectedMediaLoadMode
@@ -12211,6 +12354,7 @@ const podcasterOnScreenTextTrackEditorApi = createPodcasterOnScreenTextTrackEdit
   buildDefaultOnScreenTextLayoutForRow,
   estimateOnScreenTextLayoutHeightPct,
   getOnScreenTextClipText,
+  getPodcasterSceneKaraokeTokenOffset,
   getOnScreenTextLayoutForRow,
   ensureOnScreenTextLayoutByRowId,
   ensureOnScreenTextClipsByRowId,
@@ -13574,6 +13718,7 @@ playbackController.init(els, {
   ensureOnScreenTextClipsByRowId,
   getOnScreenTextClipEffectiveDurationMs,
   getOnScreenTextClipText,
+  getPodcasterSceneKaraokeTokenOffset,
   resolveOnScreenTextRenderMetrics,
   resolveOnScreenTextPreviewLayoutSpec,
   getOnScreenTextStylePresetClass,
@@ -13689,6 +13834,7 @@ exportPreviewController.init(exportPreviewEls, {
   ensureOnScreenTextClipsByRowId,
   getOnScreenTextClipEffectiveDurationMs,
   getOnScreenTextClipText,
+  getPodcasterSceneKaraokeTokenOffset,
   resolveOnScreenTextRenderMetrics,
   resolveOnScreenTextPreviewLayoutSpec,
   getOnScreenTextStylePresetClass,
@@ -14311,16 +14457,16 @@ function renderCreativeInspector(session = null) {
       <span class="row-field-head">
         <span>Texto en pantalla</span>
         <span class="row-field-inline-actions">
-          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="copy-voiceover-to-onscreen-text" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Copiar guión → texto en pantalla" aria-label="Copiar guión a texto en pantalla">
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="copy-voiceover-to-onscreen-text" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Copiar guion → texto en pantalla" aria-label="Copiar guion a texto en pantalla">
             <i class="fas fa-level-down-alt" aria-hidden="true"></i>
           </button>
         </span>
       </span>
-      <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(activeRow?.onScreenText || "").trim())}" placeholder="Texto breve en pantalla">
+      <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(activeRow?.headlineText || activeRow?.onScreenText || "").trim())}" placeholder="Texto breve en pantalla">
     </label>
     <label class="row-field">
       <span>Transición</span>
-      <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Ej: corte rápido, disolvencia, barrido">${escapeHtml(String(activeRow?.transition || activeRow?.visualNotes || activeRow?.notes || "").trim())}</textarea>
+      <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Ej: corte rápido, disolvencia, barrido">${escapeHtml(String(activeRow?.transition || "").trim())}</textarea>
     </label>
     <label class="row-field">
       <span class="row-field-head">
@@ -16087,7 +16233,7 @@ async function rewriteVoiceOverTextWithGemini(rowId = "", options = {}) {
     const data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
-        model: els.scriptModelSelect?.value || "gemini-2.5-flash",
+        model: els.scriptModelSelect?.value || "gemini-3.5-flash",
         payload
       })
     });
@@ -16166,6 +16312,74 @@ function restoreVoiceOverOriginalText(rowId = "") {
   return true;
 }
 
+async function regenerateHeadlineTextWithGemini(rowId = "", options = {}) {
+  const session = getActiveSession();
+  if (!session || !isCreativeVideoMode(session)) return false;
+  const key = String(rowId || "").trim();
+  const triggerBtn = options?.button || null;
+  if (!key) return false;
+  const { row, rowIndex } = resolveCreativeRowMeta(session, key);
+  if (!row || rowIndex < 0) return false;
+  const videoPreset = resolveActiveVideoPreset(session);
+  const generator = requirePodcasterScriptGeneratorApiFunction("enhanceEducationalVideoOnScreenTextWithGemini");
+  try {
+    window.setButtonLoadingState?.(triggerBtn, true, { loadingTitle: "Regenerando titular..." });
+    const generatedRows = await generator([{
+      time: String(row?.time || "").trim(),
+      script: String(row?.voiceOverText || row?.text || "").trim(),
+      sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").trim(),
+      headlineText: String(row?.headlineText || "").trim(),
+      captionText: String(row?.captionText || "").trim(),
+      inSceneText: String(row?.inSceneText || "").trim(),
+      overlayMode: String(row?.overlayMode || "none").trim() || "none",
+      textSource: "generated",
+      transition: String(row?.transition || "").trim(),
+      visual: String(resolveVisualNotesForGeneration(row) || row?.visual || "").trim()
+    }], session);
+    const generated = Array.isArray(generatedRows) ? generatedRows[0] : null;
+    if (!generated) throw new Error("Gemini no devolvió una respuesta válida.");
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        rows: (current.script?.rows || []).map((item, index) => {
+          if (String(item?.id || "").trim() !== key) {
+            return normalizeCreativeRow(item, index, { videoPreset });
+          }
+          const headlineText = String(generated?.headlineText || "").replace(/\s+/g, " ").trim();
+          const captionText = String(item?.captionText || "").trim();
+          const candidate = {
+            ...item,
+            headlineText,
+            overlayMode: headlineText
+              ? (captionText ? "both" : "headline")
+              : (captionText ? "captions" : "none"),
+            textSource: "generated"
+          };
+          return normalizeCreativeRow({
+            ...candidate,
+            ...normalizePodcasterSceneTextFields(candidate)
+          }, index, { videoPreset });
+        })
+      }
+    }), { render: false });
+    syncOnScreenTextClipVisibilityFromRowText(key, getOnScreenTextClipText(
+      getSessionRows(getActiveSession()).find((item) => String(item?.id || "").trim() === key)
+    ), { render: false });
+    renderCreativeVideoShell(getActiveSession());
+    scheduleSessionLocalPersist("script-edit");
+    setGenerationStatus(generated?.headlineText
+      ? `Titular de escena ${rowIndex + 1} regenerado con Gemini.`
+      : `La escena ${rowIndex + 1} no necesita titular.`, "is-live");
+    return true;
+  } catch (error) {
+    setGenerationStatus(`No se pudo regenerar el titular (${String(error?.message || "error desconocido")}).`, "");
+    return false;
+  } finally {
+    window.setButtonLoadingState?.(triggerBtn, false);
+  }
+}
+
 async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
   const session = getActiveSession();
   if (!isCreativeVideoMode(session)) return false;
@@ -16183,8 +16397,8 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
   const voiceOverOriginal = String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim();
   const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
   const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
-  const onScreenText = String(row?.onScreenText || "").replace(/\s+/g, " ").trim();
   const currentVisual = String(resolveVisualNotesForGeneration(row) || row?.visual || "").replace(/\s+/g, " ").trim();
+  const aspectRatio = resolvePodcasterSceneAspectRatio(session);
 
   if (!voiceOverText && !voiceOverOriginal) {
     setGenerationStatus("No hay guion para regenerar el elemento visual.", "");
@@ -16209,7 +16423,7 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
           "Lee primero el guion actual (si existe) y usa el original solo como respaldo.",
           "Regenera un 'Elemento visual' nuevo, más detallado, que refuerce exactamente lo que dice el guion.",
           "Describe el recurso visual (objeto, gráfico, diagrama, animación, entorno) con claridad y concreción.",
-          "Debe servir para generar video 16:9 sin texto incrustado (no pongas subtítulos).",
+          `Debe servir para generar video ${aspectRatio} sin titulares, subtítulos ni copy overlay incrustado.`,
           "Evita estilo podcast: sin cabina, sin micrófono, sin set de entrevista, sin presentador humano si no aporta.",
           "Entrega solo JSON válido."
         ].join(" ")
@@ -16224,7 +16438,6 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
           voiceOverOriginal ? `Guion original: ${voiceOverOriginal}` : "",
           sceneDescription ? `Descripción de escena: ${sceneDescription}` : "",
           transition ? `Transición: ${transition}` : "",
-          onScreenText ? `Texto en pantalla (semántica, no incrustar): ${onScreenText}` : "",
           currentVisual ? `Elemento visual actual: ${currentVisual}` : "",
           "Objetivo: proponer un elemento visual NUEVO y más detallado, alineado al guion, listo para producción."
         ].filter(Boolean).join("\n")
@@ -16245,7 +16458,7 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
     const data = await authFetchJson("/api/gemini/generate", {
       method: "POST",
       body: JSON.stringify({
-        model: els.scriptModelSelect?.value || "gemini-2.5-flash",
+        model: els.scriptModelSelect?.value || "gemini-3.5-flash",
         payload
       })
     });
@@ -16354,6 +16567,11 @@ async function handleSharedCreativeRowAction(target = null) {
   if (action === "copy-voiceover-to-onscreen-text") {
     if (!rowId) return true;
     copyVoiceOverTextToOnScreenText(rowId);
+    return true;
+  }
+  if (action === "regenerate-headline-text") {
+    if (!rowId) return true;
+    await regenerateHeadlineTextWithGemini(rowId, { button: actionBtn });
     return true;
   }
   if (action === "open-gemini-creativity") {
@@ -17606,9 +17824,21 @@ function attachEvents() {
       const field = String(target.dataset.field || "").trim();
       if (!rowId || !field) return;
       const isLiveInput = String(event?.type || "").trim().toLowerCase() === "input";
+      const previousRow = getSessionRows(getActiveSession())
+        .find((row) => String(row?.id || "").trim() === rowId) || null;
+      const headlineEdit = field === "headlineText"
+        ? resolveCreativeHeadlineTextEdit(target.value, previousRow?.headlineText)
+        : null;
+      if (field === "headlineText" && isLiveInput) return;
+      if (field === "headlineText" && !headlineEdit.accepted) {
+        target.value = headlineEdit.value;
+        setGenerationStatus("El titular debe tener 2–6 palabras y máximo 48 caracteres.", "");
+        return;
+      }
       const rawValue = field === "durationSec"
         ? Number(target.value || 0)
-        : String(target.value || "");
+        : (field === "headlineText" ? headlineEdit.value : String(target.value || ""));
+      const editorialFields = new Set(["headlineText", "captionText", "inSceneText", "overlayMode", "onScreenText"]);
       upsertActiveSession((current) => ({
         ...current,
         script: {
@@ -17618,10 +17848,41 @@ function attachEvents() {
             const rows = Array.isArray(current.script?.rows) ? [...current.script.rows] : [];
             const targetIndex = rows.findIndex((row) => String(row?.id || "").trim() === rowId);
             if (targetIndex < 0) return rows;
-            rows[targetIndex] = {
-              ...(rows[targetIndex] || {}),
-              [field]: rawValue
-            };
+            const currentRow = rows[targetIndex] || {};
+            if (editorialFields.has(field)) {
+              const migratedRow = { ...currentRow, ...normalizePodcasterSceneTextFields(currentRow) };
+              const candidate = {
+                ...migratedRow,
+                [field === "onScreenText" ? "headlineText" : field]: rawValue,
+                ...(field === "overlayMode" ? {} : { textSource: "manual" })
+              };
+              if (field === "onScreenText") {
+                candidate.captionText = "";
+                candidate.overlayMode = String(rawValue || "").trim() ? "headline" : "none";
+                candidate.onScreenTextNoSummarize = false;
+              } else if (field === "headlineText") {
+                const hasHeadline = Boolean(String(rawValue || "").trim());
+                const hasCaption = Boolean(String(candidate.captionText || "").trim());
+                candidate.overlayMode = hasHeadline
+                  ? (hasCaption ? "both" : "headline")
+                  : (hasCaption ? "captions" : "none");
+              } else if (field === "captionText") {
+                const hasHeadline = Boolean(String(candidate.headlineText || "").trim());
+                const hasCaption = Boolean(String(rawValue || "").trim());
+                candidate.overlayMode = hasCaption
+                  ? (hasHeadline ? "both" : "captions")
+                  : (hasHeadline ? "headline" : "none");
+              }
+              rows[targetIndex] = {
+                ...candidate,
+                ...normalizePodcasterSceneTextFields(candidate)
+              };
+            } else {
+              rows[targetIndex] = {
+                ...currentRow,
+                [field]: rawValue
+              };
+            }
             return rows;
           })()
         }
@@ -17631,8 +17892,10 @@ function attachEvents() {
         recordHistory: !isLiveInput,
         autosaveReason: field === "durationSec" ? "structure" : "script-edit"
       });
-      if (field === "onScreenText") {
-        const nextText = String(rawValue || "").replace(/\s+/g, " ").trim();
+      if (editorialFields.has(field)) {
+        const refreshedRow = getSessionRows(getActiveSession())
+          .find((row) => String(row?.id || "").trim() === rowId) || null;
+        const nextText = getOnScreenTextClipText(refreshedRow);
         syncOnScreenTextClipVisibilityFromRowText(rowId, nextText, {
           render: false,
           autosave: false,
@@ -20918,7 +21181,7 @@ async function __compatibility_only__() {
 // but must declare its contract here for static analysis.
 function buildTimelineSceneVideoGenerationRequest(row = null, options = {}) {
   return {
-    promptProfile: "timeline-scene-video",
+    promptProfile: "podcaster_video_v2",
     sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").trim(),
     visualNotes: String(resolveVisualNotesForGeneration(row) || row?.visual || "").trim()
   };

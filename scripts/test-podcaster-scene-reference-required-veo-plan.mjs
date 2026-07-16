@@ -1,49 +1,68 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 
-const backendSource = readFileSync(
-  new URL("../backend/server.js", import.meta.url),
-  "utf8"
+const require = createRequire(import.meta.url);
+const provider = require("../backend/podcaster-video-provider.js");
+const backendSource = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
+const frontendSource = readFileSync(new URL("../public/podcaster/podcaster-video-generator.js", import.meta.url), "utf8");
+
+assert.equal(
+  provider.resolveVideoGenerator({ generator: "auto", hasReferenceImages: true }),
+  "omni",
+  "Las referencias de imagen generales deben permanecer en Omni."
 );
-const frontendSource = readFileSync(
-  new URL("../public/podcaster/podcaster-video-generator.js", import.meta.url),
-  "utf8"
+assert.equal(
+  provider.resolveVideoGenerator({ generator: "auto", hasReferenceVideo: true }),
+  "veo",
+  "Una referencia de video sí requiere Veo 3.1."
 );
 
-assert.match(
-  backendSource,
-  /requestRequiresSceneReference[\s\S]*filterVeoVariantsForModel\(effectiveRequestVariants, modelName\)\.some\(\(variant\) => \/reference-\/i\.test/,
-  "Cuando hay referencia de escena, el backend debe elegir modelos con variantes reference-* compatibles."
-);
-
-assert.match(
-  backendSource,
-  /requestRequiresSceneReference[\s\S]*\? videoModels\.filter\(\(modelName\) => filterVeoVariantsForModel\(effectiveRequestVariants, modelName\)\.some/,
-  "Cuando hay referencia de escena, el backend debe conservar todos los modelos compatibles con referenceImages, no solo el limite inicial."
-);
-
-assert.match(
-  backendSource,
-  /filterVeoVariantsForModel\(effectiveRequestVariants, videoModel\)[\s\S]*filter\(\(variant\) => !requestRequiresSceneReference \|\| \/reference-\/i\.test/,
-  "Cuando hay referencia de escena, el backend no debe continuar con variantes text-only."
-);
-
-assert.match(
-  backendSource,
-  /scene_reference_unavailable[\s\S]*return res\.status\(422\)\.json/,
-  "Si la referencia declarada no se puede cargar, el backend debe fallar con diagnostico en vez de degradar a text-only."
-);
-
-assert.match(
-  backendSource,
-  /const veoPrompt = compactVeoPromptForRequest\(prompt\);[\s\S]*prompt: veoPrompt/,
-  "El backend debe compactar el prompt antes de enviarlo a Veo para respetar el limite de texto del modelo."
-);
+const veoRefConfig = provider.resolveVeoConfig({
+  quality: "draft",
+  durationSeconds: 4,
+  hasReferences: true,
+  aspectRatio: "9:16"
+});
+assert.equal(veoRefConfig.durationSeconds, 8);
+assert.equal(veoRefConfig.resolution, "720p");
+assert.equal(veoRefConfig.aspectRatio, "9:16");
 
 assert.match(
   frontendSource,
-  /hasStoragePath: Boolean\(String\(item\?\.storagePath \|\| item\?\.path \|\| ""\)\.trim\(\)\)/,
-  "El trace frontend debe reportar referencias remotas por storagePath, no solo dataUrl inline."
+  /hasReferenceVideo:\s*referenceMode === "video" && Boolean\(rowReferenceVideo\)/,
+  "El frontend debe informar explícitamente cuándo hay una referencia de video."
+);
+assert.match(
+  frontendSource,
+  /referenceImages:[\s\S]*\.slice\(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT\)/,
+  "La solicitud debe transportar hasta tres referencias de imagen."
+);
+assert.match(
+  frontendSource,
+  /maxModelAttempts:\s*1/,
+  "Una operación aceptada no debe iniciar un segundo modelo como fallback."
 );
 
-console.log("Podcaster scene reference required Veo plan OK.");
+assert.match(
+  backendSource,
+  /resolvedGenerator === "omni"[\s\S]*createOmniVideo\([\s\S]*createVeoVideo\(/,
+  "El endpoint debe delegar en adaptadores separados de Omni y Veo."
+);
+assert.match(
+  backendSource,
+  /hasReferenceVideo:\s*Boolean\(referenceVideoDataUrl \|\| referenceVideoProviderUri\)/,
+  "El backend debe resolver las capacidades desde el request antes de elegir proveedor."
+);
+assert.match(
+  backendSource,
+  /validateVeoExtensionSource\(\{[\s\S]*referenceVideoProviderUri[\s\S]*referenceVideoProviderGeneratedAt/,
+  "La extensión debe validar procedencia Veo reciente antes de llamar al proveedor."
+);
+assert.match(
+  backendSource,
+  /const videoModels = \[requestedModel\];/,
+  "El backend debe ejecutar un único modelo y no iniciar fallback después de aceptar la solicitud."
+);
+
+console.log("Podcaster image/video reference routing v2 OK.");

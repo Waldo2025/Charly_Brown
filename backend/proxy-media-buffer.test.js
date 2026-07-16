@@ -32,6 +32,18 @@ test("returns full buffer for missing range header", () => {
   assert.equal(payload.body.toString("utf8"), "abcdefghij");
 });
 
+test("returns the final bytes for a suffix byte range", () => {
+  const source = Buffer.from("abcdefghij", "utf8");
+  const payload = buildBufferedMediaPayload(source, {
+    mimeType: "audio/mpeg",
+    rangeHeader: "bytes=-4"
+  });
+
+  assert.equal(payload.status, 206);
+  assert.equal(payload.headers["Content-Range"], "bytes 6-9/10");
+  assert.equal(payload.body.toString("utf8"), "ghij");
+});
+
 test("builds streaming payload metadata for valid byte range", () => {
   const payload = buildStreamingMediaPayload(10, {
     mimeType: "video/mp4",

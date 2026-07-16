@@ -75,7 +75,10 @@ test("montage export preview syncs karaoke overlay from the preview video elemen
 });
 
 test("montage export preview falls back to scene index when row id is missing", () => {
-  assert.ok(montageExportSource.includes("currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()"));
+  assert.match(
+    montageExportSource,
+    /const cleanSceneIndex = Math\.max\(0,[\s\S]*?if \(!cleanRowId && cleanSceneIndex <= 0\) return;/m
+  );
   assert.ok(montageExportSource.includes("previewSceneIndex"));
   assert.ok(montageExportSource.includes("resolveMontageRenderEntryAtTime"));
   assert.ok(montageExportSource.includes("getMontageExportPreviewMediaTargets"));
@@ -93,7 +96,8 @@ test("playback controller does not re-hardcode bubble width and position outside
 });
 
 test("preview controller renders karaoke markup when timings exist and falls back to raw text otherwise", () => {
-  assert.match(playbackControllerSource, /const karaokeWordTimings = normalizeKaraokeWordTimings\(audioClip, text\);/);
+  assert.match(playbackControllerSource, /const karaokeTokenOffset = Math\.max\(0, Number\([\s\S]*?getPodcasterSceneKaraokeTokenOffset\?\.\(row\)[\s\S]*?\) \|\| 0\);/m);
+  assert.match(playbackControllerSource, /const karaokeWordTimings = normalizeKaraokeWordTimings\(audioClip, text, \{[\s\S]*?tokenOffset: karaokeTokenOffset[\s\S]*?\}\);/m);
   assert.match(playbackControllerSource, /const contentHtml = karaokeWordTimings\.length[\s\S]*?buildKaraokeSubtitleMarkup\(text,\s*karaokeWordTimings,\s*activeKaraokeWordIndex,\s*settings\)[\s\S]*?: this\.deps\.escapeHtml\(text\);/m);
   assert.doesNotMatch(playbackControllerSource, /wrappedText \|\| previewSpec\?\.metrics\?\.wrappedText/);
 });

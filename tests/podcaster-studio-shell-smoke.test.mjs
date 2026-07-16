@@ -38,11 +38,31 @@ test("session rail module owns rail filters, archive toggle, and card actions", 
 test("preview fullscreen uses the shared controller on visual containers", () => {
   assert.match(fullscreenSource, /function mountControls\(\) \{/);
   assert.match(fullscreenSource, /function restoreControls\(\) \{/);
+  assert.match(fullscreenSource, /controlsEl\.classList\.add\("is-attached-to-stage-fullscreen"\);/);
   assert.match(fullscreenSource, /document\.addEventListener\("fullscreenchange", onFullscreenChange\);/);
   assert.match(fullscreenSource, /targetEl\.classList\.add\(fallbackClass\);/);
   assert.match(podcasterSource, /createPodcasterStageFullscreenController\(\{[\s\S]*?targetEl: podcastPreviewStageEl,[\s\S]*?buttonEl: els\.podcastPreviewFullscreenBtn[\s\S]*?\}\);/);
   assert.match(podcasterSource, /const montageExportPreviewStageEl = document\.getElementById\("montageExportPreviewContainer"\);/);
   assert.match(podcasterSource, /createPodcasterStageFullscreenController\(\{[\s\S]*?targetEl: montageExportPreviewStageEl,[\s\S]*?buttonEl: els\.montageExportFullscreenBtn[\s\S]*?\}\);/);
+});
+
+test("fullscreen transport stays above stage overlays and remains clickable after reparenting", () => {
+  assert.match(
+    cssSource,
+    /\.podcast-stage-fullscreen-controls-host\s*\{[\s\S]*?z-index:\s*120;[\s\S]*?pointer-events:\s*none;[\s\S]*?\}/m
+  );
+  assert.match(
+    cssSource,
+    /\.is-stage-fullscreen \.podcast-stage-fullscreen-controls-host,[\s\S]*?\.is-stage-expanded \.podcast-stage-fullscreen-controls-host\s*\{[\s\S]*?display:\s*flex;[\s\S]*?pointer-events:\s*auto;[\s\S]*?\}/m
+  );
+  assert.match(
+    cssSource,
+    /\.podcast-stage-fullscreen-controls-host\s*>\s*\.is-attached-to-stage-fullscreen\s*\{[\s\S]*?position:\s*relative\s*!important;[\s\S]*?inset:\s*auto\s*!important;[\s\S]*?pointer-events:\s*auto\s*!important;[\s\S]*?\}/m
+  );
+  assert.match(
+    cssSource,
+    /\.is-stage-fullscreen \.podcast-stage-fullscreen-btn,[\s\S]*?\.is-stage-expanded \.podcast-stage-fullscreen-btn\s*\{[\s\S]*?z-index:\s*130;[\s\S]*?pointer-events:\s*auto;[\s\S]*?\}/m
+  );
 });
 
 test("playback stop guards timeline stage sync when no session is active", () => {

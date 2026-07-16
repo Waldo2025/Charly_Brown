@@ -9,14 +9,29 @@ const runtime = requirePodcasterGenerationRuntime();
 // --- Constants ---
 const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 3;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
+const DIALOGUE_VIDEO_POLL_TIMEOUT_MS = 11 * 60 * 1000;
+const PODCASTER_VIDEO_PROMPT_PROFILE = "podcaster_video_v2";
+const PODCASTER_VIDEO_MODEL_AUTO = "auto";
+const PODCASTER_VIDEO_MODEL_OMNI = "gemini-omni-flash-preview";
+const PODCASTER_VIDEO_MODEL_VEO_STANDARD = "veo-3.1-generate-preview";
+const PODCASTER_VIDEO_MODEL_VEO_FAST = "veo-3.1-fast-generate-preview";
+const PODCASTER_VIDEO_MODEL_VEO_LITE = "veo-3.1-lite-generate-preview";
 const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
-  "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview",
-  "veo-3.0-generate-001",
-  "veo-3.0-fast-generate-001",
-  "veo-2.0-generate-001"
+  PODCASTER_VIDEO_MODEL_OMNI,
+  PODCASTER_VIDEO_MODEL_VEO_STANDARD,
+  PODCASTER_VIDEO_MODEL_VEO_FAST,
+  PODCASTER_VIDEO_MODEL_VEO_LITE
 ]);
+const PODCASTER_VIDEO_MODEL_PREFERENCES = Object.freeze([
+  PODCASTER_VIDEO_MODEL_AUTO,
+  ...AVAILABLE_PODCASTER_VIDEO_MODELS
+]);
+const LEGACY_PODCASTER_VIDEO_MODEL_MAP = Object.freeze({
+  "veo-3.0-generate-001": PODCASTER_VIDEO_MODEL_VEO_STANDARD,
+  "veo-3.0-fast-generate-001": PODCASTER_VIDEO_MODEL_VEO_FAST,
+  "veo-2.0-generate-001": PODCASTER_VIDEO_MODEL_VEO_STANDARD
+});
+const VISIBLE_TEXT_DIRECTIVE_PATTERN = /\b(texto|textos|palabra|palabras|letra|letras|letrero|letreros|r[oó]tulo|r[oó]tulos|subt[ií]tulo|subt[ií]tulos|t[ií]tulo|t[ií]tulos|logo|logos|marca|marcas|caption|captions|headline|headlines|title|titles|sign|signs|label|labels|letter|letters|word|words|typography)\b/i;
 
 // --- State ---
 const dialogueVideoGenerationTasks = new Map();
@@ -27,6 +42,127 @@ const brokenDialogueVideoRows = podcasterGenerationShared.brokenDialogueVideoRow
 let nextDialogueVideoRequestAt = 0;
 
 // --- Helpers ---
+
+function normalizePodcasterVideoModelPreference(value = "") {
+  const requested = String(value || "").trim();
+  if (PODCASTER_VIDEO_MODEL_PREFERENCES.includes(requested)) return requested;
+  return LEGACY_PODCASTER_VIDEO_MODEL_MAP[requested] || PODCASTER_VIDEO_MODEL_AUTO;
+}
+
+function resolvePodcasterVideoGeneratorPreference(modelPreference = PODCASTER_VIDEO_MODEL_AUTO, requestedGenerator = "") {
+  const explicitGenerator = String(requestedGenerator || "").trim().toLowerCase();
+  if (["auto", "omni", "veo"].includes(explicitGenerator)) return explicitGenerator;
+  if (modelPreference === PODCASTER_VIDEO_MODEL_OMNI) return "omni";
+  if (String(modelPreference || "").startsWith("veo-")) return "veo";
+  return "auto";
+}
+
+function resolvePodcasterVideoRouting(options = {}) {
+  const configuredModel = normalizePodcasterVideoModelPreference(options.modelPreference);
+  const generator = resolvePodcasterVideoGeneratorPreference(configuredModel, options.generator);
+  const highQuality = options.highQuality === true;
+  let model = configuredModel;
+  if (generator === "auto") model = PODCASTER_VIDEO_MODEL_AUTO;
+  if (generator === "omni") model = PODCASTER_VIDEO_MODEL_OMNI;
+  if (generator === "veo") {
+    if (!String(model || "").startsWith("veo-")) model = PODCASTER_VIDEO_MODEL_VEO_STANDARD;
+    if (highQuality) model = PODCASTER_VIDEO_MODEL_VEO_STANDARD;
+  }
+  const quality = highQuality
+    ? "final"
+    : (["draft", "final"].includes(String(options.quality || "").trim().toLowerCase())
+      ? String(options.quality).trim().toLowerCase()
+      : (model === PODCASTER_VIDEO_MODEL_VEO_LITE ? "draft" : "final"));
+  const resolvedGeneratorHint = generator === "auto"
+    ? ((options.hasReferenceVideo === true || options.requiresLastFrame === true || options.requiresExtension === true) ? "veo" : "omni")
+    : generator;
+  return { generator, model, quality, resolvedGeneratorHint };
+}
+
+function normalizeInSceneText(value = "") {
+  return String(value || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function resolveRowInSceneText(row = null) {
+  const canonicalNormalizer = window.PodcasterOnScreenTextRenderSpec?.normalizePodcasterSceneTextFields;
+  if (typeof canonicalNormalizer === "function") {
+    return normalizeInSceneText(canonicalNormalizer(row || {})?.inSceneText || "");
+  }
+  return normalizeInSceneText(
+    row?.inSceneText
+    || row?.inVideoText
+    || row?.embeddedText
+    || row?.sceneText
+    || ""
+  );
+}
+
+function validateInSceneText(value = "") {
+  const text = normalizeInSceneText(value);
+  if (!text) return { valid: true, text: "", wordCount: 0 };
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (text.length > 48 || wordCount > 6) {
+    return {
+      valid: false,
+      text,
+      wordCount,
+      message: "El texto dentro del video admite una sola línea, máximo 6 palabras y 48 caracteres."
+    };
+  }
+  return { valid: true, text, wordCount };
+}
+
+function sanitizeVisualPromptText(value = "", field = "") {
+  const source = String(value || "").replace(/\s+/g, " ").trim();
+  if (!source) return { value: "", removed: 0, field };
+  const chunks = source.match(/[^.!?;]+[.!?;]?/g) || [source];
+  let removed = 0;
+  const kept = chunks.filter((chunk) => {
+    if (!VISIBLE_TEXT_DIRECTIVE_PATTERN.test(chunk)) return true;
+    removed += 1;
+    return false;
+  });
+  return {
+    value: kept.join(" ").replace(/\s+/g, " ").trim(),
+    removed,
+    field
+  };
+}
+
+function sanitizeVisualPromptFields(fields = {}) {
+  const sanitized = {};
+  const removedTextDirectives = [];
+  Object.entries(fields || {}).forEach(([field, value]) => {
+    if (Array.isArray(value)) {
+      const cleanItems = [];
+      let removed = 0;
+      value.forEach((item) => {
+        const result = sanitizeVisualPromptText(item, field);
+        removed += result.removed;
+        if (result.value) cleanItems.push(result.value);
+      });
+      sanitized[field] = cleanItems;
+      if (removed > 0) removedTextDirectives.push({ field, count: removed });
+      return;
+    }
+    const result = sanitizeVisualPromptText(value, field);
+    sanitized[field] = result.value;
+    if (result.removed > 0) removedTextDirectives.push({ field, count: result.removed });
+  });
+  return { sanitized, removedTextDirectives };
+}
+
+function resolveDialogueVideoInteractionId(sceneClip = null) {
+  const segments = Array.isArray(sceneClip?.segments) ? sceneClip.segments : [];
+  const generatedVideos = Array.isArray(sceneClip?.generatedVideos) ? sceneClip.generatedVideos : [];
+  return String(
+    sceneClip?.interactionId
+    || sceneClip?.primarySegment?.interactionId
+    || segments.map((segment) => segment?.interactionId).find(Boolean)
+    || generatedVideos.map((item) => item?.interactionId || item?.video?.interactionId).find(Boolean)
+    || ""
+  ).trim();
+}
 
 function extractGenerationErrorText(value = null, fallback = "", seen = new Set()) {
   if (value == null) return String(fallback || "").trim();
@@ -371,7 +507,8 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
   const silent = options.silent === true;
   const sceneNumber = String(options.sceneNumber || "").trim();
   const pollIntervalMs = 2500;
-  const maxAttempts = 360;
+  const maxAttempts = Math.ceil(DIALOGUE_VIDEO_POLL_TIMEOUT_MS / pollIntervalMs);
+  const pollStartedAt = Date.now();
   let lastStateKey = "";
   let lastData = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -426,7 +563,9 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
       const fallbackHint = `Generando video${sceneNumber ? ` de escena ${sceneNumber}` : ""}... (${waitedSec}s)`;
       setGenerationStatus(hint || fallbackHint, "is-busy");
     }
-    await sleep(pollIntervalMs);
+    const elapsedMs = Date.now() - pollStartedAt;
+    if (elapsedMs >= DIALOGUE_VIDEO_POLL_TIMEOUT_MS) break;
+    await sleep(Math.min(pollIntervalMs, DIALOGUE_VIDEO_POLL_TIMEOUT_MS - elapsedMs));
   }
   const error = new Error("Tiempo de espera agotado al generar video de la escena.");
   error.status = 504;
@@ -495,18 +634,26 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const enhanceFromExistingVideo = options.enhanceFromExistingVideo === true;
   const silent = options.silent === true;
   const videoCfg = typeof runtime.getPodcastVideoConfig === "function" ? runtime.getPodcastVideoConfig(session) : {};
-  const selectedVideoModel = (() => {
-    const requested = String(options.videoModel || videoCfg.videoModel || "").trim();
-    if (requested && AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requested)) return requested;
-    return videoCfg.cheapVideoMode === false ? "veo-3.1-generate-preview" : "veo-3.1-lite-generate-preview";
-  })();
-  const modelCandidates = typeof runtime.buildPodcasterVideoModelChain === "function"
-    ? runtime.buildPodcasterVideoModelChain(selectedVideoModel)
-    : Array.from(new Set([selectedVideoModel, ...AVAILABLE_PODCASTER_VIDEO_MODELS]));
-  const cheapVideoMode = selectedVideoModel === "veo-3.1-lite-generate-preview";
-  const promptProfile = String(options.promptProfile || "").trim();
-  const videoDirective = String(options.videoDirective || row?.videoDirective || resolveVisualNotesForGeneration(row) || "").replace(/\s+/g, " ").trim();
-  const visualNotes = String(
+  const normalizeSceneTextFields = window.PodcasterOnScreenTextRenderSpec?.normalizePodcasterSceneTextFields;
+  const sceneTextFields = typeof normalizeSceneTextFields === "function"
+    ? normalizeSceneTextFields(row || {})
+    : {
+      headlineText: String(row?.headlineText || "").replace(/\s+/g, " ").trim(),
+      captionText: String(row?.captionText || "").trim(),
+      inSceneText: String(row?.inSceneText || "").replace(/\s+/g, " ").trim(),
+      overlayMode: String(row?.overlayMode || "none").trim() || "none",
+      textSource: String(row?.textSource || "manual").trim() || "manual"
+    };
+  const inSceneTextValidation = validateInSceneText(options.inSceneText != null ? options.inSceneText : resolveRowInSceneText(row));
+  if (!inSceneTextValidation.valid) {
+    const error = new Error(inSceneTextValidation.message);
+    error.status = 400;
+    error.code = "in_scene_text_invalid";
+    throw error;
+  }
+  const inSceneText = inSceneTextValidation.text;
+  const rawVideoDirective = String(options.videoDirective || row?.videoDirective || resolveVisualNotesForGeneration(row) || "").replace(/\s+/g, " ").trim();
+  const rawVisualNotes = String(
     row?.visualNotes
     || row?.visual
     || row?.elementoVisual
@@ -517,8 +664,50 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
     || resolveVisualNotesForGeneration(row)
     || ""
   ).replace(/\s+/g, " ").trim();
-  const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
+  const rawScenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
+  const rawImagePrompts = normalizeVideoImagePrompts(row?.imagePrompts || []);
   const relateWithPreviousScene = options.relateWithPreviousScene === true || row?.relateWithPreviousScene === true;
+  const lastFrameDataUrl = String(options.lastFrameDataUrl || "").trim();
+  const hasLastFrame = options.hasLastFrame === true || /^data:image\//i.test(lastFrameDataUrl);
+  const extendVideo = options.extendVideo === true || options.videoExtension === true;
+  const extensionSource = extendVideo
+    ? (options.extensionSource || currentMap[key] || rowReferenceVideo || null)
+    : null;
+  const requestedVideoModel = options.videoModel || videoCfg.videoModel || PODCASTER_VIDEO_MODEL_AUTO;
+  const requestedGenerator = options.generator || (options.videoModel ? "" : (videoCfg.videoGenerator || ""));
+  const routing = resolvePodcasterVideoRouting({
+    modelPreference: requestedVideoModel,
+    generator: requestedGenerator,
+    quality: options.quality,
+    highQuality: options.highQuality === true,
+    hasReferenceVideo: referenceMode === "video" && Boolean(rowReferenceVideo),
+    requiresLastFrame: hasLastFrame,
+    requiresExtension: extendVideo
+  });
+  if (inSceneText && routing.resolvedGeneratorHint === "veo") {
+    const error = new Error("Veo no admite texto exacto dentro de la escena. Selecciona Automático u Omni, o convierte el texto en overlay.");
+    error.status = 400;
+    error.code = "in_scene_text_requires_omni";
+    throw error;
+  }
+  const promptFieldSanitization = sanitizeVisualPromptFields({
+    sceneDescription: row?.sceneDescription || "",
+    visualNotes: rawVisualNotes,
+    videoDirective: rawVideoDirective,
+    scenePrompt: rawScenePrompt,
+    imagePrompts: rawImagePrompts
+  });
+  const sceneDescription = String(promptFieldSanitization.sanitized.sceneDescription || "").trim();
+  const visualNotes = String(promptFieldSanitization.sanitized.visualNotes || "").trim();
+  const videoDirective = String(promptFieldSanitization.sanitized.videoDirective || "").trim();
+  const scenePrompt = String(promptFieldSanitization.sanitized.scenePrompt || "").trim();
+  const imagePrompts = Array.isArray(promptFieldSanitization.sanitized.imagePrompts)
+    ? promptFieldSanitization.sanitized.imagePrompts
+    : [];
+  const selectedVideoModel = routing.model;
+  const modelCandidates = selectedVideoModel === PODCASTER_VIDEO_MODEL_AUTO ? [] : [selectedVideoModel];
+  const cheapVideoMode = selectedVideoModel === PODCASTER_VIDEO_MODEL_VEO_LITE;
+  const promptProfile = PODCASTER_VIDEO_PROMPT_PROFILE;
 
   const resolveTimelinePreviousRowId = () => {
     try {
@@ -546,10 +735,21 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
 
   const audioClip = resolveDialogueAudioForRow(session, key);
   const audioDurationSec = Math.max(0, Number(audioClip?.durationSec) || 0);
+  const dialogueAudioUrl = String(audioClip?.downloadUrl || audioClip?.url || "").trim();
+  const dialogueAudioStoragePath = String(audioClip?.storagePath || audioClip?.path || "").trim();
+  const hasExternalDialogueAudio = Boolean(dialogueAudioUrl || dialogueAudioStoragePath);
+  const previousInteractionId = options.correctInSceneText === true
+    ? String(
+      options.previousInteractionId
+      || resolveDialogueVideoInteractionId(session?.dialogueVideoMap?.[key])
+      || resolveDialogueVideoInteractionId(currentMap[key])
+      || ""
+    ).trim()
+    : "";
 
   const task = (async () => {
     dialogueVideoGenerationPending.add(pendingKey);
-    if (!silent) setGenerationStatus(`Generando video Veo para escena ${resolveSceneNumberByRowId(key, session)}...`, "is-busy");
+    if (!silent) setGenerationStatus(`Generando video Gemini para escena ${resolveSceneNumberByRowId(key, session)}...`, "is-busy");
     setPodcastVideoStatus(`Generando Video de la Escena ${resolveSceneNumberByRowId(key, session)}`);
 
     try {
@@ -576,10 +776,13 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       const genderGroup = portrait?.genderGroup || "";
 
       const scenarioPrompt = typeof runtime.resolveSpeakerStudioScenarioPrompt === "function" ? runtime.resolveSpeakerStudioScenarioPrompt(session, speakerLabel) : "";
-      const sceneDescription = String(row?.sceneDescription || "").trim();
       const strictIdentity = !isVideoStyle && Boolean(portraitUrl || portraitStoragePath);
 
-      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(effectiveReferenceImages, rowReferenceVideo, continuityReferenceImageDataUrl);
+      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(
+        effectiveReferenceImages,
+        extendVideo ? null : rowReferenceVideo,
+        continuityReferenceImageDataUrl
+      );
       const traceMeta = buildVisualReferenceTraceMeta({
         referenceImages: effectiveReferenceImages,
         referenceVideo: rowReferenceVideo,
@@ -597,9 +800,17 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           ? runtime.getRowSourceDurationMs(row, session)
           : 8000);
       const requestedDurationSec = Math.max(4, Math.min(8, Math.round(durationMs / 1000) || 8));
+      const aspectRatio = isReel ? "9:16" : "16:9";
+      const textPolicy = inSceneText ? "in_scene" : "overlay_only";
 
       const body = {
         promptProfile,
+        generator: routing.generator,
+        resolvedGeneratorHint: routing.resolvedGeneratorHint,
+        quality: routing.quality,
+        highQuality: options.highQuality === true,
+        textPolicy,
+        aspectRatio,
         sessionId,
         rowId: key,
         speaker: speakerLabel,
@@ -608,7 +819,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         counterpartSpeakerLabel,
         counterpartSpeakerName,
         voiceName: resolveConfiguredSpeakerVoiceForGeneration(row, session),
-        text: String(row?.text || "").trim(),
+        text: hasExternalDialogueAudio ? "" : String(row?.text || "").trim(),
         genderGroup,
         portraitUrl,
         portraitStoragePath,
@@ -621,14 +832,21 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         visualNotes,
         videoDirective,
         scenePrompt,
-        imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
-        onScreenText: String(row?.onScreenText || "").trim(),
+        imagePrompts,
+        headlineText: String(sceneTextFields.headlineText || "").trim(),
+        captionText: String(sceneTextFields.captionText || "").trim(),
+        inSceneText,
+        overlayMode: String(sceneTextFields.overlayMode || "none").trim() || "none",
+        textSource: String(sceneTextFields.textSource || "manual").trim() || "manual",
         transition: String(row?.transition || "").trim(),
         relateWithPreviousScene: relateWithPreviousScene && !!continuityReferenceImageDataUrl,
         audioDurationSec,
         requestedDurationSec,
-        audioUrl: audioClip?.downloadUrl || "",
-        audioStoragePath: audioClip?.storagePath || "",
+        dialogueAudioUrl,
+        dialogueAudioStoragePath,
+        // Compatibility aliases for one release while the backend/client pair rolls out.
+        audioUrl: dialogueAudioUrl,
+        audioStoragePath: dialogueAudioStoragePath,
         referenceMode,
         referenceImages: effectiveReferenceImages
           .map((item) => ({
@@ -648,15 +866,30 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         referenceVideoDataUrl: inlineReferenceBudget.referenceVideoDataUrl,
         referenceVideoName: String(rowReferenceVideo?.name || "").trim(),
         referenceVideoMimeType: String(rowReferenceVideo?.mimeType || "video/mp4").trim() || "video/mp4",
+        referenceVideoProviderUri: String(extensionSource?.providerVideoUri || "").trim(),
+        referenceVideoProviderGeneratedAt: String(extensionSource?.providerVideoGeneratedAt || "").trim(),
+        referenceVideoProviderGenerator: String(extensionSource?.providerVideoGenerator || extensionSource?.generator || "").trim(),
+        referenceVideoProviderModel: String(extensionSource?.providerVideoModel || extensionSource?.model || "").trim(),
+        referenceVideoProviderResolution: String(extensionSource?.providerVideoResolution || extensionSource?.resolution || "").trim(),
+        referenceVideoProviderAspectRatio: String(extensionSource?.providerVideoAspectRatio || extensionSource?.aspectRatio || "").trim(),
+        referenceVideoProviderDurationSec: Number(
+          extensionSource?.providerVideoDurationSec ?? extensionSource?.durationSec ?? extensionSource?.durationSeconds ?? 0
+        ) || 0,
         continuityReferenceImageDataUrl: inlineReferenceBudget.continuityReferenceImageDataUrl,
+        hasLastFrame,
+        lastFrameDataUrl,
+        extendVideo,
         regenerate,
         enhanceFromExistingVideo,
+        correctInSceneText: options.correctInSceneText === true,
+        previousInteractionId,
         model: selectedVideoModel,
         modelCandidates,
         cheapVideoMode,
+        removedTextDirectives: promptFieldSanitization.removedTextDirectives,
         inlineReferenceBudget,
         forceImmediateSceneChange: shouldForceImmediateSceneChange(videoDirective),
-        maxModelAttempts: options.maxModelAttempts || 3,
+        maxModelAttempts: 1,
         maxVariantAttempts: options.maxVariantAttempts || 6
       };
 
@@ -677,10 +910,16 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         visualNotesLength: visualNotes.length,
         regenerate,
         enhanceFromExistingVideo,
+        generator: routing.generator,
+        resolvedGeneratorHint: routing.resolvedGeneratorHint,
+        quality: routing.quality,
+        textPolicy,
+        aspectRatio,
         cheapVideoMode,
         referenceMode,
         audioDurationSec,
         requestedDurationSec,
+        removedTextDirectiveCount: promptFieldSanitization.removedTextDirectives.reduce((sum, item) => sum + Math.max(0, Number(item?.count || 0) || 0), 0),
         strictIdentity,
         ...traceMeta
       });
@@ -695,12 +934,21 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         portraitStoragePath: String(portraitStoragePath || "").trim() || null,
         portraitUrl: String(portraitUrl || "").trim() || null,
         promptProfile,
+        generator: routing.generator,
+        resolvedGeneratorHint: routing.resolvedGeneratorHint,
+        quality: routing.quality,
+        textPolicy,
+        aspectRatio,
         scenarioPromptLength: scenarioPrompt.length,
         sceneDescriptionLength: sceneDescription.length,
         visualNotesLength: visualNotes.length,
         videoDirectiveLength: videoDirective.length,
         scenePromptLength: scenePrompt.length,
         textLength: body.text.length,
+        hasInSceneText: Boolean(inSceneText),
+        hasExternalDialogueAudio,
+        hasPreviousInteraction: Boolean(previousInteractionId),
+        removedTextDirectiveCount: promptFieldSanitization.removedTextDirectives.reduce((sum, item) => sum + Math.max(0, Number(item?.count || 0) || 0), 0),
         ...traceMeta
       });
 
@@ -780,8 +1028,21 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       });
 
       const previousClip = resolveDialogueVideoForRow(session, key);
-      const finalClip = result?.dialogueVideo;
-      if (!finalClip) throw new Error("No se devolvió un clip válido.");
+      const rawFinalClip = result?.dialogueVideo;
+      if (!rawFinalClip) throw new Error("No se devolvió un clip válido.");
+      const finalClip = {
+        ...rawFinalClip,
+        generator: rawFinalClip?.generator || result?.generator || routing.resolvedGeneratorHint || null,
+        textPolicy: rawFinalClip?.textPolicy || result?.textPolicy || textPolicy,
+        aspectRatio: rawFinalClip?.aspectRatio || result?.aspectRatio || aspectRatio,
+        requestedDurationSeconds: rawFinalClip?.requestedDurationSeconds ?? result?.requestedDurationSeconds ?? requestedDurationSec,
+        durationSeconds: rawFinalClip?.durationSeconds ?? result?.durationSeconds ?? rawFinalClip?.durationSec ?? null,
+        resolution: rawFinalClip?.resolution || result?.resolution || null,
+        interactionId: rawFinalClip?.interactionId || result?.interactionId || null,
+        promptHash: rawFinalClip?.promptHash || result?.promptHash || null,
+        removedTextDirectives: rawFinalClip?.removedTextDirectives || result?.removedTextDirectives || promptFieldSanitization.removedTextDirectives,
+        promptVersion: rawFinalClip?.promptVersion || result?.promptVersion || PODCASTER_VIDEO_PROMPT_PROFILE
+      };
 
       upsertActiveSession((current) => ({
         ...current,
@@ -1005,7 +1266,14 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     }), { render: false });
 
     const generated = await generateDialogueVideoForRow(key, {
-      promptProfile: options.promptProfile || "",
+      promptProfile: PODCASTER_VIDEO_PROMPT_PROFILE,
+      generator: options.generator,
+      videoModel: options.videoModel,
+      quality: options.quality,
+      highQuality: options.highQuality === true,
+      inSceneText: options.inSceneText,
+      correctInSceneText: options.correctInSceneText === true,
+      previousInteractionId: options.previousInteractionId,
       regenerate: options.regenerate != null ? options.regenerate === true : hasStoredMediaSource(existingClip),
       enhanceFromExistingVideo: options.enhanceFromExistingVideo === true,
       silent: options.silent === true,
@@ -1112,6 +1380,9 @@ async function runGenerateMissingDialogueVideos(options = {}) {
 
       try {
         await generateDialogueVideoForRow(rowId, {
+          promptProfile: PODCASTER_VIDEO_PROMPT_PROFILE,
+          quality: options.highQuality === true ? "final" : undefined,
+          highQuality: options.highQuality === true,
           videoDirective: normalizeVideoDirectiveText(row?.videoDirective || resolveVisualNotesForGeneration(row) || ""),
           regenerate: regenerateAll,
           silent: true,
@@ -1160,6 +1431,50 @@ async function runGenerateMissingDialogueVideos(options = {}) {
 
 // --- Event Listeners ---
 
+function updateRowInSceneText(rowId = "", value = "") {
+  const key = String(rowId || "").trim();
+  const validation = validateInSceneText(value);
+  if (!key || !validation.valid) return validation;
+  upsertActiveSession((current) => ({
+    ...current,
+    script: {
+      ...current.script,
+      rows: (current.script?.rows || []).map((item) => {
+        if (String(item?.id || "").trim() !== key) return item;
+        const next = { ...item, inSceneText: validation.text };
+        delete next.inVideoText;
+        delete next.embeddedText;
+        delete next.sceneText;
+        return next;
+      })
+    }
+  }));
+  runtime.renderPodcastVideoTimeline?.(getActiveSession(), { force: true, reason: "in-scene-text" });
+  runtime.syncPodcastStudioInspector?.(getActiveSession());
+  return validation;
+}
+
+function promptForRowInSceneText(rowId = "") {
+  const key = String(rowId || "").trim();
+  const session = getActiveSession();
+  const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
+  if (!row) return null;
+  const currentText = resolveRowInSceneText(row);
+  const nextText = window.prompt(
+    "Texto natural dentro del escenario (máximo 6 palabras y 48 caracteres). Déjalo vacío para usar sólo overlays:",
+    currentText
+  );
+  if (nextText == null) return null;
+  const result = updateRowInSceneText(key, nextText);
+  if (!result?.valid) {
+    addChatMessage("system", result?.message || "El texto dentro del video no es válido.");
+    setGenerationStatus("Texto dentro del video no válido", "");
+    return null;
+  }
+  setGenerationStatus(result.text ? "Texto dentro del video actualizado" : "Texto dentro del video eliminado", "is-live");
+  return result.text;
+}
+
 async function handlePodcasterGenerationClick(event) {
     const genAllBtn = event.target.closest("[data-action='timeline-generate-scene-video-batch']");
     if (genAllBtn) {
@@ -1169,7 +1484,51 @@ async function handlePodcasterGenerationClick(event) {
 
     const regenAllBtn = event.target.closest("[data-action='timeline-regenerate-scene-video-batch-hq']");
     if (regenAllBtn) {
-      runGenerateMissingDialogueVideos({ regenerateAll: true, triggerButton: regenAllBtn });
+      runGenerateMissingDialogueVideos({ regenerateAll: true, highQuality: true, triggerButton: regenAllBtn });
+      return;
+    }
+
+    const editInSceneTextBtn = event.target.closest("[data-action='timeline-edit-in-scene-text']");
+    if (editInSceneTextBtn) {
+      const rowId = String(editInSceneTextBtn.dataset.rowId || "").trim() || resolveTargetVideoRowId(getActiveSession());
+      if (rowId) promptForRowInSceneText(rowId);
+      return;
+    }
+
+    const correctInSceneTextBtn = event.target.closest("[data-action='timeline-correct-in-scene-text']");
+    if (correctInSceneTextBtn) {
+      const session = getActiveSession();
+      const rowId = String(correctInSceneTextBtn.dataset.rowId || "").trim() || resolveTargetVideoRowId(session);
+      const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === rowId) || null;
+      const inSceneText = resolveRowInSceneText(row);
+      const existingClip = session?.dialogueVideoMap?.[rowId] || resolveDialogueVideoForRow(session, rowId);
+      const previousInteractionId = resolveDialogueVideoInteractionId(existingClip);
+      if (!rowId || !inSceneText || !previousInteractionId) {
+        addChatMessage("system", "Para corregir texto se necesita un clip Omni editable y texto dentro de la escena.");
+        return;
+      }
+      try {
+        await runSceneVideoGenerationFlow(rowId, {
+          promptProfile: PODCASTER_VIDEO_PROMPT_PROFILE,
+          generator: "omni",
+          videoModel: PODCASTER_VIDEO_MODEL_OMNI,
+          quality: "final",
+          inSceneText,
+          correctInSceneText: true,
+          previousInteractionId,
+          promptDirective: false,
+          loadingButton: correctInSceneTextBtn,
+          loadingTitle: "Corrigiendo texto dentro del video...",
+          selectRow: true,
+          syncStage: false,
+          silent: false,
+          syncStageAfterGenerate: true,
+          regenerate: true,
+          enhanceFromExistingVideo: false
+        });
+      } catch (error) {
+        addChatMessage("system", `No se pudo corregir el texto dentro del video (${buildGenerationErrorMessage(error, "Error al corregir texto.")}).`);
+      }
       return;
     }
 
@@ -1237,7 +1596,7 @@ async function handlePodcasterGenerationClick(event) {
       const loadingBtn = findTimelineActionButton("timeline-generate-scene-video", rowId) || generateBtn;
       try {
         await runSceneVideoGenerationFlow(rowId, {
-          promptProfile: "timeline-scene-video",
+          promptProfile: PODCASTER_VIDEO_PROMPT_PROFILE,
           promptDirective: false,
           loadingButton: loadingBtn,
           loadingTitle: "Generando video de escena...",
@@ -1300,6 +1659,9 @@ async function handlePodcasterGenerationClick(event) {
       const loadingBtn = findTimelineActionButton("timeline-regenerate-scene-video-hq", rowId) || regenerateHqBtn;
       try {
         await runSceneVideoGenerationFlow(rowId, {
+          promptProfile: PODCASTER_VIDEO_PROMPT_PROFILE,
+          quality: "final",
+          highQuality: true,
           promptDirective: false,
           loadingButton: loadingBtn,
           loadingTitle: hasStoredMediaSource(existingClip) ? "Analizando clip y regenerando escena..." : "Generando video de escena...",

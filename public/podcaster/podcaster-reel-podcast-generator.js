@@ -25,7 +25,8 @@ Sigue estas reglas fundamentales de tono, redacción y estructura:
    - "¡Ojo al dato!", "¡Espera!", "Mira esto...", "¡Boom! Así de fácil", "¡Es una lucura!", "Flipante", "A ver, te explico...", "¡Piénsalo por un segundo!".
 4. EXPLICACIÓN SIEMPRE CON EJEMPLOS CONCRETOS Y COTIDIANOS: Prohibido dar explicaciones abstractas, teóricas o puramente formales sin aterrizarlas de inmediato con analogías memorables de la vida diaria (repartir pizzas, lanzar monedas, dados, caminar por la calle, un hotel infinito, etc.). Explica el truco o concepto de forma que cualquiera pueda visualizarlo al instante.
 5. CUES VISUALES Y DE EDICIÓN DINÁMICAS (columna visualNotes): En cada fila, describe al presentador ("youtuber") posicionado frontalmente en la zona central de la pantalla (zona central simétrica, formato vertical), mirando de frente y con entusiasmo directamente al lente de la cámara (contacto visual constante con el espectador). Describe con precisión sus gestos (ademanes enérgicos con las manos, señalar a la cámara o hacia los lados para dar énfasis) e indicaciones de edición modernas:
-   - Zooms rápidos a la cara, animaciones de texto colorido gigante en pantalla que reafirman las palabras clave ("¡BOOM!", "¡OJO!"), iconos sencillos, esquemas o dibujos explicativos flotando a sus costados (overlays didácticos) que el presentador señala activamente con el dedo, transiciones de plano dinámicas.
+   - Zooms rápidos a la cara, iconos, formas, esquemas o dibujos explicativos flotando a sus costados que el presentador señala activamente con el dedo y transiciones de plano dinámicas. visualNotes, scenePrompt y cualquier prompt visual deben quedar libres de palabras, letras, logos, rótulos y pseudo-tipografía.
+   - Si una escena necesita énfasis editorial, usa headlineText como overlay separado: es opcional, de 2 a 6 palabras y máximo 48 caracteres. Usa null cuando no aporte valor.
 6. EFECTOS DE SONIDO Y AUDIO (columna mediaCue): Usa efectos de sonido de alta retención (como 'Pop', 'Transición', 'Efecto sutil', 'Ding', 'Suspenso', 'Cierre', 'CTA final') para acentuar los puntos más importantes del discurso.
 7. CIERRE CON LLAMADO A LA ACCIÓN (CTA) O BUCLE: La última escena debe tener un desenlace potente y un llamado a la acción directo, breve y amigable que invite a interactuar: "¿Qué opinas de esto? ¡Déjamelo en los comentarios y sígueme para más mates/ciencia!".
 
@@ -42,6 +43,11 @@ Devuelve un objeto JSON que coincida estrictamente con el siguiente esquema:
       "durationSec": 8,
       "expression": "Expresión emocional del locutor ('Enérgico', 'Sorprendido', 'Divertido', 'Analítico', 'Inspirador', 'Neutral')",
       "mediaCue": "Efecto o transición de audio ('Pop', 'Transición', 'Efecto sutil', 'Ding', 'Cierre', 'CTA final', 'Sin media')",
+      "headlineText": "Titular editorial opcional de 2 a 6 palabras y máximo 48 caracteres, o null",
+      "captionText": "",
+      "inSceneText": "",
+      "overlayMode": "headline o none",
+      "textSource": "generated",
       "visualNotes": "Instrucciones detalladas del presentador de frente en la zona central de la pantalla (plano medio o primer plano), haciendo contacto visual directo y entusiasta con la lente de la cámara, ademanes enérgicos de explicación y mención de recursos gráficos flotantes a los lados (overlays) que él señala activamente.",
       "scenePrompt": "Escenario consistente de video vertical (ej: Set de grabación moderno de YouTuber con luces LED de colores de fondo, o fondo abstracto dinámico), con el presentador posicionado frontalmente en el centro del encuadre, mirando fijamente al lente de la cámara.",
       "notes": "Propósito editorial de la escena (ej: Gancho, Introducción del ejemplo, Explicación práctica, Conclusión, CTA)"
@@ -64,7 +70,8 @@ export function buildReelPodcastContextualInstructions(context = {}) {
     `REGLA DE LOCUTOR ÚNICO: Todo el guion debe pertenecer a un solo locutor: "${primarySpeaker}". Prohibido usar más de una voz en la columna 'speaker'.`,
     `La columna speaker/Locutor DEBE usar exactamente el ID interno del presentador: "${primarySpeaker}".`,
     "No menciones nombres propios del locutor dentro del diálogo hablado.",
-    "El campo visualNotes debe describir con precisión efectos de edición modernos, textos gigantes animados en pantalla, ademanes con las manos y gestos enérgicos del presentador en cámara.",
+    "El campo visualNotes debe describir efectos de edición modernos, diagramas e iconos sin palabras, ademanes con las manos y gestos enérgicos del presentador; nunca debe pedir letras, rótulos, logos ni textos dentro del video.",
+    "El énfasis editorial va únicamente en headlineText como overlay opcional de 2 a 6 palabras y máximo 48 caracteres; captionText e inSceneText quedan vacíos salvo instrucción explícita compatible.",
     "Mantén el escenario consistente en todas las escenas: un estudio premium de grabación de video o fondo temático abstracto de alta calidad.",
     "Cada escena debe ser súper dinámica y ágil, con duraciones estimadas cortas (entre 6 y 12 segundos por fila).",
     "Usa un lenguaje natural, directo, conversacional y entusiasta, propio de los mejores divulgadores de YouTube.",
@@ -166,7 +173,7 @@ export async function generateReelPodcastScript(prompt, sessionSnapshot = null, 
   const data = await authFetchJson("/api/gemini/generate", {
     method: "POST",
     body: JSON.stringify({
-      model: els?.scriptModelSelect?.value || "gemini-2.5-flash",
+      model: els?.scriptModelSelect?.value || "gemini-3.5-flash",
       payload
     })
   });
@@ -252,7 +259,7 @@ export async function buildReelPodcastScriptFromPromptTable(prompt = "", session
   const data = await authFetchJson("/api/gemini/generate", {
     method: "POST",
     body: JSON.stringify({
-      model: els?.scriptModelSelect?.value || "gemini-2.5-flash",
+      model: els?.scriptModelSelect?.value || "gemini-3.5-flash",
       payload
     })
   });
