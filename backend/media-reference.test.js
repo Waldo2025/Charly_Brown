@@ -35,6 +35,24 @@ test("drops inline data URLs from persisted downloadUrl fields", () => {
   assert.equal(normalized.downloadUrl, "");
 });
 
+test("drops browser-only blob URLs while preserving an explicit storage path", () => {
+  assert.deepEqual(normalizePersistedMediaReference({
+    downloadUrl: "blob:https://charly-brown.web.app/temporary-id",
+    storagePath: "podcaster/sessions/session_1/images/scene.png"
+  }), {
+    downloadUrl: "",
+    storagePath: "podcaster/sessions/session_1/images/scene.png"
+  });
+
+  assert.deepEqual(normalizePersistedMediaReference({
+    downloadUrl: "blob:https://charly-brown.web.app/temporary-id",
+    storagePath: ""
+  }), {
+    downloadUrl: "",
+    storagePath: ""
+  });
+});
+
 test("derives storagePath from proxy image URLs with storagePath query", () => {
   const normalized = normalizePersistedMediaReference({
     downloadUrl: "https://charly-brown.web.app/api/assets/proxy-image?storagePath=podcaster%2Fsessions%2Fsession_1%2Fowners%2Fuid%2Freferences%2FEscena%25202.png",

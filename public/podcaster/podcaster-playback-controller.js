@@ -291,6 +291,10 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.setProperty("--pod-scene-media-translate-y", "0px");
     surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
     surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-motion-start-x", `${Number(spec.motion?.startOffsetXPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-motion-end-x", `${Number(spec.motion?.endOffsetXPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
   }
   reapplyEntryVisualLayout(entry = null, surfaceEl = null) {
     if (!surfaceEl) return;
@@ -325,6 +329,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       surfaceEl.style.setProperty("--pod-scene-media-height", "100%");
       surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", "0px");
       surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-motion-start-x", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-motion-end-x", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", "0px");
     }
     surfaceEl.style.setProperty("--pod-scene-media-scale", String(state.mediaScale));
     surfaceEl.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
@@ -357,6 +365,10 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.removeProperty("--pod-scene-media-translate-y");
     surfaceEl.style.removeProperty("--pod-scene-media-pan-x-amplitude");
     surfaceEl.style.removeProperty("--pod-scene-media-pan-y-amplitude");
+    surfaceEl.style.removeProperty("--pod-scene-media-motion-start-x");
+    surfaceEl.style.removeProperty("--pod-scene-media-motion-end-x");
+    surfaceEl.style.removeProperty("--pod-scene-media-motion-start-y");
+    surfaceEl.style.removeProperty("--pod-scene-media-motion-end-y");
     surfaceEl.style.removeProperty("--pod-scene-media-scale");
     surfaceEl.style.removeProperty("--pod-scene-media-x");
     surfaceEl.style.removeProperty("--pod-scene-media-y");
@@ -1091,8 +1103,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     const key = String(rowId || "").trim();
     if (!key) return;
 
-    // 1. Evacuate audio elements and audio cache
-    this.invalidateRowAudioCache(key);
+    // Visual replacement must not revoke a dialogue/background blob that may
+    // still be playing. Audio callers can explicitly opt into audio eviction.
+    if (options?.includeAudio === true) this.invalidateRowAudioCache(key);
 
     // 2. Resolve dialogue video/image clip URLs and evict them from blobCache and Cache Storage
     const activeSession = session || this.state.session || (typeof getActiveSession === "function" ? getActiveSession() : (window.getActiveSession ? window.getActiveSession() : null));

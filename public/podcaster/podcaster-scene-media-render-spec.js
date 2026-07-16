@@ -62,9 +62,9 @@
   }
 
   function resolveSceneMediaFitMode({ reelMode = false, visualLayoutMode = "default", mediaKind = "video" } = {}) {
-    return normalizeSceneMediaVisualLayoutMode(visualLayoutMode) === "blur-backdrop"
-      ? "contain"
-      : (reelMode === true ? "cover" : "contain");
+    if (normalizeSceneMediaVisualLayoutMode(visualLayoutMode) === "blur-backdrop") return "contain";
+    if (reelMode === true) return "cover";
+    return String(mediaKind || "").trim().toLowerCase() === "image" ? "width" : "contain";
   }
 
   function resolveSceneMediaFrameRect({
@@ -121,7 +121,9 @@
     });
     const baseFitScale = fitMode === "cover"
       ? Math.max(frameRect.width / sourceWidth, frameRect.height / sourceHeight)
-      : Math.min(frameRect.width / sourceWidth, frameRect.height / sourceHeight);
+      : (fitMode === "width"
+        ? frameRect.width / sourceWidth
+        : Math.min(frameRect.width / sourceWidth, frameRect.height / sourceHeight));
     const baseWidth = sourceWidth * baseFitScale;
     const baseHeight = sourceHeight * baseFitScale;
     const mediaScale = normalizeSceneMediaScale(input.mediaScale);
@@ -130,24 +132,60 @@
     const overflowX = Math.max(0, scaledWidth - frameRect.width);
     const overflowY = Math.max(0, scaledHeight - frameRect.height);
     const maxShiftX = overflowX / 2;
-    const maxShiftY = overflowY / 2;
+    const topAlignedImage = fitMode === "width";
+    const maxShiftY = topAlignedImage ? overflowY : (overflowY / 2);
     const mediaOffsetXPct = normalizeSceneMediaOffset(input.mediaOffsetXPct);
     const mediaOffsetYPct = normalizeSceneMediaOffset(input.mediaOffsetYPct);
     const desiredShiftX = scaledWidth * mediaOffsetXPct;
     const desiredShiftY = scaledHeight * mediaOffsetYPct;
     const offsetShiftX = clampNumber(desiredShiftX, -maxShiftX, maxShiftX, 0);
-    const offsetShiftY = clampNumber(desiredShiftY, -maxShiftY, maxShiftY, 0);
+    const offsetShiftY = topAlignedImage
+      ? clampNumber(desiredShiftY, -maxShiftY, 0, 0)
+      : clampNumber(desiredShiftY, -maxShiftY, maxShiftY, 0);
     const leftPx = frameRect.x + ((frameRect.width - scaledWidth) / 2) + offsetShiftX;
-    const topPx = frameRect.y + ((frameRect.height - scaledHeight) / 2) + offsetShiftY;
+    const topPx = topAlignedImage
+      ? frameRect.y + offsetShiftY
+      : frameRect.y + ((frameRect.height - scaledHeight) / 2) + offsetShiftY;
     const motionPreset = normalizeSceneMediaMotionPreset(input.mediaMotionPreset);
+    const amplitudeXPx = ["pan-left-right", "pan-right-left"].includes(motionPreset)
+      ? Math.min(scaledWidth * MOTION_DISTANCE_PCT, maxShiftX)
+      : 0;
+    const amplitudeYPx = ["pan-up-down", "pan-down-up"].includes(motionPreset)
+      ? Math.min(scaledHeight * MOTION_DISTANCE_PCT, maxShiftY)
+      : 0;
+    let startOffsetXPx = 0;
+    let endOffsetXPx = 0;
+    let startOffsetYPx = 0;
+    let endOffsetYPx = 0;
+    if (motionPreset === "pan-left-right") {
+      startOffsetXPx = -amplitudeXPx;
+      endOffsetXPx = amplitudeXPx;
+    } else if (motionPreset === "pan-right-left") {
+      startOffsetXPx = amplitudeXPx;
+      endOffsetXPx = -amplitudeXPx;
+    } else if (topAlignedImage && motionPreset === "pan-up-down") {
+      // Recorre la imagen completa: borde superior del medio -> borde inferior.
+      startOffsetYPx = frameRect.y - topPx;
+      endOffsetYPx = (frameRect.y - overflowY) - topPx;
+    } else if (topAlignedImage && motionPreset === "pan-down-up") {
+      // Recorrido inverso: borde inferior del medio -> borde superior.
+      startOffsetYPx = (frameRect.y - overflowY) - topPx;
+      endOffsetYPx = frameRect.y - topPx;
+    } else if (motionPreset === "pan-up-down") {
+      startOffsetYPx = -amplitudeYPx;
+      endOffsetYPx = amplitudeYPx;
+    } else if (motionPreset === "pan-down-up") {
+      startOffsetYPx = amplitudeYPx;
+      endOffsetYPx = -amplitudeYPx;
+    }
     const motion = {
       preset: motionPreset,
-      amplitudeXPx: ["pan-left-right", "pan-right-left"].includes(motionPreset)
-        ? Math.min(scaledWidth * MOTION_DISTANCE_PCT, maxShiftX)
-        : 0,
-      amplitudeYPx: ["pan-up-down", "pan-down-up"].includes(motionPreset)
-        ? Math.min(scaledHeight * MOTION_DISTANCE_PCT, maxShiftY)
-        : 0,
+      amplitudeXPx,
+      amplitudeYPx,
+      startOffsetXPx,
+      endOffsetXPx,
+      startOffsetYPx,
+      endOffsetYPx,
       distancePct: MOTION_DISTANCE_PCT,
       durationSec: Math.max(0.2, Number(input.durationSec || 12) || 12)
     };

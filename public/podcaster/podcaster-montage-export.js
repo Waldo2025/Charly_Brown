@@ -1354,6 +1354,10 @@ function applyMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl 
     mediaEl.style.setProperty("--pod-scene-media-translate-y", "0px");
     mediaEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-motion-start-x", `${Number(spec.motion?.startOffsetXPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-motion-end-x", `${Number(spec.motion?.endOffsetXPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
   };
   const targetMediaEl = mediaEl || (String(preview.mediaType || "").startsWith("image/")
     ? window.els.montageExportPreviewImage

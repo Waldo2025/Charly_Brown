@@ -97,6 +97,70 @@ const imageSpec = resolveSceneMediaRenderSpec({
   mediaKind: "image"
 });
 
+const portraitImageSpec = resolveSceneMediaRenderSpec({
+  canvasWidth: 1280,
+  canvasHeight: 720,
+  sourceWidth: 900,
+  sourceHeight: 1600,
+  reelMode: false,
+  visualLayoutMode: "default",
+  mediaScale: 1,
+  mediaOffsetXPct: 0,
+  mediaOffsetYPct: 0,
+  mediaMotionPreset: "none",
+  mediaKind: "image"
+});
+
+if (portraitImageSpec.fitMode !== "width") {
+  throw new Error("Una imagen normal debe ajustarse al ancho completo.");
+}
+approx(portraitImageSpec.scaledRect.width, 1280, 0.001, "portrait image width");
+approx(portraitImageSpec.leftPx, 0, 0.001, "portrait image left");
+approx(portraitImageSpec.topPx, 0, 0.001, "portrait image top");
+
+const portraitTopToBottom = resolveSceneMediaRenderSpec({
+  canvasWidth: 1280,
+  canvasHeight: 720,
+  sourceWidth: 900,
+  sourceHeight: 1600,
+  mediaOffsetYPct: -0.2,
+  mediaMotionPreset: "pan-up-down",
+  mediaKind: "image"
+});
+const portraitBottomToTop = resolveSceneMediaRenderSpec({
+  canvasWidth: 1280,
+  canvasHeight: 720,
+  sourceWidth: 900,
+  sourceHeight: 1600,
+  mediaOffsetYPct: -0.2,
+  mediaMotionPreset: "pan-down-up",
+  mediaKind: "image"
+});
+approx(
+  portraitTopToBottom.topPx + portraitTopToBottom.motion.startOffsetYPx,
+  portraitTopToBottom.frameRect.y,
+  0.001,
+  "top-to-bottom starts at image top"
+);
+approx(
+  portraitTopToBottom.topPx + portraitTopToBottom.motion.endOffsetYPx + portraitTopToBottom.scaledRect.height,
+  portraitTopToBottom.frameRect.y + portraitTopToBottom.frameRect.height,
+  0.001,
+  "top-to-bottom ends at image bottom"
+);
+approx(
+  portraitBottomToTop.topPx + portraitBottomToTop.motion.startOffsetYPx + portraitBottomToTop.scaledRect.height,
+  portraitBottomToTop.frameRect.y + portraitBottomToTop.frameRect.height,
+  0.001,
+  "bottom-to-top starts at image bottom"
+);
+approx(
+  portraitBottomToTop.topPx + portraitBottomToTop.motion.endOffsetYPx,
+  portraitBottomToTop.frameRect.y,
+  0.001,
+  "bottom-to-top ends at image top"
+);
+
 const videoSpec = resolveSceneMediaRenderSpec({
   canvasWidth: 1280,
   canvasHeight: 720,

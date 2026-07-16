@@ -28,6 +28,14 @@ function getActivePodcasterSession() {
         : window.PodcasterState?.activeSession) || null;
 }
 
+function resolveStableReplacementMediaUrl(downloadUrl = "", storagePath = "") {
+    const rawUrl = String(downloadUrl || "").trim();
+    const cleanStoragePath = String(storagePath || "").trim();
+    if (rawUrl && !/^(?:blob|data):/i.test(rawUrl)) return rawUrl;
+    if (!cleanStoragePath) return "";
+    return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+}
+
 function resolveSceneNumber(rowId = "", session = null) {
     const key = String(rowId || "").trim();
     const activeSession = session || getActivePodcasterSession();
@@ -439,7 +447,11 @@ function setupEventListeners() {
     els.confirmBtn.addEventListener('click', async () => {
         currentEditingRowId = String(els.modal?.dataset?.rowId || currentEditingRowId || '').trim();
         const selectedLibrary = window._selectedLibraryVideo;
-        const mediaUrl = uploadedMediaUrl || selectedLibrary?.downloadUrl;
+        const finalStoragePath = String(uploadedStoragePath || selectedLibrary?.storagePath || '').trim();
+        const mediaUrl = resolveStableReplacementMediaUrl(
+            uploadedMediaUrl || selectedLibrary?.downloadUrl,
+            finalStoragePath
+        );
         let mediaType = uploadedMediaType || selectedLibrary?.type || 'video';
         
         const isUrlImage = /\.(jpg|jpeg|png|webp|gif)(\?|$|\s)/i.test(mediaUrl);
@@ -504,7 +516,6 @@ function setupEventListeners() {
             }
 
             const isImageMedia = mediaType === 'image' || mediaType.startsWith('image/');
-            const finalStoragePath = uploadedStoragePath || selectedLibrary?.storagePath || '';
             const mediaData = {
                 id: currentEditingRowId,
                 rowId: currentEditingRowId,
@@ -534,15 +545,22 @@ function setupEventListeners() {
             
             if (isImageMedia) {
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = effects;
+                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaScale`] = 1;
+                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaOffsetXPct`] = 0;
+                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaOffsetYPct`] = 0;
+                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaMotionPreset`] = "none";
+                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.visualLayoutMode`] = "default";
             } else {
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = null;
             }
             
             // 1. Invalidate caches on the playback controller
             if (typeof playbackController?.invalidateRowMediaCache === "function") {
-                playbackController.invalidateRowMediaCache(currentEditingRowId, session);
-            } else if (typeof playbackController?.invalidateRowAudioCache === "function") {
-                playbackController.invalidateRowAudioCache(currentEditingRowId);
+                playbackController.invalidateRowMediaCache(currentEditingRowId, session, {
+                    previousClip: session?.dialogueVideoMap?.[currentEditingRowId] || null,
+                    nextClip: mediaData,
+                    includeAudio: false
+                });
             }
 
             // 2. Local sync
@@ -570,7 +588,14 @@ function setupEventListeners() {
                     next.dialogueVideoMap[currentEditingRowId] = localMediaData;
                     next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] = {
                         ...(next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] || {}),
-                        type: mediaType
+                        type: mediaType,
+                        ...(isImageMedia ? {
+                            mediaScale: 1,
+                            mediaOffsetXPct: 0,
+                            mediaOffsetYPct: 0,
+                            mediaMotionPreset: "none",
+                            visualLayoutMode: "default"
+                        } : {})
                     };
                     
                     if (isImageMedia) {

@@ -10556,6 +10556,14 @@ async function downloadUrlToFile(url = "", outPath = "", options = {}) {
     throw err;
   }
 
+  if (/^blob:/i.test(cleanUrl)) {
+    const err = new Error("browser_blob_url_not_persistable");
+    err.code = "browser_blob_url_not_persistable";
+    err.status = 400;
+    err.detail = { sourceUrl: "blob:", hint: "Use storagePath or an http/https downloadUrl." };
+    throw err;
+  }
+
   const isAbsoluteHttp = cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://");
   if (!isAbsoluteHttp) {
     const localPath = path.resolve(PUBLIC_ROOT, cleanUrl.replace(/^\//, ""));
@@ -12282,16 +12290,17 @@ function buildSceneMediaPositionCropFilter({
     durationSec
   });
   const progressExpr = buildSceneMediaMotionProgressExpr(durationSec);
+  const returnToAnchorExpr = `(4*(${progressExpr})*(1-(${progressExpr})))`;
   let xExpr = `${spec.leftPx.toFixed(3)}`;
   let yExpr = `${spec.topPx.toFixed(3)}`;
-  if (spec.motion.preset === "pan-left-right") {
-    xExpr = `${(spec.leftPx - spec.motion.amplitudeXPx).toFixed(3)}+(2*${spec.motion.amplitudeXPx.toFixed(3)}*(${progressExpr}))`;
-  } else if (spec.motion.preset === "pan-right-left") {
-    xExpr = `${(spec.leftPx + spec.motion.amplitudeXPx).toFixed(3)}-(2*${spec.motion.amplitudeXPx.toFixed(3)}*(${progressExpr}))`;
-  } else if (spec.motion.preset === "pan-up-down") {
-    yExpr = `${(spec.topPx - spec.motion.amplitudeYPx).toFixed(3)}+(2*${spec.motion.amplitudeYPx.toFixed(3)}*(${progressExpr}))`;
-  } else if (spec.motion.preset === "pan-down-up") {
-    yExpr = `${(spec.topPx + spec.motion.amplitudeYPx).toFixed(3)}-(2*${spec.motion.amplitudeYPx.toFixed(3)}*(${progressExpr}))`;
+  if (["pan-left-right", "pan-right-left"].includes(spec.motion.preset)) {
+    const startX = Number(spec.motion.startOffsetXPx || 0);
+    const distanceX = Number(spec.motion.endOffsetXPx || 0) - startX;
+    xExpr = `${(spec.leftPx + startX).toFixed(3)}+(${distanceX.toFixed(3)}*(${progressExpr}))`;
+  } else if (["pan-up-down", "pan-down-up"].includes(spec.motion.preset)) {
+    const startY = Number(spec.motion.startOffsetYPx || 0);
+    const distanceY = Number(spec.motion.endOffsetYPx || 0) - startY;
+    yExpr = `${(spec.topPx + startY).toFixed(3)}+(${distanceY.toFixed(3)}*(${progressExpr}))`;
   }
 
   if (visualLayoutMode === "blur-backdrop") {
@@ -12321,7 +12330,10 @@ function buildSceneMediaPositionCropFilter({
         const motionHeight = Math.max(2, Math.round(spec.scaledRect.height * panScale / 2) * 2);
         inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame`);
         const baseLeft = spec.leftPx - ((motionWidth - spec.scaledRect.width) / 2);
-        const baseTop = spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
+        const topAlignedImageMotion = spec.fitMode === "width";
+        const baseTop = topAlignedImageMotion
+          ? spec.topPx
+          : spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
         if (spec.kenBurns.effect === "pan-left") {
           xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
           yExpr = `${baseTop.toFixed(3)}`;
@@ -12330,10 +12342,14 @@ function buildSceneMediaPositionCropFilter({
           yExpr = `${baseTop.toFixed(3)}`;
         } else if (spec.kenBurns.effect === "pan-up") {
           xExpr = `${baseLeft.toFixed(3)}`;
-          yExpr = `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+          yExpr = topAlignedImageMotion
+            ? `${baseTop.toFixed(3)}-(${panDistanceYPx.toFixed(3)}*(${returnToAnchorExpr}))`
+            : `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
         } else if (spec.kenBurns.effect === "pan-down") {
           xExpr = `${baseLeft.toFixed(3)}`;
-          yExpr = `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+          yExpr = topAlignedImageMotion
+            ? `${(baseTop - panDistanceYPx).toFixed(3)}+(${panDistanceYPx.toFixed(3)}*(${progressExpr}))`
+            : `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
         }
       }
     } else {
@@ -12369,7 +12385,10 @@ function buildSceneMediaPositionCropFilter({
       const motionHeight = Math.max(2, Math.round(spec.scaledRect.height * panScale / 2) * 2);
       inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame`);
       const baseLeft = spec.leftPx - ((motionWidth - spec.scaledRect.width) / 2);
-      const baseTop = spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
+      const topAlignedImageMotion = spec.fitMode === "width";
+      const baseTop = topAlignedImageMotion
+        ? spec.topPx
+        : spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
       if (spec.kenBurns.effect === "pan-left") {
         xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
         yExpr = `${baseTop.toFixed(3)}`;
@@ -12378,10 +12397,14 @@ function buildSceneMediaPositionCropFilter({
         yExpr = `${baseTop.toFixed(3)}`;
       } else if (spec.kenBurns.effect === "pan-up") {
         xExpr = `${baseLeft.toFixed(3)}`;
-        yExpr = `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+        yExpr = topAlignedImageMotion
+          ? `${baseTop.toFixed(3)}-(${panDistanceYPx.toFixed(3)}*(${returnToAnchorExpr}))`
+          : `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
       } else if (spec.kenBurns.effect === "pan-down") {
         xExpr = `${baseLeft.toFixed(3)}`;
-        yExpr = `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+        yExpr = topAlignedImageMotion
+          ? `${(baseTop - panDistanceYPx).toFixed(3)}+(${panDistanceYPx.toFixed(3)}*(${progressExpr}))`
+          : `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
       }
     }
   } else {

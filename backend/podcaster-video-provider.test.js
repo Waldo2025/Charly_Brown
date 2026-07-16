@@ -293,6 +293,7 @@ test("builds supported Omni tasks without Veo-only tuning parameters", () => {
   ]);
   assert.equal(params.background, false);
   assert.equal(params.stream, false);
+  assert.equal(params.store, true, "URI video delivery must always store the interaction");
   assert.equal(Object.hasOwn(params, "temperature"), false);
   assert.equal(Object.hasOwn(params, "negativePrompt"), false);
   assert.equal(Object.hasOwn(params, "resolution"), false);
@@ -364,6 +365,8 @@ test("Omni adapter returns interaction metadata without polling another model", 
   });
 
   assert.equal(requests.length, 1);
+  assert.equal(requests[0].params.store, true);
+  assert.equal(requests[0].params.response_format.delivery, "uri");
   assert.equal(requests[0].requestOptions.timeout, 1234);
   assert.equal(result.generator, "omni");
   assert.equal(result.model, OMNI_VIDEO_MODEL);

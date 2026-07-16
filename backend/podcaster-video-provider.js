@@ -265,7 +265,6 @@ function buildOmniInteractionParams(options = {}) {
   const input = images.length && !isEdit
     ? [...images, { type: "text", text: roleBoundPrompt }]
     : inputPrompt;
-  const shouldStore = Boolean(inSceneText || isEdit);
   return {
     model,
     input,
@@ -279,7 +278,9 @@ function buildOmniInteractionParams(options = {}) {
     },
     background: false,
     stream: false,
-    store: shouldStore,
+    // URI video delivery requires a stored interaction so Gemini can host the
+    // generated file while it is retrieved and downloaded.
+    store: true,
     ...(previousInteractionId ? { previous_interaction_id: previousInteractionId } : {})
   };
 }

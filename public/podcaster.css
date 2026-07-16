@@ -4682,6 +4682,15 @@ body.is-resizing-podcast-stage {
   will-change: opacity, transform, filter;
 }
 
+.podcast-active-speaker-image.ken-burns-pan-left,
+.podcast-active-speaker-image.ken-burns-pan-right,
+.podcast-active-speaker-image.ken-burns-pan-up,
+.podcast-active-speaker-image.ken-burns-pan-down,
+.podcast-active-speaker-image.ken-burns-zoom-in,
+.podcast-active-speaker-image.ken-burns-zoom-out {
+  transform-origin: top center;
+}
+
 .podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop),
 .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop) {
   translate: var(--pod-scene-media-translate-x, 0px) var(--pod-scene-media-translate-y, 0px);
@@ -4737,23 +4746,23 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes pod-scene-media-pan-left-right {
-  from { translate: calc(0px - var(--pod-scene-media-pan-x-amplitude, 0px)) 0px; }
-  to { translate: var(--pod-scene-media-pan-x-amplitude, 0px) 0px; }
+  from { translate: var(--pod-scene-media-motion-start-x, 0px) 0px; }
+  to { translate: var(--pod-scene-media-motion-end-x, 0px) 0px; }
 }
 
 @keyframes pod-scene-media-pan-right-left {
-  from { translate: var(--pod-scene-media-pan-x-amplitude, 0px) 0px; }
-  to { translate: calc(0px - var(--pod-scene-media-pan-x-amplitude, 0px)) 0px; }
+  from { translate: var(--pod-scene-media-motion-start-x, 0px) 0px; }
+  to { translate: var(--pod-scene-media-motion-end-x, 0px) 0px; }
 }
 
 @keyframes pod-scene-media-pan-up-down {
-  from { translate: 0px calc(0px - var(--pod-scene-media-pan-y-amplitude, 0px)); }
-  to { translate: 0px var(--pod-scene-media-pan-y-amplitude, 0px); }
+  from { translate: 0px var(--pod-scene-media-motion-start-y, 0px); }
+  to { translate: 0px var(--pod-scene-media-motion-end-y, 0px); }
 }
 
 @keyframes pod-scene-media-pan-down-up {
-  from { translate: 0px var(--pod-scene-media-pan-y-amplitude, 0px); }
-  to { translate: 0px calc(0px - var(--pod-scene-media-pan-y-amplitude, 0px)); }
+  from { translate: 0px var(--pod-scene-media-motion-start-y, 0px); }
+  to { translate: 0px var(--pod-scene-media-motion-end-y, 0px); }
 }
 
 /* Efectos de movimiento persistidos en visualEffectsMap. Esta definición debe
@@ -4794,23 +4803,27 @@ body.is-resizing-podcast-stage {
 .speed-10 { --kb-duration: 2s; }
 
 @keyframes ken-burns-pan-left {
-  from { transform: scale(1.2) translateX(-10%); }
-  to { transform: scale(1.2) translateX(10%); }
+  from { transform: scale(1.2) translateX(8%); }
+  75% { transform: scale(1.2) translateX(-8%); }
+  to { transform: scale(1) translateX(0); }
 }
 
 @keyframes ken-burns-pan-right {
-  from { transform: scale(1.2) translateX(10%); }
-  to { transform: scale(1.2) translateX(-10%); }
+  from { transform: scale(1.2) translateX(-8%); }
+  75% { transform: scale(1.2) translateX(8%); }
+  to { transform: scale(1) translateX(0); }
 }
 
 @keyframes ken-burns-pan-up {
-  from { transform: scale(1.2) translateY(10%); }
-  to { transform: scale(1.2) translateY(-10%); }
+  from { transform: scale(1.2) translateY(0); }
+  75% { transform: scale(1.2) translateY(-8%); }
+  to { transform: scale(1) translateY(0); }
 }
 
 @keyframes ken-burns-pan-down {
-  from { transform: scale(1.2) translateY(-10%); }
-  to { transform: scale(1.2) translateY(10%); }
+  from { transform: scale(1.2) translateY(-8%); }
+  75% { transform: scale(1.2) translateY(0); }
+  to { transform: scale(1) translateY(0); }
 }
 
 @keyframes ken-burns-zoom-in {

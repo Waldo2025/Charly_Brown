@@ -56,7 +56,7 @@ function parseFirebaseStorageObjectPath(url = "") {
 function normalizePersistedMediaReference(input = {}) {
   const downloadUrl = String(input?.downloadUrl || "").trim();
   const explicitStoragePath = String(input?.storagePath || "").trim().replace(/^\/+/, "");
-  if (/^data:/i.test(downloadUrl)) {
+  if (/^(?:data|blob):/i.test(downloadUrl)) {
     return {
       downloadUrl: "",
       storagePath: explicitStoragePath

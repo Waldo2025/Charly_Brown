@@ -205,3 +205,17 @@ test("background recovery stops after four failed attempts for one source", () =
   assert.equal(controller.backgroundRecoveryTimer, null);
   assert.equal(controller.backgroundRecoveryAttempts, 4);
 });
+
+test("visual scene replacement never evicts row audio unless explicitly requested", () => {
+  const controller = new PodcasterPlaybackController();
+  let audioInvalidations = 0;
+  controller.invalidateRowAudioCache = () => {
+    audioInvalidations += 1;
+  };
+
+  controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} });
+  assert.equal(audioInvalidations, 0);
+
+  controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} }, { includeAudio: true });
+  assert.equal(audioInvalidations, 1);
+});
