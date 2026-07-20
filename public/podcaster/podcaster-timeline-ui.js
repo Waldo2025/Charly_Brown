@@ -193,9 +193,12 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     if (!nextSrc) return;
     const preferAuto = options.preferAuto === true;
     const currentSrc = String(videoEl.getAttribute("src") || "").trim();
+    const currentPreviewSrc = String(videoEl.dataset.previewSrc || "").trim();
     const currentPreload = String(videoEl.preload || "").trim().toLowerCase();
 
-    if (currentSrc === nextSrc || (videoEl.dataset.blobSrc && videoEl.dataset.blobSrc === currentSrc)) {
+    if (
+      currentPreviewSrc === nextSrc && (currentSrc === nextSrc || (videoEl.dataset.blobSrc && videoEl.dataset.blobSrc === currentSrc))
+    ) {
       if (preferAuto && currentPreload === "auto") return;
       if (!preferAuto && (currentPreload === "metadata" || currentPreload === "auto")) return;
     }

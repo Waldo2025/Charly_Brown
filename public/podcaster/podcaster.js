@@ -21050,6 +21050,7 @@ window.PodcasterUI = {
   render: () => render(),
   upsertActiveSession: (updater, options) => upsertActiveSession(updater, options),
   upsertPodcastVideoConfig: (updater, options) => upsertPodcastVideoConfig(updater, options),
+  renderPodcastVideoTimeline: (session = null, options = {}) => renderPodcastVideoTimeline(session, options),
   selectTimelineSceneRow: (rowId = "", options = {}) => selectTimelineSceneRow(rowId, options),
   setPodcastVideoRow: (rowId = "", options = {}) => setPodcastVideoRow(rowId, options),
   syncStageMedia: (rowId = "", options = {}) => syncPodcastVideoStageMedia(getActiveSession(), rowId, options)

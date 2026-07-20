@@ -715,7 +715,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     }, { render: false });
     const refreshed = getActiveSession();
     deps.renderScript?.(refreshed);
-    deps.renderPodcastVideoTimeline?.(refreshed, { force: true, reason: "structure" });
+    deps.renderPodcastVideoTimeline?.(refreshed, { lightweight: true, reason: "selection" });
     deps.syncPodcastStudioInspector?.(refreshed, { forceRender: true });
     deps.renderPodcastVideoShell?.(refreshed);
     deps.renderCreativeVideoShell?.(refreshed);

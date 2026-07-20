@@ -1926,7 +1926,13 @@ export class PodcasterPlaybackController extends EventEmitter {
           lightweightInspector: true
         });
       } else {
-        this.deps?.setPodcastVideoRow?.(activeRowId);
+        this.deps?.setPodcastVideoRow?.(activeRowId, {
+          syncStage: true,
+          lightweightUi: true,
+          preserveMontageCursor: true,
+          reason: "playback",
+          skipInspectorSync: false
+        });
         if (session && this.deps?.setPodcastVideoSpeaker) {
           this.deps.setPodcastVideoSpeaker(session, speaker, { rowId: activeRowId, syncStageMedia: false });
         }

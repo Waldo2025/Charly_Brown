@@ -676,7 +676,7 @@ function setupEventListeners() {
                     }
                     
                     return next;
-                }, { render: true });
+                }, { render: false });
                 logSceneReplacement("local-sync:done", currentEditingRowId, {
                     mediaType,
                     isImageMedia,
@@ -693,6 +693,13 @@ function setupEventListeners() {
                         sessionId: String(hydratedSession?.id || "").trim(),
                         mediaUrl: String(hydratedSession?.dialogueVideoMap?.[currentEditingRowId]?.downloadUrl || "").trim(),
                         storagePath: String(hydratedSession?.dialogueVideoMap?.[currentEditingRowId]?.storagePath || "").trim()
+                    });
+                }
+
+                if (typeof window.PodcasterUI?.renderPodcastVideoTimeline === "function") {
+                    window.PodcasterUI.renderPodcastVideoTimeline(hydratedSession, {
+                        lightweight: true,
+                        reason: "selection"
                     });
                 }
 
