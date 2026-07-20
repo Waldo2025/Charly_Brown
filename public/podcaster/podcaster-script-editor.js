@@ -811,6 +811,7 @@ function handleScriptFieldUpdate(event) {
     || field === "visualNotes"
     || field === "transition"
     || field === "durationSec";
+  const isToggleField = field === "excludeScriptFromVideoPrompt" || field === "disfluencyEnabled" || field === "fillerLevel" || field === "errorLevel" || field === "stutterEnabled" || field === "stutterLevel";
 
   if (field === "disfluencyEnabled" || field === "fillerLevel" || field === "errorLevel" || field === "stutterEnabled" || field === "stutterLevel") {
     const limits = window.DISFLUENCY_LEVEL_MAX || { fillerLevel: 10, errorLevel: 10, stutterLevel: 10 };
@@ -956,6 +957,7 @@ function handleScriptFieldUpdate(event) {
   }
   if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "headlineText" || field === "captionText" || field === "inSceneText" || field === "overlayMode" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec" || field === "excludeScriptFromVideoPrompt")) {
     const videoPreset = window.resolveActiveVideoPreset(session);
+    const shouldRender = !isLiveInput && !isToggleField;
     window.upsertActiveSession((current) => ({
       ...current,
       script: {
@@ -1008,7 +1010,7 @@ function handleScriptFieldUpdate(event) {
             })
         ))
       }
-    }), { ...baseSessionUpdateOptions, render: !isLiveInput });
+    }), { ...baseSessionUpdateOptions, render: shouldRender });
     if (["headlineText", "captionText", "overlayMode", "onScreenText"].includes(field)) {
       const updatedRow = (window.getActiveSession()?.script?.rows || []).find((item) => String(item?.id || "").trim() === rowId) || null;
       const nextText = String(normalizeSceneTextFields(updatedRow || {}).onScreenText || "").replace(/\s+/g, " ").trim();
@@ -1023,6 +1025,9 @@ function handleScriptFieldUpdate(event) {
       if (window.podcastVideoState?.enabled && typeof window.renderPodcastVideoTimeline === "function") {
         window.renderPodcastVideoTimeline(window.getActiveSession(), { lightweight: true });
       }
+    }
+    if (isToggleField && window.podcastVideoState?.enabled && typeof window.renderPodcastVideoTimeline === "function") {
+      window.renderPodcastVideoTimeline(window.getActiveSession(), { lightweight: true, reason: "selection" });
     }
     if (affectsMontagePreview && els.montageExportModal && !els.montageExportModal.hidden) {
       if (typeof window.scheduleMontageExportPreviewRefresh === "function") {
