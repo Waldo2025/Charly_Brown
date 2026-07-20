@@ -1456,6 +1456,57 @@ body.is-resizing-podcast-stage {
   place-items: stretch;
 }
 
+.floating-panel-modal.snoopy-editor-modal.is-snoopy-editor-fullscreen {
+  z-index: 2147483000;
+  place-items: stretch;
+  padding: 0;
+  background: #020617;
+}
+
+.floating-panel-modal.snoopy-editor-modal.is-snoopy-editor-fullscreen .floating-panel-backdrop {
+  background: #020617;
+}
+
+.floating-panel-modal.snoopy-editor-modal.is-snoopy-editor-fullscreen > .floating-panel-card {
+  width: 100vw;
+  max-width: none;
+  min-height: 100dvh;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+}
+
+.floating-panel-modal.snoopy-editor-modal.is-snoopy-editor-fullscreen .floating-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 240;
+}
+
+.floating-panel-modal.snoopy-editor-modal.is-snoopy-editor-fullscreen .snoopy-editor-fullscreen-toggle {
+  background: color-mix(in srgb, var(--pod-accent) 18%, rgba(15, 23, 42, 0.92) 82%);
+  border-color: color-mix(in srgb, var(--pod-accent) 42%, var(--pod-border) 58%);
+  color: var(--pod-text);
+}
+
+.has-snoopy-editor-fullscreen .snoopy-editor-child-modal {
+  z-index: 2147483400;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 6, 23, 0.58);
+}
+
+.has-snoopy-editor-fullscreen .snoopy-editor-child-modal > .floating-panel-card {
+  z-index: 2;
+  width: min(var(--snoopy-child-modal-width, 960px), calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
+  min-height: 0;
+  height: auto;
+  max-height: calc(100dvh - 40px);
+  margin: auto;
+  border-radius: 18px;
+}
+
 #podcastVideoShell.floating-panel-card {
   width: 100%;
   max-width: none;
@@ -3520,6 +3571,10 @@ body.is-resizing-podcast-stage {
   z-index: 3;
 }
 
+#podcastVideoShell:has(.podcast-overlay-card-layer.is-interactive) #podcastVideoStage {
+  z-index: 420;
+}
+
 #podcastVideoShell .podcast-video-actions {
   position: relative;
   z-index: 3;
@@ -4702,7 +4757,7 @@ body.is-resizing-podcast-stage {
 .montage-export-preview-container[data-scene-media-motion-preset="pan-left-right"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-left-right"] .podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-left-right"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop) {
-  animation: pod-scene-media-pan-left-right 12s ease-in-out infinite alternate;
+  animation: pod-scene-media-pan-left-right var(--pod-scene-media-motion-duration, 12s) ease-in-out 1 both;
   animation-play-state: paused;
 }
 
@@ -4712,7 +4767,7 @@ body.is-resizing-podcast-stage {
 .montage-export-preview-container[data-scene-media-motion-preset="pan-right-left"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-right-left"] .podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-right-left"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop) {
-  animation: pod-scene-media-pan-right-left 12s ease-in-out infinite alternate;
+  animation: pod-scene-media-pan-right-left var(--pod-scene-media-motion-duration, 12s) ease-in-out 1 both;
   animation-play-state: paused;
 }
 
@@ -4722,7 +4777,7 @@ body.is-resizing-podcast-stage {
 .montage-export-preview-container[data-scene-media-motion-preset="pan-up-down"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-up-down"] .podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-up-down"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop) {
-  animation: pod-scene-media-pan-up-down 12s ease-in-out infinite alternate;
+  animation: pod-scene-media-pan-up-down var(--pod-scene-media-motion-duration, 12s) ease-in-out 1 both;
   animation-play-state: paused;
 }
 
@@ -4732,7 +4787,7 @@ body.is-resizing-podcast-stage {
 .montage-export-preview-container[data-scene-media-motion-preset="pan-down-up"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-down-up"] .podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop),
 .player-stage[data-scene-media-motion-preset="pan-down-up"] .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop) {
-  animation: pod-scene-media-pan-down-up 12s ease-in-out infinite alternate;
+  animation: pod-scene-media-pan-down-up var(--pod-scene-media-motion-duration, 12s) ease-in-out 1 both;
   animation-play-state: paused;
 }
 
@@ -5482,6 +5537,7 @@ body.is-resizing-podcast-stage {
 }
 
 .podcast-overlay-card-layer.is-interactive {
+  z-index: 214748250;
   pointer-events: auto;
 }
 
@@ -10432,6 +10488,39 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.row-video-dialogue-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
+  border-radius: 999px;
+  color: var(--pod-muted);
+  background: color-mix(in srgb, var(--pod-surface) 84%, transparent 16%);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.row-field .row-video-dialogue-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--pod-accent);
+  box-shadow: none;
+}
+
+.row-video-dialogue-toggle:has(input:checked) {
+  color: var(--pod-accent);
+  border-color: color-mix(in srgb, var(--pod-accent) 52%, var(--pod-border) 48%);
+  background: color-mix(in srgb, var(--pod-accent) 10%, var(--pod-surface) 90%);
 }
 
 .row-field-mini-btn {

@@ -66,13 +66,13 @@ assert.match(
 
 assert.match(
   homeJs,
-  /else if \(wbType === 'escapeRoom_preview'\) \{\s*openEscapeRoomPreview\(id\);/,
+  /else if \(wbType === 'escapeRoom_preview'\) \{\s*void openEscapeRoomPreview\(id, btnWorkbench\.dataset\.topicId \|\| ""\);/,
   "La acción de preview debe abrir el iframe del Escape Room."
 );
 
 assert.match(
   homeJs,
-  /function openEscapeRoomPreview\(/,
+  /async function openEscapeRoomPreview\(/,
   "Home debe exponer una función para abrir el preview del Escape Room."
 );
 
@@ -104,6 +104,18 @@ assert.match(
   homeJs,
   /const estacion = project\.estacion \|\| item\.estacion \|\| formState\.estacionSelect \|\| "";/,
   "Home debe leer la estación cuando el escape room es de secundaria."
+);
+
+assert.match(
+  homeJs,
+  /const modoPresentacion = project\.modo_presentacion \|\| formState\.modoPresentacionSelect \|\| "salas";/,
+  "Home debe resolver el formato del proyecto y degradar sesiones legacy al modo por salas."
+);
+
+assert.match(
+  homeJs,
+  /modoPresentacion === "menu_secciones" \? "Menú por secciones" : "Por salas"/,
+  "Home debe mostrar un distintivo legible para cada formato de Escape Room."
 );
 
 console.log("Home escape room workbench OK.");

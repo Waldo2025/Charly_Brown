@@ -339,10 +339,14 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
     return `
       <div class="script-row-grid">
         <!-- El campo Tiempo (durationSec) ha sido removido para evitar confusión con la velocidad del audio -->
-        <label class="row-field wide">
+        <div class="row-field wide">
           <span class="row-field-head">
             <span>Guion</span>
             <span class="row-field-inline-actions">
+              <label class="row-video-dialogue-toggle" title="Generar sólo con la dirección visual y las referencias. El Guion se conserva para audio, subtítulos y montaje.">
+                <input type="checkbox" data-field="excludeScriptFromVideoPrompt" data-row-id="${escapeHtml(creativeRow.id)}"${creativeRow.excludeScriptFromVideoPrompt === true ? " checked" : ""}>
+                <span>No usar guion</span>
+              </label>
               ${String(creativeRow.publicSceneLibraryId || "").trim() ? `<span class="row-chip row-chip-public">Pública</span>` : ""}
               <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(creativeRow.id)}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i>
@@ -356,7 +360,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
             </span>
           </span>
           <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.voiceOverText || creativeRow.text || creativeRow.guion || creativeRow.script || "")}</textarea>
-        </label>
+        </div>
         <label class="row-field wide">
           <span>Descripción de escena</span>
           <textarea rows="4" data-field="sceneDescription" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.sceneDescription || creativeRow.scenePrompt || creativeRow.descripcionEscena || creativeRow.descripcionDeEscena || "")}</textarea>
@@ -493,7 +497,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
       </label>
       <label class="row-field">
         <span>Voz</span>
-        <select data-field="voiceName" data-speaker="${escapeHtml(row.speaker)}" data-row-id="${escapeHtml(row.id)}">
+        <select data-field="voiceName" data-speaker="${escapeHtml(row.speaker)}" data-row-id="${escapeHtml(row.id)}" data-voice-source="${escapeHtml(window.normalizeVoiceNameSource?.(row.voiceNameSource) || "host")}">
           ${buildVoiceOptions(window.resolveConfiguredSpeakerVoiceForGeneration(row, session))}
         </select>
       </label>
@@ -736,6 +740,7 @@ function buildBlankScriptRow(session = null, options = {}) {
     headlineText: "",
     captionText: "",
     inSceneText: "",
+    excludeScriptFromVideoPrompt: false,
     overlayMode: "none",
     textSource: "manual",
     onScreenText: "",
@@ -794,7 +799,7 @@ function handleScriptFieldUpdate(event) {
   };
   const rawValue = field === "durationSec"
     ? Number(target.value || 0)
-    : field === "disfluencyEnabled" || field === "stutterEnabled" || field === "relateWithPreviousScene"
+    : field === "disfluencyEnabled" || field === "stutterEnabled" || field === "relateWithPreviousScene" || field === "excludeScriptFromVideoPrompt"
       ? Boolean(target.checked)
       : target.value;
   const affectsMontagePreview = field === "voiceOverText"
@@ -865,6 +870,7 @@ function handleScriptFieldUpdate(event) {
     }
     window.stopRowAudio();
     window.stopGeminiLiveSession().catch(() => { });
+    target.dataset.voiceSource = "row";
     window.upsertActiveSession((current) => ({
       ...current,
       script: {
@@ -948,7 +954,7 @@ function handleScriptFieldUpdate(event) {
     scheduleConfirmedLocalPersist();
     return;
   }
-  if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "headlineText" || field === "captionText" || field === "inSceneText" || field === "overlayMode" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec")) {
+  if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "headlineText" || field === "captionText" || field === "inSceneText" || field === "overlayMode" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec" || field === "excludeScriptFromVideoPrompt")) {
     const videoPreset = window.resolveActiveVideoPreset(session);
     window.upsertActiveSession((current) => ({
       ...current,

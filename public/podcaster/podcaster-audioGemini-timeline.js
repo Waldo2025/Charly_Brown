@@ -139,6 +139,10 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   const speechRateHint = computeDurationSpeedMultiplier(dialogueText, targetDurationSec);
   const regenerate = options.regenerate === true;
   const silent = options.silent === true;
+  const previousAudioClip = window.resolveDialogueAudioForRow?.(session, key) || null;
+  const previousAudioSourceKey = typeof window.playbackController?.resolveAudioSourceKey === "function"
+    ? window.playbackController.resolveAudioSourceKey(previousAudioClip)
+    : "";
 
   dialogueAudioGenerationPending.add(pendingKey);
   if (!silent) window.setGenerationStatus(`Generando audio Gemini para escena ${window.resolveSceneNumberByRowId(key, session)}...`, "is-busy");
@@ -170,7 +174,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     if (!resp?.ok) throw new Error(resp?.error || "Error al generar audio.");
 
     const finalAudio = resp.dialogueAudio;
-    window.upsertActiveSession((current) => {
+    const updatedSession = window.upsertActiveSession((current) => {
       const currentAudioMap = window.getDialogueAudioMap(current);
       const existingClip = currentAudioMap[key] || null;
       const row = window.getSessionRows(current).find((item) => String(item?.id || "").trim() === key) || null;
@@ -190,6 +194,14 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
         }
       };
     }, { render: false });
+    const nextSession = updatedSession || window.getActiveSession();
+    const nextAudioClip = window.resolveDialogueAudioForRow?.(nextSession, key)
+      || window.getDialogueAudioMap?.(nextSession)?.[key]
+      || finalAudio
+      || null;
+    const nextAudioSourceKey = typeof window.playbackController?.resolveAudioSourceKey === "function"
+      ? window.playbackController.resolveAudioSourceKey(nextAudioClip)
+      : "";
     if (typeof window.upsertPodcastVideoConfig === "function") {
       window.upsertPodcastVideoConfig((cfg) => {
         const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
@@ -205,11 +217,18 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     }
 
     // Evacuar referencias del reproductor viejas
+    const invalidateOptions = {
+      previousClip: previousAudioClip,
+      previousSourceKey: previousAudioSourceKey,
+      nextClip: nextAudioClip,
+      nextSourceKey: nextAudioSourceKey,
+      revokeBlobUrls: true
+    };
     if (typeof window.playbackController?.invalidateRowAudioCache === "function") {
-      window.playbackController.invalidateRowAudioCache(key);
+      window.playbackController.invalidateRowAudioCache(key, invalidateOptions);
     }
     if (typeof window.exportPreviewController?.invalidateRowAudioCache === "function") {
-      window.exportPreviewController.invalidateRowAudioCache(key);
+      window.exportPreviewController.invalidateRowAudioCache(key, invalidateOptions);
     }
 
     // Medir la nueva duración e incorporar al timeline inmediatamente
@@ -223,6 +242,9 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       render: false,
       preserveStartMs: true
     });
+    window.renderPodcastVideoTimeline?.(window.getActiveSession(), { force: true, reason: "dialogue-audio-regenerated" });
+    window.syncPodcastStudioInspector?.(window.getActiveSession());
+    window.scheduleSessionLocalPersist?.("dialogue-audio-regenerated");
 
     return finalAudio;
   } catch (error) {

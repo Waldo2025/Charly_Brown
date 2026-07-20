@@ -13,6 +13,15 @@ function escapeHtmlAttr(value = "") {
   return escapeHtml(value).replace(/`/g, "&#96;");
 }
 
+function serializeForJavaScript(value) {
+  return JSON.stringify(value, null, 2)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 function sanitizeFileName(value = "", fallback = "EscapeRoom") {
   const normalized = String(value || fallback)
     .normalize("NFD")
@@ -62,7 +71,7 @@ function extractExplicitFinalPasscode(text = "") {
   if (!raw) return "";
   const quotedMatch = raw.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
   if (quotedMatch) return String(quotedMatch[1] || "").toUpperCase();
-  const keywordMatch = raw.match(/(?:clave|código|codigo|clave final|código final|codigo final|clave final es|clave es|clave final es:|codigo es|código es:)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
+  const keywordMatch = raw.match(/(?:clave final|c[oó]digo final|clave|c[oó]digo)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
   if (keywordMatch) return String(keywordMatch[1] || "").toUpperCase();
   return "";
 }
@@ -79,6 +88,78 @@ function resolveFinalPasscode(project = {}) {
     return { code: explicit, isFallback: false };
   }
   return { code: buildFallbackFinalPasscode(project), isFallback: true };
+}
+
+function buildProgressFingerprint(project = {}) {
+  const source = JSON.stringify({
+    modo_presentacion: project?.modo_presentacion === "menu_secciones" ? "menu_secciones" : "salas",
+    clave_final: resolveFinalPasscode(project).code,
+    misiones: (Array.isArray(project?.misiones) ? project.misiones : []).map((mission) => ({
+      id: String(mission?.id || ""),
+      titulo: String(mission?.titulo || ""),
+      historia: String(mission?.historia || ""),
+      reto: String(mission?.reto || ""),
+      preguntas: (Array.isArray(mission?.preguntas) ? mission.preguntas : []).map((question) => ({
+        id: String(question?.id || ""),
+        titulo: String(question?.titulo || ""),
+        reto: String(question?.reto || ""),
+        tipo_interaccion: String(question?.tipo_interaccion || ""),
+        subtipo_respuesta: String(question?.subtipo_respuesta || ""),
+        respuesta_correcta: String(question?.respuesta_correcta || ""),
+        respuestas_aceptadas: Array.isArray(question?.respuestas_aceptadas)
+          ? question.respuestas_aceptadas.map((answer) => String(answer ?? ""))
+          : [String(question?.respuesta_correcta || "")],
+        opciones: Array.isArray(question?.opciones) ? question.opciones.map((option) => String(option ?? "")) : [],
+        parejas: Array.isArray(question?.parejas)
+          ? question.parejas.map((pair) => [String(pair?.izquierda || ""), String(pair?.derecha || "")])
+          : []
+      }))
+    }))
+  });
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function resolveMissionCardImage(mission = {}) {
+  if (mission?.media?.tipo === "imagen" && mission.media.url) return mission.media.url;
+  if (mission?.imagen) return mission.imagen;
+  const questions = Array.isArray(mission?.preguntas) ? mission.preguntas : [];
+  const mediaQuestion = questions.find((question) => question?.media?.tipo === "imagen" && question.media.url);
+  if (mediaQuestion?.media?.url) return mediaQuestion.media.url;
+  return questions.find((question) => String(question?.imagen || "").trim())?.imagen || "";
+}
+
+function resolveEndingImage(project = {}) {
+  const missions = Array.isArray(project?.misiones) ? project.misiones : [];
+  return project?.backgroundImage
+    || missions.find((mission) => mission?.media?.tipo === "imagen" && mission.media.url)?.media?.url
+    || missions.find((mission) => String(mission?.imagen || "").trim())?.imagen
+    || missions.flatMap((mission) => Array.isArray(mission?.preguntas) ? mission.preguntas : [])
+      .find((question) => question?.media?.tipo === "imagen" && question.media.url)?.media?.url
+    || missions.flatMap((mission) => Array.isArray(mission?.preguntas) ? mission.preguntas : [])
+      .find((question) => String(question?.imagen || "").trim())?.imagen
+    || "";
+}
+
+function buildSectionCardFallback(kind = "activity") {
+  const icons = {
+    intro: '<path d="M12 3 3.5 7.5 12 12l8.5-4.5L12 3Zm-6 7v5.5c0 1.5 2.7 3.5 6 3.5s6-2 6-3.5V10l-6 3-6-3Z"/>',
+    instructions: '<path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v14.5l-3-2-3 2-3-2-3 2v-17Zm3 4h6M9 11h6M9 14.5h4"/>',
+    final: '<path d="M7 3h10v4a5 5 0 0 1-4 4.9V15h3v2H8v-2h3v-3.1A5 5 0 0 1 7 7V3Zm-3 2h3v2a4 4 0 0 1-3-2Zm16 0h-3v2a4 4 0 0 0 3-2Z"/>',
+    activity: '<path d="M12 2.8 14.7 8l5.8.8-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8-4.2-4.1L9.3 8 12 2.8Z"/>'
+  };
+  return `<div class="section-card-fallback section-card-fallback-${escapeHtmlAttr(kind)}" aria-hidden="true">
+    <svg viewBox="0 0 24 24" focusable="false">${icons[kind] || icons.activity}</svg>
+  </div>`;
+}
+
+function buildSectionCardMedia(imageUrl = "", alt = "", kind = "activity") {
+  if (!imageUrl) return buildSectionCardFallback(kind);
+  return `<div class="section-card-media"><img src="${escapeHtmlAttr(imageUrl)}" alt="${escapeHtmlAttr(alt)}" loading="lazy"></div>`;
 }
 
 function isDuplicateMediaNote(note = "", fallbackText = "") {
@@ -171,31 +252,146 @@ function clampThemeNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, parsed));
 }
 
-function resolveGameTheme(themeConfig = {}) {
+function normalizeThemeColor(value, fallback) {
+  const raw = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(raw)) return raw.toLowerCase();
+  if (/^#[0-9a-f]{3}$/i.test(raw)) {
+    return `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`.toLowerCase();
+  }
+  return fallback;
+}
+
+const ACADEMIC_STATION_COLORS = Object.freeze({
+  1: "#fcc659",
+  2: "#bbd152",
+  3: "#e95297",
+  4: "#02b0a3"
+});
+const ACADEMIC_THEME_COLORS = Object.freeze({
+  1: "#2da6b1",
+  2: "#ea5a5a",
+  3: "#952e89",
+  4: "#e48119"
+});
+
+function normalizeAcademicIndex(value, fallback = 1) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  const safe = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return ((safe - 1) % 4 + 4) % 4 + 1;
+}
+
+function resolveAcademicStationIndex(value, fallback = 1) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const names = {
+    "primera estación": 1,
+    "segunda estación": 2,
+    "tercera estación": 3,
+    "cuarta estación": 4
+  };
+  if (Object.prototype.hasOwnProperty.call(names, normalized)) return names[normalized];
+  if (!normalized || normalized === "todas") return normalizeAcademicIndex(fallback, fallback);
+  return normalizeAcademicIndex(normalized, fallback);
+}
+
+function resolveMissionAcademicPalette(project = {}, mission = {}, index = 0) {
+  const stored = mission?.paleta_academica || {};
+  const isSecondary = String(project?.nivel || "").trim().toLowerCase() === "secundaria";
+  const roomIndex = normalizeAcademicIndex(index + 1, 1);
+  const stationIndex = stored.color_estacion
+    ? normalizeAcademicIndex(stored.estacion_index, roomIndex)
+    : isSecondary
+      ? resolveAcademicStationIndex(project?.estacion, roomIndex)
+      : roomIndex;
+  const themeSource = isSecondary ? project?.tema : project?.unidad;
+  const themeIndex = stored.color_tema_unidad
+    ? normalizeAcademicIndex(stored.tema_unidad_index, 1)
+    : normalizeAcademicIndex(themeSource, 1);
   return {
-    titleColor: String(themeConfig.titleColor || "#f5eefe"),
-    subtitleColor: String(themeConfig.subtitleColor || "#e9d5ff"),
-    paragraphColor: String(themeConfig.paragraphColor || "#c7b9db"),
-    backgroundColor: String(themeConfig.backgroundColor || "#12091d"),
-    cardColor: String(themeConfig.cardColor || "#23143d"),
-    elevatedCardColor: String(themeConfig.elevatedCardColor || themeConfig.cardColor || "#2b1749"),
+    color_estacion: normalizeThemeColor(stored.color_estacion, ACADEMIC_STATION_COLORS[stationIndex]),
+    color_tema_unidad: normalizeThemeColor(stored.color_tema_unidad, ACADEMIC_THEME_COLORS[themeIndex]),
+    estacion_index: stationIndex,
+    tema_unidad_index: themeIndex
+  };
+}
+
+function hydrateAcademicMissionPalettes(project = {}) {
+  return {
+    ...project,
+    misiones: (Array.isArray(project?.misiones) ? project.misiones : []).map((mission, index) => ({
+      ...mission,
+      paleta_academica: resolveMissionAcademicPalette(project, mission, index)
+    }))
+  };
+}
+
+function buildMissionPaletteStyle(project = {}, mission = {}, index = 0) {
+  const palette = resolveMissionAcademicPalette(project, mission, index);
+  return `--room-station-color:${palette.color_estacion};--room-theme-color:${palette.color_tema_unidad};--accent:${palette.color_estacion};--accent-2:${palette.color_tema_unidad};--button-bg:${palette.color_tema_unidad};`;
+}
+
+function resolveAcademicBackgroundColor(project = {}) {
+  const missions = Array.isArray(project?.misiones) ? project.misiones : [];
+  const firstMissionWithPalette = missions.find((mission) => mission?.paleta_academica?.color_tema_unidad);
+  const isSecondary = String(project?.nivel || "").trim().toLowerCase() === "secundaria";
+  const hasAcademicSelection = Boolean(
+    firstMissionWithPalette
+    || String(project?.unidad || "").trim()
+    || (isSecondary && String(project?.tema || "").trim())
+  );
+  if (!hasAcademicSelection) return "";
+  return resolveMissionAcademicPalette(project, firstMissionWithPalette || missions[0] || {}, 0).color_tema_unidad;
+}
+
+function resolveGameTheme(themeConfig = {}) {
+  const titleColor = normalizeThemeColor(themeConfig.titleColor, "#f5eefe");
+  const subtitleColor = normalizeThemeColor(themeConfig.subtitleColor, "#e9d5ff");
+  const paragraphColor = normalizeThemeColor(themeConfig.paragraphColor, "#c7b9db");
+  const backgroundColor = normalizeThemeColor(themeConfig.backgroundColor, "#12091d");
+  const cardColor = normalizeThemeColor(themeConfig.cardColor, "#23143d");
+  const buttonColor = normalizeThemeColor(themeConfig.buttonColor, "#a855f7");
+  return {
+    titleColor,
+    subtitleColor,
+    paragraphColor,
+    backgroundColor,
+    cardColor,
+    elevatedCardColor: normalizeThemeColor(
+      themeConfig.elevatedCardColor,
+      normalizeThemeColor(themeConfig.cardColor, "#2b1749")
+    ),
     cardRadius: clampThemeNumber(themeConfig.cardRadius, 0, 40, 22),
     titleSize: clampThemeNumber(themeConfig.titleSize, 24, 72, 46),
     subtitleSize: clampThemeNumber(themeConfig.subtitleSize, 14, 40, 22),
     paragraphSize: clampThemeNumber(themeConfig.paragraphSize, 12, 28, 16),
-    buttonColor: String(themeConfig.buttonColor || "#a855f7"),
-    buttonTextColor: String(themeConfig.buttonTextColor || "#ffffff"),
-    accentColor: String(themeConfig.accentColor || themeConfig.buttonColor || "#7c3aed"),
-    accentStrong: String(themeConfig.accentStrong || themeConfig.buttonColor || "#a855f7"),
-    accentSoft: String(themeConfig.accentSoft || themeConfig.cardColor || "#3b1d63"),
-    successColor: String(themeConfig.successColor || "#34d399"),
-    warningColor: String(themeConfig.warningColor || "#f59e0b"),
-    dangerColor: String(themeConfig.dangerColor || "#fb7185")
+    buttonColor,
+    buttonTextColor: normalizeThemeColor(themeConfig.buttonTextColor, "#ffffff"),
+    accentColor: normalizeThemeColor(
+      themeConfig.accentColor,
+      normalizeThemeColor(themeConfig.buttonColor, "#7c3aed")
+    ),
+    accentStrong: normalizeThemeColor(
+      themeConfig.accentStrong,
+      normalizeThemeColor(themeConfig.buttonColor, "#a855f7")
+    ),
+    accentSoft: normalizeThemeColor(
+      themeConfig.accentSoft,
+      normalizeThemeColor(themeConfig.cardColor, "#3b1d63")
+    ),
+    successColor: normalizeThemeColor(themeConfig.successColor, "#34d399"),
+    warningColor: normalizeThemeColor(themeConfig.warningColor, "#f59e0b"),
+    dangerColor: normalizeThemeColor(themeConfig.dangerColor, "#fb7185")
   };
 }
 
 export function buildGameCss(projectOrTheme = {}) {
-  const theme = resolveGameTheme(projectOrTheme?.themeConfig || projectOrTheme);
+  const resolvedTheme = resolveGameTheme(projectOrTheme?.themeConfig || projectOrTheme);
+  const academicBackgroundColor = resolveAcademicBackgroundColor(projectOrTheme);
+  const theme = academicBackgroundColor
+    ? { ...resolvedTheme, backgroundColor: academicBackgroundColor }
+    : resolvedTheme;
+  const displayTitleSize = Math.max(24, Math.min(32, theme.titleSize - 12));
+  const displaySubtitleSize = Math.max(13, Math.min(18, theme.subtitleSize - 1));
+  const displayParagraphSize = Math.max(12, Math.min(14, theme.paragraphSize - 2));
   return `:root {
   --bg: ${theme.backgroundColor};
   --bg-2: ${theme.backgroundColor};
@@ -230,17 +426,19 @@ body {
 }
 .game-logo-brand {
   position: absolute;
-  top: 24px;
-  left: 24px;
-  width: 48px;
+  top: 10px;
+  left: 10px;
+  width: 42px;
   height: auto;
-  z-index: 100;
+  z-index: 1;
   pointer-events: none;
 }
 .game-shell {
+  position: relative;
+  z-index: 2;
   max-width: 1280px;
   margin: 0 auto;
-  padding: 0 24px 24px;
+  padding: 72px 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -279,11 +477,12 @@ body {
 .timer-shell {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 0.78rem 1rem;
+  justify-content: center;
+  padding: 0.6rem 0.88rem;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel-soft) 88%, white 12%);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.22);
 }
 .timer-shell.is-ready {
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
@@ -291,41 +490,32 @@ body {
 .timer-shell.is-running {
   border-color: color-mix(in srgb, var(--success) 34%, transparent);
 }
+.timer-shell.is-complete {
+  border-color: color-mix(in srgb, var(--success) 64%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, var(--panel-soft));
+}
 .timer-shell.is-warning {
   border-color: color-mix(in srgb, var(--warn) 36%, transparent);
 }
 .timer-shell.is-expired {
   border-color: color-mix(in srgb, var(--danger) 36%, transparent);
 }
-.timer-copy {
-  display: grid;
-  gap: 2px;
-}
-.timer-label {
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 800;
-}
 .timer-value {
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 900;
   color: var(--text);
   letter-spacing: 0.04em;
 }
-.timer-status {
-  font-size: 0.78rem;
-  color: var(--muted);
-  font-weight: 700;
-}
 .timer-fab {
   position: fixed;
-  right: 18px;
+  left: 18px;
+  right: auto;
   bottom: 18px;
   z-index: 60;
-  min-width: 220px;
-  justify-content: space-between;
+  min-width: 0;
+  width: fit-content;
+  max-width: calc(100vw - 36px);
+  justify-content: flex-start;
   box-shadow: 0 18px 42px rgba(2, 6, 23, 0.42);
   backdrop-filter: blur(18px);
 }
@@ -499,32 +689,47 @@ body {
   color: var(--muted);
   font-weight: 700;
 }
-.room-status-box {
+#roomStatusBox.status-box.room-status-box {
   margin-top: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #ffffff;
+  font-size: clamp(1.15rem, 2vw, 1.4rem);
+  font-weight: 800;
+  line-height: 1.55;
+}
+#roomStatusBox.status-box.room-status-box.is-good,
+#roomStatusBox.status-box.room-status-box.is-bad {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #ffffff;
 }
 .question-response-row {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 12px;
-  flex-wrap: wrap;
 }
 .question-response-row.is-inline-answer {
-  flex-wrap: nowrap;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
 }
 .question-response-row.is-inline-answer .question-challenge {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
 }
 .question-response-row.is-inline-answer .question-actions {
   margin-left: 0;
-  width: auto;
+  width: 100%;
 }
 .question-challenge {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
-  flex: 1 1 360px;
+  width: 100%;
   min-width: 0;
 }
 .question-challenge .choice-grid,
@@ -532,13 +737,27 @@ body {
   grid-template-columns: 1fr;
 }
 .question-challenge .match-row-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+.question-challenge .match-row-grid > .match-item {
+  grid-column: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.question-challenge .match-row-grid > .match-select {
+  grid-column: 2;
+  min-width: 0;
+  max-width: 100%;
+  display: block;
 }
 .question-response-row .question-actions {
   justify-content: flex-end;
-  flex: 0 0 auto;
-  margin-left: auto;
-  align-self: flex-end;
+  width: 100%;
+  margin: 0;
+  align-self: start;
 }
 .question-actions {
   justify-content: flex-end;
@@ -555,8 +774,23 @@ body {
 .field.question-answer-input.is-number {
   width: min(100%, 180px);
 }
+.free-response-field {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.field.question-answer-input.is-free-response {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.free-response-note {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
 .question-card .media-card {
-  margin-top: 12px;
+  margin: 12px 0 24px;
 }
 @keyframes galleryFadeIn {
   from {
@@ -586,9 +820,9 @@ body {
   font-weight: 800;
 }
 h1, h2, h3, p { margin-top: 0; }
-.title { font-size: clamp(2rem, 4vw, ${theme.titleSize}px); line-height: 1.04; margin: 10px 0 12px; color: var(--title-color); }
-.subtitle { color: var(--subtitle-color); line-height: 1.5; font-size: ${theme.subtitleSize}px; }
-.muted, .status-note, .mission-story, .map-help { color: var(--paragraph-color); line-height: 1.6; font-size: ${theme.paragraphSize}px; }
+.title { font-size: clamp(1.3rem, 2.2vw, ${displayTitleSize}px); line-height: 1.12; margin: 6px 0 8px; color: var(--title-color); }
+.subtitle { color: var(--subtitle-color); line-height: 1.5; font-size: ${displaySubtitleSize}px; }
+.muted, .status-note, .mission-story, .map-help { color: var(--paragraph-color); line-height: 1.55; font-size: ${displayParagraphSize}px; }
 .progress-shell { margin-top: 18px; }
 .progress-bar {
   height: 12px;
@@ -628,10 +862,10 @@ h1, h2, h3, p { margin-top: 0; }
 .map-card {
   position: relative;
   min-width: 132px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--room-station-color, var(--accent)) 58%, var(--line));
   border-bottom-color: color-mix(in srgb, var(--title-color) 22%, transparent);
   border-radius: var(--radius-md);
-  background: var(--panel);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--room-theme-color, var(--accent-2)) 12%, var(--panel)), var(--panel));
   color: var(--text);
   cursor: pointer;
   padding: 14px 18px 16px;
@@ -699,6 +933,34 @@ h1, h2, h3, p { margin-top: 0; }
   opacity: 0.9;
 }
 .mission-panel { margin-top: 20px; }
+.mission-panel[data-room-palette] {
+  border-color: color-mix(in srgb, var(--room-station-color) 58%, var(--line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--room-theme-color) 8%, var(--panel-soft)), var(--panel-soft));
+  box-shadow: inset 5px 0 0 color-mix(in srgb, var(--room-station-color) 78%, transparent);
+}
+.mission-panel[data-room-palette] .mission-title,
+.mission-panel[data-room-palette] .question-title {
+  color: color-mix(in srgb, var(--room-theme-color) 62%, var(--title-color));
+}
+.mission-panel[data-room-palette] .question-card {
+  border-left: 4px solid var(--room-station-color);
+}
+.mission-panel[data-room-palette] .label {
+  color: var(--room-theme-color);
+}
+.mission-panel[data-room-palette] .primary {
+  background: var(--room-theme-color);
+}
+.mission-panel[data-room-palette] .secondary {
+  border-color: color-mix(in srgb, var(--room-station-color) 58%, var(--line));
+  color: color-mix(in srgb, var(--room-station-color) 68%, var(--text));
+}
+.mission-panel[data-room-palette] .choice-card.is-selected,
+.mission-panel[data-room-palette] .match-select:focus,
+.mission-panel[data-room-palette] .field:focus {
+  border-color: var(--room-theme-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--room-station-color) 24%, transparent);
+}
 .mission-title { font-size: clamp(1.4rem, 2.5vw, 2rem); margin-bottom: 8px; }
 .challenge-box {
   padding: 16px;
@@ -719,7 +981,19 @@ h1, h2, h3, p { margin-top: 0; }
 }
 .field:focus { outline: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 58%, transparent); }
 .choice-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.choice-card { padding: 14px; cursor: pointer; }
+.choice-card {
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+@media (hover: hover) {
+  .choice-card:not(.is-selected):hover {
+    border-color: color-mix(in srgb, var(--accent-2) 54%, var(--line));
+    background: color-mix(in srgb, var(--accent) 13%, var(--panel-soft));
+    box-shadow: 0 10px 20px rgba(2, 6, 23, 0.18);
+    transform: translateY(-2px);
+  }
+}
 .choice-card.is-selected { border-color: color-mix(in srgb, var(--accent-2) 62%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-2) 28%, transparent); }
 .match-grid { grid-template-columns: 1fr; }
 .match-row-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; }
@@ -732,6 +1006,11 @@ h1, h2, h3, p { margin-top: 0; }
   background: color-mix(in srgb, var(--panel-soft) 92%, black 8%);
   color: var(--text);
   font: inherit;
+  color-scheme: dark;
+}
+.match-select option {
+  background: var(--panel);
+  color: var(--text);
 }
 .match-select:focus { outline: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 58%, transparent); }
 .media-card-empty {
@@ -761,7 +1040,8 @@ button {
   border-radius: 16px;
   padding: 0.88rem 1rem;
   font: inherit;
-  font-weight: 800;
+  font-size: 0.78rem;
+  font-weight: 400;
   cursor: pointer;
 }
 .primary { background: var(--button-bg); color: var(--button-text); }
@@ -785,10 +1065,306 @@ h2, h3, .mission-title, .question-title {
 .status-box { background: color-mix(in srgb, var(--panel-soft) 90%, white 10%); border: 1px solid var(--line); color: var(--muted); }
 .status-box.is-good { background: color-mix(in srgb, var(--success) 12%, var(--panel)); border-color: color-mix(in srgb, var(--success) 26%, transparent); color: color-mix(in srgb, var(--success) 64%, white 36%); }
 .status-box.is-bad { background: color-mix(in srgb, var(--danger) 12%, var(--panel)); border-color: color-mix(in srgb, var(--danger) 26%, transparent); color: color-mix(in srgb, var(--danger) 68%, white 32%); }
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+button:focus-visible,
+.field:focus-visible,
+.match-select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent-2) 78%, white 22%);
+  outline-offset: 4px;
+}
+.menu-mode .game-shell {
+  padding-top: 72px;
+  padding-bottom: 48px;
+}
+.menu-mode .menu-game-card {
+  padding: clamp(18px, 3vw, 34px);
+}
+.menu-mode .gallery-stage {
+  width: 100%;
+}
+.menu-mode .gallery-screen[data-gallery-screen="mission"].is-active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto;
+}
+.menu-hero {
+  display: grid;
+  gap: clamp(18px, 2.3vw, 30px);
+  padding: clamp(22px, 3vw, 42px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 76% 18%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 34%),
+    linear-gradient(112deg, color-mix(in srgb, var(--bg) 70%, #001d29), var(--panel-soft)),
+    var(--panel-soft);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent), 0 22px 48px rgba(2, 6, 23, 0.28);
+}
+.menu-hero-heading { display: flex; align-items: flex-start; gap: 18px; padding-bottom: clamp(16px, 2vw, 24px); border-bottom: 1px solid var(--line); }
+.menu-hero-mark { display: grid; flex: 0 0 54px; width: 54px; height: 54px; place-items: center; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 65%, var(--line)); border-radius: 50%; background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--accent) 7%, transparent); }
+.menu-hero-mark svg { width: 29px; height: 29px; }
+.menu-hero-copy {
+  min-width: 0;
+  max-width: 940px;
+}
+.menu-hero-copy .label { color: var(--accent); }
+.menu-hero-copy .title { margin: 7px 0 8px; font-size: clamp(1.85rem, 4vw, 3.25rem); }
+.menu-hero-copy .subtitle { margin: 0; color: var(--subtitle-color); font-size: clamp(1rem, 2vw, 1.28rem); }
+.menu-hero-copy .title,
+.menu-hero-copy .subtitle,
+.section-card-title,
+.menu-detail-copy {
+  overflow-wrap: anywhere;
+}
+.menu-hero-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, .48fr);
+  gap: clamp(20px, 3vw, 42px);
+  align-items: stretch;
+}
+.menu-progress-area { min-width: 0; }
+.menu-progress-eyebrow { margin: 0 0 6px; color: var(--accent); font-size: .76rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.menu-progress-lead { margin: 0 0 18px; color: var(--subtitle-color); }
+.menu-progress-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; }
+.menu-progress-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.menu-progress-step { display: grid; gap: 7px; min-width: 0; color: var(--muted); font-size: .72rem; text-align: center; }
+.menu-progress-step::before { content: attr(data-step); display: grid; width: 42px; height: 42px; margin: 0 auto; place-items: center; color: var(--text); font-size: 1.15rem; font-weight: 800; border: 3px solid color-mix(in srgb, var(--muted) 28%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--panel) 70%, black 30%); }
+.menu-progress-step.is-active { color: var(--accent); font-weight: 700; }
+.menu-progress-step.is-active::before { border-color: var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent); }
+.menu-progress-step.is-complete::before { color: var(--bg); border-color: var(--success); background: var(--success); }
+.menu-progress-step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-progress-count { align-self: center; min-width: 128px; padding: 14px; color: var(--muted); text-align: center; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 68%, transparent); }
+.menu-progress-count strong { display: block; color: var(--text); font-size: 1.65rem; line-height: 1; }
+.menu-progress-count span { display: block; margin-top: 6px; font-size: .7rem; }
+.menu-hero-controls { display: grid; align-content: center; gap: 16px; padding-left: clamp(18px, 3vw, 42px); border-left: 1px solid var(--line); }
+.menu-hero-controls .timer-shell { justify-content: center; width: fit-content; }
+.menu-hero-controls .timer-value { font-size: clamp(1.08rem, 2vw, 1.3rem); }
+.menu-hero-controls .hero-controls { justify-content: flex-start; }
+.menu-hero-controls .hero-controls .primary, .menu-hero-controls .hero-controls .secondary { width: 100%; }
+.menu-progress { display: none; }
+.menu-hero-tip { display: flex; align-items: center; gap: 14px; padding: 14px 16px; color: var(--subtitle-color); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.menu-hero-tip svg { flex: 0 0 28px; width: 28px; height: 28px; color: var(--warn); }
+.menu-hero-tip strong { display: block; margin-bottom: 2px; color: color-mix(in srgb, var(--warn) 70%, var(--text)); }
+.menu-hero-tip p { margin: 0; font-size: .88rem; }
+.sections-panel {
+  display: grid;
+  gap: 16px;
+}
+.sections-panel-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sections-panel-heading h2,
+.sections-panel-heading p {
+  margin-bottom: 0;
+}
+.sections-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.section-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 270px;
+  padding: 14px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.28);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+}
+.section-card[data-menu-mission] {
+  border-color: color-mix(in srgb, var(--room-station-color) 58%, var(--line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--room-theme-color) 12%, var(--panel)), var(--panel));
+  box-shadow: inset 5px 0 0 color-mix(in srgb, var(--room-station-color) 78%, transparent), 0 16px 34px rgba(2, 6, 23, 0.28);
+}
+.section-card[data-menu-mission] .section-card-kicker {
+  color: var(--room-theme-color);
+}
+.section-card:not(:disabled):hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
+  box-shadow: 0 22px 42px rgba(2, 6, 23, 0.4);
+}
+.section-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+}
+.section-card.is-complete {
+  border-color: color-mix(in srgb, var(--success) 58%, transparent);
+}
+.section-card-media,
+.section-card-fallback {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-soft));
+}
+.section-card-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.section-card-fallback {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 28% 24%, color-mix(in srgb, var(--accent-2) 28%, transparent), transparent 38%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--panel-soft)), var(--panel));
+}
+.section-card-fallback svg {
+  width: 42%;
+  max-width: 88px;
+  fill: none;
+  stroke: var(--title-color);
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.section-card-kicker {
+  color: var(--accent-2);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.section-card-title {
+  display: block;
+  min-width: 0;
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
+  line-height: 1.25;
+}
+.section-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: end;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.section-card-status::before {
+  content: "○";
+  font-size: 0.9rem;
+}
+.section-card.is-locked .section-card-status::before {
+  content: "🔒";
+  font-size: 0.78rem;
+}
+.section-card.is-complete .section-card-status {
+  color: var(--success);
+}
+.section-card.is-complete .section-card-status::before {
+  content: "✓";
+}
+.menu-detail-screen {
+  min-width: 0;
+  isolation: isolate;
+}
+.menu-detail-shell {
+  display: grid;
+  gap: 20px;
+  padding: clamp(18px, 4vw, 38px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-soft);
+}
+.menu-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.menu-mission-shell {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.menu-mode .gallery-screen[data-gallery-screen="mission"].is-active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto;
+  gap: 16px;
+}
+.menu-mode .gallery-screen[data-gallery-screen="mission"].is-active > .menu-mission-shell {
+  grid-column: 1;
+  grid-row: auto;
+  min-width: 0;
+}
+.menu-mode .menu-mission-shell > .menu-detail-toolbar {
+  position: sticky;
+  top: 12px;
+  z-index: 3;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel-soft) 94%, black 6%);
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.24);
+  backdrop-filter: blur(14px);
+}
+.menu-mission-shell .menu-detail-toolbar-actions {
+  display: flex;
+  margin-left: auto;
+}
+.menu-mode .menu-mission-shell > #missionStage {
+  min-width: 0;
+}
+.menu-detail-media img {
+  display: block;
+  width: min(100%, 820px);
+  max-height: 460px;
+  margin: 0 auto;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+.menu-detail-copy {
+  max-width: 78ch;
+  margin: 0 auto;
+  color: var(--paragraph-color);
+  font-size: ${theme.paragraphSize}px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+.menu-mode #missionStage {
+  min-width: 0;
+}
+.menu-mode #missionStage .mission-panel:first-child {
+  margin-top: 0;
+}
+.menu-mode .mission-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
 .hidden { display: none !important; }
 @media (max-width: 900px) {
   .game-shell {
-    padding: 0 14px 14px;
+    padding: 52px 14px 14px;
     gap: 10px;
   }
   .game-header {
@@ -801,7 +1377,7 @@ h2, h3, .mission-title, .question-title {
   .game-header .secondary {
     padding: 0.72rem 0.9rem;
     border-radius: 14px;
-    font-size: 0.92rem;
+    font-size: 0.78rem;
   }
   .game-header-center {
     gap: 10px;
@@ -884,19 +1460,18 @@ h2, h3, .mission-title, .question-title {
     padding: 12px;
   }
   .question-card .media-card {
-    margin-top: 10px;
+    margin: 10px 0 18px;
   }
   .question-title {
     font-size: 1.02rem;
   }
   .question-response-row {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
   .question-response-row.is-inline-answer {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
   }
   .question-challenge {
     flex-basis: auto;
@@ -909,7 +1484,7 @@ h2, h3, .mission-title, .question-title {
     font-size: 0.96rem;
   }
   .question-response-row.is-inline-answer .field.question-answer-input.is-number {
-    width: min(100%, 150px);
+    width: min(100%, 180px);
   }
   .field.question-answer-input.is-number {
     width: min(100%, 180px);
@@ -918,10 +1493,12 @@ h2, h3, .mission-title, .question-title {
     grid-template-columns: 1fr;
   }
   .timer-fab {
-    right: 14px;
     left: 14px;
+    right: auto;
     bottom: 14px;
     min-width: 0;
+    width: fit-content;
+    max-width: calc(100vw - 28px);
   }
   .choice-card,
   .match-item {
@@ -936,8 +1513,8 @@ h2, h3, .mission-title, .question-title {
     margin-left: 0;
   }
   .question-response-row.is-inline-answer .question-actions {
-    width: auto;
-    align-self: center;
+    width: 100%;
+    align-self: stretch;
   }
   .question-actions {
     width: 100%;
@@ -948,11 +1525,26 @@ h2, h3, .mission-title, .question-title {
   .mission-actions .primary {
     width: auto;
   }
+  .sections-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .menu-mode .game-shell {
+    padding-top: 52px;
+    padding-bottom: 32px;
+  }
 }
 
 @media (max-width: 560px) {
+  .menu-mode .game-shell {
+    padding-top: 42px;
+  }
+  .menu-mode .game-logo-brand {
+    top: 6px;
+    left: 6px;
+    width: 28px;
+  }
   .game-shell {
-    padding: 0 10px 10px;
+    padding: 42px 10px 10px;
     gap: 8px;
   }
   .game-header {
@@ -963,7 +1555,7 @@ h2, h3, .mission-title, .question-title {
   .game-header button,
   .game-header .secondary {
     padding: 0.62rem 0.78rem;
-    font-size: 0.84rem;
+    font-size: 0.72rem;
     border-radius: 12px;
   }
   .gallery-step,
@@ -1010,19 +1602,91 @@ h2, h3, .mission-title, .question-title {
     padding: 0.76rem 0.86rem;
     font-size: 0.92rem;
   }
+  .question-challenge .match-row-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .question-challenge .match-row-grid > .match-item,
+  .question-challenge .match-row-grid > .match-select {
+    grid-column: 1;
+  }
   .button-row {
     gap: 8px;
   }
   .hero-status-row {
     align-items: flex-start;
   }
-  .timer-shell {
+  .timer-shell:not(.timer-fab) {
     width: 100%;
     justify-content: space-between;
+  }
+  .timer-fab.timer-shell {
+    width: fit-content;
+    max-width: calc(100vw - 28px);
+    justify-content: flex-start;
   }
   button {
     padding: 0.72rem 0.84rem;
     border-radius: 12px;
+  }
+  .sections-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .section-card {
+    min-height: 0;
+  }
+  .menu-hero-meta,
+  .menu-detail-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .menu-hero {
+    padding: 20px 16px;
+  }
+  .menu-hero-heading {
+    gap: 12px;
+  }
+  .menu-hero-mark {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+  }
+  .menu-progress-line {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .menu-progress-count {
+    justify-self: stretch;
+  }
+  .menu-hero-controls {
+    padding: 16px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+  .menu-hero-controls .timer-shell,
+  .menu-hero-controls .hero-controls,
+  .menu-detail-toolbar .secondary {
+    width: 100%;
+  }
+  .menu-hero-controls .hero-controls button {
+    flex: 1 1 150px;
+  }
+  .menu-mode .mission-actions {
+    justify-content: stretch;
+  }
+  .menu-mode .mission-actions button {
+    flex: 1 1 140px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .ending-panel.is-alert {
+    animation: none;
+    border-width: 2px;
   }
 }
 
@@ -1043,40 +1707,66 @@ h2, h3, .mission-title, .question-title {
 }
 
 export function buildGameRuntime(project) {
-  const normalized = normalizeEscapeRoomProject(project);
-  const initialUnlocked = normalized.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id);
+  const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
+  const isMenuMode = normalized.modo_presentacion === "menu_secciones";
+  const initialUnlocked = isMenuMode
+    ? []
+    : normalized.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id);
   const finalPasscode = resolveFinalPasscode(normalized);
+  const progressFingerprint = buildProgressFingerprint(normalized);
   const runtimeProject = {
     ...normalized,
     misiones: normalized.misiones.map((mission) => buildRuntimeMission(mission, initialUnlocked))
   };
 
-  return `const ESCAPE_ROOM_DATA = ${JSON.stringify(runtimeProject, null, 2)};
+  return `const ESCAPE_ROOM_DATA = ${serializeForJavaScript(runtimeProject)};
 const ESCAPE_ROOM_FINAL_PASSCODE = ${JSON.stringify(finalPasscode.code)};
 const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "true" : "false"};
+const ESCAPE_ROOM_PRESENTATION_MODE = ${JSON.stringify(isMenuMode ? "menu_secciones" : "salas")};
+const ESCAPE_ROOM_PROGRESS_VERSION = 2;
+const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 
-// Runtime de mapa libre: las salas desbloqueadas se eligen en cualquier orden permitido.
+// ${isMenuMode
+  ? "Runtime de menú por secciones: las actividades se desbloquean de forma secuencial."
+  : "Runtime de mapa libre: las salas desbloqueadas se eligen en cualquier orden permitido."}
 (function initEscapeRoomGame() {
+  const IS_MENU_MODE = ESCAPE_ROOM_PRESENTATION_MODE === "menu_secciones";
   const DEFAULT_DURATION_MINUTES = ${JSON.stringify(normalized.duracion_minutos || 35)};
+  function getMissionPaletteStyle(mission) {
+    const palette = mission?.paleta_academica || {};
+    const safeColor = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : fallback;
+    const stationColor = safeColor(palette.color_estacion, "#fcc659");
+    const themeColor = safeColor(palette.color_tema_unidad, "#2da6b1");
+    return "--room-station-color:" + stationColor
+      + ";--room-theme-color:" + themeColor
+      + ";--accent:" + stationColor
+      + ";--accent-2:" + themeColor
+      + ";--button-bg:" + themeColor + ";";
+  }
   const state = {
-    unlocked: new Set(ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id)),
+    unlocked: new Set(IS_MENU_MODE ? [] : ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id)),
     completed: new Set(),
     completedQuestions: new Set(),
     questionAnswers: {},
     questionChoices: {},
     questionMatches: {},
-    currentMissionId: ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null,
-    galleryScreen: "intro",
+    currentMissionId: IS_MENU_MODE
+      ? (ESCAPE_ROOM_DATA.misiones[0]?.id || null)
+      : (ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null),
+    galleryScreen: IS_MENU_MODE ? "menu" : "intro",
+    lastMenuFocusSelector: '[data-menu-section="intro"]',
     missionEventsBound: false,
     durationSeconds: 0,
     isStarted: false,
     isFinished: false,
     startedAtMs: null,
     endAtMs: null,
+    remainingSecondsAtFinish: null,
     timerIntervalId: null,
     isMasterSolved: false,
     alertAudioContext: null,
-    alertAudioNodes: null
+    alertAudioNodes: null,
+    nowOverrideMs: null
   };
 
   function isStorageAvailable() {
@@ -1090,13 +1780,23 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     }
   }
 
-  function getProgressStorageKey() {
+  function getLegacyProgressStorageKey() {
     const slug = normalizeBaseText(ESCAPE_ROOM_DATA.titulo || "escape-room") || "escape-room";
     return "escapeRoomGame.progress." + slug;
   }
 
+  function getProgressStorageKey() {
+    return getLegacyProgressStorageKey()
+      + ".v" + ESCAPE_ROOM_PROGRESS_VERSION
+      + "." + ESCAPE_ROOM_PRESENTATION_MODE
+      + "." + ESCAPE_ROOM_PROGRESS_FINGERPRINT;
+  }
+
   function serializeProgressState() {
     return {
+      version: ESCAPE_ROOM_PROGRESS_VERSION,
+      mode: ESCAPE_ROOM_PRESENTATION_MODE,
+      fingerprint: ESCAPE_ROOM_PROGRESS_FINGERPRINT,
       completed: [...state.completed],
       completedQuestions: [...state.completedQuestions],
       questionAnswers: state.questionAnswers,
@@ -1110,6 +1810,7 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
       isFinished: state.isFinished,
       startedAtMs: state.startedAtMs,
       endAtMs: state.endAtMs,
+      remainingSecondsAtFinish: state.remainingSecondsAtFinish,
       isMasterSolved: state.isMasterSolved
     };
   }
@@ -1117,7 +1818,6 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   function saveProgressState() {
     if (!isStorageAvailable()) return;
     try {
-      window.localStorage.removeItem(getProgressStorageKey());
       window.localStorage.setItem(getProgressStorageKey(), JSON.stringify(serializeProgressState()));
     } catch (error) {
       const isQuota = error?.name === "QuotaExceededError" || String(error?.message || "").toLowerCase().includes("quota");
@@ -1129,25 +1829,65 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
   function restoreProgressState() {
     if (!isStorageAvailable()) return;
-    const raw = window.localStorage.getItem(getProgressStorageKey());
+    let raw = window.localStorage.getItem(getProgressStorageKey());
+    let isLegacySave = false;
+    if (!raw && !IS_MENU_MODE) {
+      raw = window.localStorage.getItem(getLegacyProgressStorageKey());
+      isLegacySave = Boolean(raw);
+    }
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw);
+      if (!isLegacySave) {
+        const isCompatible = parsed?.version === ESCAPE_ROOM_PROGRESS_VERSION
+          && parsed?.mode === ESCAPE_ROOM_PRESENTATION_MODE
+          && parsed?.fingerprint === ESCAPE_ROOM_PROGRESS_FINGERPRINT;
+        if (!isCompatible) return;
+      }
       const missionIds = new Set(ESCAPE_ROOM_DATA.misiones.map((mission) => mission.id));
       state.completed = new Set(Array.isArray(parsed.completed) ? parsed.completed.filter((id) => missionIds.has(id)) : []);
+      if (IS_MENU_MODE) {
+        const sequentialCompleted = [];
+        for (const mission of ESCAPE_ROOM_DATA.misiones) {
+          if (!state.completed.has(mission.id)) break;
+          sequentialCompleted.push(mission.id);
+        }
+        state.completed = new Set(sequentialCompleted);
+      }
       state.completedQuestions = new Set(Array.isArray(parsed.completedQuestions) ? parsed.completedQuestions.filter((key) => String(key || "").includes("::")) : []);
       state.questionAnswers = parsed.questionAnswers && typeof parsed.questionAnswers === "object" ? parsed.questionAnswers : {};
       state.questionChoices = parsed.questionChoices && typeof parsed.questionChoices === "object" ? parsed.questionChoices : {};
       state.questionMatches = parsed.questionMatches && typeof parsed.questionMatches === "object" ? parsed.questionMatches : {};
       state.unlocked = new Set(Array.isArray(parsed.unlocked) ? parsed.unlocked.filter((id) => missionIds.has(id)) : ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id));
-      state.currentMissionId = missionIds.has(parsed.currentMissionId) ? parsed.currentMissionId : (ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null);
-      state.galleryScreen = ["intro", "mission", "ending"].includes(parsed.galleryScreen) ? parsed.galleryScreen : "intro";
+      state.currentMissionId = missionIds.has(parsed.currentMissionId)
+        ? parsed.currentMissionId
+        : (IS_MENU_MODE
+          ? (ESCAPE_ROOM_DATA.misiones[0]?.id || null)
+          : (ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null));
+      const validScreens = IS_MENU_MODE ? ["menu", "intro", "instructions", "mission", "ending"] : ["intro", "mission", "ending"];
+      state.galleryScreen = validScreens.includes(parsed.galleryScreen) ? parsed.galleryScreen : (IS_MENU_MODE ? "menu" : "intro");
       state.durationSeconds = normalizeDurationSeconds(parsed.durationSeconds);
       state.isStarted = parsed.isStarted === true;
       state.isFinished = parsed.isFinished === true;
       state.isMasterSolved = parsed.isMasterSolved === true;
       state.startedAtMs = Number.isFinite(Number(parsed.startedAtMs)) ? Number(parsed.startedAtMs) : null;
       state.endAtMs = Number.isFinite(Number(parsed.endAtMs)) ? Number(parsed.endAtMs) : null;
+      const storedRemainingAtFinish = parsed.remainingSecondsAtFinish == null
+        ? null
+        : Number(parsed.remainingSecondsAtFinish);
+      state.remainingSecondsAtFinish = Number.isFinite(storedRemainingAtFinish) && storedRemainingAtFinish >= 0
+        ? Math.min(state.durationSeconds, Math.round(storedRemainingAtFinish))
+        : null;
+      if (state.isFinished && state.remainingSecondsAtFinish == null) {
+        state.remainingSecondsAtFinish = state.isMasterSolved && state.endAtMs
+          ? Math.max(0, Math.ceil((state.endAtMs - nowMs()) / 1000))
+          : 0;
+      }
+      if (IS_MENU_MODE) syncMenuUnlocksFromProgress();
+      if (isLegacySave) {
+        saveProgressState();
+        window.localStorage.removeItem(getLegacyProgressStorageKey());
+      }
     } catch (error) {
       console.warn("No se pudo restaurar el avance del escape room:", error);
     }
@@ -1171,9 +1911,10 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     endingPanel: document.getElementById("endingPanel"),
     timerShells: Array.from(document.querySelectorAll("[data-timer-shell]")),
     timerValues: Array.from(document.querySelectorAll("[data-timer-value]")),
-    timerStatuses: Array.from(document.querySelectorAll("[data-timer-status]")),
     startButtons: Array.from(document.querySelectorAll("[data-game-start]")),
-    resetButtons: Array.from(document.querySelectorAll("[data-game-reset]"))
+    resetButtons: Array.from(document.querySelectorAll("[data-game-reset]")),
+    menuCards: Array.from(document.querySelectorAll("[data-menu-card]")),
+    liveStatus: document.getElementById("gameLiveStatus")
   };
 
   function normalizeBaseText(value = "") {
@@ -1201,6 +1942,10 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     return /^data:/i.test(url) || /^assets\\\//i.test(url) || /^\\\.{0,2}\\\//.test(url) || /^https?:\\\/\\\//i.test(url);
   }
 
+  function nowMs() {
+    return Number.isFinite(state.nowOverrideMs) ? state.nowOverrideMs : Date.now();
+  }
+
   function normalizeDurationSeconds(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -1221,8 +1966,11 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   }
 
   function getRemainingSeconds() {
+    if (state.isFinished && Number.isFinite(state.remainingSecondsAtFinish)) {
+      return Math.max(0, Math.floor(state.remainingSecondsAtFinish));
+    }
     if (!state.isStarted || !state.endAtMs) return state.durationSeconds;
-    return Math.max(0, Math.ceil((state.endAtMs - Date.now()) / 1000));
+    return Math.max(0, Math.ceil((state.endAtMs - nowMs()) / 1000));
   }
 
   function stopTimerInterval() {
@@ -1304,29 +2052,23 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
   function updateTimerUi() {
     const remainingSeconds = getRemainingSeconds();
-    const isExpired = state.isFinished || (state.isStarted && remainingSeconds <= 0);
-    const shellState = isExpired
-      ? "is-expired"
+    const isCompleted = state.isFinished && state.isMasterSolved;
+    const isExpired = !isCompleted && (state.isFinished || (state.isStarted && remainingSeconds <= 0));
+    const shellState = isCompleted
+      ? "is-complete"
+      : isExpired
+        ? "is-expired"
       : !state.isStarted
         ? "is-ready"
         : remainingSeconds <= 300
           ? "is-warning"
           : "is-running";
-    const statusText = isExpired
-      ? "Tiempo agotado"
-      : !state.isStarted
-        ? "Listo para iniciar"
-        : "Escape room en curso";
-
     els.timerShells.forEach((shell) => {
-      shell.classList.remove("is-ready", "is-running", "is-warning", "is-expired");
+      shell.classList.remove("is-ready", "is-running", "is-warning", "is-expired", "is-complete");
       shell.classList.add(shellState);
     });
     els.timerValues.forEach((node) => {
       node.textContent = formatDuration(remainingSeconds);
-    });
-    els.timerStatuses.forEach((node) => {
-      node.textContent = statusText;
     });
     els.startButtons.forEach((button) => {
       button.hidden = state.isStarted;
@@ -1336,14 +2078,15 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     els.resetButtons.forEach((button) => {
       button.disabled = false;
     });
-    setGameInteractionState(!state.isStarted || isExpired);
+    setGameInteractionState(!state.isStarted || isExpired || isCompleted);
   }
 
   function handleTimeExpired() {
     stopTimerInterval();
     state.isFinished = true;
-    state.endAtMs = Date.now();
-    state.galleryScreen = "mission";
+    state.endAtMs = nowMs();
+    state.remainingSecondsAtFinish = 0;
+    if (!IS_MENU_MODE) state.galleryScreen = "mission";
     updateTimerUi();
     persistProgressState();
     if (els.roomStatusBox) {
@@ -1386,9 +2129,8 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   }
 
   function getMissionAcceptedAnswers(mission) {
-    return Array.isArray(mission?.respuestas_aceptadas)
-      ? mission.respuestas_aceptadas.map((value) => normalizeBaseText(value)).filter(Boolean)
-      : [];
+    const values = Array.isArray(mission?.respuestas_aceptadas) ? mission.respuestas_aceptadas : [];
+    return [...new Set(values.map((value) => normalizePlayerAnswer(value, mission)).filter(Boolean))];
   }
 
   function missionById(id) {
@@ -1399,7 +2141,77 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     return state.completed.size === ESCAPE_ROOM_DATA.misiones.length;
   }
 
+  function syncMenuUnlocksFromProgress() {
+    if (!IS_MENU_MODE) return;
+    const unlocked = new Set();
+    if (state.isStarted) {
+      for (const mission of ESCAPE_ROOM_DATA.misiones) {
+        if (state.completed.has(mission.id)) {
+          unlocked.add(mission.id);
+          continue;
+        }
+        unlocked.add(mission.id);
+        break;
+      }
+    }
+    state.unlocked = unlocked;
+  }
+
+  function renderEndingPanelState() {
+    if (!els.endingPanel) return;
+    const shouldShowEnding = state.galleryScreen === "ending" && areAllMissionsCompleted();
+    els.endingPanel.classList.toggle("hidden", !shouldShowEnding);
+    if (!shouldShowEnding) return;
+
+    const finalCode = extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion);
+    const masterPanelContainer = document.getElementById("masterPanelContainer");
+    const victoryContainer = document.getElementById("victoryContainer");
+
+    if (finalCode && !state.isMasterSolved) {
+      if (masterPanelContainer) masterPanelContainer.classList.remove("hidden");
+      if (victoryContainer) victoryContainer.classList.add("hidden");
+      return;
+    }
+
+    if (masterPanelContainer) masterPanelContainer.classList.add("hidden");
+    if (victoryContainer) victoryContainer.classList.remove("hidden");
+
+    let timeDisplay = els.endingPanel.querySelector(".ending-time-display");
+    if (!timeDisplay) {
+      timeDisplay = document.createElement("div");
+      timeDisplay.className = "ending-time-display";
+      timeDisplay.style.marginTop = "20px";
+      timeDisplay.style.fontSize = "1.25rem";
+      timeDisplay.style.fontWeight = "bold";
+      timeDisplay.style.color = "var(--primary)";
+      if (victoryContainer) victoryContainer.appendChild(timeDisplay);
+      else els.endingPanel.appendChild(timeDisplay);
+    }
+    const elapsed = Math.max(0, state.durationSeconds - getRemainingSeconds());
+    timeDisplay.innerHTML = \`¡Felicidades! Lograste escapar en <span>\${formatDuration(elapsed)}</span>.\`;
+  }
+
+  function renderMenuGallery() {
+    const validScreens = ["menu", "intro", "instructions", "mission", "ending"];
+    if (!validScreens.includes(state.galleryScreen)) state.galleryScreen = "menu";
+    if (state.galleryScreen === "ending" && !areAllMissionsCompleted()) state.galleryScreen = "menu";
+
+    els.galleryScreens.forEach((screen) => {
+      const isActive = screen.dataset.galleryScreen === state.galleryScreen;
+      screen.classList.toggle("is-active", isActive);
+      screen.setAttribute("aria-hidden", isActive ? "false" : "true");
+    });
+    renderEndingPanelState();
+    syncEndingAlertState();
+    updateTimerUi();
+    persistProgressState();
+  }
+
   function renderGallery() {
+    if (IS_MENU_MODE) {
+      renderMenuGallery();
+      return;
+    }
     const galleryOrder = ["intro", "mission", "ending"];
     if (!galleryOrder.includes(state.galleryScreen)) {
       state.galleryScreen = "intro";
@@ -1438,40 +2250,7 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
       button.textContent = "Final";
     });
 
-    if (els.endingPanel) {
-      const shouldShowEnding = state.galleryScreen === "ending" && areAllMissionsCompleted();
-      els.endingPanel.classList.toggle("hidden", !shouldShowEnding);
-      if (shouldShowEnding) {
-        const finalCode = extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion);
-        const masterPanelContainer = document.getElementById("masterPanelContainer");
-        const victoryContainer = document.getElementById("victoryContainer");
-
-        if (finalCode && !state.isMasterSolved) {
-          if (masterPanelContainer) masterPanelContainer.classList.remove("hidden");
-          if (victoryContainer) victoryContainer.classList.add("hidden");
-        } else {
-          if (masterPanelContainer) masterPanelContainer.classList.add("hidden");
-          if (victoryContainer) victoryContainer.classList.remove("hidden");
-
-          let timeDisplay = els.endingPanel.querySelector(".ending-time-display");
-          if (!timeDisplay) {
-            timeDisplay = document.createElement("div");
-            timeDisplay.className = "ending-time-display";
-            timeDisplay.style.marginTop = "20px";
-            timeDisplay.style.fontSize = "1.25rem";
-            timeDisplay.style.fontWeight = "bold";
-            timeDisplay.style.color = "var(--primary)";
-            if (victoryContainer) {
-              victoryContainer.appendChild(timeDisplay);
-            } else {
-              els.endingPanel.appendChild(timeDisplay);
-            }
-          }
-          const elapsed = Math.max(0, state.durationSeconds - getRemainingSeconds());
-          timeDisplay.innerHTML = \`¡Felicidades! Lograste escapar en <span>\${formatDuration(elapsed)}</span>.\`;
-        }
-      }
-    }
+    renderEndingPanelState();
 
     syncEndingAlertState();
     updateTimerUi();
@@ -1479,8 +2258,11 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   }
 
   function setGalleryScreen(screenName = "intro") {
-    const galleryOrder = ["intro", "mission", "ending"];
-    const nextScreen = galleryOrder.includes(screenName) ? screenName : "intro";
+    const galleryOrder = IS_MENU_MODE
+      ? ["menu", "intro", "instructions", "mission", "ending"]
+      : ["intro", "mission", "ending"];
+    const fallbackScreen = IS_MENU_MODE ? "menu" : "intro";
+    const nextScreen = galleryOrder.includes(screenName) ? screenName : fallbackScreen;
     if (nextScreen === "ending" && !areAllMissionsCompleted()) return;
     state.galleryScreen = nextScreen;
     renderGallery();
@@ -1490,11 +2272,16 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   }
 
   function goToPreviousGalleryScreen() {
+    if (IS_MENU_MODE) {
+      returnToMenu();
+      return;
+    }
     if (state.galleryScreen === "mission") setGalleryScreen("intro");
     else if (state.galleryScreen === "ending") setGalleryScreen("mission");
   }
 
   function goToNextGalleryScreen() {
+    if (IS_MENU_MODE) return;
     if (state.galleryScreen === "intro") setGalleryScreen("mission");
     else if (state.galleryScreen === "mission" && areAllMissionsCompleted()) setGalleryScreen("ending");
   }
@@ -1505,9 +2292,130 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     const percent = Math.min((done / total) * 100, 100);
     if (els.progressText) els.progressText.textContent = done + " / " + total;
     if (els.progressBar) els.progressBar.style.width = percent + "%";
+    if (IS_MENU_MODE) {
+      document.querySelectorAll(".menu-progress-step").forEach((step, index) => {
+        const mission = ESCAPE_ROOM_DATA.misiones[index];
+        const complete = Boolean(mission && state.completed.has(mission.id));
+        const active = Boolean(mission && !complete && state.unlocked.has(mission.id));
+        step.classList.toggle("is-complete", complete);
+        step.classList.toggle("is-active", active);
+      });
+    }
+  }
+
+  function getMenuCardState(button) {
+    const section = button?.dataset?.menuSection || "";
+    if (section === "intro" || section === "instructions") {
+      return { locked: false, complete: false, status: "Disponible" };
+    }
+    if (section === "ending") {
+      const complete = areAllMissionsCompleted();
+      return {
+        locked: !complete,
+        complete: complete && state.isMasterSolved,
+        status: complete ? (state.isMasterSolved ? "Completado" : "Clave final disponible") : "Bloqueado · completa todas las actividades"
+      };
+    }
+    const missionId = button?.dataset?.menuMission || "";
+    const complete = state.completed.has(missionId);
+    const unlocked = state.unlocked.has(missionId);
+    const locked = !unlocked || (!complete && state.isFinished);
+    return {
+      locked,
+      complete,
+      status: complete
+        ? "Completada"
+        : state.isFinished
+          ? "Bloqueada · tiempo agotado"
+          : unlocked
+            ? "Disponible"
+            : state.isStarted
+              ? "Bloqueada · completa la actividad anterior"
+              : "Bloqueada · inicia el escape room"
+    };
+  }
+
+  function renderMenuCards() {
+    if (!IS_MENU_MODE) return;
+    syncMenuUnlocksFromProgress();
+    els.menuCards.forEach((button) => {
+      const cardState = getMenuCardState(button);
+      button.disabled = cardState.locked;
+      button.setAttribute("aria-disabled", cardState.locked ? "true" : "false");
+      button.classList.toggle("is-locked", cardState.locked);
+      button.classList.toggle("is-complete", cardState.complete);
+      const status = button.querySelector("[data-menu-card-status]");
+      if (status) status.textContent = cardState.status;
+      const title = button.querySelector(".section-card-title")?.textContent?.trim() || "Sección";
+      button.setAttribute("aria-label", title + ". " + cardState.status + ".");
+    });
+  }
+
+  function focusActiveMenuScreen() {
+    window.requestAnimationFrame(() => {
+      const screen = document.querySelector('[data-gallery-screen="' + CSS.escape(state.galleryScreen) + '"]');
+      const heading = screen?.querySelector("h1, h2");
+      if (!heading) return;
+      heading.setAttribute("tabindex", "-1");
+      heading.focus({ preventScroll: true });
+    });
+  }
+
+  function openMenuCard(button) {
+    if (!IS_MENU_MODE || !button || button.disabled) return;
+    const section = button.dataset.menuSection || "";
+    const missionId = button.dataset.menuMission || "";
+    state.lastMenuFocusSelector = missionId
+      ? '[data-menu-card][data-menu-mission="' + CSS.escape(missionId) + '"]'
+      : '[data-menu-card][data-menu-section="' + CSS.escape(section) + '"]';
+    if (section === "mission") {
+      if (!state.isStarted || !state.unlocked.has(missionId)) return;
+      state.currentMissionId = missionId;
+    }
+    if (section === "ending" && !areAllMissionsCompleted()) return;
+    state.galleryScreen = section;
+    persistProgressState();
+    render();
+    focusActiveMenuScreen();
+  }
+
+  function returnToMenu() {
+    if (!IS_MENU_MODE) return;
+    const focusSelector = state.lastMenuFocusSelector;
+    state.galleryScreen = "menu";
+    persistProgressState();
+    render();
+    window.requestAnimationFrame(() => {
+      const card = focusSelector ? document.querySelector(focusSelector) : null;
+      card?.focus({ preventScroll: true });
+    });
+  }
+
+  function goToNextMenuActivity() {
+    if (!IS_MENU_MODE) return;
+    const currentIndex = ESCAPE_ROOM_DATA.misiones.findIndex((mission) => mission.id === state.currentMissionId);
+    const nextMission = ESCAPE_ROOM_DATA.misiones
+      .slice(Math.max(0, currentIndex + 1))
+      .find((mission) => state.unlocked.has(mission.id) && !state.completed.has(mission.id));
+    if (nextMission) {
+      state.currentMissionId = nextMission.id;
+      state.galleryScreen = "mission";
+    } else if (areAllMissionsCompleted()) {
+      state.galleryScreen = "ending";
+    } else {
+      returnToMenu();
+      return;
+    }
+    persistProgressState();
+    render();
+    focusActiveMenuScreen();
   }
 
   function renderMap() {
+    if (IS_MENU_MODE) {
+      renderMenuCards();
+      return;
+    }
     if (!els.mapGrid) return;
     const target = els.mapGrid;
     target.innerHTML = "";
@@ -1520,6 +2428,7 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
       button.type = "button";
       button.className = \`map-card \${locked ? "is-locked" : ""} \${complete ? "is-complete" : ""} \${active ? "is-active" : ""}\`;
       button.dataset.openMission = mission.id;
+      button.style.cssText = getMissionPaletteStyle(mission);
       button.disabled = locked;
       button.setAttribute("aria-label", roomLabel + (mission.titulo ? " · " + mission.titulo : ""));
       button.textContent = roomLabel;
@@ -1559,17 +2468,18 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   }
 
   function getQuestionAcceptedAnswers(question) {
-    return Array.isArray(question?.respuestas_aceptadas)
-      ? question.respuestas_aceptadas.map((value) => normalizeBaseText(value)).filter(Boolean)
-      : [];
+    const values = Array.isArray(question?.respuestas_aceptadas) ? question.respuestas_aceptadas : [];
+    return [...new Set(values.map((value) => normalizePlayerAnswer(value, question)).filter(Boolean))];
   }
 
   function getQuestionAutofillText(question) {
+    if (question?.subtipo_respuesta === "frase_libre") return "Esta es una respuesta libre de prueba.";
+    const correctAnswer = String(question?.respuesta_correcta || "").trim();
+    if (correctAnswer) return correctAnswer;
     const firstAccepted = Array.isArray(question?.respuestas_aceptadas)
       ? question.respuestas_aceptadas.find((value) => String(value || "").trim())
       : "";
-    const fallback = String(question?.respuesta_correcta || "").trim();
-    return String(firstAccepted || fallback || "");
+    return String(firstAccepted || "");
   }
 
   function getQuestionCorrectChoiceIndex(question) {
@@ -1597,13 +2507,18 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
       letra: "Escribe una letra",
       numero: "Escribe un numero",
       codigo_corto: "Escribe el codigo",
-      frase_corta: "Escribe tu respuesta"
+      frase_corta: "Escribe tu respuesta",
+      frase_libre: "Escribe tu respuesta libre"
     };
-    const maxLength = question.subtipo_respuesta === "letra" ? 1 : "";
-    const type = question.subtipo_respuesta === "numero" ? "number" : "text";
+    const maxLength = question.subtipo_respuesta === "letra" ? 1 : (question.subtipo_respuesta === "palabra" ? 32 : "");
+    const type = "text";
+    const inputMode = question.subtipo_respuesta === "numero" ? ' inputmode="decimal"' : '';
     const inputClass = 'field question-answer-input' + (question.subtipo_respuesta === "numero" ? ' is-number' : '');
     const currentValue = state.questionAnswers[key] || "";
-    return '<input id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + '" data-question-answer="' + escapeHtmlAttr(key) + '" type="' + type + '"' + (maxLength ? ' maxlength="' + maxLength + '"' : '') + ' value="' + escapeHtmlAttr(currentValue) + '" placeholder="' + escapeHtmlAttr(placeholderBySubtype[question.subtipo_respuesta] || "Escribe tu respuesta") + '">';
+    if (question.subtipo_respuesta === "frase_libre") {
+      return '<div class="free-response-field"><textarea id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + ' is-free-response" data-question-answer="' + escapeHtmlAttr(key) + '" rows="4" spellcheck="true" autocapitalize="sentences" placeholder="Escribe tu respuesta libre">' + escapeHtml(currentValue) + '</textarea><div class="muted free-response-note">Cualquier respuesta no vacía es válida. Revisa las sugerencias ortográficas antes de verificar.</div></div>';
+    }
+    return '<input id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + '" data-question-answer="' + escapeHtmlAttr(key) + '" type="' + type + '"' + inputMode + (maxLength ? ' maxlength="' + maxLength + '"' : '') + ' value="' + escapeHtmlAttr(currentValue) + '" placeholder="' + escapeHtmlAttr(placeholderBySubtype[question.subtipo_respuesta] || "Escribe tu respuesta") + '">';
   }
 
   function renderMissionChoiceBlock(question, key) {
@@ -1733,11 +2648,11 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     }
     if (areMissionQuestionsCompleted(mission)) {
       markMissionComplete(mission);
-      setRoomStatus('Sala completada. Se desbloquearon nuevas rutas.', 'good');
+      setRoomStatus(IS_MENU_MODE ? 'Actividad completada. Ya puedes volver al menú y continuar.' : 'Sala completada. Se desbloquearon nuevas rutas.', 'good');
       renderMission();
       return;
     }
-    setRoomStatus('Continúa resolviendo las preguntas de esta sala.', 'info');
+    setRoomStatus(IS_MENU_MODE ? 'Continúa resolviendo las preguntas de esta actividad.' : 'Continúa resolviendo las preguntas de esta sala.', 'info');
   }
 
   function renderMission() {
@@ -1754,15 +2669,22 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     const questions = getRoomQuestions(mission);
     const completedCount = getCompletedQuestionCount(mission);
     const roomComplete = areMissionQuestionsCompleted(mission);
-    const roomStatusText = roomComplete ? 'Sala completada. Listo para avanzar.' : 'Resuelve las preguntas en cualquier orden para desbloquear la siguiente sala.';
+    const roomStatusText = roomComplete
+      ? (IS_MENU_MODE ? 'Actividad completada. Vuelve al menú para continuar.' : 'Sala completada. Listo para avanzar.')
+      : (IS_MENU_MODE ? 'Resuelve las preguntas en cualquier orden para desbloquear la siguiente actividad.' : 'Resuelve las preguntas en cualquier orden para desbloquear la siguiente sala.');
     const questionCards = questions.map((question, index) => renderQuestionCard(mission, question, index)).join('');
-
     if (els.questionProgress) {
       els.questionProgress.innerHTML = 'Preguntas resueltas: <strong>' + completedCount + ' / ' + questions.length + '</strong>';
     }
+    const nextActionSlot = document.querySelector('[data-menu-next-slot]');
+    if (nextActionSlot) {
+      nextActionSlot.innerHTML = IS_MENU_MODE && roomComplete
+        ? '<button type="button" class="primary" data-menu-next>' + (areAllMissionsCompleted() ? 'Siguiente: mensaje final' : 'Siguiente') + '</button>'
+        : '';
+    }
 
     els.missionStage.innerHTML =
-      '<section class="mission-panel">' +
+      '<section class="mission-panel" data-room-palette style="' + escapeHtmlAttr(getMissionPaletteStyle(mission)) + '">' +
         '<h2 class="mission-title">' + escapeHtml(mission.titulo) + '</h2>' +
         '<p class="mission-story">' + escapeHtml(mission.historia) + '</p>' +
         '<div class="mission-layout">' +
@@ -1781,6 +2703,14 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
   function markMissionComplete(mission) {
     state.completed.add(mission.id);
+    if (IS_MENU_MODE) {
+      syncMenuUnlocksFromProgress();
+      persistProgressState();
+      updateProgress();
+      renderMap();
+      renderGallery();
+      return;
+    }
     (mission.desbloquea || []).forEach((targetId) => state.unlocked.add(targetId));
     persistProgressState();
     updateProgress();
@@ -1791,9 +2721,10 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
         setGalleryScreen('ending');
       } else {
         stopTimerInterval();
+        state.remainingSecondsAtFinish = getRemainingSeconds();
         state.isFinished = true;
         if (!state.endAtMs) {
-          state.endAtMs = Date.now();
+          state.endAtMs = nowMs();
         }
         setGalleryScreen('ending');
       }
@@ -1802,13 +2733,95 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     renderGallery();
   }
 
+  function setEditorialReviewAction(action = "autofill") {
+    const button = document.querySelector("[data-editorial-autofill]");
+    if (!button) return;
+    const shouldVerify = action === "verify";
+    button.dataset.editorialAction = shouldVerify ? "verify" : "autofill";
+    button.textContent = shouldVerify ? "Verificar respuestas" : "Autocompletar pantalla";
+    button.setAttribute("aria-label", shouldVerify ? "Verificar todas las respuestas" : "Autocompletar todas las respuestas");
+    if (window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ === true && window.parent !== window) {
+      window.parent.postMessage({ type: "pigpen-editorial-action", action: button.dataset.editorialAction }, "*");
+    }
+  }
+
+  function validateEditorialCurrentScreen() {
+    if (state.galleryScreen === "ending") {
+      const verifyMasterButton = document.getElementById("btnVerifyMasterPasscode");
+      if (!verifyMasterButton) {
+        setRoomStatus("No se encontró la validación de la clave final.", "bad");
+        return;
+      }
+      verifyMasterButton.click();
+      setEditorialReviewAction("autofill");
+      setRoomStatus("Clave final verificada para revisión editorial.", "good");
+      return;
+    }
+
+    const mission = missionById(state.currentMissionId);
+    if (state.galleryScreen !== "mission" || !mission) {
+      setRoomStatus("No hay respuestas listas para verificar en esta pantalla.", "info");
+      setEditorialReviewAction("autofill");
+      return;
+    }
+
+    const pendingQuestions = getRoomQuestions(mission).filter((question) => (
+      !state.completedQuestions.has(getQuestionKey(mission, question))
+    ));
+    let validated = 0;
+    pendingQuestions.forEach((question) => {
+      const key = getQuestionKey(mission, question);
+      const verifyButton = els.missionStage?.querySelector('[data-question-verify="' + CSS.escape(key) + '"]');
+      if (!verifyButton) return;
+      verifyButton.click();
+      if (state.completedQuestions.has(key)) validated += 1;
+    });
+
+    const allValidated = pendingQuestions.length > 0 && validated === pendingQuestions.length;
+    setEditorialReviewAction(allValidated ? "autofill" : "verify");
+    setRoomStatus(
+      allValidated
+        ? 'Se verificaron correctamente ' + validated + ' respuesta(s) de esta pantalla.'
+        : 'Se validaron ' + validated + ' de ' + pendingQuestions.length + ' respuesta(s). Revisa las pendientes.',
+      allValidated ? 'good' : 'bad'
+    );
+  }
+
   function autocompleteCurrentScreen() {
+    const editorialButton = document.querySelector("[data-editorial-autofill]");
+    if (editorialButton?.dataset.editorialAction === "verify") {
+      validateEditorialCurrentScreen();
+      return;
+    }
+
+    if (!state.isStarted && !state.isFinished) {
+      startEscapeRoom();
+    }
+
+    if (!state.isFinished && state.galleryScreen !== "mission") {
+      const nextMission = ESCAPE_ROOM_DATA.misiones.find((mission) => (
+        state.unlocked.has(mission.id) && !state.completed.has(mission.id)
+      )) || (!IS_MENU_MODE ? missionById(state.currentMissionId) : null);
+
+      if (nextMission) {
+        state.currentMissionId = nextMission.id;
+        state.galleryScreen = "mission";
+        persistProgressState();
+        render();
+      } else if (areAllMissionsCompleted()) {
+        state.galleryScreen = "ending";
+        persistProgressState();
+        render();
+      }
+    }
+
     if (state.galleryScreen === "ending") {
       const finalCode = extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion);
       const input = document.getElementById("masterPasscodeInput");
       if (input && finalCode) {
         input.value = finalCode;
-        setRoomStatus("Clave final autocompletada para revisión editorial.", "good");
+        setEditorialReviewAction("verify");
+        setRoomStatus("Clave final autocompletada. Pulsa Verificar para validarla.", "good");
         return;
       }
     }
@@ -1820,7 +2833,7 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
     const mission = missionById(state.currentMissionId);
     if (!mission) {
-      setRoomStatus("No se encontró la sala activa.", "bad");
+      setRoomStatus(IS_MENU_MODE ? "No se encontró la actividad activa." : "No se encontró la sala activa.", "bad");
       return;
     }
 
@@ -1864,7 +2877,8 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
     persistProgressState();
     if (filled > 0) {
-      setRoomStatus('Se autocompletaron ' + filled + ' respuesta(s) de esta pantalla.', 'good');
+      setEditorialReviewAction("verify");
+      setRoomStatus('Se autocompletaron ' + filled + ' respuesta(s). Pulsa Verificar para validarlas.', 'good');
     } else {
       setRoomStatus("No había respuestas pendientes para autocompletar.", "info");
     }
@@ -1931,7 +2945,9 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
           const answerInput = els.missionStage.querySelector('[data-question-answer="' + CSS.escape(key) + '"]');
           const answer = answerInput ? answerInput.value || '' : (state.questionAnswers[key] || '');
           state.questionAnswers[key] = answer;
-          isCorrect = getQuestionAcceptedAnswers(question).includes(normalizePlayerAnswer(answer, question));
+          isCorrect = question.subtipo_respuesta === 'frase_libre'
+            ? Boolean(String(answer).trim())
+            : getQuestionAcceptedAnswers(question).includes(normalizePlayerAnswer(answer, question));
         }
 
         if (isCorrect) {
@@ -1939,7 +2955,13 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
           return;
         }
 
-        setQuestionStatus(key, question.retroalimentacion_incorrecta || 'Respuesta incorrecta. Intenta otra vez.', 'bad');
+        setQuestionStatus(
+          key,
+          question.subtipo_respuesta === 'frase_libre'
+            ? 'Escribe una respuesta antes de verificar.'
+            : (question.retroalimentacion_incorrecta || 'Respuesta incorrecta. Intenta otra vez.'),
+          'bad'
+        );
       }
     });
 
@@ -1970,36 +2992,47 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
   function startEscapeRoom() {
     if (state.isStarted && !state.isFinished) return;
-    const now = Date.now();
+    const now = nowMs();
     state.durationSeconds = normalizeDurationSeconds(state.durationSeconds);
     state.isStarted = true;
     state.isFinished = false;
     state.startedAtMs = now;
     state.endAtMs = now + (state.durationSeconds * 1000);
-    state.galleryScreen = "mission";
+    state.remainingSecondsAtFinish = null;
+    if (IS_MENU_MODE) {
+      state.galleryScreen = "menu";
+      syncMenuUnlocksFromProgress();
+    } else {
+      state.galleryScreen = "mission";
+    }
     ensureTimerInterval();
     persistProgressState();
     render();
-    scrollMissionStageToTop();
+    if (!IS_MENU_MODE) scrollMissionStageToTop();
   }
 
   function resetEscapeRoom() {
     stopTimerInterval();
     stopAlertSound();
-    state.unlocked = new Set(ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id));
+    state.unlocked = new Set(IS_MENU_MODE ? [] : ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id));
     state.completed = new Set();
     state.completedQuestions = new Set();
     state.questionAnswers = {};
     state.questionChoices = {};
     state.questionMatches = {};
-    state.currentMissionId = ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null;
-    state.galleryScreen = "intro";
+    state.currentMissionId = IS_MENU_MODE
+      ? (ESCAPE_ROOM_DATA.misiones[0]?.id || null)
+      : (ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null);
+    state.galleryScreen = IS_MENU_MODE ? "menu" : "intro";
     state.durationSeconds = normalizeDurationSeconds(DEFAULT_DURATION_MINUTES * 60);
     state.isStarted = false;
     state.isFinished = false;
     state.isMasterSolved = false;
     state.startedAtMs = null;
     state.endAtMs = null;
+    state.remainingSecondsAtFinish = null;
+    state.nowOverrideMs = null;
+    setEditorialReviewAction("autofill");
     const input = document.getElementById("masterPasscodeInput");
     const statusBox = document.getElementById("masterStatusBox");
     if (input) input.value = "";
@@ -2022,12 +3055,83 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     render();
   }
 
+  function getGameTextState() {
+    const currentMission = missionById(state.currentMissionId);
+    const activities = ESCAPE_ROOM_DATA.misiones.map((mission, index) => ({
+      index: index + 1,
+      id: mission.id,
+      title: mission.titulo,
+      status: state.completed.has(mission.id)
+        ? "completed"
+        : state.unlocked.has(mission.id) && !state.isFinished
+          ? "available"
+          : "locked"
+    }));
+    return {
+      mode: ESCAPE_ROOM_PRESENTATION_MODE,
+      screen: state.galleryScreen,
+      started: state.isStarted,
+      finished: state.isFinished,
+      masterSolved: state.isMasterSolved,
+      remainingSeconds: getRemainingSeconds(),
+      progress: {
+        completed: state.completed.size,
+        total: ESCAPE_ROOM_DATA.misiones.length
+      },
+      currentActivity: currentMission ? { id: currentMission.id, title: currentMission.titulo } : null,
+      activities,
+      sections: IS_MENU_MODE
+        ? [
+            { id: "intro", status: "available" },
+            { id: "instructions", status: "available" },
+            ...activities,
+            { id: "ending", status: areAllMissionsCompleted() ? (state.isMasterSolved ? "completed" : "available") : "locked" }
+          ]
+        : undefined
+    };
+  }
+
+  function renderGameToText() {
+    return JSON.stringify(getGameTextState(), null, 2);
+  }
+
+  function updateAccessibleState() {
+    if (!els.liveStatus) return;
+    const current = getGameTextState();
+    const screenLabel = current.screen === "menu"
+      ? "Menú principal"
+      : current.screen === "mission"
+        ? (IS_MENU_MODE ? "Actividad" : "Sala")
+        : current.screen === "instructions"
+          ? "Instrucciones"
+          : current.screen === "ending"
+            ? "Mensaje final"
+            : "Introducción";
+    els.liveStatus.textContent = screenLabel
+      + ". Progreso " + current.progress.completed + " de " + current.progress.total
+      + ". " + (current.started
+        ? (current.finished
+          ? (current.masterSolved ? "Escape room completado." : "Tiempo agotado.")
+          : "Juego en curso.")
+        : "Juego listo para iniciar.");
+  }
+
+  function advanceTime(milliseconds = 0) {
+    const delta = Number(milliseconds);
+    if (!Number.isFinite(delta) || delta < 0) return renderGameToText();
+    state.nowOverrideMs = (Number.isFinite(state.nowOverrideMs) ? state.nowOverrideMs : Date.now()) + delta;
+    if (state.isStarted && !state.isFinished) tickTimer();
+    render();
+    return renderGameToText();
+  }
+
   function render() {
     renderGallery();
     renderMap();
     renderMission();
     updateProgress();
     updateTimerUi();
+    updateAccessibleState();
   }
 
   els.galleryPrevButtons.forEach((button) => {
@@ -2046,6 +3150,19 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     button.addEventListener("click", resetEscapeRoom);
   });
 
+  els.menuCards.forEach((button) => {
+    button.addEventListener("click", () => openMenuCard(button));
+  });
+
+  if (IS_MENU_MODE) {
+    document.addEventListener("click", (event) => {
+      const backButton = event.target.closest("[data-menu-back]");
+      if (backButton) returnToMenu();
+      const nextButton = event.target.closest("[data-menu-next]");
+      if (nextButton) goToNextMenuActivity();
+    });
+  }
+
   const editorialAutofillButton = document.querySelector("[data-editorial-autofill]");
   if (editorialAutofillButton && window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ === true) {
     editorialAutofillButton.hidden = false;
@@ -2057,7 +3174,7 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
     if (!text) return null;
     const quotedMatch = text.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
     if (quotedMatch) return quotedMatch[1];
-    const keywordMatch = text.match(/(?:clave|código|codigo|clave final|código final|codigo final|clave final es|clave es|clave final es:|codigo es|código es:)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
+    const keywordMatch = text.match(/(?:clave final|c[oó]digo final|clave|c[oó]digo)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
     if (keywordMatch) return keywordMatch[1];
     return null;
   }
@@ -2083,10 +3200,11 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
       setTimeout(() => {
         stopTimerInterval();
+        state.remainingSecondsAtFinish = getRemainingSeconds();
         state.isMasterSolved = true;
         state.isFinished = true;
         if (!state.endAtMs) {
-          state.endAtMs = Date.now();
+          state.endAtMs = nowMs();
         }
         if (els.endingPanel) {
           els.endingPanel.classList.remove("is-success-flash");
@@ -2118,7 +3236,10 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
   restoreProgressState();
   if (state.isStarted && !state.isFinished && getRemainingSeconds() <= 0) {
     state.isFinished = true;
+    state.remainingSecondsAtFinish = 0;
   }
+  window.render_game_to_text = renderGameToText;
+  window.advanceTime = advanceTime;
   ensureTimerInterval();
   window.addEventListener("beforeunload", persistProgressState);
   window.addEventListener("pagehide", persistProgressState);
@@ -2130,9 +3251,205 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 `;
 }
 
+function buildMenuSectionsHtml(normalized, finalPasscode) {
+  const title = escapeHtml(normalized.titulo);
+  const subtitle = escapeHtml(normalized.subtitulo);
+  const introduction = escapeHtml(normalized.introduccion);
+  const instructions = escapeHtml(normalized.instrucciones);
+  const conclusion = escapeHtml(normalized.conclusion);
+  const endingImageUrl = resolveEndingImage(normalized);
+  const introductionMedia = buildSectionCardMedia(
+    normalized.backgroundImage,
+    normalized.titulo || "Introducción del escape room",
+    "intro"
+  );
+  const endingMedia = buildSectionCardMedia(
+    endingImageUrl,
+    normalized.titulo || "Mensaje final del escape room",
+    "final"
+  );
+  const detailTimer = () => `<div class="timer-shell is-ready" data-timer-shell aria-label="Cuenta regresiva"><strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong></div>`;
+  const missionCards = normalized.misiones.map((mission, index) => {
+    const activityNumber = String(index + 1).padStart(2, "0");
+    const missionTitle = escapeHtml(mission.titulo);
+    const paletteStyle = buildMissionPaletteStyle(normalized, mission, index);
+    return `<button type="button" class="section-card is-locked" data-menu-card data-menu-section="mission" data-menu-mission="${escapeHtmlAttr(mission.id)}" style="${escapeHtmlAttr(paletteStyle)}" aria-disabled="true" disabled>
+      ${buildSectionCardMedia(resolveMissionCardImage(mission), mission.imagen_alt || mission.titulo, "activity")}
+      <span class="section-card-kicker">Actividad ${activityNumber}</span>
+      <strong class="section-card-title">${missionTitle}</strong>
+      <span class="section-card-status" data-menu-card-status>Bloqueada · inicia el escape room</span>
+    </button>`;
+  }).join("\n");
+  const heroProgressSteps = normalized.misiones.map((mission, index) => `<li class="menu-progress-step${index === 0 ? " is-active" : ""}" data-step="${index + 1}"><span>${escapeHtml(mission.titulo || `Actividad ${index + 1}`)}</span></li>`).join("");
+  const endingImageHtml = endingImageUrl
+    ? `<div class="ending-media"><img src="${escapeHtmlAttr(endingImageUrl)}" alt="${escapeHtmlAttr(normalized.titulo || "Escape room completado")}"></div>`
+    : buildSectionCardFallback("final");
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <link rel="stylesheet" href="assets/game.css">
+</head>
+<body class="menu-mode">
+  <img src="logo.png" alt="PigPen" class="game-logo-brand">
+  <p id="gameLiveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  <main class="game-shell">
+    <section class="game-card menu-game-card">
+      <div class="gallery-stage">
+        <section class="gallery-screen is-active" data-gallery-screen="menu" aria-hidden="false">
+          <header class="menu-hero">
+            <div class="menu-hero-heading">
+              <div class="menu-hero-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="15" cy="9" r="4"></circle><path d="m12.2 11.8-8 8M7 17l-2-2m5-1-2-2"></path></svg>
+              </div>
+              <div class="menu-hero-copy">
+                <div class="label">Escape room · Menú por secciones</div>
+                <h1 class="title">${title}</h1>
+                <p class="subtitle">${subtitle}</p>
+              </div>
+            </div>
+            <div class="menu-hero-meta">
+              <div class="menu-progress-area">
+                <p class="menu-progress-eyebrow">Tu progreso</p>
+                <p class="menu-progress-lead">Resuelve las actividades para descubrir la clave final.</p>
+                <div class="menu-progress-line">
+                  <ol class="menu-progress-steps" aria-label="Progreso de actividades">${heroProgressSteps}</ol>
+                  <div class="menu-progress-count"><strong id="progressText">0 / ${normalized.misiones.length}</strong><span>actividades completadas</span></div>
+                </div>
+                <div class="progress-shell menu-progress" aria-hidden="true"><div class="progress-bar"><span id="progressBar"></span></div></div>
+              </div>
+              <div class="menu-hero-controls">
+                ${detailTimer()}
+                <div class="hero-controls">
+                  <button type="button" class="primary" data-game-start>Iniciar escape room</button>
+                  <button type="button" class="secondary" data-game-reset>Reiniciar escape room</button>
+                </div>
+              </div>
+            </div>
+            <aside class="menu-hero-tip" aria-label="Consejo">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 22h4M8.7 14.2A6.5 6.5 0 1 1 15.3 14c-.8.6-1.3 1.4-1.3 2.4H10c0-1-.5-1.8-1.3-2.2Z"></path><path d="M12 2v1M4.9 4.9l.7.7M2 12h1M19 12h3M18.4 5.6l.7-.7"></path></svg>
+              <div><strong>Consejo</strong><p>Explora cada sección con atención: la clave puede estar en los detalles.</p></div>
+            </aside>
+          </header>
+
+          <section class="sections-panel" aria-labelledby="sectionsMenuTitle">
+            <div class="sections-panel-heading">
+              <div>
+                <div class="label">Recorrido</div>
+                <h2 id="sectionsMenuTitle">Elige una sección</h2>
+              </div>
+              <p class="muted">Las actividades se desbloquean en orden.</p>
+            </div>
+            <div class="sections-grid" id="sectionsMenu">
+              <button type="button" class="section-card" data-menu-card data-menu-section="intro" aria-disabled="false">
+                ${introductionMedia}
+                <span class="section-card-kicker">Antes de comenzar</span>
+                <strong class="section-card-title">Introducción</strong>
+                <span class="section-card-status" data-menu-card-status>Disponible</span>
+              </button>
+              <button type="button" class="section-card" data-menu-card data-menu-section="instructions" aria-disabled="false">
+                ${buildSectionCardFallback("instructions")}
+                <span class="section-card-kicker">Cómo jugar</span>
+                <strong class="section-card-title">Instrucciones</strong>
+                <span class="section-card-status" data-menu-card-status>Disponible</span>
+              </button>
+              ${missionCards}
+              <button type="button" class="section-card is-locked" data-menu-card data-menu-section="ending" aria-disabled="true" disabled>
+                ${endingMedia}
+                <span class="section-card-kicker">Cierre</span>
+                <strong class="section-card-title">Mensaje final</strong>
+                <span class="section-card-status" data-menu-card-status>Bloqueado · completa todas las actividades</span>
+              </button>
+            </div>
+          </section>
+        </section>
+
+        <section class="gallery-screen menu-detail-screen" data-gallery-screen="intro" aria-hidden="true">
+          <article class="menu-detail-shell">
+            <div class="menu-detail-toolbar">
+              <button type="button" class="secondary" data-menu-back>Volver al menú</button>
+              ${detailTimer()}
+            </div>
+            <div>
+              <div class="label">Introducción</div>
+              <h2 class="mission-title">${title}</h2>
+            </div>
+            ${normalized.backgroundImage ? `<div class="menu-detail-media"><img src="${escapeHtmlAttr(normalized.backgroundImage)}" alt="${escapeHtmlAttr(normalized.titulo || "Introducción del escape room")}"></div>` : buildSectionCardFallback("intro")}
+            <p class="menu-detail-copy">${introduction}</p>
+          </article>
+        </section>
+
+        <section class="gallery-screen menu-detail-screen" data-gallery-screen="instructions" aria-hidden="true">
+          <article class="menu-detail-shell">
+            <div class="menu-detail-toolbar">
+              <button type="button" class="secondary" data-menu-back>Volver al menú</button>
+              ${detailTimer()}
+            </div>
+            <div>
+              <div class="label">Cómo jugar</div>
+              <h2 class="mission-title">Instrucciones</h2>
+            </div>
+            ${buildSectionCardFallback("instructions")}
+            <p class="menu-detail-copy">${instructions}</p>
+          </article>
+        </section>
+
+        <section class="gallery-screen menu-detail-screen" data-gallery-screen="mission" aria-hidden="true">
+          <article class="menu-mission-shell">
+            <div class="menu-detail-toolbar" aria-label="Controles de actividad">
+              <button type="button" class="secondary" data-menu-back>Menú</button>
+              <div class="question-progress" id="questionProgress" aria-live="polite">Preguntas resueltas: <strong>0 / 0</strong></div>
+              ${detailTimer()}
+              <div class="menu-detail-toolbar-actions" data-menu-next-slot></div>
+            </div>
+            <section id="missionStage"></section>
+          </article>
+        </section>
+
+        <section class="gallery-screen menu-detail-screen" data-gallery-screen="ending" aria-hidden="true">
+          <div class="menu-detail-toolbar">
+            <button type="button" class="secondary" data-menu-back>Volver al menú</button>
+            ${detailTimer()}
+          </div>
+          <section id="endingPanel" class="ending-panel hidden">
+            <div id="masterPanelContainer" class="master-panel-container hidden" style="text-align: center; max-width: 500px; margin: 0 auto; padding: 20px;">
+              <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">Panel de Control Maestro</div>
+              <h2 style="margin-bottom: 15px;">Sistema en estado crítico</h2>
+              <p class="muted" style="margin-bottom: 25px;">Introduce la clave final para desactivar el sistema y detener el temporizador.</p>
+              ${finalPasscode.isFallback ? `<p class="muted" style="margin-bottom: 18px;">Clave final de respaldo: <strong>${escapeHtml(finalPasscode.code)}</strong></p>` : ""}
+              <div class="button-row" style="justify-content: center; margin-bottom: 20px; align-items: center;">
+                <label class="sr-only" for="masterPasscodeInput">Clave final</label>
+                <input class="field" type="text" id="masterPasscodeInput" placeholder="Clave final" autocomplete="off" style="max-width: 220px; text-align: center; letter-spacing: 2px; font-weight: bold;">
+                <button type="button" class="primary" id="btnVerifyMasterPasscode">Desactivar</button>
+              </div>
+              <div id="masterStatusBox" class="status-box hidden" role="status" aria-live="polite"></div>
+            </div>
+
+            <div id="victoryContainer">
+              <div class="label">Victoria</div>
+              <h2>Escape room completado</h2>
+              ${endingImageHtml}
+              <p class="muted">${conclusion}</p>
+            </div>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="assets/game.js"></script>
+</body>
+</html>`;
+}
+
 export function buildGameHtml(project) {
-  const normalized = normalizeEscapeRoomProject(project);
+  const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
   const finalPasscode = resolveFinalPasscode(normalized);
+  if (normalized.modo_presentacion === "menu_secciones") {
+    return buildMenuSectionsHtml(normalized, finalPasscode);
+  }
   const title = escapeHtml(normalized.titulo);
   const subtitle = escapeHtml(normalized.subtitulo);
   const introduction = escapeHtml(normalized.introduccion);
@@ -2180,13 +3497,7 @@ export function buildGameHtml(project) {
       </div>
       <button type="button" class="secondary" data-gallery-next>Siguiente</button>
     </header>
-    <div class="timer-shell timer-fab is-ready" data-timer-shell>
-      <div class="timer-copy">
-        <span class="timer-label">Temporizador</span>
-        <strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong>
-      </div>
-      <span class="timer-status" data-timer-status>Listo para iniciar</span>
-    </div>
+    <div class="timer-shell timer-fab is-ready" data-timer-shell aria-label="Cuenta regresiva"><strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong></div>
     <section class="game-card">
       <div class="gallery-stage">
         <section class="gallery-screen is-active" data-gallery-screen="intro">
@@ -2248,16 +3559,18 @@ export function buildGameHtml(project) {
 }
 
 export function buildPreviewDocument(project, options = {}) {
-  const normalized = normalizeEscapeRoomProject(project);
+  const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
+  const styleProject = { ...normalized, themeConfig: normalized.themeConfig };
   const fullHtml = buildGameHtml(normalized);
-  const bodyMatch = fullHtml.match(/<body>([\s\S]*?)<script src="assets\/game\.js"><\/script>\s*<\/body>/i);
-  const bodyContent = bodyMatch?.[1] || "";
+  const bodyMatch = fullHtml.match(/<body([^>]*)>([\s\S]*?)<script src="assets\/game\.js"><\/script>\s*<\/body>/i);
+  const bodyAttributes = bodyMatch?.[1] || "";
+  const bodyContent = bodyMatch?.[2] || "";
   const editorialReview = options?.editorialReview === true;
   const editorialScript = editorialReview
     ? `<script>window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ = true;</script>`
     : "";
   const editorialButton = editorialReview
-    ? `<button type="button" data-editorial-autofill hidden style="position: fixed; right: 20px; bottom: 20px; z-index: 9999; border: 0; border-radius: 999px; padding: 12px 16px; background: #ec4899; color: #fff; font-weight: 700; box-shadow: 0 12px 30px rgba(236,72,153,.35);">Autocompletar pantalla</button>`
+    ? `<button type="button" data-editorial-autofill data-editorial-action="autofill" aria-label="Autocompletar todas las respuestas" hidden style="position: fixed; right: 20px; bottom: 20px; z-index: 9999; border: 0; border-radius: 999px; padding: 12px 16px; background: #ec4899; color: #fff; font-weight: 700; box-shadow: 0 12px 30px rgba(236,72,153,.35);">Autocompletar pantalla</button>`
     : "";
   return `<!DOCTYPE html>
 <html lang="es">
@@ -2265,19 +3578,19 @@ export function buildPreviewDocument(project, options = {}) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(normalized.titulo)}</title>
-  <style>${buildGameCss(project)}</style>
+  <style>${buildGameCss(styleProject)}</style>
 </head>
-<body>
+<body${bodyAttributes}>
   ${bodyContent}
   ${editorialButton}
   ${editorialScript}
-  <script>${buildGameRuntime(normalized)}<\/script>
+  <script>${buildGameRuntime(normalized).replace(/<\/script/gi, "<\\/script")}<\/script>
 </body>
 </html>`;
 }
 
 export function buildEscapeRoomPackage(project) {
-  const normalized = normalizeEscapeRoomProject(project);
+  const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
   const files = {};
   const mediaFolder = "assets/media";
 
@@ -2295,7 +3608,7 @@ export function buildEscapeRoomPackage(project) {
   });
 
   files["index.html"] = buildGameHtml(normalized);
-  files["assets/game.css"] = buildGameCss(project);
+  files["assets/game.css"] = buildGameCss({ ...normalized, themeConfig: normalized.themeConfig });
   files["assets/game.js"] = buildGameRuntime(normalized);
   files["assets/escape-room.json"] = JSON.stringify(normalized, null, 2);
 

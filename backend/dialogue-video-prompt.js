@@ -212,6 +212,8 @@ function buildDialogueVideoPromptBundle(options = {}) {
   const inSceneText = normalizeInSceneText(options?.inSceneText || "");
   const textPolicy = normalizeTextPolicy(options?.textPolicy, inSceneText);
   const externalDialogueAudio = Boolean(clean(options?.dialogueAudioStoragePath || options?.dialogueAudioUrl));
+  const excludeScriptFromVideoPrompt = options?.excludeScriptFromVideoPrompt === true
+    || clean(options?.dialoguePolicy).toLowerCase() === "ambient_only";
   const generator = clean(options?.generator || "auto").toLowerCase() || "auto";
   const { sanitized, removedDirectives } = sanitizeVisualPromptFields(options);
   const previousScene = options?.previousScene && typeof options.previousScene === "object"
@@ -237,7 +239,7 @@ function buildDialogueVideoPromptBundle(options = {}) {
     .map((item) => limitPromptText(item, 260))
     .filter(Boolean)
     .slice(0, 3);
-  const voiceOverText = limitPromptText(options?.text, 600);
+  const voiceOverText = excludeScriptFromVideoPrompt ? "" : limitPromptText(options?.text, 600);
   const regenerationInstruction = [
     sanitized.regenerationSummary ? `Current clip assessment: ${ensureSentence(sanitized.regenerationSummary)}` : "",
     sanitized.regenerationPreserve ? `Preserve: ${ensureSentence(sanitized.regenerationPreserve)}` : "",
@@ -250,7 +252,9 @@ function buildDialogueVideoPromptBundle(options = {}) {
   const textInstruction = textPolicy === "in_scene"
     ? `Visible text: render exactly one natural, readable sign or surface that says "${exactInSceneText}". Spell it exactly as quoted. No other visible text.`
     : "Visible text: none. No titles, subtitles, captions, labels, lettering, logos, watermarks, interface elements, or text-like glyphs.";
-  const audioInstruction = externalDialogueAudio
+  const audioInstruction = excludeScriptFromVideoPrompt
+    ? "Audio: natural ambience only. No speech, narration, or lip-synced dialogue. The subject remains silent with a closed, relaxed mouth and does not perform speech."
+    : externalDialogueAudio
     ? "Audio: generate ambient sound only. No speech, narration, or lip-synced dialogue; external dialogue will be added in post-production."
     : (voiceOverText
       ? `Audio: natural ambience. The speaker says: ${ensureSentence(voiceOverText)} Never show the dialogue as visible text.`
@@ -290,6 +294,8 @@ function buildDialogueVideoPromptBundle(options = {}) {
     textPolicy,
     inSceneText,
     externalDialogueAudio,
+    excludeScriptFromVideoPrompt,
+    dialoguePolicy: excludeScriptFromVideoPrompt ? "ambient_only" : "scripted",
     sceneVisualPrompt,
     sceneImagePromptList,
     removedDirectives: mergeRemovedDirectiveMetadata(options?.removedTextDirectives, removedDirectives),

@@ -1212,6 +1212,22 @@ function normalizarTextoPlano(value = "") {
         .replace(/[\u0300-\u036f]/g, "");
 }
 
+function detectarTiposSolicitadosQuizz(texto = "") {
+    const normalized = normalizarTextoPlano(texto);
+    const tipos = [];
+    const agregar = (tipo, patron) => {
+        if (patron.test(normalized) && !tipos.includes(tipo)) tipos.push(tipo);
+    };
+
+    agregar("opción múltiple", /\b(opcion multiple|seleccion multiple|multiple choice|elige (?:la )?opcion|selecciona (?:la )?respuesta)\b/i);
+    agregar("emparejamiento", /\b(emparejamiento|emparejar|relaciona(?:r)? (?:las )?(?:columnas|opciones|conceptos)|matching|match the)\b/i);
+    agregar("verdadero/falso", /\b(verdadero\s*(?:\/|o|y)\s*falso|true\s*(?:\/|or)\s*false)\b/i);
+    agregar("completar", /\b(completar|completa (?:el|la|los|las)|llenar (?:el|la|los|las)|fill in the blanks?)\b/i);
+    agregar("respuesta abierta", /\b(preguntas? abiertas?|respuestas? abiertas?|preguntas? de desarrollo|open[- ]ended|essay question)\b/i);
+
+    return tipos;
+}
+
 function detectarPerfilAutorQuizz(texto = "") {
     const raw = String(texto || "");
     const normalized = normalizarTextoPlano(raw);
@@ -1228,9 +1244,11 @@ function detectarPerfilAutorQuizz(texto = "") {
 
     const preservarPreguntasLiteralmente = pidioTranscripcionLiteral && preguntasOriginales.length > 0;
     const cantidadObjetivo = preguntasOriginales.length || inferirCantidadSolicitadaParaQuizz(raw) || null;
+    const tiposSolicitados = detectarTiposSolicitadosQuizz(raw);
 
     return {
         preguntasOriginales,
+        tiposSolicitados,
         cantidadObjetivo,
         preservarPreguntasLiteralmente,
         pidioPreguntasAbiertas,
@@ -1249,10 +1267,12 @@ function reforzarPerfilQuizzConModoEstructurado(perfil = {}, modoActivo = false)
         ...base,
         cantidadObjetivo: preguntasOriginales.length || base.cantidadObjetivo || null,
         preservarPreguntasLiteralmente: preguntasOriginales.length > 0 ? true : base.preservarPreguntasLiteralmente === true,
-        pidioPreguntasAbiertas: preguntasOriginales.length > 0 ? true : base.pidioPreguntasAbiertas === true,
-        prohibirOpciones: true,
-        prohibirRetroalimentacion: true,
-        prohibirRespuestas: true,
+        // Estructurar no significa convertir a abierta. Conservamos las restricciones
+        // únicamente cuando el autor realmente pidió preguntas abiertas.
+        pidioPreguntasAbiertas: base.pidioPreguntasAbiertas === true,
+        prohibirOpciones: base.prohibirOpciones === true,
+        prohibirRetroalimentacion: base.prohibirRetroalimentacion === true,
+        prohibirRespuestas: base.prohibirRespuestas === true,
         noAgregarReactivos: true
     };
 }
@@ -2030,7 +2050,10 @@ export async function generarModuloGemini(moduloId) {
         - Tu prioridad NO es reinterpretar ni reinventar la actividad, sino reestructurarla mejor respetando su tipo original.
         - Conserva el mismo tipo de actividad del autor.
         - NO conviertas preguntas abiertas en verdadero/falso, opción múltiple, emparejamiento, completar, selección ni otros formatos cerrados.
-        - NO agregues respuestas correctas, opciones, distractores ni retroalimentaciones salvo que el autor las haya escrito explícitamente.
+        - Tampoco conviertas preguntas de opción múltiple, emparejamiento, verdadero/falso o completar en preguntas abiertas.
+        - Si el autor indicó un tipo cerrado, conserva y estructura sus opciones, pares, respuestas y retroalimentaciones; completa únicamente los campos indispensables de ese mismo tipo cuando falten.
+        - NO inventes un tipo distinto al indicado por el autor.
+        - Tipos detectados en la instrucción: ${perfilAutorQuizz.tiposSolicitados?.length ? perfilAutorQuizz.tiposSolicitados.join(", ") : "inferir cada tipo desde su estructura, sin asumir que es respuesta abierta"}.
         - Si el autor ya redactó preguntas o consignas, transcríbelas tal como están y ordénalas con mejor presentación.
         - Puedes mejorar encabezados, espaciado, separación visual y estructura editorial, pero NO cambies el fondo pedagógico ni el formato cognitivo del ejercicio.
         - Si detectas varias preguntas del autor, debes mantener EXACTAMENTE esa misma cantidad.
@@ -2569,6 +2592,9 @@ function promptExtraPorTipo(tipo, options = {}) {
     const quizProfile = options?.quizProfile && typeof options.quizProfile === "object" ? options.quizProfile : {};
     const modoTranscribirEstructurar = options?.transcribirEstructurarMismoTipoActividad === true;
     const distractoresRetadoresQuiz = options?.distractoresRetadoresQuiz === true;
+    const tiposSolicitadosQuiz = Array.isArray(quizProfile?.tiposSolicitados) && quizProfile.tiposSolicitados.length
+        ? quizProfile.tiposSolicitados.join(", ")
+        : "no especificados; inferirlos de la estructura de cada actividad";
     switch (tipo) {
 case "Quizz": return isEnglish ? `
 Generate a Moodle QUIZ in structured markdown.
@@ -2582,6 +2608,7 @@ RULES:
 - ${quizProfile.noAgregarReactivos ? "Do NOT add extra questions or split one author question into several new ones." : "Do not increase the total number of items without a real reason."}
 - ${quizProfile.preservarPreguntasLiteralmente ? "The author already wrote specific questions: transcribe them literally in the output, without rewriting or summarizing them." : "If the author provides model questions, keep their wording and intent as closely as possible."}
 - ${quizProfile.pidioPreguntasAbiertas ? "These are OPEN questions: do not convert them into multiple choice, true/false, or matching." : "Change the question type only if the author explicitly asks for it."}
+- Question types detected in the author's instruction: ${tiposSolicitadosQuiz}. Treat them as authoritative; never default a closed activity to open-ended.
 - ${modoTranscribirEstructurar ? "Structured transcription mode is ACTIVE: improve layout only, while preserving the original activity type and intent." : "You may reorganize the activity only when that does not alter the original type requested by the author."}
 - Mix question types only if the author asks for it or if it helps faithfully convert the original activities, without increasing the total count.
 - If there is a reference image, ANALYZE it first for visual pattern and pedagogy.
@@ -2647,6 +2674,7 @@ REGLAS:
 - ${quizProfile.noAgregarReactivos ? "NO agregues reactivos extra ni subdividas una pregunta del autor en varias preguntas nuevas." : "No aumentes la cantidad total de reactivos sin justificación pedagógica real."}
 - ${quizProfile.preservarPreguntasLiteralmente ? "El autor ya redactó preguntas específicas: transcríbelas literalmente en la salida, sin reformularlas ni resumirlas." : "Si el autor aporta preguntas modelo, conserva su intención y redacción lo más fiel posible."}
 - ${quizProfile.pidioPreguntasAbiertas ? "Estas preguntas son ABIERTAS: no las conviertas a opción múltiple, verdadero/falso ni emparejamiento." : "Solo cambia el tipo de reactivo si el autor lo pide explícitamente."}
+- Tipos de reactivo detectados en la instrucción del autor: ${tiposSolicitadosQuiz}. Trátalos como obligatorios; nunca conviertas por defecto una actividad cerrada en pregunta abierta.
 - ${modoTranscribirEstructurar ? "El modo transcribir y estructurar está ACTIVO: mejora solo la presentación, no cambies el tipo de actividad." : "Puedes reorganizar la actividad solo si eso no cambia el tipo original solicitado por el autor."}
 - Solo mezcla tipos si el autor lo pide o si eso ayuda a convertir fielmente las actividades originales, sin aumentar la cantidad total.
 - Si existe imagen de referencia, primero ANALIZA su contenido visual y su patrón pedagógico.

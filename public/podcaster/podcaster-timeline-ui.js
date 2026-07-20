@@ -224,10 +224,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           }
         }
       }).catch(() => {
-        if (videoEl.src !== nextSrc) {
-          videoEl.src = nextSrc;
-          try { videoEl.load(); } catch (_) { }
-        }
+        // Si la hidratación del preview falló, no asignamos el URL remoto crudo:
+        // para Firebase Storage privado eso sólo provoca 403 visibles en consola.
       });
     } else if (currentSrc !== nextSrc) {
       videoEl.src = nextSrc;

@@ -417,6 +417,18 @@ service cloud.firestore {
         isSignedIn() &&
         isOwner(resource.data.ownerId)
       );
+
+      match /topics/{topicId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          exists(/databases/$(database)/documents/escapeRoom/$(sessionId)) &&
+          isOwner(get(/databases/$(database)/documents/escapeRoom/$(sessionId)).data.ownerId);
+        allow update, delete: if isAdmin() || (
+          isSignedIn() &&
+          exists(/databases/$(database)/documents/escapeRoom/$(sessionId)) &&
+          isOwner(get(/databases/$(database)/documents/escapeRoom/$(sessionId)).data.ownerId)
+        );
+      }
     }
 
     match /image_creator_sessions/{sessionId} {

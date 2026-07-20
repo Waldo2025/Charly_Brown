@@ -165,16 +165,20 @@ export async function runMontageExportV2() {
       { tone: "neutral" }
     );
 
+    if (window.els?.montageExportOnlyAudio?.checked === true && window.montageExportState) {
+      window.montageExportState.onlyAudio = true;
+    }
     const prepared = await buildMontageExportPayloadForSubmission(session, { renderOnScreenTextFrames: true });
     if (!prepared?.ok || !prepared?.payload) {
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
       setMontageExportBusy(false, { label: "Exportar" });
       return;
     }
-    const onScreenTextSegmentCount = Array.isArray(prepared.payload.onScreenTextTimeline?.segments)
+    const onlyAudio = prepared.payload?.onlyAudio === true;
+    const onScreenTextSegmentCount = onlyAudio ? 0 : Array.isArray(prepared.payload.onScreenTextTimeline?.segments)
       ? prepared.payload.onScreenTextTimeline.segments.length
       : 0;
-    const renderedTextSegments = Array.isArray(prepared.payload.onScreenTextRenderedSegments)
+    const renderedTextSegments = onlyAudio ? [] : Array.isArray(prepared.payload.onScreenTextRenderedSegments)
       ? prepared.payload.onScreenTextRenderedSegments
       : [];
     const renderedTextFrameCount = renderedTextSegments.reduce((total, segment) => {
@@ -194,6 +198,15 @@ export async function runMontageExportV2() {
     payload.previewRowId = getMontagePreviewRowId();
     payload.renderMode = "browser";
     payload.renderPipeline = "ffmpeg-preview-runtime-v2";
+    if (onlyAudio) {
+      payload.format = "mp3_audio";
+      payload.onScreenTextTimeline = null;
+      payload.onScreenTextRenderedSegments = [];
+      payload.stylizedTextTimeline = { enabled: false, segments: [] };
+      payload.overlayCards = { enabled: false, segments: [] };
+      payload.brandOverlay = { enabled: false };
+      payload.partyKaraoke = false;
+    }
     payload.clientBuild = {
       module: "podcaster-montage-export-v2.js",
       route: "/api/podcaster/montage/export-v2"
@@ -206,7 +219,9 @@ export async function runMontageExportV2() {
       onScreenTextSegments: onScreenTextSegmentCount,
       renderedTextSegments: renderedTextSegments.length,
       renderedTextFrames: renderedTextFrameCount,
-      onScreenTextMode: "rendered_png_overlay"
+      onScreenTextMode: onlyAudio ? "disabled_audio_only" : "rendered_png_overlay",
+      onlyAudio,
+      format: String(payload.format || "").trim() || undefined
     });
 
     const exportV2Endpoint = buildMontageExportV2Endpoint("/api/podcaster/montage/export-v2");
@@ -215,7 +230,11 @@ export async function runMontageExportV2() {
       renderPipeline: payload.renderPipeline,
       entries: Array.isArray(payload.entries) ? payload.entries.length : 0
     });
-    const submissionPayload = stripMontageExportSubmissionPayload(payload);
+    const submissionPayload = {
+      ...stripMontageExportSubmissionPayload(payload),
+      onlyAudio,
+      format: onlyAudio ? "mp3_audio" : payload.format
+    };
     const data = await authFetchJson(exportV2Endpoint, {
       method: "POST",
       preferRemote: false,
@@ -241,9 +260,21 @@ export async function runMontageExportV2() {
     pollMontageExportJob(jobId).catch(() => {});
   } catch (error) {
     console.error("[podcaster][montage-export-v2] failed", error);
+    const detail = error?.detail && typeof error.detail === "object" ? error.detail : null;
+    const nestedDetail = detail?.detail && typeof detail.detail === "object" ? detail.detail : null;
+    const issues = Array.isArray(detail?.issues)
+      ? detail.issues
+      : (Array.isArray(nestedDetail?.issues) ? nestedDetail.issues : []);
+    const issueHint = issues.length
+      ? issues.slice(0, 3).map((issue, index) => {
+        const sceneIndex = Math.max(1, Number(issue?.sceneIndex || issue?.index + 1 || index + 1) || index + 1);
+        const message = String(issue?.message || issue?.code || "dato incompleto").trim();
+        return `Escena ${sceneIndex}: ${message}`;
+      }).join("; ") + (issues.length > 3 ? ` y ${issues.length - 3} más` : "")
+      : "";
     setMontageExportStatus(
       "No pudimos exportar tu video con FFmpeg v2.",
-      String(error?.message || error || "Revisa el timeline y vuelve a intentar.").trim(),
+      issueHint || String(error?.message || error || "Revisa el timeline y vuelve a intentar.").trim(),
       { tone: "error" }
     );
     setMontageExportBusy(false, { label: "Exportar" });

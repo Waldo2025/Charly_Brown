@@ -219,3 +219,29 @@ test("visual scene replacement never evicts row audio unless explicitly requeste
   controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} }, { includeAudio: true });
   assert.equal(audioInvalidations, 1);
 });
+
+test("scene motion duration uses effective trim length while progress stays timeline-local", () => {
+  const controller = new PodcasterPlaybackController();
+  let applied = null;
+  controller.deps = {
+    applySceneMediaScaleToStage: (params) => {
+      applied = params;
+    }
+  };
+  controller.state.currentMs = 7000;
+  controller.applySceneMediaScale({
+    rowId: "scene-trimmed",
+    startMs: 5000,
+    endMs: 11000,
+    effectiveDurationMs: 6000,
+    durationMs: 10000,
+    clip: {
+      trimInMs: 4000,
+      trimOutMs: 10000,
+      mediaMotionPreset: "pan-up-down"
+    }
+  });
+
+  assert.equal(applied.durationSec, 6);
+  assert.equal(applied.motionOffsetSec, 2);
+});

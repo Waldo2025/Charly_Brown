@@ -217,6 +217,19 @@ export class PodcasterPlaybackController extends EventEmitter {
   applySceneMediaScale(entry = null) {
     const mediaScale = this.normalizeSceneMediaScale(entry?.clip?.mediaScale);
     const visualLayoutMode = String(entry?.clip?.visualLayoutMode || "default").trim() || "default";
+    const effectiveDurationMs = Math.max(
+      200,
+      Number(entry?.effectiveDurationMs || 0)
+        || (Number(entry?.endMs || 0) - Number(entry?.startMs || 0))
+        || (Number(entry?.clip?.trimOutMs || 0) - Number(entry?.clip?.trimInMs || 0))
+        || Number(entry?.durationMs || 0)
+        || 12000
+    );
+    const motionDurationSec = effectiveDurationMs / 1000;
+    const motionOffsetSec = Math.max(
+      0,
+      Math.min(motionDurationSec, (Number(this.state.currentMs || 0) - Number(entry?.startMs || 0)) / 1000)
+    );
     if (typeof this.deps?.applySceneMediaScaleToStage === "function") {
       this.deps.applySceneMediaScaleToStage({
         rowId: String(entry?.rowId || "").trim(),
@@ -225,7 +238,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         mediaOffsetYPct: entry?.clip?.mediaOffsetYPct,
         mediaMotionPreset: entry?.clip?.mediaMotionPreset,
         visualLayoutMode,
-        container: this.resolveStageMediaScaleContainer()
+        container: this.resolveStageMediaScaleContainer(),
+        durationSec: motionDurationSec,
+        motionOffsetSec,
+        motionSyncRevision: Number(this.sceneMotionSyncRevision || 0)
       });
       return;
     }
@@ -295,6 +311,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.setProperty("--pod-scene-media-motion-end-x", `${Number(spec.motion?.endOffsetXPx || 0).toFixed(3)}px`);
     surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
     surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-motion-duration", `${Number(spec.motion?.durationSec || 12).toFixed(3)}s`);
   }
   reapplyEntryVisualLayout(entry = null, surfaceEl = null) {
     if (!surfaceEl) return;
@@ -333,6 +350,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       surfaceEl.style.setProperty("--pod-scene-media-motion-end-x", "0px");
       surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", "0px");
       surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-motion-duration", "12s");
     }
     surfaceEl.style.setProperty("--pod-scene-media-scale", String(state.mediaScale));
     surfaceEl.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
@@ -369,6 +387,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.removeProperty("--pod-scene-media-motion-end-x");
     surfaceEl.style.removeProperty("--pod-scene-media-motion-start-y");
     surfaceEl.style.removeProperty("--pod-scene-media-motion-end-y");
+    surfaceEl.style.removeProperty("--pod-scene-media-motion-duration");
     surfaceEl.style.removeProperty("--pod-scene-media-scale");
     surfaceEl.style.removeProperty("--pod-scene-media-x");
     surfaceEl.style.removeProperty("--pod-scene-media-y");
@@ -532,18 +551,23 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const localMediaPrefix = "podcaster-local-media:";
     if (url.startsWith(localMediaPrefix)) {
-      return this.blobCache.has(url) ? this.blobCache.get(url) : "";
+      const cachedLocal = this.blobCache.has(url) ? this.blobCache.get(url) : "";
+      return cachedLocal === "404" ? "" : cachedLocal;
     }
     
     const activeMode = this.resolveActiveMediaLoadMode(url);
     if (activeMode === "streaming") {
-      if (this.blobCache.has(url)) return this.blobCache.get(url);
+      if (this.blobCache.has(url)) {
+        const cachedStreaming = this.blobCache.get(url);
+        return cachedStreaming === "404" ? "" : cachedStreaming;
+      }
       
       let finalUrl = url;
       if (finalUrl.startsWith("gs://")) {
         const cacheKey = this.resolvePersistentMediaCacheKey(finalUrl);
         if (cacheKey && this.blobCache.has(cacheKey)) {
-          return this.blobCache.get(cacheKey);
+          const cachedGs = this.blobCache.get(cacheKey);
+          return cachedGs === "404" ? "" : cachedGs;
         }
         return null;
       }
@@ -558,12 +582,15 @@ export class PodcasterPlaybackController extends EventEmitter {
       return finalUrl;
     }
     
-    if (this.blobCache.has(url)) return this.blobCache.get(url);
+    if (this.blobCache.has(url)) {
+      const cached = this.blobCache.get(url);
+      return cached === "404" ? "" : cached;
+    }
     const cacheKey = this.resolvePersistentMediaCacheKey(url);
     if (cacheKey && cacheKey !== url && this.blobCache.has(cacheKey)) {
       const cached = this.blobCache.get(cacheKey);
       this.blobCache.set(url, cached);
-      return cached;
+      return cached === "404" ? "" : cached;
     }
     return null;
   }
@@ -626,6 +653,14 @@ export class PodcasterPlaybackController extends EventEmitter {
   async resolveAudioSource(clip = null) {
     const localKey = String(clip?.localMediaCacheKey || "").trim();
     const localMediaPrefix = "podcaster-local-media:";
+    const downloadUrl = String(clip?.downloadUrl || "").trim();
+    const storagePath = String(clip?.storagePath || "").trim();
+    const directSource = String(clip?.sourceUrl || "").trim();
+    const hasRemoteSource = Boolean(
+      downloadUrl
+      || storagePath
+      || (directSource && !directSource.startsWith(localMediaPrefix))
+    );
     if (localKey) {
       const localSrc = await this.resolveLocalMediaObjectUrl(localKey);
       if (localSrc) return localSrc;
@@ -639,21 +674,24 @@ export class PodcasterPlaybackController extends EventEmitter {
           const localBlobUrl = await this.resolveLocalMediaObjectUrl(localDataKey);
           if (localBlobUrl) return localBlobUrl;
         }
-      }
-      if (!localKey) {
-        const fallbackLocalBlob = await this.resolveLocalMediaObjectUrl(localDataUrl);
-        if (fallbackLocalBlob) return fallbackLocalBlob;
-      }
-      if (localDataUrl.startsWith("data:")) {
+        if (hasRemoteSource) {
+          // La clave local es sólo una caché oportunista. Si IndexedDB está vacío
+          // después de cargar otra máquina/navegador, continuamos hacia Storage.
+        } else {
+          return "";
+        }
+      } else {
+        if (!localKey) {
+          const fallbackLocalBlob = await this.resolveLocalMediaObjectUrl(localDataUrl);
+          if (fallbackLocalBlob) return fallbackLocalBlob;
+        }
+        if (localDataUrl.startsWith("data:")) {
+          return localDataUrl;
+        }
         return localDataUrl;
       }
-      if (localDataUrl.startsWith(localMediaPrefix)) {
-        return "";
-      }
-      return localDataUrl;
     }
 
-    const directSource = String(clip?.sourceUrl || "").trim();
     if (directSource) {
       if (directSource.startsWith(localMediaPrefix)) {
         const localSourceKey = directSource.replace(localMediaPrefix, "").trim();
@@ -661,18 +699,19 @@ export class PodcasterPlaybackController extends EventEmitter {
           const localBlobUrl = await this.resolveLocalMediaObjectUrl(localSourceKey);
           if (localBlobUrl) return localBlobUrl;
         }
-        return "";
+        if (!hasRemoteSource) return "";
+      } else {
+        const resolvedDirectSource = this.deps?.resolveStorageAudioUrl?.(directSource, clip?.storagePath);
+        if (resolvedDirectSource && String(resolvedDirectSource).trim()) {
+          return this.getBlobUrl(resolvedDirectSource, { persistent: true });
+        }
+        return directSource;
       }
-      const resolvedDirectSource = this.deps?.resolveStorageAudioUrl?.(directSource, clip?.storagePath);
-      if (resolvedDirectSource && String(resolvedDirectSource).trim()) {
-        return this.getBlobUrl(resolvedDirectSource, { persistent: true });
-      }
-      return directSource;
     }
 
-    const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+    const rawUrl = this.deps?.resolveStorageAudioUrl?.(downloadUrl, storagePath);
     if (!rawUrl) {
-      const fallbackUrl = String(clip?.downloadUrl || "").trim();
+      const fallbackUrl = downloadUrl;
       if (!fallbackUrl) return "";
       return this.getBlobUrl(fallbackUrl, { persistent: true });
     }
@@ -681,6 +720,12 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   resolveAudioSourceKey(clip = null) {
     const localMediaPrefix = "podcaster-local-media:";
+    const remoteAudioUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+    if (remoteAudioUrl) return String(remoteAudioUrl).trim();
+    const storagePath = String(clip?.storagePath || "").trim();
+    if (storagePath) return `storage:${storagePath}`;
+    const downloadUrl = String(clip?.downloadUrl || "").trim();
+    if (downloadUrl) return downloadUrl;
     const localKey = String(clip?.localMediaCacheKey || "").trim();
     if (localKey) return `local:${localKey}`;
     const sourceUrl = String(clip?.sourceUrl || "").trim();
@@ -696,10 +741,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (normalizedLocalKey) return `local:${normalizedLocalKey}`;
     }
     if (localDataUrl) return localDataUrl.slice(0, 240);
-    const downloadUrl = String(clip?.downloadUrl || "").trim();
-    if (downloadUrl) return downloadUrl;
-    const storagePath = String(clip?.storagePath || "").trim();
-    return storagePath ? `storage:${storagePath}` : "";
+    return "";
   }
 
   async invalidateBlobUrl(url) {
@@ -922,6 +964,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         const msg = String(e?.message || "").toLowerCase();
         if (msg.includes("status 404")) {
           this.blobCache.set(url, "404");
+          return "";
         } else {
           this.blobCache.set(url, url); 
         }
@@ -1063,36 +1106,67 @@ export class PodcasterPlaybackController extends EventEmitter {
    * Call this whenever the audio source for a row changes (e.g. after regeneration)
    * so the next tick creates a fresh Audio element and fires loadedmetadata.
    */
-  invalidateRowAudioCache(rowId = "") {
+  invalidateRowAudioCache(rowId = "", options = {}) {
     const key = String(rowId || "").trim();
     if (!key) return;
     const session = this.state.session || this.deps?.getActiveSession?.();
-    const clip = this.deps?.resolveDialogueAudioForRow?.(session, key);
-    const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
-    if (rawUrl) {
-      if (this.blobCache.has(rawUrl)) {
-        const cached = this.blobCache.get(rawUrl);
-        if (cached && cached.startsWith("blob:")) {
+    const currentClip = this.deps?.resolveDialogueAudioForRow?.(session, key);
+    const audio = this.dialoguePlayers[key];
+    const sourceCandidates = new Set();
+    const addSourceCandidate = (value = "") => {
+      const candidate = String(value || "").trim();
+      if (candidate) sourceCandidates.add(candidate);
+    };
+    const collectClipSources = (clip = null) => {
+      if (!clip || typeof clip !== "object") return;
+      const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+      addSourceCandidate(rawUrl);
+      addSourceCandidate(clip.downloadUrl);
+      addSourceCandidate(clip.storagePath);
+      addSourceCandidate(clip.sourceUrl);
+      addSourceCandidate(clip.localDataUrl);
+      addSourceCandidate(clip.dataUrl);
+      const localKey = String(clip.localMediaCacheKey || "").trim();
+      if (localKey) {
+        addSourceCandidate(localKey);
+        addSourceCandidate(`local:${localKey}`);
+        addSourceCandidate(`podcaster-local-media:${localKey}`);
+      }
+    };
+    collectClipSources(options?.previousClip);
+    collectClipSources(currentClip);
+    collectClipSources(options?.nextClip);
+    addSourceCandidate(options?.previousSourceKey);
+    addSourceCandidate(options?.nextSourceKey);
+    addSourceCandidate(this.dialogueAudioSourceKeys[key]);
+    if (audio) {
+      addSourceCandidate(audio.dataset?.originalSrc);
+      addSourceCandidate(audio.dataset?.sourceKey);
+      addSourceCandidate(audio.currentSrc);
+      addSourceCandidate(audio.src);
+    }
+    sourceCandidates.forEach((candidate) => {
+      const cacheKey = this.resolvePersistentMediaCacheKey(candidate);
+      [candidate, cacheKey].filter(Boolean).forEach((cacheCandidate) => {
+        const cached = this.blobCache.get(cacheCandidate);
+        if (cached && String(cached).startsWith("blob:")) {
           try { URL.revokeObjectURL(cached); } catch (_) { }
         }
-        this.blobCache.delete(rawUrl);
+        this.blobCache.delete(cacheCandidate);
+        this.fetchPromises.delete(cacheCandidate);
+      });
+      if (candidate.startsWith("blob:")) {
+        try { URL.revokeObjectURL(candidate); } catch (_) { }
       }
-      const cacheKey = this.resolvePersistentMediaCacheKey(rawUrl);
-      if (cacheKey && cacheKey !== rawUrl && this.blobCache.has(cacheKey)) {
-        this.blobCache.delete(cacheKey);
-      }
-    }
-    const audio = this.dialoguePlayers[key];
+    });
     if (audio) {
       try { audio.pause(); } catch (_) { }
-      const originalSrc = String(audio.dataset?.originalSrc || "").trim();
-      if (originalSrc && this.blobCache.has(originalSrc)) {
-        try { URL.revokeObjectURL(this.blobCache.get(originalSrc)); } catch (_) { }
-        this.blobCache.delete(originalSrc);
-      }
+      try { audio.removeAttribute("src"); } catch (_) { audio.src = ""; }
+      try { audio.load(); } catch (_) { }
       delete this.dialoguePlayers[key];
       delete this.audioCache[key];
     }
+    delete this.dialogueAudioSourceKeys[key];
   }
 
   /**
@@ -1776,6 +1850,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   async seek(targetMs, options = {}) {
     const ms = Math.max(0, Math.min(this.state.totalDurationMs || 9999999, Number(targetMs) || 0));
     this.state.currentMs = ms;
+    this.sceneMotionSyncRevision = Number(this.sceneMotionSyncRevision || 0) + 1;
     const useLightweightSeek = options.lightweight === true || this.deps?.useLightweightSeekDuringPlayback === true;
     if (options.allowConcurrentTick !== false) {
       this.stageSwitchSeq += 1;
@@ -2937,7 +3012,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     editor.prewarmStylizedText(nextEntry.rowId, session);
   }
 
-  requestImageStageSwap(entry = null, offsetSec = 0) {
+  requestImageStageSwap(entry = null) {
     const imageEl = this.els?.podcastActiveSpeakerImage;
     const cleanSrc = String(entry?.videoSrc || "").trim();
     if (!imageEl || !cleanSrc) return;
@@ -2965,10 +3040,6 @@ export class PodcasterPlaybackController extends EventEmitter {
         imageEl.className = className;
       }
       imageEl.style.animationPlayState = this.state.isPlaying ? 'running' : 'paused';
-      const targetDelay = offsetSec >= 0 ? `-${offsetSec.toFixed(3)}s` : "";
-      if (imageEl.style.animationDelay !== targetDelay) {
-        imageEl.style.animationDelay = targetDelay;
-      }
       this.syncStageMediaMotionPlaybackState(this.state.isPlaying === true);
     };
 
@@ -3029,7 +3100,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.applySceneMediaScale(entry);
 
     if (isImage) {
-        this.requestImageStageSwap(entry, offsetSec);
+        this.requestImageStageSwap(entry);
         return;
     } else {
         this.hideAllImages();

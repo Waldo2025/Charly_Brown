@@ -13,7 +13,7 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.522";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.528";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
@@ -918,7 +918,7 @@ const configurarEventos = () => {
       } else if (wbType === 'aprende_ver') {
         openAprendeViewer(id);
       } else if (wbType === 'escapeRoom_preview') {
-        openEscapeRoomPreview(id);
+        void openEscapeRoomPreview(id, btnWorkbench.dataset.topicId || "");
       }
       return;
     }
@@ -2444,11 +2444,23 @@ function closeEscapeRoomPreview() {
   if (modal) modal.classList.add("hidden");
 }
 
-function openEscapeRoomPreview(id) {
-  const project = escapeRoomPreviewCache.get(id);
+async function openEscapeRoomPreview(id, topicId = "") {
+  const cacheKey = topicId ? `${id}:${topicId}` : id;
+  let project = escapeRoomPreviewCache.get(cacheKey);
   const modal = document.getElementById("escapeRoomPreviewModal");
   const frame = document.getElementById("escapeRoomPreviewFrame");
   const title = document.getElementById("escapeRoomPreviewTitle");
+
+  if (!project && topicId) {
+    try {
+      const topicSnap = await getDoc(doc(db, "escapeRoom", id, "topics", topicId));
+      const topicData = topicSnap.exists() ? topicSnap.data() : null;
+      project = topicData?.project && typeof topicData.project === "object" ? topicData.project : null;
+      if (project) escapeRoomPreviewCache.set(cacheKey, project);
+    } catch (error) {
+      console.error("No se pudo cargar el tema del escape room:", error);
+    }
+  }
 
   if (!project || !modal || !frame) {
     showNotification("No se pudo cargar el preview del escape room.", "error");
@@ -3847,7 +3859,10 @@ function applyHomeSceneMediaScaleToStage({
   mediaOffsetYPct = 0,
   mediaMotionPreset = "none",
   visualLayoutMode = "default",
-  container = null
+  container = null,
+  durationSec = 12,
+  motionOffsetSec = 0,
+  motionSyncRevision = 0
 } = {}) {
   const stage = container || document.getElementById("playerStage");
   if (!stage) return;
@@ -3861,6 +3876,8 @@ function applyHomeSceneMediaScaleToStage({
   const nextX = Math.max(-0.5, Math.min(0.5, Number(mediaOffsetXPct) || 0));
   const nextY = Math.max(-0.5, Math.min(0.5, Number(mediaOffsetYPct) || 0));
   const nextMotion = String(mediaMotionPreset || "none").trim() || "none";
+  const safeMotionDurationSec = Math.max(0.2, Number(durationSec || 12) || 12);
+  const safeMotionOffsetSec = Math.max(0, Math.min(safeMotionDurationSec, Number(motionOffsetSec || 0) || 0));
 
   stage.style.setProperty("--pod-scene-media-scale", String(nextScale));
   stage.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
@@ -3871,6 +3888,16 @@ function applyHomeSceneMediaScaleToStage({
   stage.dataset.sceneMediaOffsetY = String(nextY);
   stage.dataset.sceneMediaMotionPreset = nextMotion;
   stage.dataset.sceneMediaLayout = String(visualLayoutMode || "default");
+  stage.style.setProperty("--pod-scene-media-motion-duration", `${safeMotionDurationSec.toFixed(3)}s`);
+
+  const motionSyncKey = `${String(rowId || "").trim()}:${Math.max(0, Number(motionSyncRevision || 0) || 0)}`;
+  if (surfaceEl.dataset.sceneMediaMotionSyncKey !== motionSyncKey) {
+    surfaceEl.dataset.sceneMediaMotionSyncKey = motionSyncKey;
+    surfaceEl.style.animationDelay = safeMotionOffsetSec > 0 ? `-${safeMotionOffsetSec.toFixed(3)}s` : "0s";
+    surfaceEl.style.animationName = "none";
+    void surfaceEl.offsetWidth;
+    surfaceEl.style.removeProperty("animation-name");
+  }
 
   if (typeof resolver !== "function") return;
 
@@ -3891,7 +3918,7 @@ function applyHomeSceneMediaScaleToStage({
     mediaOffsetYPct: nextY,
     mediaMotionPreset: nextMotion,
     mediaKind: isImage ? "image" : "video",
-    durationSec: 12
+    durationSec: safeMotionDurationSec
   });
 
   if (!spec) return;
@@ -3904,6 +3931,11 @@ function applyHomeSceneMediaScaleToStage({
   surfaceEl.style.setProperty("--pod-scene-media-translate-y", "0px");
   surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
   surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-motion-start-x", `${Number(spec.motion?.startOffsetXPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-motion-end-x", `${Number(spec.motion?.endOffsetXPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-motion-duration", `${Number(spec.motion?.durationSec || safeMotionDurationSec).toFixed(3)}s`);
   surfaceEl.style.left = "var(--pod-scene-media-left, 0px)";
   surfaceEl.style.top = "var(--pod-scene-media-top, 0px)";
   surfaceEl.style.right = "auto";
@@ -5777,7 +5809,10 @@ function renderUserItemList(container, items, type) {
       const unidadTemaLabel = String(nivel).toLowerCase() === "primaria" ? "Unidad" : "Tema";
       const unidadTemaValue = project.unidad || item.unidad || project.tema || item.tema || formState.unidadTemaSelect || "—";
       const estacion = project.estacion || item.estacion || formState.estacionSelect || "";
+      const modoPresentacion = project.modo_presentacion || formState.modoPresentacionSelect || "salas";
+      const formatoLabel = modoPresentacion === "menu_secciones" ? "Menú por secciones" : "Por salas";
       const previewProject = project && Object.keys(project).length ? project : null;
+      const topicSummaries = Array.isArray(item.topicSummaries) ? item.topicSummaries : [];
 
       if (previewProject) {
         escapeRoomPreviewCache.set(item.id, previewProject);
@@ -5796,6 +5831,10 @@ function renderUserItemList(container, items, type) {
               <span>${escapeHtml(metaLabel)}</span>
             </div>
             <h2 class="workbench-item-title">${escapeHtml(displayTitle)}</h2>
+            <div class="workbench-tags">
+              <span class="workbench-tag"><i class="fas fa-table-cells-large" aria-hidden="true"></i> ${escapeHtml(formatoLabel)}</span>
+              <span class="workbench-tag"><i class="fas fa-layer-group" aria-hidden="true"></i> ${topicSummaries.length || (previewProject ? 1 : 0)} temas</span>
+            </div>
           </div>
           <i class="fas fa-chevron-down workbench-accordion-icon"></i>
         </div>
@@ -5837,15 +5876,24 @@ function renderUserItemList(container, items, type) {
               <span class="workbench-detail-value"><span class="workbench-tag is-status">${statusLabel}</span></span>
             </div>
             <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Formato</span>
+              <span class="workbench-detail-value">${escapeHtml(formatoLabel)}</span>
+            </div>
+            <div class="workbench-detail-item">
               <span class="workbench-detail-label">Fecha</span>
               <span class="workbench-detail-value">${escapeHtml(date)}</span>
             </div>
             <div class="workbench-action-area">
               <div class="workbench-item-actions" style="flex-direction: row; gap: 0.75rem; justify-content: flex-end; width: 100%;">
-                <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="escapeRoom_preview" title="Ver preview" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #ec4899 !important; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3) !important;">
-                  <i class="fas fa-eye"></i>
-                  <span>Ver preview</span>
-                </a>
+                ${topicSummaries.length ? topicSummaries.map((topic) => `
+                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-topic-id="${escapeHtml(String(topic.id || ""))}" data-type="escapeRoom_preview" title="Ver Tema ${escapeHtml(String(topic.academicNumber || ""))}" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #ec4899 !important; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3) !important;">
+                    <i class="fas fa-eye"></i><span>Tema ${escapeHtml(String(topic.academicNumber || ""))} · ${escapeHtml(String(topic.title || "Escape Room"))}</span>
+                  </a>
+                `).join("") : `
+                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="escapeRoom_preview" title="Ver preview" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #ec4899 !important; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3) !important;">
+                    <i class="fas fa-eye"></i><span>Ver preview</span>
+                  </a>
+                `}
               </div>
             </div>
           </div>

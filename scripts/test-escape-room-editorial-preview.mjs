@@ -49,6 +49,24 @@ assert.match(
 );
 
 assert.match(
+  builder,
+  /function resetEscapeRoom\(\)[\s\S]*setEditorialReviewAction\("autofill"\)/,
+  "Reiniciar el juego debe restaurar el control editorial a Autocompletar."
+);
+
+assert.match(
+  creatorJs,
+  /type !== "pigpen-editorial-action"[\s\S]*syncPreviewEditorialButton\(payload\.action === "verify" \? "verify" : "autofill"\)/,
+  "El creador debe reflejar el estado editorial enviado por el iframe."
+);
+
+assert.match(
+  builder,
+  /#roomStatusBox\.status-box\.room-status-box\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*#ffffff;[\s\S]*?font-size:\s*clamp\([\s\S]*?font-weight:\s*800;/,
+  "El estado general de la sala debe mostrarse como texto destacado y no como badge."
+);
+
+assert.match(
   home,
   /buildPreviewDocument\(project,\s*\{\s*editorialReview:\s*true\s*\}\)/,
   "Home debe abrir el preview del escape room en modo editorial."

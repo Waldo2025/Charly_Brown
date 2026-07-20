@@ -92,6 +92,45 @@ test("validateMontageExportPreflight accepts downloadUrl as a renderable visual 
   assert.deepEqual(result.issues, []);
 });
 
+test("validateMontageExportPreflight allows missing visual sources for audio-only MP3 exports", () => {
+  const result = validateMontageExportPreflight(baseInput({
+    onlyAudio: true,
+    format: "mp3_audio",
+    entries: [
+      {
+        rowId: "row_audio_only",
+        sceneIndex: 1,
+        durationMs: 1800,
+        timelineStartMs: 0,
+        timelineEndMs: 1800,
+        video: {}
+      }
+    ]
+  }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("validateMontageExportPreflight infers audio-only intent from the MP3 format", () => {
+  const result = validateMontageExportPreflight(baseInput({
+    format: "mp3_audio",
+    entries: [
+      {
+        rowId: "row_mp3_format",
+        sceneIndex: 1,
+        durationMs: 1800,
+        timelineStartMs: 0,
+        timelineEndMs: 1800,
+        video: {}
+      }
+    ]
+  }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.issues, []);
+});
+
 test("createMontageExportPreflightError returns a 422 error with issue details", () => {
   const result = validateMontageExportPreflight(baseInput({ entries: [] }));
   const error = createMontageExportPreflightError(result);

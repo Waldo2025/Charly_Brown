@@ -47,22 +47,55 @@
 
         <div class="content-wrapper">
             <main class="er-page">
-                <section class="er-workspace">
+                <section class="er-card er-summary-card" aria-label="Barra principal de PigPen Creator">
+                    <div class="er-summary-main">
+                        <div class="er-summary-stats" id="erSummaryStats">
+                            <div class="er-stat">
+                                <span class="er-stat-label" id="erMissionCountLabel">Salas</span>
+                                <strong id="erMissionCount">0</strong>
+                            </div>
+                            <div class="er-stat">
+                                <span class="er-stat-label" id="erUnlockedCountLabel">Disponibles</span>
+                                <strong id="erUnlockedCount">0</strong>
+                            </div>
+                            <div class="er-stat er-stat-wide">
+                                <span class="er-stat-label">Tipo</span>
+                                <strong id="erTypeSummary">-</strong>
+                            </div>
+                        </div>
+                        <div class="er-summary-actions">
+                            <button type="button" class="er-button er-panel-icon-button er-studio-icon-button" data-studio-panel-toggle="inspector" data-er-tooltip="Abrir panel de contenido" aria-label="Abrir panel de contenido" aria-expanded="true" aria-controls="erInspectorPanel">
+                                <i class="fas fa-layer-group" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" class="er-button er-panel-icon-button er-studio-icon-button" data-studio-panel-toggle="brief" data-er-tooltip="Abrir brief" aria-label="Abrir brief" aria-expanded="true" aria-controls="briefCollapse">
+                                <i class="fas fa-sliders" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" id="btnModelConfig" class="er-button er-studio-icon-button" data-bs-toggle="modal" data-bs-target="#modelConfigModal" data-er-tooltip="Configuración" aria-label="Configuración">
+                                <i class="fas fa-gear"></i>
+                            </button>
+                            <button type="button" id="btnExportar" class="er-button er-studio-icon-button" data-er-tooltip="Exportar" aria-label="Exportar" disabled>
+                                <i class="fas fa-file-zipper"></i>
+                            </button>
+                            <div class="er-publish-switch-wrap" role="group" aria-label="Publicación del escape room">
+                                <span id="publishSwitchLabel" class="er-publish-switch-label">Borrador</span>
+                                <label class="er-publish-switch" title="Publicar escape room">
+                                    <input type="checkbox" id="publishToggle" aria-label="Publicar escape room">
+                                    <span class="er-publish-switch-track" aria-hidden="true">
+                                        <span class="er-publish-switch-thumb"></span>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="er-workspace er-studio-shell" id="erStudioWorkspace">
                     <aside class="er-sessions-panel" aria-label="Sesiones de Escape Room">
                         <div class="er-card-header er-sessions-panel-header">
-                            <div>
-                                <div class="er-card-kicker">Sesiones</div>
-                                <h2>Mis sesiones</h2>
-                            </div>
-                            <button type="button" id="btnNewSession" class="er-button er-button-primary er-button-compact">
+                            <button type="button" id="btnNewSession" class="er-button er-button-compact er-new-session-button">
                                 <i class="fas fa-plus"></i>
                                 <span>Nueva sesión</span>
                             </button>
-                        </div>
-                        <div class="er-session-current">
-                            <div class="er-label">Sesión activa</div>
-                            <div id="erActiveSessionName" class="er-session-current-name">Sin sesión activa</div>
-                            <div id="erSaveState" class="er-session-save-state">Sin cambios remotos</div>
                         </div>
                         <div id="erSessionsLoading" class="er-empty-inline">Cargando sesiones...</div>
                         <div id="erSessionsEmpty" class="er-empty-inline hidden">Todavía no tienes sesiones guardadas.</div>
@@ -70,76 +103,55 @@
                     </aside>
 
                     <div class="er-main-column">
-                        <section class="er-card er-summary-card">
-                            <div class="er-summary-main">
-                                <div class="er-summary-copy">
-                                    <h1>PigPen EscapeRoom Creator</h1>
-                                </div>
-                                <div class="er-summary-actions">
-                                    <button type="button" id="btnAddMission" class="er-button er-button-ghost">
+                        <aside class="er-brief-panel er-studio-dock is-open" id="briefCollapse" aria-label="Brief del escape room">
+                            <div id="erBriefResizeHandle" class="er-brief-resizer" role="separator" aria-label="Redimensionar el brief" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="560" aria-valuenow="340" tabindex="0"></div>
+                            <form id="escapeRoomForm" class="er-card er-form-card" novalidate>
+                                <div class="er-actions er-brief-actions">
+                                    <button type="button" id="btnAddTopic" class="er-button er-studio-icon-button" data-er-tooltip="Crear tema" aria-label="Crear tema">
                                         <i class="fas fa-plus"></i>
-                                        <span>Misión</span>
                                     </button>
-                                    <button type="button" class="er-button er-button-secondary" data-bs-toggle="collapse" data-bs-target="#briefCollapse" aria-expanded="true" aria-controls="briefCollapse">
-                                        <i class="fas fa-sliders"></i>
-                                        <span>Brief</span>
+                                    <button type="submit" id="btnGenerar" class="er-button er-studio-icon-button" data-er-tooltip="Generar escape room" aria-label="Generar escape room">
+                                        <i class="fas fa-wand-magic-sparkles"></i>
                                     </button>
-                                    <button type="button" id="btnModelConfig" class="er-button er-button-secondary er-button-icon" data-bs-toggle="modal" data-bs-target="#modelConfigModal" aria-label="Configuración">
-                                        <i class="fas fa-gear"></i>
+                                    <button type="button" id="btnLimpiar" class="er-button er-studio-icon-button" data-er-tooltip="Limpiar proyecto" aria-label="Limpiar proyecto">
+                                        <i class="fas fa-rotate-left"></i>
                                     </button>
-                                    <button type="button" id="btnExportar" class="er-button er-button-primary" disabled>
-                                        <i class="fas fa-file-zipper"></i>
-                                        <span>Exportar</span>
+                                    <button type="button" id="btnCopiarJson" class="er-button er-studio-icon-button" data-er-tooltip="Copiar JSON" aria-label="Copiar JSON" disabled>
+                                        <i class="fas fa-copy"></i>
                                     </button>
-                                    <div class="er-publish-switch-wrap" role="group" aria-label="Publicación del escape room">
-                                        <span id="publishSwitchLabel" class="er-publish-switch-label">Borrador</span>
-                                        <label class="er-publish-switch" title="Publicar escape room">
-                                            <input type="checkbox" id="publishToggle" aria-label="Publicar escape room">
-                                            <span class="er-publish-switch-track" aria-hidden="true">
-                                                <span class="er-publish-switch-thumb"></span>
-                                            </span>
-                                        </label>
-                                    </div>
                                 </div>
-                            </div>
-                            <div class="er-summary-stats" id="erSummaryStats">
-                                <div class="er-stat">
-                                    <span class="er-stat-label">Misiones</span>
-                                    <strong id="erMissionCount">0</strong>
-                                </div>
-                                <div class="er-stat">
-                                    <span class="er-stat-label">Activas</span>
-                                    <strong id="erUnlockedCount">0</strong>
-                                </div>
-                                <div class="er-stat er-stat-wide">
-                                    <span class="er-stat-label">Tipo</span>
-                                    <strong id="erTypeSummary">-</strong>
-                                </div>
-                            </div>
-                        </section>
 
-                        <div class="collapse show" id="briefCollapse">
-                            <form id="escapeRoomForm" class="er-card er-form-card">
                                 <div class="er-card-header er-form-header-compact" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                                     <div>
                                         <div class="er-card-kicker">Brief</div>
                                         <h2>Configuración base</h2>
                                     </div>
-                                    <button type="button" id="btnSugerirObjetivo" class="er-button er-button-ghost er-button-compact">
-                                        <i class="fas fa-wand-magic-sparkles"></i>
-                                        <span>Sugerir objetivo</span>
-                                    </button>
                                 </div>
 
-                                <div class="er-form-compact-grid">
+                                <div class="er-form-compact-grid er-brief-form-grid">
+                                    <h3 class="er-brief-group-title">Formato y objetivo</h3>
+                                    <label class="er-field er-presentation-mode-field">
+                                        <span>Formato del escape room</span>
+                                        <select id="modoPresentacionSelect" required>
+                                            <option value="salas" selected>Por salas</option>
+                                            <option value="menu_secciones">Menú por secciones</option>
+                                        </select>
+                                        <small class="er-field-help" id="erPresentationModeHelp">Recorrido tradicional por salas encadenadas.</small>
+                                    </label>
                                     <label class="er-field er-field-topic">
                                         <span>Tema curricular</span>
                                         <textarea id="temaInput" class="er-multiline er-compact-textarea" rows="3" placeholder="Un tema o subtema por línea" required></textarea>
                                     </label>
-                                    <label class="er-field er-field-objective">
-                                        <span>Objetivo final</span>
+                                    <div class="er-field er-field-objective">
+                                        <div class="er-objective-field-header">
+                                            <label class="er-objective-field-label" for="objetivoInput">Objetivo final</label>
+                                            <button type="button" id="btnSugerirObjetivo" class="er-button er-studio-icon-button" data-er-tooltip="Sugerir objetivo" aria-label="Sugerir objetivo">
+                                                <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
                                         <textarea id="objetivoInput" class="er-objective-textarea er-compact-textarea" rows="3" placeholder="Qué debe lograr el grupo al terminar"></textarea>
-                                    </label>
+                                    </div>
+                                    <h3 class="er-brief-group-title">Contexto académico</h3>
                                     <label class="er-field">
                                         <span>Nivel</span>
                                         <select id="nivelSelect" required>
@@ -217,18 +229,19 @@
                                         </select>
                                     </label>
                                     <label class="er-field">
-                                        <span>Misiones</span>
+                                        <span id="erMissionFieldLabel">Salas</span>
                                         <input type="number" id="numMisionesInput" value="4" min="2" max="8" required>
                                     </label>
                                     <label class="er-field">
-                                        <span>Preguntas / sala</span>
+                                        <span id="erQuestionCountLabel">Preguntas / sala</span>
                                         <input type="number" id="preguntasPorSalaInput" value="1" min="1" max="6" required>
                                     </label>
                                     <label class="er-field">
                                         <span>Duración</span>
                                         <input type="number" id="duracionInput" min="10" max="120" step="5" value="35">
                                     </label>
-                                    <label class="er-field">
+                                    <h3 class="er-brief-group-title">Experiencia visual</h3>
+                                    <label class="er-field er-field-wide">
                                         <span>Estilo visual de imágenes</span>
                                         <select id="estiloImagenSelect">
                                             <optgroup label="Ilustración">
@@ -269,7 +282,7 @@
                                             <span>Modo estricto: evitar texto visible y texto mixto</span>
                                         </div>
                                     </label>
-                                    <label class="er-field">
+                                    <label class="er-field er-field-wide">
                                         <span>Narrativa</span>
                                         <select id="narrativaSelect">
                                             <optgroup label="General / Clásicas">
@@ -346,63 +359,75 @@
                                     </div>
                                 </div>
 
-                                <div class="er-actions">
-                                    <button type="submit" id="btnGenerar" class="er-button er-button-primary">
-                                        <i class="fas fa-wand-magic-sparkles"></i>
-                                        <span>Generar</span>
-                                    </button>
-                                    <button type="button" id="btnLimpiar" class="er-button er-button-secondary">
-                                        <i class="fas fa-rotate-left"></i>
-                                        <span>Limpiar</span>
-                                    </button>
-                                    <button type="button" id="btnCopiarJson" class="er-button er-button-ghost" disabled>
-                                        <i class="fas fa-copy"></i>
-                                        <span>Copiar JSON</span>
-                                    </button>
-                                </div>
-
                                 <div id="loadingIndicator" class="er-loading hidden" aria-live="polite">
                                     <span class="er-spinner" aria-hidden="true"></span>
                                     <span>Diseñando la experiencia y normalizando las misiones...</span>
                                 </div>
                             </form>
-                        </div>
+                        </aside>
 
-                        <section class="er-card er-missions-card">
+                        <section class="er-card er-missions-card er-general-content-card" id="erGeneralContentCard" aria-labelledby="erGeneralContentTitle">
                             <div class="er-card-header">
                                 <div>
-                                    <div class="er-card-kicker">2. Studio de misiones</div>
-                                    <h2>Editor de salas, rutas y preguntas</h2>
+                                    <div class="er-card-kicker">2. Contenido general</div>
+                                    <h2 id="erGeneralContentTitle">Portada, apertura y cierre</h2>
                                 </div>
-                                <p class="er-inline-note">Arrastra para reordenar. Cada misión puede desbloquear otras.</p>
+                                <p class="er-inline-note" id="erGeneralContentHelp">Genera o añade una sala para habilitar estos contenidos.</p>
+                            </div>
+                            <div class="er-general-content-grid">
+                                <label class="er-field er-field-wide">
+                                    <span>Título principal</span>
+                                    <input type="text" id="generalTitleInput" data-project-field="titulo" autocomplete="off" disabled>
+                                </label>
+                                <label class="er-field er-field-wide">
+                                    <span>Subtítulo</span>
+                                    <input type="text" id="generalSubtitleInput" data-project-field="subtitulo" autocomplete="off" disabled>
+                                </label>
+                                <label class="er-field">
+                                    <span>Introducción</span>
+                                    <textarea id="generalIntroductionInput" data-project-field="introduccion" rows="5" disabled></textarea>
+                                </label>
+                                <label class="er-field">
+                                    <span>Instrucciones</span>
+                                    <textarea id="generalInstructionsInput" data-project-field="instrucciones" rows="5" disabled></textarea>
+                                </label>
+                                <label class="er-field er-field-wide">
+                                    <span>Mensaje final</span>
+                                    <textarea id="generalConclusionInput" data-project-field="conclusion" rows="4" disabled></textarea>
+                                </label>
+                            </div>
+                        </section>
+
+                        <section class="er-card er-missions-card er-mission-workspace-panel hidden" id="erMissionWorkspacePanel" aria-labelledby="erStudioTitle">
+                            <div class="er-card-header">
+                                <div>
+                                    <div class="er-card-kicker" id="erStudioKicker">Sala seleccionada</div>
+                                    <h2 id="erStudioTitle" tabindex="-1">Editor de salas, rutas y preguntas</h2>
+                                </div>
+                                <p class="er-inline-note" id="erStudioHelp">Arrastra para reordenar. Cada sala desbloquea la siguiente.</p>
                             </div>
                             <div id="missionEditorList" class="er-mission-list"></div>
-                            <div id="erMissionEmpty" class="er-empty-inline">
-                                Genera un escape room o añade una misión manualmente para empezar a editar.
-                            </div>
                         </section>
 
                         <section class="er-card er-output-card">
                             <div class="er-card-header">
                                 <div>
-                                    <div class="er-card-kicker">3. Preview y salida</div>
+                                    <div class="er-card-kicker">4. Preview y salida</div>
                                     <h2>Juego exportable y JSON normalizado</h2>
                                 </div>
                                 <div class="er-output-header-actions">
-                                    <button type="button" id="btnRepairEscapeRoom" class="er-button er-button-secondary">
+                                    <button type="button" id="btnRepairEscapeRoom" class="er-button er-studio-icon-button" data-er-tooltip="Reparar escape room" aria-label="Reparar escape room">
                                         <i class="fas fa-screwdriver-wrench"></i>
-                                        <span>Reparar escape room</span>
                                     </button>
-                                    <button type="button" id="btnPreviewAutofill" class="er-button er-button-secondary">
+                                    <button type="button" id="btnPreviewAutofill" class="er-button er-studio-icon-button" data-er-tooltip="Resolver preview" aria-label="Resolver preview">
                                         <i class="fas fa-wand-magic-sparkles"></i>
-                                        <span>Resolver preview</span>
                                     </button>
-                                    <button type="button" id="btnPreviewTheme" class="er-button er-button-secondary er-button-icon" data-bs-toggle="modal" data-bs-target="#previewThemeModal" aria-label="Tema del juego">
+                                    <button type="button" id="btnPreviewTheme" class="er-button er-studio-icon-button" data-bs-toggle="modal" data-bs-target="#previewThemeModal" data-er-tooltip="Tema del juego" aria-label="Tema del juego">
                                         <i class="fas fa-palette"></i>
                                     </button>
                                     <div class="er-tab-switcher" role="tablist" aria-label="Panel de salida">
-                                        <button type="button" class="er-tab is-active" data-er-tab="preview" aria-pressed="true">Vista previa</button>
-                                        <button type="button" class="er-tab" data-er-tab="json" aria-pressed="false">JSON</button>
+                                        <button type="button" class="er-tab er-studio-icon-button is-active" data-er-tab="preview" data-er-tooltip="Vista previa" aria-label="Vista previa" aria-pressed="true"><i class="fas fa-eye" aria-hidden="true"></i></button>
+                                        <button type="button" class="er-tab er-studio-icon-button" data-er-tab="json" data-er-tooltip="JSON" aria-label="JSON" aria-pressed="false"><i class="fas fa-code" aria-hidden="true"></i></button>
                                     </div>
                                 </div>
                             </div>
@@ -437,8 +462,68 @@
 
                         <div id="erStatusBanner" class="er-status-banner hidden" role="status" aria-live="polite"></div>
                     </div>
+
+                    <aside class="er-inspector-panel er-studio-dock is-open" id="erInspectorPanel" aria-label="Contenido y salas">
+                        <div class="er-inspector-tabs" role="tablist" aria-label="Panel del proyecto">
+                            <button type="button" class="er-inspector-tab" data-er-inspector-tab="topics" role="tab" aria-selected="false" aria-controls="erInspectorTopicsPanel">Temas</button>
+                            <button type="button" class="er-inspector-tab" data-er-inspector-tab="content" role="tab" aria-selected="false" aria-controls="erInspectorContentPanel">Contenido general</button>
+                            <button type="button" class="er-inspector-tab is-active" data-er-inspector-tab="rooms" role="tab" aria-selected="true" aria-controls="erInspectorRoomsPanel">Salas</button>
+                        </div>
+                        <div class="er-inspector-body">
+                            <section id="erInspectorTopicsPanel" class="er-inspector-tab-panel hidden" data-er-inspector-panel="topics" role="tabpanel">
+                                <div class="er-room-list-header">
+                                    <div><h3>Temas</h3><p>Selecciona un Escape Room.</p></div>
+                                </div>
+                                <div id="erTopicList" class="er-topic-list" aria-label="Temas de la sesión"></div>
+                                <div id="erTopicEmpty" class="er-empty-inline">Esta sesión todavía no tiene temas.</div>
+                            </section>
+                            <section id="erInspectorContentPanel" class="er-inspector-tab-panel hidden" data-er-inspector-panel="content" role="tabpanel"></section>
+                            <section id="erInspectorRoomsPanel" class="er-inspector-tab-panel" data-er-inspector-panel="rooms" role="tabpanel">
+                                <div class="er-room-list-header">
+                                    <div>
+                                        <h3 id="erRoomListTitle">Salas</h3>
+                                        <p>Selecciona una para editarla.</p>
+                                    </div>
+                                    <button type="button" id="btnAddMission" class="er-button er-studio-icon-button" data-er-tooltip="Añadir sala" aria-label="Añadir sala">
+                                        <i class="fas fa-plus"></i>
+                                        <span id="erAddMissionLabel" class="visually-hidden">Sala</span>
+                                    </button>
+                                </div>
+                                <div id="erMissionNavigatorList" class="er-mission-navigator" aria-label="Lista ordenable de salas"></div>
+                                <div id="erMissionEmpty" class="er-empty-inline">
+                                    Genera un escape room o añade una sala manualmente para empezar a editar.
+                                </div>
+                            </section>
+                        </div>
+                    </aside>
+
+                    <button type="button" id="erStudioBackdrop" class="er-studio-backdrop hidden" aria-label="Cerrar panel abierto"></button>
                 </section>
             </main>
+        </div>
+    </div>
+
+    <div class="modal fade" id="erNewTopicModal" tabindex="-1" aria-labelledby="erNewTopicModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content er-modal-content">
+                <form id="erNewTopicForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="erNewTopicModalTitle">Crear tema</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body">
+                        <label class="er-field">
+                            <span>Número de tema o unidad</span>
+                            <input type="number" id="erNewTopicNumber" min="1" step="1" inputmode="numeric" required placeholder="Ej. 2">
+                        </label>
+                        <p id="erNewTopicError" class="er-import-zip-status" role="alert"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" id="erCreateTopicButton" class="er-button er-button-primary">Crear tema</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -585,6 +670,31 @@
                         <i class="fas fa-wand-magic-sparkles"></i>
                         <span>Generar objetivo final</span>
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="erNewSessionModal" tabindex="-1" aria-labelledby="erNewSessionModalLabel" aria-describedby="erImportZipHelp" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content er-modal-content er-new-session-modal">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="erNewSessionModalLabel">Nueva sesión</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="erImportZipHelp" class="er-field-help">Crea un escape room desde cero o continúa editando un ZIP exportado por PigPen.</p>
+                    <div class="er-new-session-options">
+                        <button type="button" id="btnCreateBlankSession" class="er-new-session-option">
+                            <i class="fas fa-file-circle-plus" aria-hidden="true"></i>
+                            <span><strong>Sesión vacía</strong><small>Configura y genera un escape room nuevo.</small></span>
+                        </button>
+                        <button type="button" id="btnImportZipSession" class="er-new-session-option">
+                            <i class="fas fa-file-zipper" aria-hidden="true"></i>
+                            <span><strong>Importar ZIP</strong><small>Restaura salas, preguntas, medios y configuración.</small></span>
+                        </button>
+                    </div>
+                    <input id="erImportZipInput" type="file" accept=".zip,application/zip" class="visually-hidden" aria-label="Seleccionar ZIP exportado por PigPen">
+                    <p id="erImportZipStatus" class="er-import-zip-status" role="status" aria-live="polite"></p>
                 </div>
             </div>
         </div>

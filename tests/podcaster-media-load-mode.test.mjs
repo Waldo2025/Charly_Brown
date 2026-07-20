@@ -45,6 +45,7 @@ const { normalizePodcastVideoConfig } = window;
 
 await import("../public/podcaster/podcaster-text-render.js");
 const { PodcasterPlaybackController } = await import("../public/podcaster/podcaster-playback-controller.js");
+const { createPodcasterPanelMusicApi } = await import("../public/podcaster/podcaster-panel-music.js");
 
 test("normalizePodcastVideoConfig parses and defaults mediaLoadMode correctly", () => {
   // 1. Defaults to "streaming" when not provided
@@ -193,6 +194,103 @@ test("PodcasterPlaybackController prewarms dialogue URLs successfully", () => {
   
   assert.equal(controller.getBlobUrlSync(url1), `/api/assets/proxy-media?url=${encodeURIComponent(url1)}`);
   assert.equal(controller.getBlobUrlSync(url2), `/api/assets/proxy-media?url=${encodeURIComponent(url2)}`);
+});
+
+test("PodcasterPlaybackController falls back to Firebase Storage when local audio cache key is empty", async () => {
+  const controller = new PodcasterPlaybackController();
+  const remoteUrl = "https://example.test/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Faudio%2Frow-1.wav";
+  const resolvedBlobUrl = "blob:remote-audio";
+  let requestedUrl = "";
+
+  controller.resolveLocalMediaObjectUrl = async () => "";
+  controller.getBlobUrl = async (url, options = {}) => {
+    requestedUrl = String(url || "");
+    assert.equal(options.persistent, true);
+    return resolvedBlobUrl;
+  };
+  controller.deps = {
+    resolveStorageAudioUrl: (downloadUrl, storagePath) => {
+      assert.equal(downloadUrl, "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media");
+      assert.equal(storagePath, "podcaster/sessions/s1/audio/row-1.wav");
+      return remoteUrl;
+    }
+  };
+
+  const source = await controller.resolveAudioSource({
+    localMediaCacheKey: "row-1-local-missing",
+    localDataUrl: "podcaster-local-media:row-1-local-missing",
+    downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media",
+    storagePath: "podcaster/sessions/s1/audio/row-1.wav"
+  });
+
+  assert.equal(source, resolvedBlobUrl);
+  assert.equal(requestedUrl, remoteUrl);
+  assert.equal(
+    controller.resolveAudioSourceKey({
+      localMediaCacheKey: "row-1-local-missing",
+      downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media",
+      storagePath: "podcaster/sessions/s1/audio/row-1.wav"
+    }),
+    remoteUrl
+  );
+});
+
+test("PodcasterPlaybackController treats proxy-media 404 as a failed hydration, not a playable src", async () => {
+  const controller = new PodcasterPlaybackController();
+  controller.state.config = { mediaLoadMode: "blob" };
+  const originalFetch = globalThis.fetch;
+  const sourceUrl = "http://127.0.0.1:5010/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Fvideos%2Fmissing.mp4";
+  let staleMarked = false;
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    clone() {
+      return this;
+    },
+    async blob() {
+      return new Blob([]);
+    }
+  });
+  controller.deps = {
+    markStaleProxyMediaUrl: (url, reason) => {
+      assert.equal(url, sourceUrl);
+      assert.equal(reason, "proxy-media-404-from-controller");
+      staleMarked = true;
+    }
+  };
+
+  try {
+    const resolved = await controller.getBlobUrl(sourceUrl, { persistent: true });
+    assert.equal(resolved, "");
+    assert.equal(controller.getBlobUrlSync(sourceUrl), "");
+    assert.equal(staleMarked, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Panel music source prefers Firebase Storage over stale local cache pointers", () => {
+  const api = createPodcasterPanelMusicApi({
+    resolveStorageAudioUrl: (downloadUrl, storagePath) => (
+      downloadUrl || storagePath
+        ? `https://example.test/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`
+        : ""
+    )
+  });
+
+  api.setPanelMusicTrack("uploaded", {
+    localDataUrl: "podcaster-local-media:missing-background-track",
+    localMediaCacheKey: "missing-background-track",
+    downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/music.mp3?alt=media",
+    storagePath: "podcaster/sessions/s1/music/background.mp3",
+    durationSec: 30
+  }, { select: true });
+
+  assert.equal(
+    api.resolvePanelMusicTrackSrc(),
+    "https://example.test/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Fmusic%2Fbackground.mp3"
+  );
 });
 
 test("PodcasterPlaybackController preloads upcoming dialogue player without deleting it", async () => {

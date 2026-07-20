@@ -9,6 +9,7 @@ const videoPlayerHtml = readFileSync(new URL("../public/video-player.html", impo
 const backend = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 const renderSpec = readFileSync(new URL("../public/podcaster/podcaster-scene-media-render-spec.js", import.meta.url), "utf8");
 const playbackController = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
+const homePlayer = readFileSync(new URL("../public/js/home.js", import.meta.url), "utf8");
 
 test("image replacement persists a stable source and resets geometry for the new image", () => {
   assert.match(replacement, /resolveStableReplacementMediaUrl/);
@@ -49,4 +50,15 @@ test("vertical image motion traverses the complete overflow in preview, player a
   assert.match(playbackController, /--pod-scene-media-motion-end-y/);
   assert.match(backend, /spec\.motion\.startOffsetYPx/);
   assert.match(backend, /spec\.motion\.endOffsetYPx/);
+});
+
+test("scene motion runs once for the effective trimmed duration and holds its final frame", () => {
+  assert.doesNotMatch(css, /pod-scene-media-pan-(?:left-right|right-left|up-down|down-up)[^;]*infinite\s+alternate/);
+  assert.match(css, /var\(--pod-scene-media-motion-duration, 12s\) ease-in-out 1 both/);
+  assert.match(playbackController, /entry\?\.effectiveDurationMs/);
+  assert.match(playbackController, /entry\?\.clip\?\.trimOutMs/);
+  assert.match(playbackController, /entry\?\.clip\?\.trimInMs/);
+  assert.doesNotMatch(playbackController, /const targetDelay = offsetSec/);
+  assert.match(homePlayer, /durationSec:\s*safeMotionDurationSec/);
+  assert.match(homePlayer, /--pod-scene-media-motion-duration/);
 });

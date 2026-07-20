@@ -1,8 +1,16 @@
 {
-  "version": "1.0.10.523",
-  "build": "2026-1.0.10.523",
+  "version": "1.0.10.531",
+  "build": "2026-1.0.10.531",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: La exportación solo audio MP3 de Podcaster conserva onlyAudio y mp3_audio en el request FFmpeg v2; el preflight ya no exige video, imagen ni fondo y el backend infiere la intención MP3 aunque falte la bandera.",
+    "Corregido: Export FFmpeg v2 lee directamente el checkbox Solo audio al preparar el payload MP3 y muestra los issues anidados de preflight para diagnosticar errores 422.",
+    "Corregido: Export FFmpeg v2 respeta el modo solo audio MP3, omite validaciones y capas visuales, y fuerza cache-buster 1.0.10.529 para cargar el cliente API vigente.",
+    "Corregido: Al poner el editor Snoopy en pantalla completa, los modales secundarios conservan su tamaño normal en lugar de heredar el fullscreen del editor.",
+    "Corregido: El visor interactivo de cards del Podcaster queda por encima del header flotante para permitir mover y seleccionar overlays sin bloqueo.",
+    "Corregido: Podcaster vuelve a resolver medios de sesión por proxy-media con storagePath limpio en local, evitando que los videos/audios dependan de proxy-media?url= hacia Firebase y fallen con 404.",
+    "Corregido: Los previews locales del timeline ya no hacen fallback a URLs directas de Firebase Storage sin token después de un proxy-media 404, evitando errores 403 ruidosos cuando la escena ya cargó por la ruta válida.",
+    "Actualizado: Se incrementan version.json y cache-busters a la build 1.0.10.528 para forzar en producción la carga de los fixes de rehidratación de medios desde Firebase Storage.",
     "Corregido: El primer Play reutiliza un audio de fondo persistente, evita bloquear el reloj por promesas pendientes y aplica desbloqueo compatible con navegadores.",
     "Corregido: El primer Play espera el arranque real del audio de fondo y reanuda AudioContext antes de iniciar el reloj del montaje.",
     "Corregido: La precarga persistente ya no confunde una URL HTTP en memoria con un blob hidratado; fuerza IndexedDB o descarga antes de reproducir.",
@@ -447,6 +455,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.523",
-  "updated_at": "2026-07-14T00:00:00.000Z"
+  "cache_version": "2026-1.0.10.531",
+  "updated_at": "2026-07-20T00:00:00.000Z"
 }

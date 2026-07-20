@@ -1,9 +1,9 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.487";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.523";
-import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.523";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.530";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.528";
+import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.528";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.491";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.528";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -49,15 +49,15 @@ import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
-import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.487";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-1.0.10.528";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.528";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
-import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.489";
+import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.528";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-1.0.10.528";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -513,6 +513,8 @@ const els = {
   sessionPublishToggle: document.getElementById("sessionPublishToggle"),
   creativeVideoModal: document.getElementById("creativeVideoModal"),
   creativeVideoShell: document.getElementById("creativeVideoShell"),
+  podcastVideoModalFullscreenBtn: document.getElementById("podcastVideoModalFullscreenBtn"),
+  creativeVideoModalFullscreenBtn: document.getElementById("creativeVideoModalFullscreenBtn"),
   closeCreativeVideoBtn: document.getElementById("closeCreativeVideoBtn"),
   saveSessionCreativeBtn: document.getElementById("saveSessionCreativeBtn"),
   creativeGlobalVoiceName: document.getElementById("creativeGlobalVoiceName"),
@@ -3555,6 +3557,7 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
     durationSec,
     geminiCreativityLevel,
     voiceOverOriginalText,
+    excludeScriptFromVideoPrompt: row?.excludeScriptFromVideoPrompt === true,
     visualNotesEditedText,
     visualNotesEditedStored,
     onScreenTextNoSummarize: preserveOnScreenText,
@@ -4018,10 +4021,6 @@ function getDialogueAudioMap(session = null) {
 function hasExplicitDialogueAudioForRow(session = null, rowId = "") {
   const key = String(rowId ?? "").trim();
   if (!key) return false;
-  const fallbackClip = resolveFallbackDialogueAudioForRow(session, key);
-  if (fallbackClip && (fallbackClip.downloadUrl || fallbackClip.storagePath || fallbackClip.dataUrl || fallbackClip.localMediaCacheKey)) {
-    return true;
-  }
   return Boolean(getDialogueAudioMap(session)[key]);
 }
 
@@ -7373,6 +7372,7 @@ function readRowVoiceDraftValue(rowId = "") {
   const escapedRowId = globalThis.CSS?.escape ? CSS.escape(key) : key.replace(/"/g, '\\"');
   const inputs = Array.from(document.querySelectorAll(`[data-field='voiceName'][data-row-id="${escapedRowId}"]`));
   for (const input of inputs) {
+    if (normalizeVoiceNameSource(input?.dataset?.voiceSource) !== "row") continue;
     const voice = normalizeLiveVoiceName(String(input?.value || "").trim(), "");
     if (voice) return voice;
   }
@@ -7386,6 +7386,7 @@ function flushScriptEditorVoiceDraftsToSession() {
   const draftByRowId = new Map();
   inputs.forEach((input) => {
     const rowId = String(input?.dataset?.rowId || "").trim();
+    if (normalizeVoiceNameSource(input?.dataset?.voiceSource) !== "row") return;
     const voiceName = normalizeLiveVoiceName(String(input?.value || "").trim(), "");
     if (!rowId || !voiceName) return;
     draftByRowId.set(rowId, voiceName);
@@ -7630,10 +7631,36 @@ function hasHydratableSessionContent(session = null) {
   return false;
 }
 
+function hasCloudSessionMarker(session = null) {
+  if (!session || typeof session !== "object") return false;
+  const cloudMeta = session.cloudMeta && typeof session.cloudMeta === "object" ? session.cloudMeta : {};
+  return Boolean(
+    String(cloudMeta.ownerId || "").trim()
+    || String(cloudMeta.savedAt || "").trim()
+    || String(session.sessionUpdatedAt || "").trim()
+  );
+}
+
+function isSessionDirtyInLocalCache(sessionId = "") {
+  const key = String(sessionId || "").trim();
+  if (!key) return false;
+  try {
+    const meta = sessionStore.loadSessionSyncMeta(resolveCurrentUid(), key) || {};
+    return meta.dirty === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function shouldHydrateSessionFromCloud(session = null) {
   if (!session || typeof session !== "object") return false;
   if (session.isStub === true) return true;
-  if (hasHydratableSessionContent(session)) return false;
+  const sessionId = String(session.id || "").trim();
+  const hasCloudMarker = hasCloudSessionMarker(session);
+  const hasContent = hasHydratableSessionContent(session);
+  if (hasContent) {
+    return hasCloudMarker && !isSessionDirtyInLocalCache(sessionId);
+  }
   const cloudMeta = session.cloudMeta && typeof session.cloudMeta === "object" ? session.cloudMeta : {};
   return Boolean(
     String(cloudMeta.ownerId || "").trim()
@@ -7665,10 +7692,25 @@ async function setActiveSession(sessionId, options = {}) {
   if (options.forceHydrate === true || shouldHydrateSessionFromCloud(nextSession)) {
     try {
       setGenerationStatus("Descargando contenido de la sesión...", "is-busy");
+      console.info("[podcaster][sessions] Descargando sesión desde Firebase", {
+        sessionId,
+        forceHydrate: options.forceHydrate === true,
+        isStub: nextSession?.isStub === true,
+        localDirty: isSessionDirtyInLocalCache(sessionId),
+        hasCloudMarker: hasCloudSessionMarker(nextSession),
+        localRows: getSessionRows(nextSession).length,
+        localVideos: Object.keys(getDialogueVideoMap(nextSession) || {}).length
+      });
       const cloudSession = await loadCloudSessionDocumentDirect(sessionId);
       if (cloudSession) {
         const targetSession = getActiveSession() || nextSession;
         const mergedSession = mergeCloudSessionOverLocalCache(cloudSession, targetSession);
+        console.info("[podcaster][sessions] Sesión Firebase recibida", {
+          sessionId,
+          cloudRows: getSessionRows(cloudSession).length,
+          cloudVideos: Object.keys(getDialogueVideoMap(cloudSession) || {}).length,
+          cloudAudios: Object.keys(getDialogueAudioMap(cloudSession) || {}).length
+        });
         Object.assign(targetSession, {
           ...mergedSession,
           isStub: false
@@ -7681,6 +7723,7 @@ async function setActiveSession(sessionId, options = {}) {
         activatedSession = targetSession;
         setGenerationStatus("Listo", "");
       } else {
+        console.warn("[podcaster][sessions] Firebase no devolvió la sesión solicitada", { sessionId });
         setGenerationStatus("No se encontró el contenido en la nube.", "is-error");
       }
     } catch (error) {
@@ -8235,13 +8278,13 @@ function resolveConfiguredSpeakerVoiceForGeneration(speaker = "", session = null
   if (row?.voiceName && normalizeVoiceNameSource(row?.voiceNameSource) === "row") {
     return normalizeLiveVoiceName(String(row.voiceName || "").trim(), resolveSpeakerVoiceName(key, activeSession));
   }
+  const draft = collectGlobalSpeakerDraft(activeSession);
+  const draftVoice = normalizeLiveVoiceName(String(draft?.voiceMap?.[key] || "").trim(), "");
+  if (draftVoice) return draftVoice;
   if (rowId) {
     const draftRowVoice = readRowVoiceDraftValue(rowId);
     if (draftRowVoice) return draftRowVoice;
   }
-  const draft = collectGlobalSpeakerDraft(activeSession);
-  const draftVoice = normalizeLiveVoiceName(String(draft?.voiceMap?.[key] || "").trim(), "");
-  if (draftVoice) return draftVoice;
   return resolveSpeakerVoiceName(key, activeSession);
 }
 
@@ -12076,7 +12119,10 @@ function applySceneMediaScaleToStage({
   mediaOffsetYPct = 0,
   mediaMotionPreset = "none",
   visualLayoutMode = "default",
-  container = null
+  container = null,
+  durationSec = 12,
+  motionOffsetSec = 0,
+  motionSyncRevision = 0
 } = {}) {
   const target = container
     || els.podcastVideoStage?.querySelector?.(".podcast-video-preview")
@@ -12096,6 +12142,9 @@ function applySceneMediaScaleToStage({
   target.dataset.sceneMediaOffsetY = String(nextY);
   target.dataset.sceneMediaMotionPreset = nextMotion;
   target.dataset.sceneMediaLayout = normalizeTimelineClipVisualLayoutMode(visualLayoutMode);
+  const safeMotionDurationSec = Math.max(0.2, Number(durationSec || 12) || 12);
+  const safeMotionOffsetSec = Math.max(0, Math.min(safeMotionDurationSec, Number(motionOffsetSec || 0) || 0));
+  target.style.setProperty("--pod-scene-media-motion-duration", `${safeMotionDurationSec.toFixed(3)}s`);
 
   // Re-apply computed layout (left/top/width/height) to the active media element.
   // The playback controller sets these vars using resolveSceneMediaRenderSpec and they
@@ -12106,6 +12155,14 @@ function applySceneMediaScaleToStage({
   const activeVideo = target.querySelector(".podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop)") || null;
   const surfaceEl = (activeImage && !activeImage.hidden) ? activeImage : (activeVideo && !activeVideo.hidden ? activeVideo : null);
   if (!surfaceEl) return;
+  const motionSyncKey = `${String(rowId || "").trim()}:${Math.max(0, Number(motionSyncRevision || 0) || 0)}`;
+  if (surfaceEl.dataset.sceneMediaMotionSyncKey !== motionSyncKey) {
+    surfaceEl.dataset.sceneMediaMotionSyncKey = motionSyncKey;
+    surfaceEl.style.animationDelay = safeMotionOffsetSec > 0 ? `-${safeMotionOffsetSec.toFixed(3)}s` : "0s";
+    surfaceEl.style.animationName = "none";
+    void surfaceEl.offsetWidth;
+    surfaceEl.style.removeProperty("animation-name");
+  }
   const isImage = surfaceEl.tagName === "IMG";
   const sourceWidth = Math.max(2, Number(isImage ? surfaceEl.naturalWidth : surfaceEl.videoWidth) || 0);
   const sourceHeight = Math.max(2, Number(isImage ? surfaceEl.naturalHeight : surfaceEl.videoHeight) || 0);
@@ -12126,7 +12183,7 @@ function applySceneMediaScaleToStage({
     mediaOffsetYPct: nextY,
     mediaMotionPreset: nextMotion,
     mediaKind: isImage ? "image" : "video",
-    durationSec: 12
+    durationSec: safeMotionDurationSec
   });
   if (!spec) return;
   surfaceEl.style.setProperty("--pod-scene-media-left", `${spec.leftPx.toFixed(3)}px`);
@@ -12139,6 +12196,7 @@ function applySceneMediaScaleToStage({
   surfaceEl.style.setProperty("--pod-scene-media-motion-end-x", `${Number(spec.motion?.endOffsetXPx || 0).toFixed(3)}px`);
   surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
   surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-motion-duration", `${Number(spec.motion?.durationSec || safeMotionDurationSec).toFixed(3)}s`);
 }
 
 function syncPodcastSceneZoomControls(session = null) {
@@ -14382,6 +14440,7 @@ function setCreativeVideoOpen(isOpen) {
 }
 
 function closeCreativeVideoModal() {
+  setSnoopyEditorFullscreen(els.creativeVideoModal, false);
   setGeminiCreativityModalOpen("");
   setCreativeVideoOpen(false);
 }
@@ -14389,6 +14448,129 @@ function closeCreativeVideoModal() {
 function openCreativeVideoModal() {
   setCreativeVideoOpen(true);
   renderCreativeVideoShell(getActiveSession());
+}
+
+function getSnoopyFullscreenModal() {
+  return [els.podcastVideoModal, els.creativeVideoModal]
+    .find((modal) => modal && !modal.hidden && modal.classList.contains("is-snoopy-editor-fullscreen")) || null;
+}
+
+function getBrowserFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+const snoopyFullscreenChildModalAnchors = new Map();
+
+function dockSnoopyChildModalsForFullscreen(targetModal = null) {
+  if (!targetModal) return;
+  document.querySelectorAll(".snoopy-editor-child-modal").forEach((modal) => {
+    if (!modal || modal.parentElement === targetModal) return;
+    if (!snoopyFullscreenChildModalAnchors.has(modal)) {
+      snoopyFullscreenChildModalAnchors.set(modal, {
+        parent: modal.parentNode,
+        nextSibling: modal.nextSibling
+      });
+    }
+    targetModal.appendChild(modal);
+  });
+}
+
+function restoreSnoopyChildModalsAfterFullscreen() {
+  snoopyFullscreenChildModalAnchors.forEach((anchor, modal) => {
+    if (!modal || !anchor?.parent) return;
+    try {
+      anchor.parent.insertBefore(modal, anchor.nextSibling || null);
+    } catch (_) {
+      anchor.parent.appendChild(modal);
+    }
+  });
+  snoopyFullscreenChildModalAnchors.clear();
+}
+
+async function requestSnoopyBrowserFullscreen(targetModal = null) {
+  const target = targetModal && targetModal.classList?.contains("snoopy-editor-modal")
+    ? targetModal
+    : els.podcastVideoModal;
+  if (!target) return false;
+  if (getBrowserFullscreenElement()) return true;
+  dockSnoopyChildModalsForFullscreen(target);
+  try {
+    if (typeof target.requestFullscreen === "function") {
+      await target.requestFullscreen({ navigationUI: "hide" });
+      return true;
+    }
+    if (typeof target.webkitRequestFullscreen === "function") {
+      target.webkitRequestFullscreen();
+      return true;
+    }
+  } catch (error) {
+    console.warn("[podcaster] No se pudo activar pantalla completa del navegador.", error);
+  }
+  return false;
+}
+
+async function exitSnoopyBrowserFullscreen() {
+  if (!getBrowserFullscreenElement()) return true;
+  try {
+    if (typeof document.exitFullscreen === "function") {
+      await document.exitFullscreen();
+      return true;
+    }
+    if (typeof document.webkitExitFullscreen === "function") {
+      document.webkitExitFullscreen();
+      return true;
+    }
+  } catch (error) {
+    console.warn("[podcaster] No se pudo salir de pantalla completa del navegador.", error);
+  }
+  return false;
+}
+
+function syncSnoopyEditorFullscreenButtons() {
+  [
+    [els.podcastVideoModal, els.podcastVideoModalFullscreenBtn],
+    [els.creativeVideoModal, els.creativeVideoModalFullscreenBtn]
+  ].forEach(([modal, button]) => {
+    if (!button) return;
+    const isFullscreen = Boolean(modal?.classList?.contains("is-snoopy-editor-fullscreen"));
+    button.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+    button.setAttribute("title", isFullscreen ? "Salir de pantalla completa" : "Pantalla completa");
+    button.setAttribute("aria-label", isFullscreen ? "Salir de pantalla completa" : "Pantalla completa");
+    const icon = button.querySelector("i");
+    if (icon) icon.className = isFullscreen ? "fas fa-compress" : "fas fa-expand";
+  });
+}
+
+function setSnoopyEditorFullscreen(modal = null, enabled = false, options = {}) {
+  const targetModal = modal && modal.classList?.contains("snoopy-editor-modal") ? modal : null;
+  [els.podcastVideoModal, els.creativeVideoModal].forEach((item) => {
+    if (!item) return;
+    item.classList.toggle("is-snoopy-editor-fullscreen", Boolean(enabled && item === targetModal));
+  });
+  document.documentElement.classList.toggle("has-snoopy-editor-fullscreen", Boolean(enabled && targetModal));
+  syncSnoopyEditorFullscreenButtons();
+  if (options.skipBrowserFullscreen === true) return;
+  if (enabled && targetModal) {
+    void requestSnoopyBrowserFullscreen(targetModal);
+  } else {
+    void exitSnoopyBrowserFullscreen();
+    restoreSnoopyChildModalsAfterFullscreen();
+  }
+}
+
+function toggleSnoopyEditorFullscreen(modal = null) {
+  if (!modal) return;
+  const next = !modal.classList.contains("is-snoopy-editor-fullscreen");
+  setSnoopyEditorFullscreen(modal, next);
+}
+
+function syncSnoopyEditorFullscreenFromBrowser() {
+  if (getBrowserFullscreenElement()) return;
+  const fullscreenSnoopyModal = getSnoopyFullscreenModal();
+  if (fullscreenSnoopyModal) {
+    setSnoopyEditorFullscreen(fullscreenSnoopyModal, false, { skipBrowserFullscreen: true });
+  }
+  restoreSnoopyChildModalsAfterFullscreen();
 }
 
 function renderCreativeTimeline(session = null) {
@@ -14436,10 +14618,14 @@ function renderCreativeInspector(session = null) {
   const displayedActiveVisualProposal = resolveDisplayedVisualProposal(activeRow);
   els.creativeVideoInspectorEditor.innerHTML = `
     <!-- El campo Tiempo (durationSec) ha sido removido para evitar confusión con la velocidad del audio -->
-    <label class="row-field">
+    <div class="row-field">
       <span class="row-field-head">
         <span>Guion</span>
         <span class="row-field-inline-actions">
+          <label class="row-video-dialogue-toggle" title="Generar sólo con la dirección visual y las referencias. El Guion se conserva para audio, subtítulos y montaje.">
+            <input type="checkbox" data-field="excludeScriptFromVideoPrompt" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}"${activeRow?.excludeScriptFromVideoPrompt === true ? " checked" : ""}>
+            <span>No usar guion</span>
+          </label>
           <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
             <i class="fas fa-sliders-h" aria-hidden="true"></i>
           </button>
@@ -14452,7 +14638,7 @@ function renderCreativeInspector(session = null) {
         </span>
       </span>
       <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Narración de la escena">${escapeHtml(String(activeRow?.voiceOverText || activeRow?.text || "").trim())}</textarea>
-    </label>
+    </div>
     <label class="row-field">
       <span>Descripción de escena</span>
       <textarea rows="4" data-field="sceneDescription" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué se ve en cámara">${escapeHtml(String(activeRow?.sceneDescription || activeRow?.scenePrompt || "").trim())}</textarea>
@@ -14667,6 +14853,7 @@ async function openPodcastVideoModalWithLoader() {
 
 function closePodcastVideoModal() {
   podcastVideoOpenRunToken += 1;
+  setSnoopyEditorFullscreen(els.podcastVideoModal, false);
   setPodcastVideoLoaderOpen(false);
   playbackController.stop({ keepStatus: true, keepCursor: true });
   setAudioTrackMixOpen(false);
@@ -15544,8 +15731,14 @@ async function applyGlobalConfig() {
   const rows = normalizeRows(session.script?.rows);
   if (!rows.length) return false;
 
+  const isVideoMode = isCreativeVideoMode(session);
   const hostCount = normalizeHostsCount(els.speakerCountInput?.value || 2);
-  const hosts = hostsForCount(hostCount);
+  const currentHosts = getSpeakerOptions(session)
+    .map((host) => normalizeSpeakerLabel(host, ""))
+    .filter(Boolean);
+  const hosts = isVideoMode
+    ? (currentHosts.length ? currentHosts : ["Narrador"])
+    : hostsForCount(hostCount);
   const draft = collectGlobalSpeakerDraft(session);
   const voiceMap = {};
   const expressionMap = {};
@@ -15620,6 +15813,13 @@ async function applyGlobalConfig() {
     speakerVoiceMap: voiceMap,
     speakerExpressionMap: expressionMap,
     speakerNameMap: nameMap,
+    creativeVideoConfig: isVideoMode
+      ? normalizeCreativeVideoConfig({
+        ...(current.creativeVideoConfig || {}),
+        enabled: creativeVideoState.enabled || current.creativeVideoConfig?.enabled === true,
+        globalVoiceName: voiceMap["Narrador"] || voiceMap[hosts[0]] || current.creativeVideoConfig?.globalVoiceName || "Kore"
+      })
+      : current.creativeVideoConfig,
     disfluencyDefaults: normalizeDisfluencyConfig(globalDisfluencyConfig),
     ttsDirectionDefaults: normalizeTtsDirectionConfig(globalTtsDirectionConfig),
     script: nextScript
@@ -17802,11 +18002,23 @@ function attachEvents() {
       closePodcastVideoModal();
     });
   }
+  if (els.podcastVideoModalFullscreenBtn) {
+    els.podcastVideoModalFullscreenBtn.addEventListener("click", () => {
+      toggleSnoopyEditorFullscreen(els.podcastVideoModal);
+    });
+  }
   if (els.closeCreativeVideoBtn) {
     els.closeCreativeVideoBtn.addEventListener("click", () => {
       closeCreativeVideoModal();
     });
   }
+  if (els.creativeVideoModalFullscreenBtn) {
+    els.creativeVideoModalFullscreenBtn.addEventListener("click", () => {
+      toggleSnoopyEditorFullscreen(els.creativeVideoModal);
+    });
+  }
+  document.addEventListener("fullscreenchange", syncSnoopyEditorFullscreenFromBrowser);
+  document.addEventListener("webkitfullscreenchange", syncSnoopyEditorFullscreenFromBrowser);
   if (els.saveSessionCreativeBtn) {
     els.saveSessionCreativeBtn.addEventListener("click", async () => {
       await saveSessionToCloud();
@@ -17959,12 +18171,28 @@ function attachEvents() {
       const voiceName = normalizeLiveVoiceName(String(els.creativeGlobalVoiceName.value || "").trim(), "Kore");
       upsertActiveSession((session) => ({
         ...session,
+        speakerVoiceMap: {
+          ...(session.speakerVoiceMap || {}),
+          Narrador: voiceName
+        },
+        script: {
+          ...(session.script || {}),
+          hosts: ["Narrador"],
+          rows: normalizeRows(session.script?.rows).map((row) => normalizeRowVoiceConfig(row, session, {
+            speaker: String(row?.speaker || "Narrador").trim() || "Narrador",
+            hostVoiceName: voiceName,
+            ...(normalizeVoiceNameSource(row?.voiceNameSource) === "row"
+              ? { voiceName: row?.voiceName, voiceNameSource: "row" }
+              : { voiceName, voiceNameSource: "host" })
+          }))
+        },
         creativeVideoConfig: normalizeCreativeVideoConfig({
           ...(session.creativeVideoConfig || {}),
           enabled: creativeVideoState.enabled,
           globalVoiceName: voiceName
         })
-      }), { render: false });
+      }), { render: false, autosaveReason: "creative-global-voice" });
+      scheduleSessionLocalPersist("creative-global-voice");
       renderCreativeVideoShell(getActiveSession());
     });
   }
@@ -20158,6 +20386,11 @@ function attachEvents() {
       }
       if (podcastVideoState.transitionPickerOpen) {
         setPodcastTransitionPickerOpen(false);
+        return;
+      }
+      const fullscreenSnoopyModal = getSnoopyFullscreenModal();
+      if (fullscreenSnoopyModal) {
+        setSnoopyEditorFullscreen(fullscreenSnoopyModal, false);
         return;
       }
       if (podcastVideoState.enabled) {

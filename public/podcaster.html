@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.523"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.531"></script>
   <script data-cache-src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Snoopy Podcast Creator</title>
@@ -567,7 +567,7 @@
       </div>
     </section>
   </div>
-  <div id="timelineClipDurationModal" class="floating-panel-modal" hidden>
+  <div id="timelineClipDurationModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-timeline-clip-duration-modal"
       aria-label="Cerrar ajuste de duración"></button>
     <section class="timeline-clip-duration-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -714,7 +714,7 @@
       </form>
     </section>
   </div>
-  <div id="geminiAudioSpeedModal" class="floating-panel-modal" hidden>
+  <div id="geminiAudioSpeedModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-gemini-audio-speed-modal"
       aria-label="Cerrar ajuste de velocidad Gemini"></button>
     <section class="timeline-clip-duration-panel floating-panel-card gemini-audio-speed-panel" role="dialog"
@@ -749,7 +749,7 @@
       </div>
     </section>
   </div>
-  <div id="geminiTrackVolumeModal" class="floating-panel-modal" hidden>
+  <div id="geminiTrackVolumeModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-gemini-track-volume-modal"
       aria-label="Cerrar ajuste de volumen Gemini"></button>
     <section class="timeline-clip-duration-panel floating-panel-card gemini-audio-speed-panel" role="dialog"
@@ -785,7 +785,7 @@
       </div>
     </section>
   </div>
-  <div id="timelineFrameHoldModal" class="floating-panel-modal" hidden>
+  <div id="timelineFrameHoldModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-timeline-frame-hold-modal"
       aria-label="Cerrar congelado de frame"></button>
     <section class="timeline-clip-duration-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -820,7 +820,7 @@
       </div>
     </section>
   </div>
-  <div id="timelineSceneBgColorModal" class="floating-panel-modal" hidden>
+  <div id="timelineSceneBgColorModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-timeline-scene-bg-color-modal"
       aria-label="Cerrar color de fondo de escena"></button>
     <section class="timeline-clip-duration-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -883,7 +883,7 @@
       </div>
     </section>
   </div>
-  <div id="timelineSpeedRangeModal" class="floating-panel-modal" hidden>
+  <div id="timelineSpeedRangeModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-timeline-speed-range-modal"
       aria-label="Cerrar velocidad por rango"></button>
     <section class="timeline-clip-duration-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -922,7 +922,7 @@
       </div>
     </section>
   </div>
-  <div id="onScreenTextTrackModal" class="floating-panel-modal" hidden>
+  <div id="onScreenTextTrackModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-onscreen-text-track-modal"
       aria-label="Cerrar opciones de texto en pantalla"></button>
     <section id="onScreenTextTrackPanel" class="music-config-panel floating-panel-card"
@@ -937,7 +937,7 @@
       <div id="onScreenTextTrackModalBody" class="music-config-grid"></div>
     </section>
   </div>
-  <div id="montageSceneMixModal" class="floating-panel-modal" hidden>
+  <div id="montageSceneMixModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-montage-scene-mix-modal"
       aria-label="Cerrar volúmenes globales"></button>
     <section class="timeline-clip-duration-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -985,7 +985,7 @@
       </div>
     </section>
   </div>
-  <div id="podcastVideoModal" class="floating-panel-modal" hidden>
+  <div id="podcastVideoModal" class="floating-panel-modal snoopy-editor-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-podcast-video-modal"
       aria-label="Cerrar video"></button>
     <section id="podcastVideoShell" class="podcast-video-shell floating-panel-card" aria-label="Video compuesto">
@@ -1074,6 +1074,10 @@
               </button>
             </div>
           </div>
+          <button id="podcastVideoModalFullscreenBtn" class="row-icon-btn snoopy-editor-fullscreen-toggle" type="button"
+            title="Pantalla completa" aria-label="Pantalla completa" aria-pressed="false">
+            <i class="fas fa-expand"></i>
+          </button>
           <button id="closePodcastVideoBtn" class="row-icon-btn" type="button" title="Cerrar video">
             <i class="fas fa-times"></i>
           </button>
@@ -1382,7 +1386,7 @@
       <input id="podcastSceneLibraryLocalVideoInput" type="file" accept="video/*" hidden>
     </section>
   </div>
-  <div id="podcastSceneInsertModal" class="floating-panel-modal" hidden>
+  <div id="podcastSceneInsertModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-podcast-scene-insert-modal"
       aria-label="Cerrar inserción de escena"></button>
     <section class="podcast-scene-insert-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -1410,7 +1414,7 @@
       </div>
     </section>
   </div>
-  <div id="podcastSceneLibraryEditModal" class="floating-panel-modal" hidden>
+  <div id="podcastSceneLibraryEditModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-podcast-scene-library-edit-modal"
       aria-label="Cerrar edición de escena pública"></button>
     <section class="podcast-scene-library-edit-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -1458,7 +1462,7 @@
       </div>
     </section>
   </div>
-  <div id="creativeVideoModal" class="floating-panel-modal" hidden>
+  <div id="creativeVideoModal" class="floating-panel-modal snoopy-editor-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-creative-video-modal"
       aria-label="Cerrar video creativo"></button>
     <section id="creativeVideoShell" class="creative-video-shell floating-panel-card"
@@ -1484,6 +1488,10 @@
         </div>
 
         <div class="floating-panel-head-actions">
+          <button id="creativeVideoModalFullscreenBtn" class="row-icon-btn snoopy-editor-fullscreen-toggle" type="button"
+            title="Pantalla completa" aria-label="Pantalla completa" aria-pressed="false">
+            <i class="fas fa-expand"></i>
+          </button>
           <button id="saveSessionCreativeBtn" class="row-icon-btn" type="button" title="Guardar sesión en Firebase"
             aria-label="Guardar sesión en Firebase">
             <i class="fas fa-cloud-upload-alt"></i>
@@ -1515,7 +1523,7 @@
       </div>
     </section>
   </div>
-  <div id="geminiCreativityModal" class="floating-panel-modal" hidden>
+  <div id="geminiCreativityModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-gemini-creativity-modal"
       aria-label="Cerrar creatividad Gemini"></button>
     <section class="gemini-creativity-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -1537,7 +1545,7 @@
         sentido original.</p>
     </section>
   </div>
-  <div id="podcastTransitionPickerModal" class="floating-panel-modal" hidden>
+  <div id="podcastTransitionPickerModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-transition-picker-modal"
       aria-label="Cerrar selector de transición"></button>
     <section class="podcast-transition-picker floating-panel-card" aria-label="Selector de transición">
@@ -1613,7 +1621,7 @@
       <small id="podcastTransitionDurationLabel" class="timeline-clip-duration-hint">0 ms</small>
     </section>
   </div>
-  <div id="dialogueVideoDirectiveModal" class="floating-panel-modal" hidden>
+  <div id="dialogueVideoDirectiveModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-dialogue-video-directive-modal"
       aria-label="Cerrar confirmación de especificación"></button>
     <section class="dialogue-video-directive-panel floating-panel-card" role="dialog" aria-modal="true"
@@ -1640,7 +1648,7 @@
       </div>
     </section>
   </div>
-  <div id="musicConfigModal" class="floating-panel-modal" hidden>
+  <div id="musicConfigModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-music-config-modal"
       aria-label="Cerrar música de fondo"></button>
 
@@ -1728,7 +1736,7 @@
 
     </section>
   </div>
-  <div id="audioTrackMixModal" class="floating-panel-modal" hidden>
+  <div id="audioTrackMixModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-audio-track-mix-modal"
       aria-label="Cerrar mezcla de audio"></button>
     <section id="audioTrackMixPanel" class="music-config-panel floating-panel-card"
@@ -1825,7 +1833,7 @@
       </form>
     </section>
   </div>
-  <div id="globalConfigModal" class="floating-panel-modal" hidden>
+  <div id="globalConfigModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-global-config-modal"
       aria-label="Cerrar configuración general"></button>
     <section id="globalConfigPanel" class="global-config-panel floating-panel-card" aria-label="Configuración global">
@@ -1995,7 +2003,7 @@
       </div>
     </section>
   </div>
-  <div id="montageExportModal" class="floating-panel-modal" hidden>
+  <div id="montageExportModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-montage-export-modal"
       aria-label="Cerrar exportación"></button>
     <section class="montage-export-panel floating-panel-card" role="dialog" aria-modal="true"

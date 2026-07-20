@@ -1344,7 +1344,7 @@ function applyMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl 
       mediaMotionPreset: preview.mediaMotionPreset,
       visualEffects: preview.visualEffects || null,
       mediaKind: String(preview.mediaType || "").startsWith("image/") ? "image" : "video",
-      durationSec: 12
+      durationSec: Math.max(0.2, Number(preview.durationMs || 0) / 1000 || 12)
     });
     mediaEl.style.setProperty("--pod-scene-media-left", `${spec.leftPx.toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-top", `${spec.topPx.toFixed(3)}px`);
@@ -1358,6 +1358,7 @@ function applyMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl 
     mediaEl.style.setProperty("--pod-scene-media-motion-end-x", `${Number(spec.motion?.endOffsetXPx || 0).toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-motion-duration", `${Number(spec.motion?.durationSec || 12).toFixed(3)}s`);
   };
   const targetMediaEl = mediaEl || (String(preview.mediaType || "").startsWith("image/")
     ? window.els.montageExportPreviewImage
@@ -2546,6 +2547,12 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     mediaMotionPreset: selected?.mediaMotionPreset || "none",
     visualLayoutMode: String(selected?.visualLayoutMode || "default").trim() || "default",
     visualEffects: selected?.visualEffects || null,
+    durationMs: Math.max(
+      200,
+      Number(selected?.durationMs || 0)
+        || (Number(selected?.timelineEndMs || selected?.endMs || 0) - Number(selected?.timelineStartMs || selected?.startMs || 0))
+        || 12000
+    ),
     sceneIndex: Math.max(1, Number(selected?.sceneIndex || 1) || 1),
     timelineStartMs: Math.max(0, Number(selected?.timelineStartMs || selected?.startMs || 0) || 0),
     rowId: String(selected?.rowId || "").trim()
@@ -2695,7 +2702,9 @@ export async function refreshMontageExportPreviewNow(options = {}) {
       mediaOffsetYPct: frontendPreview.mediaOffsetYPct,
       mediaMotionPreset: frontendPreview.mediaMotionPreset,
       visualLayoutMode: frontendPreview.visualLayoutMode,
-      container: previewContainer
+      container: previewContainer,
+      durationSec: Math.max(0.2, Number(frontendPreview.durationMs || 0) / 1000 || 12),
+      motionOffsetSec: 0
     });
     window.renderPodcasterOverlayCardsForPreview?.({
       session: window.getActiveSession?.(),
@@ -5571,7 +5580,9 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
       .map((rowId) => String(rowId || "").trim())
       .filter(Boolean)
   );
-  prepared.payload.onScreenTextRenderedSegments = shouldRenderOnScreenTextFrames && effectiveTimeline?.segments?.length
+  prepared.payload.onScreenTextRenderedSegments = prepared.payload.onlyAudio === true
+    ? []
+    : shouldRenderOnScreenTextFrames && effectiveTimeline?.segments?.length
     ? await buildMontageOnScreenTextRenderedSegmentsForExport({
       activeSession,
       timeline: effectiveTimeline,
@@ -5586,7 +5597,9 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
     : [];
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
-  await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession);
+  if (prepared.payload.onlyAudio !== true) {
+    await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession);
+  }
   const renderedSegments = Array.isArray(prepared.payload.onScreenTextRenderedSegments)
     ? prepared.payload.onScreenTextRenderedSegments.filter(Boolean)
     : [];
@@ -5868,6 +5881,11 @@ export function buildMontageExportPayload(session = null) {
     return segments;
   };
 
+  const onlyAudioExport = window.montageExportState.onlyAudio === true
+    || window.els?.montageExportOnlyAudio?.checked === true;
+  if (onlyAudioExport && window.montageExportState) {
+    window.montageExportState.onlyAudio = true;
+  }
   const geminiTimelineSegments = montageAudioMode === "gemini-live-per-scene" ? buildGeminiTimelineSegments() : [];
   const backgroundAutomationWindows = buildSceneBackgroundAutomationWindows();
   const uploadedBackgroundSegments = buildUploadedBackgroundSegments();
@@ -5926,7 +5944,7 @@ export function buildMontageExportPayload(session = null) {
         || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
         || null;
       const hasCustomBg = entry?.clip?.backgroundColor && String(entry.clip.backgroundColor).trim() !== "";
-      if (!rowId || (!(videoStoragePath || videoDownloadUrl || videoDataUrl) && !hasCustomBg)) {
+      if (!rowId || (!onlyAudioExport && (!(videoStoragePath || videoDownloadUrl || videoDataUrl) && !hasCustomBg))) {
         return {
           ok: false,
           error: `La escena ${index + 1} no tiene video ni color de fondo seleccionado.`,
@@ -6078,12 +6096,12 @@ export function buildMontageExportPayload(session = null) {
     sessionId,
     renderMode: normalizeMontageRenderMode(window.montageExportState.renderMode || "browser"),
     exportMode: window.montageExportState.exportMode,
-    onlyAudio: window.montageExportState.onlyAudio === true,
-    format: effectiveFormat,
+    onlyAudio: onlyAudioExport,
+    format: onlyAudioExport ? "mp3_audio" : effectiveFormat,
     qualityPreset: window.montageExportState.qualityPreset,
     resolution: effectiveResolution,
     reelModeEnabled,
-    includeLogo,
+    includeLogo: onlyAudioExport ? false : includeLogo,
     includeBackgroundMusic,
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
@@ -6113,7 +6131,7 @@ export function buildMontageExportPayload(session = null) {
       minBitrateCrf: window.montageExportState.minBitrate
     },
     brandOverlay: buildMontageBrandOverlayForExport(reelModeEnabled),
-    partyKaraoke: window.montageExportState.partyKaraoke !== false
+    partyKaraoke: onlyAudioExport ? false : window.montageExportState.partyKaraoke !== false
   };
 
   return {

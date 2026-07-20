@@ -10,8 +10,16 @@ if (!/const fromScript = normalizeRows\(session\.script\?\.rows\)\.map\(\(row\) 
   throw new Error("getSessionRows debe hidratar voiceName/voiceNameSource por fila.");
 }
 
-if (!/function resolveConfiguredSpeakerVoiceForGeneration\(speaker = "", session = null\) \{[\s\S]*if \(row\?\.voiceName\) \{[\s\S]*readRowVoiceDraftValue\(rowId\)[\s\S]*collectGlobalSpeakerDraft\(activeSession\)/m.test(podcasterSource)) {
-  throw new Error("La resolución de voz debe priorizar fila, luego draft local y luego host global.");
+if (!/function resolveConfiguredSpeakerVoiceForGeneration\(speaker = "", session = null\) \{[\s\S]*normalizeVoiceNameSource\(row\?\.voiceNameSource\) === "row"[\s\S]*collectGlobalSpeakerDraft\(activeSession\)[\s\S]*readRowVoiceDraftValue\(rowId\)/m.test(podcasterSource)) {
+  throw new Error("La resolución de voz debe priorizar override de fila, luego voz global, y solo después draft local marcado como row.");
+}
+
+if (!/function readRowVoiceDraftValue\(rowId = ""\) \{[\s\S]*normalizeVoiceNameSource\(input\?\.dataset\?\.voiceSource\) !== "row"[\s\S]*continue;/m.test(podcasterSource)) {
+  throw new Error("El draft del selector de voz por escena solo debe contar cuando data-voice-source='row'.");
+}
+
+if (!/function flushScriptEditorVoiceDraftsToSession\(\) \{[\s\S]*normalizeVoiceNameSource\(input\?\.dataset\?\.voiceSource\) !== "row"[\s\S]*return;/m.test(podcasterSource)) {
+  throw new Error("El flush previo a regenerar audio no debe convertir voces heredadas del host en overrides por escena.");
 }
 
 if (!/persistSpeakerIdentityDraft\(\) \{[\s\S]*normalizeVoiceNameSource\(row\?\.voiceNameSource\) === "row"[\s\S]*voiceNameSource: "host"/m.test(podcasterSource)) {
@@ -20,6 +28,14 @@ if (!/persistSpeakerIdentityDraft\(\) \{[\s\S]*normalizeVoiceNameSource\(row\?\.
 
 if (!/field === "voiceName"[\s\S]*script:\s*\{[\s\S]*voiceNameSource: "row"/m.test(editorSource)) {
   throw new Error("Editar voiceName en una escena debe persistir override local por fila.");
+}
+
+if (!/data-field="voiceName"[\s\S]*data-voice-source="\$\{escapeHtml\(window\.normalizeVoiceNameSource\?\.\(row\.voiceNameSource\) \|\| "host"\)\}"/m.test(editorSource)) {
+  throw new Error("El selector de voz por escena debe marcar si hereda del host o si es override local.");
+}
+
+if (!/field === "voiceName"[\s\S]*target\.dataset\.voiceSource = "row";/m.test(editorSource)) {
+  throw new Error("Cambiar manualmente la voz de una escena debe marcar el selector como override local.");
 }
 
 if (/if \(field === "voiceName"\) \{[\s\S]*?speakerVoiceMap:[\s\S]*?return;/m.test(editorSource)) {

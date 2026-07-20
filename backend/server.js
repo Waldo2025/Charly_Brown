@@ -3377,6 +3377,7 @@ function sanitizePodcasterSession(raw = {}) {
       ? clampText(row?.captionText || "", 10000)
       : (legacyMustRemainLiteral ? legacyOnScreenText : "");
     nextRow.inSceneText = normalizeInSceneText(row?.inSceneText || "", { truncate: true });
+    nextRow.excludeScriptFromVideoPrompt = row?.excludeScriptFromVideoPrompt === true;
     const requestedOverlayMode = String(row?.overlayMode || "").trim().toLowerCase();
     nextRow.overlayMode = ["none", "headline", "captions", "both"].includes(requestedOverlayMode)
       ? requestedOverlayMode
@@ -8755,9 +8756,15 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         .filter(Boolean)
         .slice(0, 3);
     const performanceDirective = clampText(req.body?.performanceDirective || "", 1800);
-    const originalText = clampText(req.body?.originalText || "", 1600);
-    const targetSpeechLine = clampText(req.body?.targetSpeechLine || req.body?.text || "", 1600);
-    const text = targetSpeechLine || clampText(req.body?.text || "", 1600);
+    const excludeScriptFromVideoPrompt = req.body?.excludeScriptFromVideoPrompt === true
+      || String(req.body?.dialoguePolicy || "").trim().toLowerCase() === "ambient_only";
+    const originalText = excludeScriptFromVideoPrompt ? "" : clampText(req.body?.originalText || "", 1600);
+    const targetSpeechLine = excludeScriptFromVideoPrompt
+      ? ""
+      : clampText(req.body?.targetSpeechLine || req.body?.text || "", 1600);
+    const text = excludeScriptFromVideoPrompt
+      ? ""
+      : (targetSpeechLine || clampText(req.body?.text || "", 1600));
     const dialogueAudioUrl = clampText(
       req.body?.dialogueAudioUrl || req.body?.audioUrl || req.body?.audioDownloadUrl || "",
       3200
@@ -9285,6 +9292,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       overlayMode,
       textSource,
       textPolicy: requestedTextPolicy,
+      excludeScriptFromVideoPrompt,
+      dialoguePolicy: excludeScriptFromVideoPrompt ? "ambient_only" : "scripted",
       generator: resolvedGenerator,
       aspectRatio: requestedAspectRatio,
       transition,
@@ -10155,12 +10164,14 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
 
 function getMontageExportExtension(format = "mp4_h264") {
   const clean = String(format || "").trim().toLowerCase();
+  if (clean === "mp3_audio") return "mp3";
   if (clean === "webm_vp9") return "webm";
   return "mp4";
 }
 
 function getMontageExportMimeType(format = "mp4_h264") {
   const ext = getMontageExportExtension(format);
+  if (ext === "mp3") return "audio/mpeg";
   return ext === "webm" ? "video/webm" : "video/mp4";
 }
 
@@ -10752,8 +10763,11 @@ function normalizeMontageExportRequestBody(body = {}) {
   const raw = body && typeof body === "object" ? body : {};
   const sessionId = clampText(raw?.sessionId || "", 140);
   const exportMode = String(raw?.exportMode || "normal").trim().toLowerCase();
-  const requestedFormat = String(raw?.format || "mp4_h264").trim();
-  const format = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
+  const requestedFormat = String(raw?.format || "mp4_h264").trim().toLowerCase();
+  const onlyAudio = raw?.onlyAudio === true || requestedFormat === "mp3_audio";
+  const format = onlyAudio
+    ? "mp3_audio"
+    : (requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264");
   const qualityPreset = String(raw?.qualityPreset || "balanced").trim();
   const resolution = String(raw?.resolution || "source").trim();
   const renderMode = normalizeMontageRenderMode(raw?.renderMode || "browser");
@@ -11069,6 +11083,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     sessionId,
     renderMode,
     exportMode,
+    onlyAudio,
     format,
     qualityPreset,
     resolution,
@@ -11133,7 +11148,7 @@ function validateMontageExportRequest(input = {}) {
     err.status = 400;
     throw err;
   }
-  if (!new Set(["mp4_h264", "webm_vp9"]).has(String(input?.format || "").trim())) {
+  if (!new Set(["mp4_h264", "webm_vp9", "mp3_audio"]).has(String(input?.format || "").trim())) {
     const err = new Error("Formato inválido.");
     err.status = 400;
     throw err;
@@ -14040,6 +14055,178 @@ async function finalizeMontageExportAudioTrack({
   return nextOutPath;
 }
 
+async function renderMontageAudioOnlyExport({
+  input = {},
+  tmpDir = "",
+  downloadInput = null,
+  emitStage = () => {},
+  shouldAbort = () => false,
+  jobId = ""
+} = {}) {
+  if (typeof downloadInput !== "function") {
+    const err = new Error("montage_audio_downloader_missing");
+    err.status = 500;
+    throw err;
+  }
+  const entries = Array.isArray(input.entries) ? input.entries : [];
+  const timelineDurationMs = Math.max(
+    500,
+    Math.round(Number(input.audioTimelineRaw?.durationMs || 0) || 0),
+    ...entries.map((entry) => Math.max(0, Math.round(Number(entry?.timelineEndMs || 0) || 0))),
+    entries.reduce((acc, entry) => acc + Math.max(0, Math.round(Number(entry?.durationMs || 0) || 0)), 0)
+  );
+  const entryAudioSegments = entries
+    .map((entry, index) => {
+      const audio = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
+      if (!audio) return null;
+      const rowId = clampText(entry?.rowId || "", 140);
+      const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+      const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
+      const hasSource = Boolean(
+        audio.storagePath
+        || audio.downloadUrl
+        || audio.url
+        || audio.dataUrl
+        || audio.localDataUrl
+        || audio.localMediaCacheKey
+      );
+      if (!hasSource) return null;
+      return {
+        kind: "entry-audio",
+        id: `entry-audio-${rowId || index + 1}`,
+        rowId,
+        url: String(audio.downloadUrl || audio.url || "").trim(),
+        downloadUrl: String(audio.downloadUrl || audio.url || "").trim(),
+        storagePath: clampText(audio.storagePath || "", 900),
+        dataUrl: String(audio.dataUrl || audio.localDataUrl || "").trim(),
+        localDataUrl: String(audio.localDataUrl || audio.dataUrl || "").trim(),
+        localMediaCacheKey: String(audio.localMediaCacheKey || "").trim(),
+        mimeType: clampText(audio.mimeType || "audio/mpeg", 120) || "audio/mpeg",
+        startMs,
+        durationMs,
+        trimInMs: 0,
+        trimOutMs: durationMs,
+        playbackRate: 1,
+        fadeInMs: 0,
+        fadeOutMs: 0,
+        volumePct: Math.max(0, Math.min(200, Number(entry?.geminiVolumeOverridePct ?? 100) || 100))
+      };
+    })
+    .filter(Boolean);
+  const configuredSegments = Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments : [];
+  const audioSegments = configuredSegments.length ? configuredSegments : entryAudioSegments;
+  if (!audioSegments.length) {
+    const err = new Error("montage_audio_only_sources_missing");
+    err.code = "montage_audio_only_sources_missing";
+    err.status = 422;
+    throw err;
+  }
+
+  emitStage("mix_audio_only", 0.32, "Mezclando audio del timeline en MP3.");
+  console.info("[backend][montage-export][audio-only-start]", {
+    jobId,
+    segmentCount: audioSegments.length,
+    durationMs: timelineDurationMs
+  });
+
+  const segmentInputs = [];
+  for (let i = 0; i < audioSegments.length; i += 1) {
+    if (shouldAbort()) {
+      const err = new Error("montage_export_cancelled");
+      err.code = "montage_export_cancelled";
+      err.status = 499;
+      throw err;
+    }
+    const segment = audioSegments[i] || {};
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const p = await downloadInput(segment, "timeline-audio", i);
+      if (p) segmentInputs.push({ path: p, segment });
+    } catch (error) {
+      if (String(error?.code || "") === "storage_not_found") continue;
+      throw error;
+    }
+  }
+  if (!segmentInputs.length) {
+    const err = new Error("montage_audio_only_sources_missing");
+    err.code = "montage_audio_only_sources_missing";
+    err.status = 422;
+    throw err;
+  }
+
+  const outPath = path.join(tmpDir, "montage-audio-only.mp3");
+  const durationSec = Math.max(0.5, timelineDurationMs / 1000);
+  const filters = [];
+  const labels = [];
+  segmentInputs.forEach((item, idx) => {
+    const segment = item.segment || {};
+    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
+    const duration = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
+    const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
+    const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
+    const fadeInSec = Math.max(0, Math.min(duration, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
+    const fadeOutSec = Math.max(0, Math.min(duration, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
+    const inputIndex = idx + 1;
+    const label = `aonly${idx}`;
+    labels.push(label);
+    const fadeParts = [volume.toFixed(3)];
+    if (fadeInSec > 0.001) {
+      fadeParts.push(`if(lt(t,${fadeInSec.toFixed(3)}),t/${fadeInSec.toFixed(3)},1)`);
+    }
+    if (fadeOutSec > 0.001) {
+      fadeParts.push(`if(gt(t,${Math.max(0, duration - fadeOutSec).toFixed(3)}),(${duration.toFixed(3)}-t)/${fadeOutSec.toFixed(3)},1)`);
+    }
+    const retimeFilters = Math.abs(playbackRate - 1) > 0.0001
+      ? `,${buildFfmpegAtempoFilterChain(playbackRate)}`
+      : "";
+    const kind = String(segment?.kind || "").trim().toLowerCase();
+    const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
+    const suffixes = [];
+    if (isBackgroundSegment && Array.isArray(input.normalizedGeminiTimelineSegments) && input.normalizedGeminiTimelineSegments.length) {
+      const duckVolume = normalizeMontageBackgroundDuckVolume(
+        segment?.duckingWhenGeminiPct ?? segment?.duckingPct,
+        normalizeMontageBackgroundDuckVolume(input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct, 0.60)
+      );
+      suffixes.push(`volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, duckVolume))}':eval=frame`);
+    }
+    const volumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
+    filters.push(
+      `[${inputIndex}:a]atrim=start=${trimInSec.toFixed(3)}:duration=${(duration * playbackRate).toFixed(3)},asetpts=PTS-STARTPTS${retimeFilters},atrim=start=0:duration=${duration.toFixed(3)},asetpts=PTS-STARTPTS,volume='${volumeExpr}':eval=frame,adelay=${startMs}ms|${startMs}ms${suffixes.length ? `,${suffixes.join(",")}` : ""}[${label}]`
+    );
+  });
+  const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,atrim=start=0:duration=${durationSec.toFixed(3)},aresample=48000,alimiter=limit=-1.5dB[outa]`;
+  await runFfmpegCommand([
+    "-y", "-hide_banner", "-loglevel", "warning",
+    "-f", "lavfi", "-t", durationSec.toFixed(3), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+    ...segmentInputs.flatMap((item) => ["-i", item.path]),
+    "-filter_complex", `${filters.join(";")};${mix}`,
+    "-map", "[outa]",
+    "-vn",
+    "-c:a", "libmp3lame",
+    "-ar", "48000",
+    "-b:a", "192k",
+    outPath
+  ], {
+    stage: "montage_audio_only_mix",
+    shouldAbort: () => shouldAbort()
+  });
+  await removeMontageTempPaths(segmentInputs.map((item) => item?.path));
+  console.info("[backend][montage-export][audio-only-finish]", {
+    jobId,
+    outputSnapshot: await buildMontageFileSnapshot(outPath)
+  });
+  return {
+    finalOutPath: outPath,
+    exportedEntries: entries.map((entry, index) => ({
+      rowId: clampText(entry?.rowId || "", 140),
+      sceneIndex: Math.max(1, Number(entry?.sceneIndex || index + 1) || index + 1),
+      durationMs: Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0)),
+      durationSec: Math.max(0.5, Number(entry?.durationMs || 0) / 1000)
+    }))
+  };
+}
+
 async function executeMontageExportPipeline(rawInput = {}, context = {}) {
   const input = rawInput && typeof rawInput === "object" ? rawInput : {};
   const uid = String(context?.uid || "").trim();
@@ -14119,6 +14306,35 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       jobId,
       sceneCount: Array.isArray(input.entries) ? input.entries.length : 0
     });
+
+    if (input.onlyAudio === true) {
+      const audioOnlyResult = await renderMontageAudioOnlyExport({
+        input,
+        tmpDir,
+        downloadInput,
+        emitStage,
+        shouldAbort,
+        jobId
+      });
+      emitStage("upload_result", 0.98, "Subiendo MP3 final.");
+      const stored = await storeMontageExportResult(audioOnlyResult.finalOutPath, input, context);
+      emitStage("finalize_result", 0.99, "Finalizando entrega del MP3.");
+      return {
+        export: {
+          filename: stored.filename,
+          mimeType: stored.mimeType,
+          storagePath: stored.storagePath,
+          downloadUrl: stored.downloadUrl,
+          downloadToken: stored.downloadToken,
+          sizeBytes: stored.sizeBytes,
+          createdAt: stored.createdAtIso,
+          expiresAt: stored.expiresAtIso,
+          exportId: stored.exportId
+        },
+        downloadUrl: stored.downloadUrl,
+        exportedEntries: audioOnlyResult.exportedEntries
+      };
+    }
 
     for (let i = 0; i < input.entries.length; i += 1) {
       throwIfCancelled("download_assets");

@@ -190,6 +190,22 @@ test("native dialogue is spoken without quote-delimited copy", () => {
   assert.match(result.prompt, /Never show the dialogue as visible text\./);
 });
 
+test("reference-only scene excludes the script and explicitly keeps the subject silent", () => {
+  const result = buildDialogueVideoPromptBundle(createFixture({
+    dialogueAudioStoragePath: "",
+    dialogueAudioUrl: "",
+    text: "Este guion nunca debe llegar al video.",
+    excludeScriptFromVideoPrompt: true,
+    dialoguePolicy: "ambient_only"
+  }));
+
+  assert.equal(result.excludeScriptFromVideoPrompt, true);
+  assert.equal(result.dialoguePolicy, "ambient_only");
+  assert.doesNotMatch(result.prompt, /Este guion nunca debe llegar al video/);
+  assert.match(result.prompt, /No speech, narration, or lip-synced dialogue/);
+  assert.match(result.prompt, /subject remains silent with a closed, relaxed mouth/);
+});
+
 test("HQ regeneration guidance is included after analysis and text directives remain sanitized", () => {
   const result = buildDialogueVideoPromptBundle(createFixture({
     regenerationAnalysis: {

@@ -53,8 +53,12 @@ const context = {
     return false;
   },
   resolveStaleAwareProxyMediaUrl(downloadUrl, storagePath) {
-    return storagePath
-      ? `https://example.test/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`
+    let cleanStoragePath = String(storagePath || "").trim();
+    if (cleanStoragePath.startsWith("gs://")) {
+      cleanStoragePath = cleanStoragePath.replace(/^gs:\/\/[^/]+\//i, "");
+    }
+    return cleanStoragePath
+      ? `https://example.test/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`
       : String(downloadUrl || "").trim()
         ? `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(String(downloadUrl || "").trim())}`
         : "";
@@ -75,13 +79,12 @@ vm.createContext(context);
 vm.runInContext(`${extractFunction("resolveStorageAudioUrl")};`, context);
 vm.runInContext(`${extractFunction("resolveStorageVideoUrl")};`, context);
 
-test("podcaster resolveStorageAudioUrl converts gs:// audio into proxy-media url= fallback", () => {
+test("podcaster resolveStorageAudioUrl converts gs:// audio into proxy-media storagePath fallback", () => {
   const gsUrl = "gs://bucket-name/podcaster/sessions/session-audio/audio/row-1/file.wav";
   const resolved = context.resolveStorageAudioUrl(gsUrl, "");
-  const expectedFirebaseUrl = "https://firebasestorage.googleapis.com/v0/b/bucket-name/o/podcaster%2Fsessions%2Fsession-audio%2Faudio%2Frow-1%2Ffile.wav?alt=media";
   assert.equal(
     resolved,
-    `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(expectedFirebaseUrl)}`
+    "https://example.test/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession-audio%2Faudio%2Frow-1%2Ffile.wav"
   );
 });
 
@@ -93,12 +96,11 @@ test("podcaster resolveStorageAudioUrl keeps plain storagePath on storagePath pr
   );
 });
 
-test("podcaster resolveStorageVideoUrl converts gs:// video into proxy-media url= fallback", () => {
+test("podcaster resolveStorageVideoUrl converts gs:// video into proxy-media storagePath fallback", () => {
   const gsUrl = "gs://bucket-name/podcaster/sessions/session-video/videos/row-1/file.mp4";
   const resolved = context.resolveStorageVideoUrl(gsUrl, "");
-  const expectedFirebaseUrl = "https://firebasestorage.googleapis.com/v0/b/bucket-name/o/podcaster%2Fsessions%2Fsession-video%2Fvideos%2Frow-1%2Ffile.mp4?alt=media";
   assert.equal(
     resolved,
-    `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(expectedFirebaseUrl)}`
+    "https://example.test/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession-video%2Fvideos%2Frow-1%2Ffile.mp4"
   );
 });

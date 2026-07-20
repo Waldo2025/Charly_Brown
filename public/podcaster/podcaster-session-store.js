@@ -616,8 +616,12 @@ async function loadSingleSessionFromCloud(sessionId = "", uid = "", deps = {}) {
       });
       const session = response?.session && typeof response.session === "object" ? response.session : null;
       if (session) return session;
-    } catch (_) {
-      // Fallback to direct Firestore for local/dev runtimes.
+    } catch (error) {
+      console.warn("[podcaster][session-store] API session get failed; falling back to Firestore", {
+        sessionId: key,
+        status: Number(error?.status || 0) || null,
+        error: String(error?.message || error?.detail?.error || "unknown").slice(0, 160)
+      });
     }
   }
   try {
@@ -627,7 +631,11 @@ async function loadSingleSessionFromCloud(sessionId = "", uid = "", deps = {}) {
     const data = sessionSnap.data() || {};
     const sessionData = buildSessionFromPodcasterDoc(data, key);
     return sessionData && typeof sessionData === "object" ? sessionData : null;
-  } catch (_) {
+  } catch (error) {
+    console.warn("[podcaster][session-store] Firestore session get failed", {
+      sessionId: key,
+      error: String(error?.message || error?.code || "unknown").slice(0, 160)
+    });
     return null;
   }
 }

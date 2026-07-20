@@ -738,6 +738,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const dialogueAudioUrl = String(audioClip?.downloadUrl || audioClip?.url || "").trim();
   const dialogueAudioStoragePath = String(audioClip?.storagePath || audioClip?.path || "").trim();
   const hasExternalDialogueAudio = Boolean(dialogueAudioUrl || dialogueAudioStoragePath);
+  const excludeScriptFromVideoPrompt = row?.excludeScriptFromVideoPrompt === true;
+  const omitGeneratedDialogue = hasExternalDialogueAudio || excludeScriptFromVideoPrompt;
   const previousInteractionId = options.correctInSceneText === true
     ? String(
       options.previousInteractionId
@@ -819,7 +821,11 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         counterpartSpeakerLabel,
         counterpartSpeakerName,
         voiceName: resolveConfiguredSpeakerVoiceForGeneration(row, session),
-        text: hasExternalDialogueAudio ? "" : String(row?.text || "").trim(),
+        text: omitGeneratedDialogue ? "" : String(row?.voiceOverText || row?.text || "").trim(),
+        excludeScriptFromVideoPrompt,
+        dialoguePolicy: excludeScriptFromVideoPrompt
+          ? "ambient_only"
+          : (hasExternalDialogueAudio ? "external_dialogue" : "scripted"),
         genderGroup,
         portraitUrl,
         portraitStoragePath,
@@ -914,6 +920,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         resolvedGeneratorHint: routing.resolvedGeneratorHint,
         quality: routing.quality,
         textPolicy,
+        dialoguePolicy: body.dialoguePolicy,
+        excludeScriptFromVideoPrompt,
         aspectRatio,
         cheapVideoMode,
         referenceMode,
@@ -945,6 +953,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         videoDirectiveLength: videoDirective.length,
         scenePromptLength: scenePrompt.length,
         textLength: body.text.length,
+        dialoguePolicy: body.dialoguePolicy,
+        excludeScriptFromVideoPrompt,
         hasInSceneText: Boolean(inSceneText),
         hasExternalDialogueAudio,
         hasPreviousInteraction: Boolean(previousInteractionId),

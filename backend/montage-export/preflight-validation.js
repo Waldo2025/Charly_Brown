@@ -92,7 +92,8 @@ function validateMontageExportPreflight(input = {}, options = {}) {
   }
 
   const format = cleanText(source.format || "mp4_h264");
-  if (!new Set(["mp4_h264", "webm_vp9"]).has(format)) {
+  const onlyAudio = source.onlyAudio === true || format === "mp3_audio";
+  if (!new Set(["mp4_h264", "webm_vp9", "mp3_audio"]).has(format)) {
     issues.push(buildIssue({
       code: "invalid_format",
       message: "Formato de exportación inválido.",
@@ -169,7 +170,7 @@ function validateMontageExportPreflight(input = {}, options = {}) {
       }));
     }
 
-    if (!hasVisualSource && !hasSyntheticSource) {
+    if (!onlyAudio && !hasVisualSource && !hasSyntheticSource) {
       issues.push(buildIssue({
         code: "missing_visual_source",
         message: `Escena ${sceneIndex} no tiene video, imagen ni fondo renderizable para el backend.`,
@@ -181,7 +182,7 @@ function validateMontageExportPreflight(input = {}, options = {}) {
       }));
     }
 
-    if (usesNativeVideoAudio && !hasVisualSource) {
+    if (!onlyAudio && usesNativeVideoAudio && !hasVisualSource) {
       issues.push(buildIssue({
         code: "missing_native_audio_source",
         message: `Escena ${sceneIndex} usa audio nativo pero no tiene archivo de video accesible.`,
