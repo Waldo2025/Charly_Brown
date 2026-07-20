@@ -14,8 +14,8 @@ assert.match(
 
 assert.match(
   source,
-  /if \(isProxyMediaUrl && !isImageLikeFinalUrl\) \{[\s\S]*this\.blobCache\.set\(url,\s*finalUrl\);[\s\S]*if \(cacheKey !== url\) this\.blobCache\.set\(cacheKey,\s*finalUrl\);[\s\S]*return finalUrl;[\s\S]*\}/,
-  "Los videos servidos por proxy-media deben mantenerse como URL HTTP directa para aprovechar Range y streaming del navegador."
+  /if \(isProxyMediaUrl && !isImageLikeFinalUrl && options\.persistent !== true\) \{[\s\S]*this\.blobCache\.set\(url,\s*finalUrl\);[\s\S]*if \(cacheKey !== url\) this\.blobCache\.set\(cacheKey,\s*finalUrl\);[\s\S]*return finalUrl;[\s\S]*\}/,
+  "proxy-media debe mantenerse como stream solo en reproducción directa; la preparación persistente debe continuar hasta blob."
 );
 
 console.log("Podcaster playback controller keeps proxy-media videos streaming OK.");

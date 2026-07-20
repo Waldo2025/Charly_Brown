@@ -36,6 +36,76 @@ function resolveStableReplacementMediaUrl(downloadUrl = "", storagePath = "") {
     return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
 }
 
+function resolveReplacementPreviewUrl(downloadUrl = "", storagePath = "") {
+    const rawUrl = String(downloadUrl || "").trim();
+    const cleanStoragePath = String(storagePath || "").trim();
+    if (cleanStoragePath) {
+        return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+    }
+    return rawUrl;
+}
+
+function getSceneReplacementPreviewVideos() {
+    return Array.from(els.modal?.querySelectorAll?.(".scene-video-selector-card video") || []);
+}
+
+function pauseSceneReplacementPreview(videoEl = null, { keepFrame = true } = {}) {
+    if (!(videoEl instanceof HTMLVideoElement)) return;
+    videoEl.pause();
+    videoEl.autoplay = false;
+    if (!keepFrame) {
+        try {
+            videoEl.currentTime = 0;
+        } catch (_) {
+            // The media may not have metadata yet.
+        }
+    }
+}
+
+function stopSceneReplacementPreviews({ keepFrames = true } = {}) {
+    getSceneReplacementPreviewVideos().forEach((videoEl) => {
+        pauseSceneReplacementPreview(videoEl, { keepFrame: keepFrames });
+    });
+}
+
+function prepareSceneReplacementPreview(videoEl = null) {
+    if (!(videoEl instanceof HTMLVideoElement)) return;
+    videoEl.muted = true;
+    videoEl.defaultMuted = true;
+    videoEl.volume = 0;
+    videoEl.playsInline = true;
+    videoEl.loop = true;
+    const revealFirstFrame = () => {
+        if (!Number.isFinite(Number(videoEl.duration)) || Number(videoEl.duration) <= 0.08) return;
+        if (Number(videoEl.currentTime || 0) > 0.01) return;
+        try {
+            videoEl.currentTime = Math.min(0.15, Math.max(0.04, Number(videoEl.duration) / 20));
+        } catch (_) {
+            // Some browsers delay seeking until enough media data is buffered.
+        }
+    };
+    if (videoEl.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        revealFirstFrame();
+    } else {
+        videoEl.addEventListener("loadedmetadata", revealFirstFrame, { once: true });
+    }
+}
+
+function playSceneReplacementPreview(videoEl = null) {
+    if (!(videoEl instanceof HTMLVideoElement)) return;
+    getSceneReplacementPreviewVideos().forEach((candidate) => {
+        if (candidate !== videoEl) pauseSceneReplacementPreview(candidate, { keepFrame: true });
+    });
+    prepareSceneReplacementPreview(videoEl);
+    videoEl.autoplay = true;
+    const playPromise = videoEl.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {
+            // Keep the decoded preview frame when autoplay is restricted.
+        });
+    }
+}
+
 function resolveSceneNumber(rowId = "", session = null) {
     const key = String(rowId || "").trim();
     const activeSession = session || getActivePodcasterSession();
@@ -264,7 +334,8 @@ function registerPodcasterMediaReplacementApi() {
         ...(window.PodcasterMediaReplacement || {}),
         swapStageToImagePreview,
         onLibraryMediaSelected,
-        openSceneVideoSelectorModal
+        openSceneVideoSelectorModal,
+        stopLibraryPreviews: stopSceneReplacementPreviews
     };
 }
 
@@ -566,7 +637,7 @@ function setupEventListeners() {
             // 2. Local sync
             if (typeof window.upsertActiveSession === "function") {
                 const now = new Date().toISOString();
-                window.upsertActiveSession((current) => {
+                const updatedSession = window.upsertActiveSession((current) => {
                     const next = { ...current };
                     const currentRows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
                     
@@ -612,11 +683,44 @@ function setupEventListeners() {
                     effects
                 });
 
+                const hydratedSession = updatedSession || getActivePodcasterSession();
+                if (hydratedSession && typeof playbackController?.sync === "function") {
+                    const hydratedConfig = typeof window.getPodcastVideoConfig === "function"
+                        ? window.getPodcastVideoConfig(hydratedSession)
+                        : hydratedSession?.podcastVideoConfig;
+                    playbackController.sync(hydratedSession, hydratedConfig);
+                    logSceneReplacement("playback-controller:rehydrated", currentEditingRowId, {
+                        sessionId: String(hydratedSession?.id || "").trim(),
+                        mediaUrl: String(hydratedSession?.dialogueVideoMap?.[currentEditingRowId]?.downloadUrl || "").trim(),
+                        storagePath: String(hydratedSession?.dialogueVideoMap?.[currentEditingRowId]?.storagePath || "").trim()
+                    });
+                }
+
+                if (!isImageMedia && hydratedSession && typeof playbackController?.getBlobUrl === "function") {
+                    const hydratedClip = hydratedSession?.dialogueVideoMap?.[currentEditingRowId] || mediaData;
+                    const playbackSource = typeof window.resolveStorageVideoUrl === "function"
+                        ? window.resolveStorageVideoUrl(
+                            hydratedClip?.downloadUrl || mediaUrl,
+                            hydratedClip?.storagePath || finalStoragePath,
+                            {
+                                updatedAt: hydratedClip?.updatedAt || "",
+                                type: hydratedClip?.type || mediaType,
+                                mimeType: hydratedClip?.mimeType || selectedLibrary?.mimeType || "video/mp4"
+                            }
+                        )
+                        : mediaUrl;
+                    const hydratedBlobUrl = await playbackController.getBlobUrl(playbackSource, { persistent: true });
+                    logSceneReplacement("video-blob:hydrated", currentEditingRowId, {
+                        playbackSource,
+                        hydratedAsBlob: /^(?:blob|data):/i.test(String(hydratedBlobUrl || ""))
+                    });
+                }
+
                 if (String(window.PodcasterState?.activeRowId || '').trim() === currentEditingRowId && typeof window.syncPodcastVideoStageMedia === "function") {
                     logSceneReplacement("stage-sync:start", currentEditingRowId, {
                         activeRowId: String(window.PodcasterState?.activeRowId || '').trim()
                     });
-                    window.syncPodcastVideoStageMedia(session || getActivePodcasterSession(), currentEditingRowId, { force: true });
+                    window.syncPodcastVideoStageMedia(hydratedSession, currentEditingRowId, { force: true });
                     logSceneReplacement("stage-sync:done", currentEditingRowId, {
                         activeRowId: String(window.PodcasterState?.activeRowId || '').trim()
                     });
@@ -640,6 +744,7 @@ function setupEventListeners() {
             uploadedMediaType = null;
             currentEditingRowId = "";
             if (els.modal) delete els.modal.dataset.rowId;
+            stopSceneReplacementPreviews({ keepFrames: true });
             els.modal.hidden = true;
             currentReplacementRequestMeta = { triggerSource: "unknown" };
 
@@ -765,16 +870,16 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
     const renderCard = (video) => {
       const card = document.createElement("div");
       card.className = "scene-video-selector-card";
-      card.style.cssText = "border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; cursor: pointer; transition: border-color 0.2s;";
       
       const downloadUrl = String(video.downloadUrl || video.videoDownloadUrl || video.url || video.videoUrl || "").trim();
       const mimeType = String(video.contentType || video.mimeType || "").trim().toLowerCase();
       const storagePath = String(video.storagePath || video.path || "").trim();
       const isImg = mimeType.startsWith("image/") || video.type === 'image' || /\.(jpg|jpeg|png|webp|gif)/i.test(downloadUrl) || /\.(jpg|jpeg|png|webp|gif)$/i.test(storagePath) || /\.(jpg|jpeg|png|webp|gif)$/i.test(String(video.name || "").trim());
       
+      const previewUrl = resolveReplacementPreviewUrl(downloadUrl, storagePath);
       const mediaHtml = isImg 
-        ? `<img src="${escapeHtml(downloadUrl)}" style="width: 100%; height: 120px; object-fit: cover; background: #000;" loading="lazy">`
-        : `<video src="${escapeHtml(downloadUrl)}" preload="metadata" style="width: 100%; height: 120px; object-fit: cover; background: #000;" muted playsinline onmouseover="this.play().catch(()=> {})" onmouseout="this.pause(); this.currentTime = 0;"></video>`;
+        ? `<img src="${escapeHtml(previewUrl)}" style="width: 100%; height: 120px; object-fit: cover; background: #000;" loading="lazy">`
+        : `<video src="${escapeHtml(previewUrl)}" preload="metadata" style="width: 100%; height: 120px; object-fit: cover; background: #000;" muted playsinline loop aria-label="Preview sin audio"></video>`;
 
       card.innerHTML = `
         ${mediaHtml}
@@ -782,7 +887,18 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
           ${escapeHtml(video.name || video.id || 'Media')}
         </div>
       `;
+      const previewVideo = card.querySelector("video");
+      if (previewVideo) {
+        prepareSceneReplacementPreview(previewVideo);
+        previewVideo.addEventListener("pointerenter", () => playSceneReplacementPreview(previewVideo));
+        previewVideo.addEventListener("pointerleave", () => {
+          if (!card.classList.contains("is-selected")) {
+            pauseSceneReplacementPreview(previewVideo, { keepFrame: true });
+          }
+        });
+      }
       card.addEventListener("click", () => {
+        stopSceneReplacementPreviews({ keepFrames: true });
         window._selectedLibraryVideo = {
           id: video.id,
           downloadUrl: downloadUrl,
@@ -795,11 +911,11 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
           selectedMedia: window._selectedLibraryVideo
         });
         
-        els.sceneVideoSelectorGeneratedGrid?.querySelectorAll('.scene-video-selector-card').forEach(c => c.style.borderColor = 'var(--border-color)');
-        els.sceneVideoSelectorOthersGrid?.querySelectorAll('.scene-video-selector-card').forEach(c => c.style.borderColor = 'var(--border-color)');
+        els.sceneVideoSelectorGeneratedGrid?.querySelectorAll('.scene-video-selector-card').forEach(c => c.classList.remove('is-selected'));
+        els.sceneVideoSelectorOthersGrid?.querySelectorAll('.scene-video-selector-card').forEach(c => c.classList.remove('is-selected'));
         
-        card.style.borderColor = '#6366f1';
-        card.style.borderWidth = '2px';
+        card.classList.add('is-selected');
+        if (previewVideo) playSceneReplacementPreview(previewVideo);
         
         if (typeof window.PodcasterMediaReplacement?.onLibraryMediaSelected === "function") {
           window.PodcasterMediaReplacement.onLibraryMediaSelected(window._selectedLibraryVideo);

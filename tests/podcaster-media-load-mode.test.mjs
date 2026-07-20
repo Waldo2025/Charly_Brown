@@ -168,6 +168,42 @@ test("PodcasterPlaybackController.getBlobUrl resolves gs:// and proxies correctl
   assert.equal(controller.getBlobUrlSync(gsUrl), resolvedUrl);
 });
 
+test("persistent video hydration does not reuse an in-flight streaming resolver", async () => {
+  const controller = new PodcasterPlaybackController();
+  controller.state.config = { mediaLoadMode: "streaming" };
+  const gsUrl = "gs://bucket/podcaster/sessions/s1/videos/replaced.mp4";
+  const directUrl = "https://firebasestorage.googleapis.com/v0/b/bucket/o/podcaster%2Fsessions%2Fs1%2Fvideos%2Freplaced.mp4?alt=media&token=test";
+  const originalFetch = globalThis.fetch;
+  let releaseStorageUrl;
+  let fetchCount = 0;
+  const storageUrlReady = new Promise((resolve) => {
+    releaseStorageUrl = () => resolve(directUrl);
+  });
+
+  controller.deps = {
+    resolveFirebaseStorageUrl: async () => storageUrlReady
+  };
+  globalThis.fetch = async (url) => {
+    assert.equal(url, directUrl);
+    fetchCount += 1;
+    return new Response(new Blob(["video-bytes"], { type: "video/mp4" }), { status: 200 });
+  };
+
+  try {
+    const streamingPromise = controller.getBlobUrl(gsUrl);
+    const persistentPromise = controller.getBlobUrl(gsUrl, { persistent: true });
+    releaseStorageUrl();
+
+    const [streamingUrl, persistentUrl] = await Promise.all([streamingPromise, persistentPromise]);
+    assert.equal(streamingUrl, directUrl);
+    assert.match(persistentUrl, /^blob:/);
+    assert.equal(fetchCount, 1);
+    assert.equal(controller.getBlobUrlSync(gsUrl), persistentUrl);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("PodcasterPlaybackController prewarms dialogue URLs successfully", () => {
   const controller = new PodcasterPlaybackController();
   controller.state.config = { mediaLoadMode: "streaming" };

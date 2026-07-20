@@ -1,8 +1,13 @@
 {
-  "version": "1.0.10.531",
-  "build": "2026-1.0.10.531",
+  "version": "1.0.10.536",
+  "build": "2026-1.0.10.536",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El timeline separa las promesas de streaming y descarga persistente para que la preparación nunca confunda un URL proxy con un blob hidratado antes de reproducir.",
+    "Corregido: Reemplazar Escena separa la URL temporal del preview de la referencia persistida y descarga el video seleccionado a blob/IndexedDB antes de sincronizar el escenario para una reproducción estable.",
+    "Corregido: Al confirmar Reemplazar Escena, el controlador de reproducción se rehidrata con la sesión actualizada antes de sincronizar el escenario, evitando que vuelva a cargar el video anterior.",
+    "Corregido: Las miniaturas de Reemplazar Escena cargan los MP4 por proxy-media usando storagePath, evitando URLs de Firebase sin token que dejaban readyState=0 y la pantalla negra.",
+    "Corregido: Reemplazar Escena muestra un frame inicial y reproduce en loop el video seleccionado o apuntado, siempre silenciado, en lugar de dejar las tarjetas negras.",
     "Corregido: La exportación solo audio MP3 de Podcaster conserva onlyAudio y mp3_audio en el request FFmpeg v2; el preflight ya no exige video, imagen ni fondo y el backend infiere la intención MP3 aunque falte la bandera.",
     "Corregido: Export FFmpeg v2 lee directamente el checkbox Solo audio al preparar el payload MP3 y muestra los issues anidados de preflight para diagnosticar errores 422.",
     "Corregido: Export FFmpeg v2 respeta el modo solo audio MP3, omite validaciones y capas visuales, y fuerza cache-buster 1.0.10.529 para cargar el cliente API vigente.",
@@ -455,6 +460,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.531",
+  "cache_version": "2026-1.0.10.536",
   "updated_at": "2026-07-20T00:00:00.000Z"
 }

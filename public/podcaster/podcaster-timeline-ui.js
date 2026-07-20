@@ -1576,13 +1576,16 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const contentX = Math.max(0, Number(clientX || 0) - rect.left - offsetPx);
     const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
     const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX)));
+    const shouldAwaitCurrentMedia = options.lightweightPlayhead !== true;
     Promise.resolve(playbackController.preloadStageVideosAroundMs?.(nextMs, {
       session,
       limit: 3,
-      reason: "timeline-click-seek"
+      reason: "timeline-click-seek",
+      awaitCurrent: shouldAwaitCurrentMedia
     })).catch(() => { });
     playbackController.seek(nextMs, {
       lightweight: options.lightweightPlayhead === true,
+      awaitStageVideo: shouldAwaitCurrentMedia,
       suppressAutoScroll: options.suppressAutoScroll === true || options.lightweightPlayhead === true || podcastVideoState.playheadDragging === true
     });
     if (options.stopMontage === true && podcastVideoState.montageActive) {
@@ -1646,13 +1649,16 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       : Math.max(0, Math.min(rect.width, Number(clientX || 0) - rect.left));
     const contentX = Math.max(0, Math.min(totalWidthPx, localX + Number(els.podcastTimelineRuler.scrollLeft || 0) - offsetPx));
     const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX, session)));
+    const shouldAwaitCurrentMedia = options.lightweightPlayhead !== true;
     Promise.resolve(playbackController.preloadStageVideosAroundMs?.(nextMs, {
       session,
       limit: 3,
-      reason: "timeline-ruler-seek"
+      reason: "timeline-ruler-seek",
+      awaitCurrent: shouldAwaitCurrentMedia
     })).catch(() => { });
     playbackController.seek(nextMs, {
       lightweight: options.lightweightPlayhead === true,
+      awaitStageVideo: shouldAwaitCurrentMedia,
       suppressAutoScroll: options.suppressAutoScroll === true || options.lightweightPlayhead === true || podcastVideoState.playheadDragging === true
     });
     if (options.stopMontage === true && podcastVideoState.montageActive) {

@@ -769,6 +769,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     const cacheKey = this.resolvePersistentMediaCacheKey(url) || url;
+    // A streaming lookup may resolve only to a proxy URL, while a persistent
+    // lookup must fetch bytes and create a blob. They cannot share a promise.
+    const fetchPromiseKey = options.persistent === true
+      ? `persistent:${cacheKey}`
+      : `streaming:${cacheKey}`;
     const persistentStoreKey = `stage-media:${cacheKey}`;
     const prefersStreamingProxy = String(url || "").includes('/api/assets/proxy-media');
     // 1. Check in-memory cache
@@ -791,7 +796,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const activeMode = this.resolveActiveMediaLoadMode(url);
     if (activeMode === "streaming" && options.persistent !== true) {
-      if (this.fetchPromises.has(cacheKey)) return this.fetchPromises.get(cacheKey);
+      if (this.fetchPromises.has(fetchPromiseKey)) return this.fetchPromises.get(fetchPromiseKey);
 
       const p = (async () => {
         try {
@@ -814,14 +819,14 @@ export class PodcasterPlaybackController extends EventEmitter {
           console.error("[podcaster-playback-controller] Error resolving streaming URL:", e);
           return url;
         } finally {
-          this.fetchPromises.delete(cacheKey);
+          this.fetchPromises.delete(fetchPromiseKey);
         }
       })();
-      this.fetchPromises.set(cacheKey, p);
+      this.fetchPromises.set(fetchPromiseKey, p);
       return p;
     }
 
-    if (this.fetchPromises.has(cacheKey)) return this.fetchPromises.get(cacheKey);
+    if (this.fetchPromises.has(fetchPromiseKey)) return this.fetchPromises.get(fetchPromiseKey);
 
     const p = (async () => {
       try {
@@ -970,10 +975,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         }
         return url;
       } finally {
-        this.fetchPromises.delete(cacheKey);
+        this.fetchPromises.delete(fetchPromiseKey);
       }
     })();
-    this.fetchPromises.set(cacheKey, p);
+    this.fetchPromises.set(fetchPromiseKey, p);
     return p;
   }
 
@@ -1154,6 +1159,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         }
         this.blobCache.delete(cacheCandidate);
         this.fetchPromises.delete(cacheCandidate);
+        this.fetchPromises.delete(`streaming:${cacheCandidate}`);
+        this.fetchPromises.delete(`persistent:${cacheCandidate}`);
       });
       if (candidate.startsWith("blob:")) {
         try { URL.revokeObjectURL(candidate); } catch (_) { }

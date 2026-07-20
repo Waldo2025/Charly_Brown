@@ -13,7 +13,8 @@ const homePlayer = readFileSync(new URL("../public/js/home.js", import.meta.url)
 
 test("image replacement persists a stable source and resets geometry for the new image", () => {
   assert.match(replacement, /resolveStableReplacementMediaUrl/);
-  assert.match(replacement, /\^\(\?:blob\|data\):/);
+  assert.match(replacement, /rawUrl && !\/\^\(\?:blob\|data\):\/i\.test\(rawUrl\)/);
+  assert.match(replacement, /function resolveReplacementPreviewUrl[\s\S]*?\/api\/assets\/proxy-media\?storagePath=/);
   assert.match(replacement, /mediaScale:\s*1,[\s\S]*?mediaOffsetXPct:\s*0,[\s\S]*?mediaOffsetYPct:\s*0,[\s\S]*?visualLayoutMode:\s*"default"/m);
   assert.match(replacement, /includeAudio:\s*false/);
   assert.doesNotMatch(replacement, /else if \(typeof playbackController\?\.invalidateRowAudioCache/);

@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.530";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.528";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.536";
 import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.528";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.528";
@@ -13564,6 +13564,7 @@ function mergeVideoDirectives(primary = "", secondary = "") {
 
 
 function closeSceneVideoSelectorModal() {
+  window.PodcasterMediaReplacement?.stopLibraryPreviews?.({ keepFrames: true });
   if (els.podcastSceneVideoSelectorModal) {
     els.podcastSceneVideoSelectorModal.hidden = true;
   }
@@ -18608,6 +18609,7 @@ function attachEvents() {
     if (playbackController.state.isPlaying) playbackController.pause();
     await playbackController.seek(studioScrubberSeekTargetMs, {
       lightweight: false,
+      awaitStageVideo: true,
       suppressAutoScroll: true
     });
   };

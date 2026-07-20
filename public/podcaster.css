@@ -8739,6 +8739,15 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   transform: translateY(-1px);
 }
 
+.scene-video-selector-card.is-selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #6366f1 28%, transparent 72%);
+}
+
+.scene-video-selector-card video {
+  display: block;
+}
+
 .podcast-scene-video-tabs {
   display: flex;
   gap: 0.5rem;
