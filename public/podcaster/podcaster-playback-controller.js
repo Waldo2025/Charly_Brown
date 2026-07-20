@@ -2640,6 +2640,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     // Pre-load upcoming
     const entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
     const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 45000).slice(0, 8);
+    let hydratedUpcomingCount = 0;
+    const hydratedUpcomingLimit = 3;
     upcoming.forEach(e => {
       if (!this.hasStageVisualSurface(e) || this.isColorSceneEntry(e)) {
         return;
@@ -2647,6 +2649,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (this.isImageStageEntry(e)) {
         this.preloadImageSrc(e.videoSrc).catch(() => { });
       } else {
+        if (hydratedUpcomingCount < hydratedUpcomingLimit) {
+          hydratedUpcomingCount += 1;
+          this.getBlobUrl(e.videoSrc, { persistent: true }).catch(() => { });
+          return;
+        }
         this.getBlobUrl(e.videoSrc);
       }
     });
@@ -2880,9 +2887,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!this.deps?.setPodcastStageVideoSourceForElement) return;
 
     this.stageMachine.preloadingSrc = nextSrc;
-    this.stageMachine.preloadingPromise = Promise.resolve(
-      this.deps.setPodcastStageVideoSourceForElement(inactiveEl, nextSrc, { keepHidden: true })
-    ).catch(() => false).finally(() => {
+    this.stageMachine.preloadingPromise = (async () => {
+      await this.getBlobUrl(nextSrc, { persistent: true });
+      if (this.stageMachine.preloadingSrc !== nextSrc) return false;
+      return this.deps.setPodcastStageVideoSourceForElement(inactiveEl, nextSrc, { keepHidden: true });
+    })().catch(() => false).finally(() => {
       if (this.stageMachine.preloadingSrc === nextSrc) {
         this.stageMachine.preloadingSrc = '';
         this.stageMachine.preloadingPromise = null;
