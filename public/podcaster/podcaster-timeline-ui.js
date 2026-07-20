@@ -1,3 +1,8 @@
+import {
+  resolveTimelineEntryAtMs,
+  TIMELINE_LOOKUP_TOLERANCE_MS
+} from "./podcaster-timeline-shared.js";
+
 export function createPodcasterTimelineUiApi(deps = {}) {
   const {
     els,
@@ -377,6 +382,28 @@ export function createPodcasterTimelineUiApi(deps = {}) {
   }
 
   function renderPodcastVideoTimeline(session = null, options = {}) {
+    const renderReason = String(options.reason || "structure").trim() || "structure";
+    const lightweightReasons = new Set([
+      "selection",
+      "playback",
+      "ephemeral",
+      "media-stale",
+      "onscreen-text-track-setting",
+      "onscreen-text-track-toggle",
+      "onscreen-text-bulk-visibility",
+      "onscreen-text-visibility",
+      "onscreen-text-add",
+      "audio-metadata-loaded",
+      "dialogue-audio-regenerated",
+      "overlay-cards",
+      "audio-loop-toggle",
+      "throttled-metadata-sync",
+      "text-drag"
+    ]);
+    const isLightweightReason = lightweightReasons.has(renderReason);
+    const requestLightweight = options?.lightweight === true || isLightweightReason;
+    const forceStructure = options.force === true && !isLightweightReason;
+
     const activeSession = session || getActiveSession();
     const rows = getSessionRows(activeSession);
     const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
@@ -463,7 +490,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       });
     };
 
-    if (options.lightweight && els.podcastVideoTimeline) {
+    const dialogueMap = getDialogueVideoMap(activeSession);
+
+    if (requestLightweight && els.podcastVideoTimeline) {
       const clipMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
       const onScreenTextClipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
       const minClipPx = getStudioTimelineMinClipPx(activeSession);
@@ -515,6 +544,67 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       if (podcastVideoState.showMontageAudioSubtracks) {
         syncMontageAudioSubtrackAlignment();
       }
+
+      // Keep timeline media previews synced to the active row data without remounting all tracks.
+      try {
+        const getSceneMediaSource = (row = null, rowId = "", generatedClip = null, rowClip = null) => {
+          const rawRowId = String(rowId || "").trim();
+          if (!rawRowId) return "";
+          const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
+          const normalizedGeneratedClip = generatedClip || null;
+          const fallbackClip = rowClip || null;
+          const clip = rowClip || generatedClip || null;
+          const source = resolveStorageVideoUrl(
+            primarySegment?.downloadUrl || generatedClip?.downloadUrl || rowClip?.downloadUrl || "",
+            primarySegment?.storagePath || generatedClip?.storagePath || rowClip?.storagePath || "",
+            {
+              updatedAt: String(primarySegment?.updatedAt || generatedClip?.updatedAt || clip?.updatedAt || "").trim(),
+              type: String(primarySegment?.type || generatedClip?.type || normalizedGeneratedClip?.type || fallbackClip?.type || "").trim(),
+              mimeType: String(primarySegment?.mimeType || generatedClip?.mimeType || normalizedGeneratedClip?.mimeType || fallbackClip?.mimeType || "").trim()
+            }
+          );
+          const portrait = resolvePodcastPortraitUrl(resolvePortraitForSpeaker(activeSession, row?.speaker));
+          return source || portrait || "";
+        };
+
+        els.podcastVideoTimeline.querySelectorAll(".podcast-video-scene-card").forEach((cardEl) => {
+          const rowId = String(cardEl.closest("[data-row-id]")?.dataset?.rowId || "").trim();
+          if (!rowId) return;
+          const row = rowById?.get(rowId) || null;
+          const clip = clipMap[rowId] || null;
+          if (!row || !clip) return;
+          const previewWrap = cardEl.querySelector(".podcast-video-scene-preview");
+          if (!previewWrap) return;
+          const sceneGeneratedClip = dialogueMap[rowId] || null;
+          const rowClip = clipMap[rowId] || null;
+          const clipSrc = getSceneMediaSource(row, rowId, sceneGeneratedClip, rowClip);
+          if (!clipSrc) return;
+
+          if (clipSrc) {
+            const isVideo = !isLikelyImageMediaRecord(sceneGeneratedClip || rowClip || clip || {});
+            const currentSourceAttr = String(previewWrap?.dataset?.previewSrc || "").trim();
+            const currentImageSrc = String(previewWrap?.querySelector("img")?.getAttribute?.("src") || "").trim();
+            if (isVideo) {
+              if (currentSourceAttr === clipSrc) {
+                const existingVideo = previewWrap.querySelector("video[data-preview-src]");
+                if (existingVideo && String(existingVideo.dataset?.previewSrc || "").trim() === clipSrc) return;
+              }
+              previewWrap.innerHTML = `<video data-preview-src="${escapeHtml(clipSrc)}" preload="none" muted playsinline crossorigin="anonymous"></video>`;
+            } else {
+              const img = previewWrap.querySelector("img") || null;
+              const isDifferentImage = currentImageSrc !== clipSrc;
+              if (!img || isDifferentImage) {
+                previewWrap.innerHTML = `<img src="${escapeHtml(clipSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`;
+              }
+            }
+            const videoEl = previewWrap.querySelector("video[data-preview-src]");
+            if (videoEl) {
+              loadTimelinePreviewVideo(videoEl, { preferAuto: false });
+            }
+          }
+        });
+      } catch (_) { }
+
       syncTimelineEphemeralState(activeSession);
       syncPodcastTimelineSelectionUi(activeSession);
       syncPodcastTimelinePlayhead(activeSession);
@@ -523,7 +613,6 @@ export function createPodcasterTimelineUiApi(deps = {}) {
 
     if (!els.podcastVideoTimeline) return;
     closePodcastTimelineClipMenu();
-    const renderReason = String(options.reason || "structure").trim() || "structure";
     syncTimelineModeButtons(activeSession);
     if (!rows.length) {
       els.podcastVideoTimeline.innerHTML = "";
@@ -535,7 +624,6 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     }
 
     const clipMap = ensureTimelineClipsByRowId(activeSession);
-    const dialogueMap = getDialogueVideoMap(activeSession);
     const videoCfg = getPodcastVideoConfig(activeSession);
     const pxPerSec = getStudioTimelinePixelsPerSec(activeSession);
     const minClipPx = getStudioTimelineMinClipPx(activeSession);
@@ -566,8 +654,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
 
     if (
       canReuseStructure
-      && options.force !== true
-      && (renderReason === "selection" || renderReason === "playback" || renderReason === "ephemeral")
+      && !forceStructure
+      && isLightweightReason
     ) {
       logPodcastRenderDebug("timeline-structure-skip", { reason: renderReason });
       syncTimelineModeButtons(activeSession);
@@ -586,7 +674,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         }
       }
       return;
-    } else if (renderReason === "selection" || renderReason === "playback" || renderReason === "ephemeral") {
+    } else if (isLightweightReason) {
       logPodcastRenderDebug("timeline-guard-structural-from-ephemeral", { reason: renderReason });
     }
 
@@ -1486,19 +1574,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const totalMs = options?.totalMs || Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
     const cursorMs = Math.max(0, Math.min(totalMs, Number(options?.currentMs ?? podcastVideoState.montageCursorMs ?? 0)));
     const entries = buildTimelineRuntimeEntries(activeSession);
-    const timelineLookupToleranceMs = 12;
-    const directEntry = (
-      entries.find((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs) || entries
-        .filter((entry) => {
-          const startMs = Math.max(0, Number(entry?.startMs || 0));
-          const endMs = Math.max(startMs, Number(entry?.endMs || 0));
-          return cursorMs >= (startMs - timelineLookupToleranceMs) && cursorMs <= (endMs + timelineLookupToleranceMs);
-        })
-        .sort((a, b) => (
-          Number(b?.startMs || 0) - Number(a?.startMs || 0)
-          || Number(b?.zIndex || 0) - Number(a?.zIndex || 0)
-        ))[0]
-    ) || null;
+    const directEntry = resolveTimelineEntryAtMs(entries, cursorMs, {
+      toleranceMs: TIMELINE_LOOKUP_TOLERANCE_MS
+    });
     const lastEntry = entries.length ? entries[entries.length - 1] : null;
     const focusEntry = directEntry || (cursorMs >= (Number(lastEntry?.endMs || 0) - 1) ? lastEntry : null);
     const playheadRowId = String(focusEntry?.rowId || "").trim();

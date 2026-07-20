@@ -12,6 +12,12 @@ import {
   normalizeSpeedRangesByRowId,
   resolveSceneSourceStateAtTimelineMs
 } from "./podcaster-scene-timing.js";
+import {
+  isTimelineMsInRange,
+  resolveTimelineEntryAtMs,
+  resolveTimelineEntriesAtMs,
+  resolveTimelineIndexAtMs
+} from "./podcaster-timeline-shared.js";
 
 // === INJECTED GLOBALS (For compatibility) ===
 function readRuntimeNumber(name, fallback) {
@@ -1551,7 +1557,12 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
     });
     const videoSrc = resolveStorageVideoUrl(
       primarySegment?.downloadUrl || sceneClip?.downloadUrl || "",
-      primarySegment?.storagePath || sceneClip?.storagePath || ""
+      primarySegment?.storagePath || sceneClip?.storagePath || "",
+      {
+        updatedAt: String(primarySegment?.updatedAt || sceneClip?.updatedAt || "").trim(),
+        type: String(primarySegment?.type || sceneClip?.type || "").trim(),
+        mimeType: String(primarySegment?.mimeType || sceneClip?.mimeType || "").trim()
+      }
     );
     const audioClip = resolveDialogueAudioForRow(activeSession, rowId);
     const audioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
@@ -1608,40 +1619,17 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
 function resolveTimelineRuntimeEntryAtMs(session = null, currentMs = 0, runtimeEntries = null) {
   const activeSession = session || getActiveSession();
   const entries = Array.isArray(runtimeEntries) ? runtimeEntries : buildTimelineRuntimeEntries(activeSession);
-  const targetMs = Math.max(0, Number(currentMs || 0) || 0);
-  const strict = entries
-    .filter((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0));
-  if (strict.length) {
-    return strict
-      .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0) || Number(b?.zIndex || 0) - Number(a?.zIndex || 0))[0];
-  }
-  const toleranceMs = 12;
-  return entries
-    .filter((entry) => {
-      const startMs = Math.max(0, Number(entry?.startMs || 0));
-      const endMs = Math.max(startMs, Number(entry?.endMs || 0));
-      return targetMs >= (startMs - toleranceMs) && targetMs <= (endMs + toleranceMs);
-    })
-    .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0) || Number(b?.zIndex || 0) - Number(a?.zIndex || 0))[0] || null;
+  return resolveTimelineEntryAtMs(entries, currentMs) || null;
 }
 
 function resolveTimelineRuntimeEntriesAtMs(session = null, currentMs = 0, runtimeEntries = null, options = {}) {
   const activeSession = session || getActiveSession();
   const entries = Array.isArray(runtimeEntries) ? runtimeEntries : buildTimelineRuntimeEntries(activeSession);
-  const targetMs = Math.max(0, Number(currentMs || 0) || 0);
   const videoOnly = options?.videoOnly === true;
-  return entries
-    .filter((entry) => {
-      const startMs = Math.max(0, Number(entry?.startMs || 0));
-      const endMs = Math.max(startMs, Number(entry?.endMs || 0));
-      return targetMs >= (startMs - 12) && targetMs <= (endMs + 12);
-    })
-    .filter((entry) => !videoOnly || Boolean(String(entry?.videoSrc || "").trim()))
-    .sort((a, b) => (
-      Number(a?.startMs || 0) - Number(b?.startMs || 0)
-      || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
-      || Number(a?.index || 0) - Number(b?.index || 0)
-    ));
+  return resolveTimelineEntriesAtMs(entries, currentMs, {
+    videoOnly,
+    toleranceMs: options?.toleranceMs
+  });
 }
 
 function resolveTimelineRuntimeOverlapPairAtMs(session = null, currentMs = 0, runtimeEntries = null) {
@@ -1805,18 +1793,7 @@ function getTimelineSceneVideoGenerationStatus(session = null, rowId = "") {
 
 function resolveTimelineSequenceStartIndex(entries = [], startMs = 0) {
   const list = Array.isArray(entries) ? entries : [];
-  const cursorMs = Math.max(0, Number(startMs || 0));
-  const strictIndex = list.findIndex((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs);
-  if (strictIndex >= 0) return strictIndex;
-  const toleranceMs = 12;
-  const toleranceStartIndex = list.findIndex((entry) => {
-    const startMs = Math.max(0, Number(entry?.startMs || 0));
-    const endMs = Math.max(startMs, Number(entry?.endMs || 0));
-    return cursorMs >= (startMs - toleranceMs) && cursorMs <= (endMs + toleranceMs);
-  });
-  if (toleranceStartIndex >= 0) return toleranceStartIndex;
-  const nextIndex = list.findIndex((entry) => Number(entry.startMs || 0) >= cursorMs);
-  return nextIndex >= 0 ? nextIndex : Math.max(0, list.length - 1);
+  return resolveTimelineIndexAtMs(list, startMs);
 }
 
 function getReorderableTimelineTrackIds(session = null) {

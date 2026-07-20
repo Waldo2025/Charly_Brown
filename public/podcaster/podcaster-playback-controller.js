@@ -3,11 +3,20 @@ import {
   normalizePodcasterFinalLimiterSettings
 } from "./podcaster-audio-limiter.js";
 import {
+  TIMELINE_LOOKUP_TOLERANCE_MS,
+  resolveTimelineEntryAtMs,
+  resolveTimelineIndexAtMs
+} from "./podcaster-timeline-shared.js";
+import {
   buildKaraokeSubtitleMarkup,
   normalizeKaraokeWordTimings,
   resolveActiveKaraokeWordIndex
 } from "./podcaster-karaoke.js";
-import { getPodcasterLocalMediaBlob, putPodcasterLocalMediaBlob } from "./podcaster-local-media-cache.js";
+import {
+  deletePodcasterLocalMediaKey,
+  getPodcasterLocalMediaBlob,
+  putPodcasterLocalMediaBlob
+} from "./podcaster-local-media-cache.js";
 
 /**
  * PodcasterPlaybackController.js
@@ -115,7 +124,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   // --- Helpers ---
   clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
   toFiniteNumber(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
-  getTimelineLookupToleranceMs() { return 12; }
+  getTimelineLookupToleranceMs() { return TIMELINE_LOOKUP_TOLERANCE_MS; }
   isTimelineMsInRange(currentMs = 0, startMs = 0, endMs = 0, options = {}) {
     const toleranceMs = Math.max(0, Number(options.toleranceMs ?? this.getTimelineLookupToleranceMs()) || 0);
     const current = Math.max(0, Number(currentMs || 0));
@@ -520,7 +529,6 @@ export class PodcasterPlaybackController extends EventEmitter {
     const now = performance.now();
     let entries;
     const targetMs = Math.max(0, Number(currentMs || 0));
-    const toleranceMs = this.getTimelineLookupToleranceMs();
     if (this.cachedTickEntries && (now - this.cachedTickEntriesTime) < 16) {
       entries = this.cachedTickEntries;
     } else {
@@ -528,14 +536,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.cachedTickEntries = entries;
       this.cachedTickEntriesTime = now;
     }
-    const strictMatch = entries.find((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0));
-    if (strictMatch) return strictMatch;
-    return entries
-      .filter((entry) => this.isTimelineMsInRange(targetMs, entry?.startMs || 0, entry?.endMs || 0, { toleranceMs }))
-      .sort((a, b) => (
-        Number(b?.startMs || 0) - Number(a?.startMs || 0)
-        || Number(b?.zIndex || 0) - Number(a?.zIndex || 0)
-      ))[0] || null;
+    return (
+      resolveTimelineEntryAtMs(entries, targetMs, {
+        toleranceMs: this.getTimelineLookupToleranceMs()
+      })
+      || null
+    );
   }
   resolveActiveMediaLoadMode(url = "") {
     const configMode = String(this.state.config?.mediaLoadMode || "streaming").trim().toLowerCase();
@@ -757,7 +763,16 @@ export class PodcasterPlaybackController extends EventEmitter {
       const cache = await caches.open(this.mediaCacheName);
       await cache.delete(url);
       if (cacheKey && cacheKey !== url) await cache.delete(cacheKey);
+      if (cacheKey) {
+        await cache.delete(`stage-media:${cacheKey}`);
+      }
     } catch (e) { }
+    try {
+      const baseCacheKey = this.resolvePersistentMediaCacheKey(url);
+      if (baseCacheKey) {
+        await deletePodcasterLocalMediaKey(`stage-media:${baseCacheKey}`).catch(() => { });
+      }
+    } catch (_) { }
   }
 
 
@@ -1009,13 +1024,57 @@ export class PodcasterPlaybackController extends EventEmitter {
     const session = options.session || this.state.session || this.deps?.getActiveSession?.();
     const entries = Array.isArray(options.entries) ? options.entries : this.collectTimelineStageVideoEntries(session);
     if (!entries.length) return false;
-    const prioritized = this.prioritizeStageVideoEntriesForMs(entries, currentMs);
-    const limit = Math.max(1, Math.min(4, Number(options.limit || 3) || 3));
-    const selected = prioritized.slice(0, limit);
+    const sortedEntries = [...entries].sort((a, b) =>
+      Number(a?.startMs || 0) - Number(b?.startMs || 0)
+      || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
+      || Number(a?.index || 0) - Number(b?.index || 0)
+    );
+
+    const toleranceMs = this.getTimelineLookupToleranceMs();
+    const targetMs = Math.max(0, Number(currentMs || 0) || 0);
+    const activeIndex = resolveTimelineIndexAtMs(sortedEntries, targetMs, { toleranceMs });
+    const limit = Math.max(1, Math.min(6, Number(options.limit || 4) || 4));
+    const selectedSet = new Set();
+    const selected = [];
+    const addEntryByIndex = (index) => {
+      if (index < 0 || index >= sortedEntries.length) return;
+      const entry = sortedEntries[index] || null;
+      if (!entry) return;
+      const src = String(entry?.videoSrc || "").trim();
+      if (!src || selectedSet.has(src)) return;
+      selectedSet.add(src);
+      selected.push(entry);
+    };
+
+    if (activeIndex >= 0) {
+      addEntryByIndex(activeIndex);
+      for (let offset = 1; offset <= limit && selected.length < limit; offset += 1) {
+        addEntryByIndex(activeIndex + offset);
+      }
+      for (let offset = 1; offset <= limit && selected.length < limit; offset += 1) {
+        addEntryByIndex(activeIndex - offset);
+      }
+    }
+
+    if (selected.length < limit) {
+      const remaining = this.prioritizeStageVideoEntriesForMs(sortedEntries, targetMs)
+        .filter((entry) => !selectedSet.has(String(entry?.videoSrc || "").trim()));
+      for (const entry of remaining) {
+        if (selected.length >= limit) break;
+        selected.push(entry);
+        selectedSet.add(String(entry?.videoSrc || "").trim());
+      }
+    }
+
+    if (!selected.length) return false;
     const current = selected[0] || null;
     const tasks = selected.map((entry) => this.getBlobUrl(entry.videoSrc, { persistent: true }).catch(() => ""));
     if (options.awaitCurrent === true && current) {
       await tasks[0];
+      const next = selected[1];
+      if (selected.length > 1 && next) {
+        await tasks[1];
+      }
     }
     Promise.allSettled(tasks).catch(() => { });
     return true;
@@ -1194,35 +1253,135 @@ export class PodcasterPlaybackController extends EventEmitter {
       .concat(options?.previousClip || [])
       .concat(options?.nextClip || [])
       .filter((clip) => clip && typeof clip === "object");
-    const collectClipUrls = (clip = null) => {
-      if (!clip || typeof clip !== "object") return [];
+
+    const collectClipMediaCandidates = (clip = null) => {
+      const set = new Set();
+      const add = (value = "") => {
+        const candidate = String(value || "").trim();
+        if (candidate) set.add(candidate);
+      };
+      if (!clip || typeof clip !== "object") return set;
+
+      const addSegmentCandidates = (segment = null) => {
+        if (!segment || typeof segment !== "object") return;
+        const segmentDownloadUrl = String(segment?.downloadUrl || "").trim();
+        const segmentStoragePath = String(segment?.storagePath || "").trim();
+        const segmentSourceUrl = String(segment?.sourceUrl || "").trim();
+        const segmentLocalMediaKey = String(segment?.localMediaCacheKey || "").trim();
+        const segmentLocalDataUrl = String(segment?.localDataUrl || segment?.dataUrl || "").trim();
+        const segmentUpdatedAt = String(segment?.updatedAt || segment?.updatedAtMs || "").trim();
+        const segmentType = String(segment?.type || clip?.type || "").trim().toLowerCase();
+        const segmentMimeType = String(segment?.mimeType || clip?.mimeType || "").trim().toLowerCase();
+
+        add(segmentDownloadUrl);
+        add(segmentStoragePath);
+        add(segmentSourceUrl);
+        if (segmentLocalMediaKey) {
+          add(segmentLocalMediaKey);
+          add(`podcaster-local-media:${segmentLocalMediaKey}`);
+        }
+        if (segmentLocalDataUrl) {
+          add(segmentLocalDataUrl);
+          if (segmentLocalDataUrl.startsWith("podcaster-local-media:")) {
+            add(segmentLocalDataUrl.replace("podcaster-local-media:", ""));
+          }
+        }
+        const segmentResolved = this.deps?.resolveStorageVideoUrl?.(
+          segmentDownloadUrl,
+          segmentStoragePath,
+          {
+            updatedAt: segmentUpdatedAt,
+            type: segmentType,
+            mimeType: segmentMimeType
+          }
+        );
+        add(segmentResolved);
+      };
+
+      const mediaSourceCandidates = [
+        "downloadUrl",
+        "storagePath",
+        "sourceUrl",
+        "localMediaCacheKey",
+        "localDataUrl",
+        "dataUrl"
+      ].flatMap((candidateKey) => {
+        const value = String(clip?.[candidateKey] || "").trim();
+        if (!value) return [];
+        if (candidateKey === "localMediaCacheKey") {
+          return [value, `podcaster-local-media:${value}`];
+        }
+        if (candidateKey === "localDataUrl" || candidateKey === "dataUrl") {
+          const list = [value];
+          if (value.startsWith("podcaster-local-media:")) {
+            list.push(value.replace("podcaster-local-media:", ""));
+          }
+          return list;
+        }
+        return [value];
+      });
+      mediaSourceCandidates.forEach((value) => add(value));
+
+      const resolvedClipMedia = this.deps?.resolveStorageVideoUrl?.(
+        String(clip?.downloadUrl || "").trim(),
+        String(clip?.storagePath || "").trim(),
+        {
+          updatedAt: String(clip?.updatedAt || "").trim(),
+          type: String(clip?.type || "").trim(),
+          mimeType: String(clip?.mimeType || "").trim()
+        }
+      ) || "";
+      if (resolvedClipMedia) set.add(resolvedClipMedia);
+
       const segments = Array.isArray(clip.segments) ? clip.segments : [];
-      return [
-        clip.downloadUrl,
-        clip.storagePath,
-        ...segments.map((segment) => segment?.downloadUrl),
-        ...segments.map((segment) => segment?.storagePath)
-      ].filter(Boolean);
+      segments.forEach(addSegmentCandidates);
+      return set;
     };
-    const urlsToInvalidate = new Set(explicitClips.flatMap((clip) => collectClipUrls(clip)));
+
+    const proxyUrlVariants = (value = "") => {
+      const clean = String(value || "").trim();
+      if (!clean) return [];
+      const variants = new Set([clean]);
+      try {
+        const storageKey = clean.startsWith("gs://") ? clean : "";
+        if (storageKey) {
+          variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storageKey)}`));
+          variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-image?storagePath=${encodeURIComponent(storageKey)}`));
+        } else {
+          const parsed = new URL(clean, window.location.origin);
+          if (/firebasestorage\.googleapis\.com|\/api\/assets\//i.test(parsed.href)) {
+            const storagePath = parsed.searchParams.get("storagePath");
+            if (storagePath) {
+              variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`));
+              variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-image?storagePath=${encodeURIComponent(storagePath)}`));
+            }
+            const sourceUrl = parsed.searchParams.get("url");
+            if (sourceUrl) {
+              variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(sourceUrl)}`));
+              variants.add(this.buildMediaProxyUrl(`/api/assets/proxy-image?url=${encodeURIComponent(sourceUrl)}`));
+            }
+          }
+        }
+      } catch (_) { }
+      return Array.from(variants);
+    };
+
+    const urlsToInvalidate = new Set(
+      explicitClips
+        .flatMap((clip) => Array.from(collectClipMediaCandidates(clip)))
+        .filter(Boolean)
+    );
     if (activeSession) {
       const dialogueMap = activeSession.dialogueVideoMap || {};
       const clip = dialogueMap[key];
       if (clip) {
-        collectClipUrls(clip).forEach((url) => urlsToInvalidate.add(url));
+        collectClipMediaCandidates(clip).forEach((url) => urlsToInvalidate.add(url));
       }
     }
+
     urlsToInvalidate.forEach((url) => {
       this.invalidateBlobUrl(url);
-      // Purge proxy URL variations
-      try {
-        const proxyUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(url)}`);
-        this.invalidateBlobUrl(proxyUrl);
-      } catch (_) { }
-      try {
-        const proxyImgUrl = this.buildMediaProxyUrl(`/api/assets/proxy-image?storagePath=${encodeURIComponent(url)}`);
-        this.invalidateBlobUrl(proxyImgUrl);
-      } catch (_) { }
+      proxyUrlVariants(url).forEach((variant) => this.invalidateBlobUrl(variant));
     });
 
     // 3. Clear transient synced flags to ensure stage media synchronizes completely fresh next loop
