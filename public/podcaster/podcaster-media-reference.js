@@ -167,10 +167,43 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
 
   function normalizeReferenceImageList(value = null, maxItems = MAX_ROW_REFERENCE_IMAGE_ITEMS) {
     if (!Array.isArray(value)) return [];
-    return value
+    const normalized = value
       .map((item) => normalizeReferenceImageRecord(item))
       .filter(Boolean)
       .slice(0, Math.max(1, Math.min(MAX_ROW_REFERENCE_IMAGE_ITEMS, Number(maxItems || MAX_ROW_REFERENCE_IMAGE_ITEMS) || MAX_ROW_REFERENCE_IMAGE_ITEMS)));
+    return dedupeReferenceImageRecords(normalized, maxItems);
+  }
+
+  function buildReferenceImageFingerprint(reference = null) {
+    const normalized = normalizeReferenceImageRecord(reference);
+    if (!normalized) return "";
+    const dataUrl = String(normalized.dataUrl || "").trim();
+    const downloadUrl = String(normalized.downloadUrl || normalized.url || "").trim();
+    const storagePath = String(normalized.storagePath || normalized.path || "").trim();
+    const localMediaCacheKey = String(normalized.localMediaCacheKey || "").trim();
+    const name = String(normalized.name || "").trim();
+    if (dataUrl) return `data:${dataUrl}`;
+    if (downloadUrl) return `url:${downloadUrl}`;
+    if (storagePath) return `storage:${storagePath}`;
+    if (localMediaCacheKey) return `cache:${localMediaCacheKey}`;
+    if (name) return `name:${name}`;
+    return `raw:${String(JSON.stringify(normalized))}`;
+  }
+
+  function dedupeReferenceImageRecords(value = [], maxItems = MAX_ROW_REFERENCE_IMAGE_ITEMS) {
+    const seen = new Set();
+    const next = [];
+    const limit = Math.max(1, Math.min(MAX_ROW_REFERENCE_IMAGE_ITEMS, Number(maxItems || MAX_ROW_REFERENCE_IMAGE_ITEMS) || MAX_ROW_REFERENCE_IMAGE_ITEMS));
+    for (const item of Array.isArray(value) ? value : []) {
+      const normalized = normalizeReferenceImageRecord(item);
+      if (!normalized) continue;
+      const fingerprint = buildReferenceImageFingerprint(normalized);
+      if (seen.has(fingerprint)) continue;
+      seen.add(fingerprint);
+      next.push(normalized);
+      if (next.length >= limit) break;
+    }
+    return next;
   }
 
   function normalizeReferenceImageMap(raw = {}) {
@@ -195,6 +228,72 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       next[cleanKey] = normalizedList;
     });
     return next;
+  }
+
+  function buildCanonicalRowReferenceSessionState(raw = {}) {
+    const imageMap = normalizeReferenceImageMap(raw.rowReferenceImageMap || {});
+    const listMap = normalizeReferenceImageListMap(raw.rowReferenceImageListMap || {});
+    const videoMap = normalizeReferenceVideoMap(raw.rowReferenceVideoMap || {});
+    const sourceKeys = new Set([
+      ...Object.keys(imageMap),
+      ...Object.keys(listMap),
+      ...Object.keys(videoMap)
+    ]);
+    const nextImageMap = {};
+    const nextListMap = {};
+    for (const key of sourceKeys) {
+      const sourceList = [];
+      if (Array.isArray(listMap[key])) {
+        sourceList.push(...listMap[key]);
+      }
+      if (imageMap[key]) {
+        sourceList.push(imageMap[key]);
+      }
+      const normalizedList = dedupeReferenceImageRecords(sourceList, MAX_ROW_REFERENCE_IMAGE_ITEMS);
+      if (!normalizedList.length) continue;
+      nextListMap[key] = normalizedList;
+      nextImageMap[key] = normalizedList[0] || null;
+    }
+    const nextModeMap = normalizeRowReferenceModeMap(raw.rowReferenceModeByRowId || {}, nextImageMap, videoMap);
+
+    return {
+      rowReferenceImageMap: nextImageMap,
+      rowReferenceImageListMap: nextListMap,
+      rowReferenceVideoMap: videoMap,
+      rowReferenceModeByRowId: nextModeMap
+    };
+  }
+
+  function buildCanonicalRowReferencePayload(session = null, rowId = "") {
+    const key = String(rowId || "").trim();
+    const canonical = buildCanonicalRowReferenceSessionState(session || {});
+    if (!key) {
+      return {
+        referenceMode: "image",
+        referenceImages: [],
+        primaryReferenceImage: null,
+        referenceVideo: null
+      };
+    }
+    const referenceImages = canonical.rowReferenceImageListMap[key] || [];
+    const referenceVideo = canonical.rowReferenceVideoMap[key] || null;
+    const referenceMode = canonical.rowReferenceModeByRowId[key] === "video" && referenceVideo
+      ? "video"
+      : "image";
+    return {
+      referenceMode,
+      referenceImages: referenceMode === "image" ? referenceImages : [],
+      primaryReferenceImage: referenceMode === "image" ? (referenceImages[0] || null) : null,
+      referenceVideo: referenceMode === "video" ? referenceVideo : null
+    };
+  }
+
+  function referencesStateStable(a = {}, b = {}) {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch (_) {
+      return false;
+    }
   }
 
   function normalizeReferenceVideoRecord(raw = null) {
@@ -393,9 +492,26 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     };
     activeSession.speakerReferenceImageMap = await hydrateMap(activeSession.speakerReferenceImageMap, "image");
     activeSession.scenarioReferenceImageMap = await hydrateMap(activeSession.scenarioReferenceImageMap, "image");
-    activeSession.rowReferenceImageMap = await hydrateMap(activeSession.rowReferenceImageMap, "image");
-    activeSession.rowReferenceImageListMap = await hydrateListMap(activeSession.rowReferenceImageListMap);
-    activeSession.rowReferenceVideoMap = await hydrateMap(activeSession.rowReferenceVideoMap, "video");
+    const hydratedRowImageMap = await hydrateMap(activeSession.rowReferenceImageMap, "image");
+    const hydratedRowListMap = await hydrateListMap(activeSession.rowReferenceImageListMap);
+    const hydratedRowVideoMap = await hydrateMap(activeSession.rowReferenceVideoMap, "video");
+    const before = buildCanonicalRowReferenceSessionState({
+      rowReferenceImageMap: activeSession.rowReferenceImageMap,
+      rowReferenceImageListMap: activeSession.rowReferenceImageListMap,
+      rowReferenceVideoMap: activeSession.rowReferenceVideoMap,
+      rowReferenceModeByRowId: activeSession.rowReferenceModeByRowId
+    });
+    const after = buildCanonicalRowReferenceSessionState({
+      rowReferenceImageMap: hydratedRowImageMap,
+      rowReferenceImageListMap: hydratedRowListMap,
+      rowReferenceVideoMap: hydratedRowVideoMap,
+      rowReferenceModeByRowId: activeSession.rowReferenceModeByRowId
+    });
+    changed = changed || !referencesStateStable(before, after);
+    activeSession.rowReferenceImageMap = after.rowReferenceImageMap;
+    activeSession.rowReferenceImageListMap = after.rowReferenceImageListMap;
+    activeSession.rowReferenceVideoMap = after.rowReferenceVideoMap;
+    activeSession.rowReferenceModeByRowId = after.rowReferenceModeByRowId;
     return changed;
   }
 
@@ -438,14 +554,12 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
   }
 
   function getRowReferenceImageListMap(session = null) {
-    const normalizedListMap = normalizeReferenceImageListMap(session?.rowReferenceImageListMap || {});
-    const legacyMap = normalizeReferenceImageMap(session?.rowReferenceImageMap || {});
-    Object.entries(legacyMap).forEach(([key, value]) => {
-      if (!normalizedListMap[key]?.length && value) {
-        normalizedListMap[key] = [value];
-      }
-    });
-    return normalizedListMap;
+    return buildCanonicalRowReferenceSessionState({
+      rowReferenceImageMap: session?.rowReferenceImageMap || {},
+      rowReferenceImageListMap: session?.rowReferenceImageListMap || {},
+      rowReferenceVideoMap: session?.rowReferenceVideoMap || {},
+      rowReferenceModeByRowId: session?.rowReferenceModeByRowId || {}
+    }).rowReferenceImageListMap;
   }
 
   function getRowReferenceImageList(session = null, rowId = "") {
@@ -509,19 +623,11 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
   }
 
   function buildMutableRowReferenceState(current = null) {
-    const nextImageMap = normalizeReferenceImageMap(current?.rowReferenceImageMap || {});
-    const nextListMap = normalizeReferenceImageListMap(current?.rowReferenceImageListMap || {});
-    Object.entries(nextImageMap).forEach(([key, value]) => {
-      if (!nextListMap[key] && value) {
-        nextListMap[key] = [value];
-      }
-    });
-    Object.entries(nextListMap).forEach(([key, list]) => {
-      const primary = Array.isArray(list) ? list[0] : null;
-      if (primary) nextImageMap[key] = primary;
-    });
-    const nextVideoMap = normalizeReferenceVideoMap(current?.rowReferenceVideoMap || {});
-    const nextModeMap = normalizeRowReferenceModeMap(current?.rowReferenceModeByRowId || {}, nextImageMap, nextVideoMap);
+    const canonical = buildCanonicalRowReferenceSessionState(current || {});
+    const nextImageMap = canonical.rowReferenceImageMap;
+    const nextListMap = canonical.rowReferenceImageListMap;
+    const nextVideoMap = canonical.rowReferenceVideoMap;
+    const nextModeMap = canonical.rowReferenceModeByRowId;
     return {
       nextImageMap,
       nextListMap,
@@ -846,6 +952,8 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     readImageReferenceFromFile,
     isLikelyVideoReferenceFile,
     readVideoReferenceFromFile,
+    buildCanonicalRowReferenceSessionState,
+    buildCanonicalRowReferencePayload,
     normalizeReferenceImageRecord,
     normalizeReferenceImageList,
     normalizeReferenceImageMap,

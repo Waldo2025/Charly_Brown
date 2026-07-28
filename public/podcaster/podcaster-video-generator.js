@@ -345,6 +345,110 @@ function buildDialogueVideoInlineReferenceBudget(rowReferenceImages = [], rowRef
   };
 }
 
+function normalizeReferenceImagePayloadItem(raw = null) {
+  if (!raw || typeof raw !== "object") return null;
+  const dataUrl = normalizeInlineDataUrl(raw?.dataUrl || "");
+  const downloadUrl = String(raw?.downloadUrl || raw?.url || "").trim();
+  const storagePath = String(raw?.storagePath || raw?.path || "").trim();
+  if (!dataUrl && !downloadUrl && !storagePath) return null;
+  return {
+    name: String(raw?.name || "").trim(),
+    dataUrl,
+    downloadUrl,
+    storagePath,
+    mimeType: String(raw?.mimeType || "image/png").trim().toLowerCase() || "image/png",
+    type: "image"
+  };
+}
+
+function dedupeReferenceImagePayload(records = [], maxItems = DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT) {
+  const seen = new Set();
+  const next = [];
+  const normalized = Array.isArray(records)
+    ? records.map((record) => normalizeReferenceImagePayloadItem(record)).filter(Boolean)
+    : [];
+  const effectiveLimit = Math.max(1, Math.min(DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT, Number(maxItems || DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT) || DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT));
+  for (const item of normalized) {
+    const fingerprint = String(
+      item.storagePath
+      || item.downloadUrl
+      || item.dataUrl
+      || item.name
+      || ""
+    ).trim();
+    if (!fingerprint) continue;
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    next.push(item);
+    if (next.length >= effectiveLimit) break;
+  }
+  return next;
+}
+
+function resolveSceneReferenceText({ row = null, options = {} }) {
+  const manualOverrideProvided = Object.prototype.hasOwnProperty.call(options || {}, "inSceneText");
+  const manualText = manualOverrideProvided ? normalizeInSceneText(options?.inSceneText) : "";
+  if (manualText) {
+    return {
+      text: manualText,
+      source: "manual"
+    };
+  }
+
+  const rowText = resolveRowInSceneText(row);
+  if (rowText) {
+    return {
+      text: rowText,
+      source: "scene"
+    };
+  }
+
+  const referenceText = normalizeInSceneText(options?.referenceText);
+  if (referenceText) {
+    return {
+      text: referenceText,
+      source: "reference"
+    };
+  }
+
+  const overlayText = normalizeInSceneText(
+    String(options?.headlineText || options?.captionText || options?.overlayText || "")
+  );
+  return {
+    text: overlayText,
+    source: overlayText ? "overlay" : "none"
+  };
+}
+
+function resolveSceneReferenceImages(session = null, rowId = "", rowReferenceMode = "image", rowReferenceImages = [], rowReferenceVideo = null, rowReferenceFallback = {}) {
+  const explicitMode = String(rowReferenceMode || "").trim().toLowerCase() === "video" ? "video" : "image";
+  if (explicitMode === "video" && rowReferenceVideo) {
+    return {
+      referenceMode: "video",
+      referenceImages: [],
+      primaryImage: null
+    };
+  }
+  const fallbackReferences = [];
+  const seeded = Array.isArray(rowReferenceImages)
+    ? rowReferenceImages
+    : (typeof rowReferenceImages === "undefined" || rowReferenceImages === null ? [] : [rowReferenceImages]);
+  if (seeded.length) {
+    fallbackReferences.push(...seeded);
+  } else {
+    const speakerReferenceImage = rowReferenceFallback.speakerReferenceImage || null;
+    const scenarioReferenceImage = rowReferenceFallback.scenarioReferenceImage || null;
+    if (speakerReferenceImage) fallbackReferences.push(speakerReferenceImage);
+    if (scenarioReferenceImage) fallbackReferences.push(scenarioReferenceImage);
+  }
+  const referenceImages = dedupeReferenceImagePayload(fallbackReferences, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
+  return {
+    referenceMode: "image",
+    referenceImages,
+    primaryImage: referenceImages[0] || null
+  };
+}
+
 function estimateInlineDataUrlBytes(value = "") {
   if (!value || typeof value !== "string") return 0;
   const commaIndex = value.indexOf(",");
@@ -584,25 +688,33 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   if (!row) return null;
   if (typeof runtime.hydrateSessionReferenceMedia === "function") {
     try {
-      const hydrated = await runtime.hydrateSessionReferenceMedia(session);
-      if (hydrated) {
-        session = getActiveSession() || session;
-        sessionId = String(session?.id || "").trim();
-        rows = session?.script?.rows || [];
-        rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
-        row = rowIndex >= 0 ? rows[rowIndex] : row;
-      }
+      await runtime.hydrateSessionReferenceMedia(session);
     } catch (_) { }
   }
+  session = getActiveSession() || session;
+  sessionId = String(session?.id || "").trim();
+  rows = session?.script?.rows || [];
+  rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
+  row = rowIndex >= 0 ? rows[rowIndex] : null;
+  if (!sessionId || !row) return null;
 
   const speakerLabel = String(row?.speaker || "").trim();
   const educationalMode = isEducationalVideoMode(session);
-  const rowReferenceImages = getRowReferenceImageList(session, key);
-  const rowReferenceVideo = getRowReferenceVideoMap(session)[key] || null;
+  const canonicalRowReferencePayload = window.PodcasterMediaReferenceApi?.buildCanonicalRowReferencePayload?.(session, key) || null;
+  const rowReferenceImagesBySession = canonicalRowReferencePayload
+    ? canonicalRowReferencePayload.referenceImages
+    : getRowReferenceImageList(session, key);
+  const rowReferenceVideo = canonicalRowReferencePayload
+    ? canonicalRowReferencePayload.referenceVideo
+    : (getRowReferenceVideoMap(session)[key] || null);
   const rowReferenceModeMap = typeof runtime.getRowReferenceModeByRowId === "function"
     ? (runtime.getRowReferenceModeByRowId(session) || {})
     : {};
-  const explicitReferenceMode = String(rowReferenceModeMap?.[key] || "").trim().toLowerCase();
+  const explicitReferenceMode = String(
+    canonicalRowReferencePayload?.referenceMode
+    || rowReferenceModeMap?.[key]
+    || ""
+  ).trim().toLowerCase();
   const speakerReferenceImage = typeof runtime.getSpeakerReferenceImageMap === "function"
     ? (runtime.getSpeakerReferenceImageMap(session)[speakerLabel] || null)
     : null;
@@ -612,16 +724,19 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const scenarioReferenceImage = activeScenarioAsset && typeof runtime.getScenarioReferenceImageMap === "function"
     ? (runtime.getScenarioReferenceImageMap(session)[String(activeScenarioAsset?.id || "").trim()] || null)
     : null;
-  const fallbackReferenceImages = [speakerReferenceImage, scenarioReferenceImage].filter(Boolean);
-  const effectiveReferenceMode = explicitReferenceMode === "video" && rowReferenceVideo
-    ? "video"
-    : "image";
-  // Compatibility: const effectiveReferenceImages = rowReferenceImages.length || rowReferenceVideo ? rowReferenceImages : fallbackReferenceImages;
-  const effectiveReferenceImages = effectiveReferenceMode === "image"
-    ? (rowReferenceImages.length ? rowReferenceImages : fallbackReferenceImages)
-    : [];
-  const rowReferenceImage = effectiveReferenceImages[0] || getRowReferenceImageMap(session)[key] || speakerReferenceImage || scenarioReferenceImage || null;
-  const referenceMode = effectiveReferenceMode;
+  const resolvedSceneReferences = resolveSceneReferenceImages(
+    session,
+    key,
+    explicitReferenceMode,
+    rowReferenceImagesBySession,
+    rowReferenceVideo,
+    {
+      speakerReferenceImage,
+      scenarioReferenceImage
+    }
+  );
+  const referenceMode = resolvedSceneReferences.referenceMode;
+  const effectiveReferenceImages = resolvedSceneReferences.referenceImages;
   const pendingKey = `${sessionId}:${key}`;
 
   if (dialogueVideoGenerationTasks.has(pendingKey)) {
@@ -644,14 +759,27 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       overlayMode: String(row?.overlayMode || "none").trim() || "none",
       textSource: String(row?.textSource || "manual").trim() || "manual"
     };
-  const inSceneTextValidation = validateInSceneText(options.inSceneText != null ? options.inSceneText : resolveRowInSceneText(row));
+  const resolvedSceneReferenceText = resolveSceneReferenceText({
+    row,
+    options: {
+      inSceneText: options.inSceneText,
+      referenceText: options.referenceText,
+      headlineText: sceneTextFields.headlineText,
+      captionText: sceneTextFields.captionText
+    }
+  });
+  const inSceneTextSource = String(resolvedSceneReferenceText.source || "").trim();
+  const shouldValidateInSceneText = ["manual", "scene", "reference"].includes(inSceneTextSource);
+  const inSceneTextValidation = shouldValidateInSceneText
+    ? validateInSceneText(resolvedSceneReferenceText.text)
+    : { valid: true, text: "", wordCount: 0 };
   if (!inSceneTextValidation.valid) {
     const error = new Error(inSceneTextValidation.message);
     error.status = 400;
     error.code = "in_scene_text_invalid";
     throw error;
   }
-  const inSceneText = inSceneTextValidation.text;
+  const inSceneText = shouldValidateInSceneText ? inSceneTextValidation.text : "";
   const rawVideoDirective = String(options.videoDirective || row?.videoDirective || resolveVisualNotesForGeneration(row) || "").replace(/\s+/g, " ").trim();
   const rawVisualNotes = String(
     row?.visualNotes
@@ -684,7 +812,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
     requiresLastFrame: hasLastFrame,
     requiresExtension: extendVideo
   });
-  if (inSceneText && routing.resolvedGeneratorHint === "veo") {
+  if (shouldValidateInSceneText && inSceneText && routing.resolvedGeneratorHint === "veo") {
     const error = new Error("Veo no admite texto exacto dentro de la escena. Selecciona Automático u Omni, o convierte el texto en overlay.");
     error.status = 400;
     error.code = "in_scene_text_requires_omni";
@@ -780,17 +908,22 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       const scenarioPrompt = typeof runtime.resolveSpeakerStudioScenarioPrompt === "function" ? runtime.resolveSpeakerStudioScenarioPrompt(session, speakerLabel) : "";
       const strictIdentity = !isVideoStyle && Boolean(portraitUrl || portraitStoragePath);
 
-      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(
-        effectiveReferenceImages,
-        extendVideo ? null : rowReferenceVideo,
-        continuityReferenceImageDataUrl
-      );
-      const traceMeta = buildVisualReferenceTraceMeta({
-        referenceImages: effectiveReferenceImages,
-        referenceVideo: rowReferenceVideo,
-        continuityReferenceImageDataUrl,
-        inlineReferenceBudget
-      });
+  const referenceImageBudget = dedupeReferenceImagePayload(
+    effectiveReferenceImages,
+    DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT
+  );
+  const primaryReferenceImage = referenceImageBudget[0] || null;
+  const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(
+    referenceImageBudget,
+    extendVideo ? null : rowReferenceVideo,
+    continuityReferenceImageDataUrl
+  );
+  const traceMeta = buildVisualReferenceTraceMeta({
+    referenceImages: referenceImageBudget,
+    referenceVideo: rowReferenceVideo,
+    continuityReferenceImageDataUrl,
+    inlineReferenceBudget
+  });
       const clip = typeof runtime.ensureTimelineClipsByRowId === "function"
         ? runtime.ensureTimelineClipsByRowId(session, { persist: false })[key]
         : null;
@@ -803,7 +936,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           : 8000);
       const requestedDurationSec = Math.max(4, Math.min(8, Math.round(durationMs / 1000) || 8));
       const aspectRatio = isReel ? "9:16" : "16:9";
-      const textPolicy = inSceneText ? "in_scene" : "overlay_only";
+  const textPolicy = inSceneText && shouldValidateInSceneText ? "in_scene" : "overlay_only";
 
       const body = {
         promptProfile,
@@ -843,7 +976,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         captionText: String(sceneTextFields.captionText || "").trim(),
         inSceneText,
         overlayMode: String(sceneTextFields.overlayMode || "none").trim() || "none",
-        textSource: String(sceneTextFields.textSource || "manual").trim() || "manual",
+        textSource: inSceneTextSource || String(sceneTextFields.textSource || "manual").trim() || "manual",
         transition: String(row?.transition || "").trim(),
         relateWithPreviousScene: relateWithPreviousScene && !!continuityReferenceImageDataUrl,
         audioDurationSec,
@@ -854,21 +987,11 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         audioUrl: dialogueAudioUrl,
         audioStoragePath: dialogueAudioStoragePath,
         referenceMode,
-        referenceImages: effectiveReferenceImages
-          .map((item) => ({
-            name: String(item?.name || "").trim(),
-            dataUrl: String(item?.dataUrl || "").trim(),
-            downloadUrl: String(item?.downloadUrl || item?.url || "").trim(),
-            storagePath: String(item?.storagePath || item?.path || "").trim(),
-            mimeType: String(item?.mimeType || "image/png").trim().toLowerCase() || "image/png",
-            type: "image"
-          }))
-          .filter((item) => item.dataUrl || item.downloadUrl || item.storagePath)
-          .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
+        referenceImages: referenceImageBudget,
         referenceImageDataUrls: inlineReferenceBudget.referenceImageDataUrls,
-        referenceImageDataUrl: String(rowReferenceImage?.dataUrl || "").trim(),
-        referenceImageNames: effectiveReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
-        referenceImageName: String(rowReferenceImage?.name || "").trim(),
+        referenceImageDataUrl: String(primaryReferenceImage?.dataUrl || "").trim(),
+        referenceImageNames: referenceImageBudget.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
+        referenceImageName: String(primaryReferenceImage?.name || "").trim(),
         referenceVideoDataUrl: inlineReferenceBudget.referenceVideoDataUrl,
         referenceVideoName: String(rowReferenceVideo?.name || "").trim(),
         referenceVideoMimeType: String(rowReferenceVideo?.mimeType || "video/mp4").trim() || "video/mp4",
@@ -955,7 +1078,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         textLength: body.text.length,
         dialoguePolicy: body.dialoguePolicy,
         excludeScriptFromVideoPrompt,
-        hasInSceneText: Boolean(inSceneText),
+        hasInSceneText: textPolicy === "in_scene" && Boolean(inSceneText),
         hasExternalDialogueAudio,
         hasPreviousInteraction: Boolean(previousInteractionId),
         removedTextDirectiveCount: promptFieldSanitization.removedTextDirectives.reduce((sum, item) => sum + Math.max(0, Number(item?.count || 0) || 0), 0),
@@ -1128,7 +1251,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         sessionId,
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
-        hasReferenceImage: effectiveReferenceImages.length > 0,
+        hasReferenceImage: referenceImageBudget.length > 0,
         hasReferenceVideo: Boolean(rowReferenceVideo)
       });
       updatePodcastPlayerUi();

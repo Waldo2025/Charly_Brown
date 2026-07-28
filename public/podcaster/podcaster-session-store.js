@@ -918,10 +918,19 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
   }
   const savedAt = String(response?.savedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
+  const localReferenceMedia = {
+    speakerReferenceImageMap: target.speakerReferenceImageMap,
+    scenarioReferenceImageMap: target.scenarioReferenceImageMap,
+    rowReferenceImageMap: target.rowReferenceImageMap,
+    rowReferenceImageListMap: target.rowReferenceImageListMap,
+    rowReferenceVideoMap: target.rowReferenceVideoMap,
+    rowReferenceModeByRowId: target.rowReferenceModeByRowId
+  };
   const nextSessions = getSessions().map((session) => (
     String(session?.id || "").trim() === String(target?.id || "").trim()
       ? {
         ...payload,
+        ...localReferenceMedia,
         cloudMeta: {
           ...(session.cloudMeta || {}),
           savedAt,

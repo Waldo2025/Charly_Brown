@@ -1,9 +1,9 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.530";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.536";
-import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.528";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.560";
+import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.537";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.528";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.537";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -49,15 +49,15 @@ import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
-import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-1.0.10.528";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.528";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-1.0.10.537";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.537";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
-import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.528";
+import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.543";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-1.0.10.528";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-1.0.10.537";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -232,6 +232,7 @@ const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
 // 0 = sin timeout de polling (seguimiento indefinido del export).
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_DEVTOOLS_LOG_ENABLED = false;
+const SESSION_TITLE_FALLBACK_LABEL = "Sesión sin título";
 const SESSION_ACADEMIC_LEVEL_OPTIONS = Object.freeze(["Preescolar", "Primaria", "Secundaria"]);
 const SESSION_ACADEMIC_GRADE_OPTIONS = Object.freeze(["Primero", "Segundo", "Tercero", "Cuarto", "Quinto", "Sexto"]);
 const SESSION_ACADEMIC_TERM_OPTIONS = Object.freeze(["1", "2", "3"]);
@@ -1056,6 +1057,106 @@ function isPodcasterEditingTextField(target = null) {
   if (tag === "input" || tag === "textarea" || tag === "select") return true;
   if (el.closest && el.closest("input, textarea, select, [contenteditable='true']")) return true;
   return false;
+}
+
+function resolveSessionTitleDisplayValue(title = "") {
+  const trimmed = String(title || "").trim();
+  return trimmed || SESSION_TITLE_FALLBACK_LABEL;
+}
+
+function isFloatingPanelSessionTitleElement(target = null) {
+  const el = target instanceof Element ? target : null;
+  return Boolean(el?.classList?.contains("floating-panel-session-title"));
+}
+
+function isFloatingPanelSessionTitleEditing(target = null) {
+  const el = target instanceof Element ? target : null;
+  return isFloatingPanelSessionTitleElement(el) && el.getAttribute("data-session-title-editing") === "1";
+}
+
+function beginFloatingPanelSessionTitleEdit(target = null) {
+  const el = isFloatingPanelSessionTitleElement(target) ? target : null;
+  if (!el || isFloatingPanelSessionTitleEditing(el)) return;
+  const session = getActiveSession();
+  if (!session) return;
+  el.dataset.sessionTitleEditing = "1";
+  el.dataset.sessionTitleOriginal = String(session.title || "").trim();
+  el.dataset.sessionTitleId = String(session.id || "").trim();
+  el.classList.add("is-session-title-editing");
+  el.setAttribute("contenteditable", "true");
+  el.setAttribute("spellcheck", "false");
+  el.setAttribute("role", "textbox");
+  el.setAttribute("aria-label", "Editar nombre de la sesión");
+  el.textContent = resolveSessionTitleDisplayValue(session.title);
+  requestAnimationFrame(() => {
+    if (!isFloatingPanelSessionTitleEditing(el) || document.activeElement === el) return;
+    el.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges?.();
+    selection?.addRange?.(range);
+  });
+}
+
+function finishFloatingPanelSessionTitleEdit(target = null, options = {}) {
+  const el = isFloatingPanelSessionTitleElement(target) ? target : null;
+  if (!el || !isFloatingPanelSessionTitleEditing(el)) return;
+
+  const editingSessionId = String(el.dataset.sessionTitleId || "").trim();
+  const rawTitle = Object.prototype.hasOwnProperty.call(options, "title")
+    ? String(options.title || "")
+    : String(el.textContent || "");
+  const normalizedTitle = normalizeSessionTitle(rawTitle);
+  const targetSession = state.sessions.find((session) => String(session?.id || "").trim() === editingSessionId) || null;
+  const previousTitleNormalized = normalizeSessionTitle(targetSession?.title || "");
+  const shouldPersist = targetSession && normalizedTitle !== previousTitleNormalized;
+
+  el.removeAttribute("contenteditable");
+  el.removeAttribute("spellcheck");
+  el.removeAttribute("role");
+  el.removeAttribute("aria-label");
+  el.removeAttribute("data-session-title-editing");
+  el.classList.remove("is-session-title-editing");
+  const original = String(el.dataset.sessionTitleOriginal || "").trim();
+  delete el.dataset.sessionTitleOriginal;
+  delete el.dataset.sessionTitleId;
+
+  if (!shouldPersist) {
+    const fallbackText = resolveSessionTitleDisplayValue(targetSession?.title || original);
+    if (isFloatingPanelSessionTitleElement(el) && !isFloatingPanelSessionTitleEditing(el)) {
+      el.textContent = fallbackText;
+    }
+    if (targetSession) renderFloatingPanelSessionTitles(resolveSessionTitleDisplayValue(targetSession?.title || ""));
+    return;
+  }
+
+  upsertSessionById(editingSessionId, (session) => ({
+    ...session,
+    title: normalizedTitle
+  }), {
+    render: false,
+    autosaveReason: "session-title"
+  });
+
+  sessionStore.saveManual(editingSessionId, { render: false, silent: true }).catch((error) => {
+    const safeMessage = String(error?.message || "No se pudo guardar el título en Firebase.");
+    addChatMessage("system", `No se pudo guardar el nombre de la sesión (${safeMessage}).`);
+    setGenerationStatus("Error al guardar el nombre", "is-error");
+  });
+
+  renderFloatingPanelSessionTitles(resolveSessionTitleDisplayValue(normalizedTitle));
+}
+
+function renderFloatingPanelSessionTitles(title = "") {
+  const text = resolveSessionTitleDisplayValue(title);
+  const elements = document.querySelectorAll(".floating-panel-session-title");
+  elements.forEach((el) => {
+    if (!isFloatingPanelSessionTitleEditing(el)) {
+      el.textContent = text;
+    }
+  });
 }
 
 function isPodcastStudioInspectorEditing() {
@@ -3960,6 +4061,7 @@ function normalizeDialogueVideoMap(raw = {}) {
         : "generated",
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       segments,
+      stopMotion: globalThis.PodcasterStopMotion?.normalizeStopMotion?.(clip.stopMotion || null) || null,
       updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
       downloadUrl,
       storagePath
@@ -10560,7 +10662,17 @@ function compactCloudSessionPayload(payload = null) {
 async function saveSessionToCloud(sessionId = null, options = {}) {
   persistPanelMusicSettings();
   persistPanelMusicToActiveSession();
-  return sessionStore.saveManual(sessionId, options);
+  const response = await sessionStore.saveManual(sessionId, options);
+  const activeSession = getActiveSession();
+  const requestedSessionId = String(sessionId || activeSession?.id || "").trim();
+  if (
+    activeSession
+    && String(activeSession.id || "").trim() === requestedSessionId
+    && typeof window.PodcasterMediaReferenceApi?.hydrateSessionReferenceMedia === "function"
+  ) {
+    await window.PodcasterMediaReferenceApi.hydrateSessionReferenceMedia(activeSession);
+  }
+  return response;
 }
 
 async function persistReorderedTimelinePatchToCloud(session = null, patch = {}) {
@@ -13272,6 +13384,21 @@ function syncTimelineEphemeralState(session = null) {
     const wantsImage = isLikelyImageMediaRecord(mediaRecord);
     const sceneCard = itemEl.querySelector(".podcast-video-scene-card");
     if (sceneCard) sceneCard.classList.toggle("has-video", Boolean(videoSrc));
+    const stopMotion = window.PodcasterStopMotion?.normalizeStopMotion?.(generatedClip?.stopMotion || null);
+    let stopMotionBadge = preview.querySelector(".podcast-scene-stop-motion-badge");
+    if (stopMotion && !stopMotionBadge) {
+      stopMotionBadge = document.createElement("span");
+      stopMotionBadge.className = "podcast-scene-stop-motion-badge";
+      preview.appendChild(stopMotionBadge);
+    }
+    if (stopMotionBadge) {
+      if (stopMotion) {
+        stopMotionBadge.textContent = `${stopMotion.frames.length} fotos`;
+        stopMotionBadge.hidden = false;
+      } else {
+        stopMotionBadge.remove();
+      }
+    }
     if (itemEl.classList?.contains("podcast-video-timeline-clip")) {
       itemEl.classList.toggle("has-video", Boolean(videoSrc));
     }
@@ -13286,6 +13413,7 @@ function syncTimelineEphemeralState(session = null) {
     Array.from(preview.children).forEach((child) => {
       if (child === loading) return;
       if (child.classList?.contains("podcast-scene-stylized-text-badge")) return;
+      if (child.classList?.contains("podcast-scene-stop-motion-badge")) return;
       child.remove();
     });
     const nextMedia = document.createElement(wantsImage ? "img" : "video");
@@ -14052,6 +14180,7 @@ const montageExportControlsEl = document.querySelector(".montage-export-preview-
 const PODCAST_TIMELINE_FLOATING_PREVIEW_POSITION_KEY = "cb_podcast_timeline_floating_preview_v1";
 let podcastTimelineFloatingPreviewDrag = null;
 let podcastTimelineFloatingPreviewFrame = 0;
+let podcastTimelineFloatingPreviewReferenceRect = null;
 
 function readPodcastTimelineFloatingPreviewPosition() {
   try {
@@ -14070,14 +14199,59 @@ function persistPodcastTimelineFloatingPreviewPosition(left = 0, top = 0) {
   }
 }
 
+function getPodcastTimelineFloatingPreviewTargetSize(sourceRect = null) {
+  if (!sourceRect || !window || !podcastPreviewStageEl) return null;
+  const sourceWidth = Math.max(0, Math.round(Number(sourceRect.width || 0) || 0));
+  const sourceHeight = Math.max(0, Math.round(Number(sourceRect.height || 0) || 0));
+  if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+  const sourceRatio = sourceWidth / sourceHeight;
+  if (!Number.isFinite(sourceRatio) || sourceRatio <= 0) return null;
+
+  const viewportWidth = Math.max(0, Math.round(Number(window.innerWidth || 0) || 0));
+  const viewportHeight = Math.max(0, Math.round(Number(window.innerHeight || 0) || 0));
+  const maxWidth = Math.max(1, Math.min(420, Math.max(0, viewportWidth - 16)));
+  const maxHeight = Math.max(1, Math.min(420, Math.round(viewportHeight * 0.58)));
+  const floatingHeadHeight = 34;
+  const maxContentHeight = Math.max(1, maxHeight - floatingHeadHeight);
+
+  let width = Math.min(sourceWidth, maxWidth);
+  let contentHeight = Math.max(1, Math.round(width / sourceRatio));
+  if (contentHeight > maxContentHeight) {
+    contentHeight = Math.max(1, maxContentHeight);
+    width = Math.max(1, Math.round(contentHeight * sourceRatio));
+  }
+  const totalHeight = contentHeight + floatingHeadHeight;
+
+  return {
+    width: Math.max(1, width),
+    height: Math.max(1, Math.min(totalHeight, maxHeight))
+  };
+}
+
+function applyPodcastTimelineFloatingPreviewSize() {
+  if (!podcastPreviewStageEl || !podcastTimelineFloatingPreviewReferenceRect) return null;
+  const size = getPodcastTimelineFloatingPreviewTargetSize(podcastTimelineFloatingPreviewReferenceRect);
+  if (!size) return null;
+  podcastPreviewStageEl.style.setProperty("width", `${Math.round(size.width)}px`, "important");
+  podcastPreviewStageEl.style.setProperty("height", `${Math.round(size.height)}px`, "important");
+  return size;
+}
+
 function setPodcastTimelineFloatingPreviewVisible(visible = false) {
   if (!podcastPreviewStageEl || !els.podcastTimelineFloatingPreviewBar) return;
   const shouldShow = visible === true;
   const wasFloating = podcastPreviewStageEl.classList.contains("is-timeline-floating-preview");
   const previewShell = podcastPreviewStageEl.parentElement || null;
   const naturalRect = podcastPreviewStageEl.getBoundingClientRect();
-  if (shouldShow && !wasFloating && previewShell && naturalRect.height > 0) {
+  const measuredRect = {
+    width: Math.max(0, Math.round(Number(naturalRect?.width || 0) || 0)),
+    height: Math.max(0, Math.round(Number(naturalRect?.height || 0) || 0))
+  };
+  if (shouldShow && !wasFloating && previewShell && measuredRect.height > 0) {
     previewShell.style.minHeight = `${Math.round(naturalRect.height)}px`;
+    if (measuredRect.width > 0 && measuredRect.height > 0) {
+      podcastTimelineFloatingPreviewReferenceRect = measuredRect;
+    }
   }
   podcastPreviewStageEl.classList.toggle("is-timeline-floating-preview", shouldShow);
   els.podcastTimelineFloatingPreviewBar.hidden = !shouldShow;
@@ -14085,12 +14259,27 @@ function setPodcastTimelineFloatingPreviewVisible(visible = false) {
     if (previewShell) previewShell.style.minHeight = "";
     podcastPreviewStageEl.style.left = "";
     podcastPreviewStageEl.style.top = "";
+    podcastTimelineFloatingPreviewReferenceRect = null;
+    podcastPreviewStageEl.style.removeProperty("width");
+    podcastPreviewStageEl.style.removeProperty("height");
     return;
   }
+  if (!podcastTimelineFloatingPreviewReferenceRect) {
+    if (measuredRect.width > 0 && measuredRect.height > 0) {
+      podcastTimelineFloatingPreviewReferenceRect = measuredRect;
+    } else {
+      return;
+    }
+  }
   const rect = podcastPreviewStageEl.getBoundingClientRect();
+  const targetSize = applyPodcastTimelineFloatingPreviewSize();
   const saved = readPodcastTimelineFloatingPreviewPosition();
-  podcastPreviewStageEl.style.left = `${Math.min(Math.max(8, (window.innerWidth || 0) - Math.min(rect.width || 420, window.innerWidth || 420) - 8), saved.left)}px`;
-  podcastPreviewStageEl.style.top = `${Math.min(Math.max(8, (window.innerHeight || 0) - Math.min(rect.height || 240, window.innerHeight || 240) - 8), saved.top)}px`;
+  const previewWidth = Number(targetSize?.width || rect.width || 420);
+  const previewHeight = Number(targetSize?.height || rect.height || 240);
+  const maxLeft = Math.max(8, (window.innerWidth || 0) - Math.min(previewWidth || 420, window.innerWidth || 420) - 8);
+  const maxTop = Math.max(8, (window.innerHeight || 0) - Math.min(previewHeight || 240, window.innerHeight || 240) - 8);
+  podcastPreviewStageEl.style.left = `${Math.min(maxLeft, Math.max(8, saved.left || 0))}px`;
+  podcastPreviewStageEl.style.top = `${Math.min(maxTop, Math.max(8, saved.top || 0))}px`;
 }
 
 function syncPodcastTimelineFloatingPreview() {
@@ -16216,10 +16405,8 @@ function render() {
   updatePodcastPlayerUi();
   renderGenerationStatus(session);
   renderSessions();
-  const sessionTitle = session.title || "Sesión sin título";
-  document.querySelectorAll(".floating-panel-session-title").forEach((el) => {
-    el.textContent = sessionTitle;
-  });
+  const sessionTitle = resolveSessionTitleDisplayValue(session.title);
+  renderFloatingPanelSessionTitles(sessionTitle);
   syncCustomTooltips(document);
   setComposerGenerationMode(composerGenerationMode);
   setComposerVideoTableMode(composerVideoTableMode);
@@ -16904,6 +17091,31 @@ async function resolveSceneShareableVideoUrl(session = null, rowId = "") {
 
 function attachEvents() {
   setupGlobalTooltipPortal();
+  document.addEventListener("dblclick", (event) => {
+    const titleEl = event.target?.closest?.(".floating-panel-session-title") || null;
+    if (!titleEl) return;
+    event.preventDefault();
+    beginFloatingPanelSessionTitleEdit(titleEl);
+  });
+  document.addEventListener("focusout", (event) => {
+    const titleEl = isFloatingPanelSessionTitleElement(event.target) ? event.target : null;
+    if (!titleEl) return;
+    finishFloatingPanelSessionTitleEdit(titleEl);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!isFloatingPanelSessionTitleEditing(event.target)) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.target?.blur();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      const restoreTitle = event.target?.dataset?.sessionTitleOriginal;
+      finishFloatingPanelSessionTitleEdit(event.target, { title: restoreTitle });
+      return;
+    }
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       if (typeof playbackController?.pause === "function") {
@@ -18599,6 +18811,12 @@ function attachEvents() {
     }
     syncPodcastOnScreenTextOverlay(session, { currentMs: nextMs });
     updatePodcastVideoTransportUi();
+    void playbackController.seek(nextMs, {
+      lightweight: true,
+      awaitStageVideo: false,
+      suppressAutoScroll: true,
+      deferPreview: true
+    });
   };
   const commitPodcastStudioScrubberSeek = async () => {
     if (studioScrubberSeekRafId) {
@@ -21354,6 +21572,7 @@ Object.assign(window, {
   logVideoCreateDebug,
   clearAllActivityNotifications, getRowReferenceVideoMap,
   setSidepanelOpen,
+  playbackController,
   exportPreviewController,
 });
 
