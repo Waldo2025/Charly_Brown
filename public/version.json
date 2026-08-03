@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.536",
-  "build": "2026-1.0.10.536",
+  "version": "1.0.10.538",
+  "build": "2026-1.0.10.538",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Home reutiliza la instancia existente de Firestore y evita una segunda inicialización con opciones distintas.",
     "Corregido: El timeline separa las promesas de streaming y descarga persistente para que la preparación nunca confunda un URL proxy con un blob hidratado antes de reproducir.",
     "Corregido: Reemplazar Escena separa la URL temporal del preview de la referencia persistida y descarga el video seleccionado a blob/IndexedDB antes de sincronizar el escenario para una reproducción estable.",
     "Corregido: Al confirmar Reemplazar Escena, el controlador de reproducción se rehidrata con la sesión actualizada antes de sincronizar el escenario, evitando que vuelva a cargar el video anterior.",

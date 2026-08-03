@@ -1,7 +1,7 @@
 import {
-  initializeFirestore, collection, query, where, getDocs, doc,
+  getFirestore, collection, query, where, getDocs, doc,
   updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot,
-  orderBy, limit, persistentLocalCache, persistentMultipleTabManager
+  orderBy, limit
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import {
   getAuth,
@@ -23,11 +23,9 @@ import "../podcaster/podcaster-scene-media-render-spec.js";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-});
+// Home puede cargarse después de otros módulos que ya inicializaron Firestore.
+// Reutilizamos la instancia existente para no inicializarla con opciones distintas.
+const db = getFirestore(app);
 const auth = getAuth(app);
 const workbenchFilters = {
   lecturas: "published",
