@@ -99,9 +99,9 @@ services:
       - key: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS
         value: 2000
       - key: MONTAGE_EXPORT_MAX_CONCURRENT
-        value: 1
+        value: 2
       - key: MONTAGE_EXPORT_WORKER_CONCURRENCY
-        value: 1
+        value: 2
       - key: MONTAGE_EXPORT_REQUIRE_QUEUE
         value: false
       - key: MONTAGE_EXPORT_USE_QUEUE
@@ -147,9 +147,9 @@ services:
       - key: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS
         value: 2000
       - key: MONTAGE_EXPORT_MAX_CONCURRENT
-        value: 1
+        value: 2
       - key: MONTAGE_EXPORT_WORKER_CONCURRENCY
-        value: 1
+        value: 2
       - key: MONTAGE_EXPORT_REQUIRE_QUEUE
         value: true
       - key: RENDER_KEY_VALUE_CONNECTION_STRING

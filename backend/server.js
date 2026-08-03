@@ -2496,40 +2496,6 @@ async function resolveMontageExportJobSnapshot(jobId = "") {
   }
 }
 
-async function resolveBlockingPersistedMontageExportJob({ excludeJobId = "" } = {}) {
-  if (typeof montageExportJobStore?.listActiveJobs !== "function") return null;
-  const excluded = clampExportId(excludeJobId);
-  const jobs = await montageExportJobStore.listActiveJobs({ limit: 10 }).catch((error) => {
-    console.warn("[backend][montage-export] active persisted job lookup failed", {
-      message: String(error?.message || error)
-    });
-    return [];
-  });
-  for (const job of Array.isArray(jobs) ? jobs : []) {
-    const jobId = clampExportId(job?.jobId || "");
-    if (!jobId || (excluded && jobId === excluded)) continue;
-    const status = String(job?.status || "").trim().toLowerCase();
-    if (!["queued", "running"].includes(status)) continue;
-    if (isMontageExportJobStale(job)) {
-      const stalePatch = buildStaleMontageExportJobPatch(job);
-      console.warn("[backend][montage-export] marking stale persisted active job before new submit", {
-        jobId,
-        heartbeatAgeMs: stalePatch.error?.detail?.heartbeatAgeMs || 0,
-        staleThresholdMs: stalePatch.error?.detail?.staleThresholdMs || MONTAGE_EXPORT_STALE_HEARTBEAT_MS
-      });
-      await montageExportJobStore.updateJob(jobId, stalePatch).catch((error) => {
-        console.warn("[backend][montage-export] stale persisted job update failed before new submit", {
-          jobId,
-          message: String(error?.message || error)
-        });
-      });
-      continue;
-    }
-    return job;
-  }
-  return null;
-}
-
 function getMontageExportJobHeartbeatAgeMs(job = null, nowMs = Date.now()) {
   const source = job && typeof job === "object" ? job : null;
   if (!source) return 0;
@@ -15691,17 +15657,6 @@ app.post("/api/podcaster/montage/export-v2", async (req, res) => {
       ffmpegStage: "ffmpeg_preview_runtime"
     });
 
-    const blockingPersistedJob = await resolveBlockingPersistedMontageExportJob();
-    if (blockingPersistedJob) {
-      const activeJobId = clampExportId(blockingPersistedJob.jobId || "");
-      return res.status(429).json({
-        error: "backend_busy_with_export",
-        code: "backend_busy_with_export",
-        message: "El servidor ya tiene una exportación MP4 activa. Continúa o cancela ese export antes de iniciar otro.",
-        detail: buildDirectFallbackBusyDetail("montage_export", [activeJobId])
-      });
-    }
-
     const jobId = clampExportId(randomUUID());
     const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
     const persistedRequest = sanitizeMontageExportPersistedRequest({ input, baseUrl });
@@ -16008,22 +15963,6 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       exportMode: input.exportMode
     });
     validateMontageExportRequest(input);
-    const blockingPersistedJob = await resolveBlockingPersistedMontageExportJob();
-    if (blockingPersistedJob) {
-      const activeJobId = clampExportId(blockingPersistedJob.jobId || "");
-      console.warn("[backend][montage-export] rejected submit because persisted export is still active", {
-        activeJobId,
-        activeStatus: String(blockingPersistedJob.status || "").trim() || null,
-        activeStage: String(blockingPersistedJob.stage || "").trim() || null,
-        activeSceneSubstage: String(blockingPersistedJob.sceneSubstage || "").trim() || null
-      });
-      return res.status(429).json({
-        error: "backend_busy_with_export",
-        code: "backend_busy_with_export",
-        message: "El servidor ya tiene una exportación MP4 activa. Continúa o cancela ese export antes de iniciar otro.",
-        detail: buildDirectFallbackBusyDetail("montage_export", [activeJobId])
-      });
-    }
     const jobId = clampExportId(randomUUID());
     const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
     const persistedRequest = sanitizeMontageExportPersistedRequest({
