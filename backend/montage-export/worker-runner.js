@@ -1,7 +1,8 @@
 function createProcessMontageExportJob({
   jobStore,
   executeMontageExportPipeline,
-  buildMontageSceneFailure
+  buildMontageSceneFailure,
+  cancelPollIntervalMs = 500
 } = {}) {
   if (!jobStore || typeof jobStore.updateJob !== "function" || typeof jobStore.getJob !== "function") {
     throw new Error("montage_export_job_store_required");
@@ -40,9 +41,10 @@ function createProcessMontageExportJob({
       }
       return cancelRequested;
     };
+    const pollIntervalMs = Math.max(100, Math.min(2000, Number(cancelPollIntervalMs) || 500));
     cancelPollTimer = setInterval(() => {
       refreshCancelRequested().catch(() => { });
-    }, 500);
+    }, pollIntervalMs);
     if (typeof cancelPollTimer?.unref === "function") cancelPollTimer.unref();
 
     const isCancellationError = (error = null) => {
@@ -58,6 +60,12 @@ function createProcessMontageExportJob({
         hint
       }).catch(() => { });
     };
+
+    await refreshCancelRequested();
+    if (cancelRequested) {
+      await markCancelled();
+      return null;
+    }
 
     await jobStore.updateJob(jobId, {
       status: "running",

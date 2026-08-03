@@ -471,6 +471,12 @@ function createMontageExportJobStore({
       const ref = collection().doc(cleanJobId);
       const snap = await ref.get();
       const existing = snap.exists ? (snap.data() || {}) : { jobId: cleanJobId };
+      const existingStatus = String(existing.status || "").trim().toLowerCase();
+      const requestedStatus = String(patch?.status || "").trim().toLowerCase();
+      // A stale worker heartbeat must never revive a user-cancelled export.
+      if (existingStatus === "cancelled" && requestedStatus !== "cancelled") {
+        return existing;
+      }
       const sanitizedPatch = patch && typeof patch === "object" && Object.prototype.hasOwnProperty.call(patch, "request")
         ? {
           ...patch,

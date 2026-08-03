@@ -536,6 +536,26 @@ test("updateJob merges progress and heartbeat without deleting request metadata"
   assert.equal(updated.heartbeatAt, "2026-04-27T15:05:00.000Z");
 });
 
+test("updateJob never revives a user-cancelled export with a stale running heartbeat", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T16:00:00.000Z"
+  });
+
+  await store.createJob({ jobId: "job-cancelled", sessionId: "session-cancelled", ownerId: "user-cancelled", totalScenes: 2 });
+  await store.updateJob("job-cancelled", { status: "cancelled", stage: "cancelled" });
+  const afterStaleHeartbeat = await store.updateJob("job-cancelled", {
+    status: "running",
+    stage: "render_scene_segments",
+    progress: 0.75
+  });
+
+  assert.equal(afterStaleHeartbeat.status, "cancelled");
+  assert.equal(afterStaleHeartbeat.stage, "cancelled");
+  assert.equal(fakeDb.docs.get("job-cancelled").status, "cancelled");
+});
+
 test("getJob returns null for expired montage export jobs", async () => {
   const fakeDb = createFakeDocStore();
   const store = createMontageExportJobStore({

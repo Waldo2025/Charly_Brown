@@ -233,3 +233,42 @@ test("worker runner clears stale sceneSubstage outside render_scene_segments", a
   assert.ok(concatUpdate);
   assert.equal(concatUpdate.patch.sceneSubstage, "");
 });
+
+test("worker runner aborts when the persisted job is cancelled while rendering", async () => {
+  const updates = [];
+  let status = "running";
+  let observedAbort = false;
+  const processor = createProcessMontageExportJob({
+    jobStore: {
+      async getJob() { return { status, progress: 0.5 }; },
+      async updateJob(jobId, patch) {
+        updates.push({ jobId, patch });
+        if (patch.status) status = patch.status;
+        return { status, ...patch };
+      }
+    },
+    cancelPollIntervalMs: 10,
+    executeMontageExportPipeline: async (_input, { shouldAbort }) => {
+      await new Promise((_resolve, reject) => {
+        const timer = setInterval(() => {
+          if (!shouldAbort()) return;
+          observedAbort = true;
+          clearInterval(timer);
+          const error = new Error("montage_export_cancelled");
+          error.code = "montage_export_cancelled";
+          reject(error);
+        }, 5);
+      });
+    },
+    buildMontageSceneFailure: (error) => ({ error: error.message })
+  });
+
+  const pending = processor({ data: { jobId: "job-cancelled", ownerId: "user-1", baseUrl: "https://example.com", input: { sessionId: "session-1" } } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  status = "cancelled";
+  await pending;
+
+  assert.equal(observedAbort, true);
+  assert.equal(updates.at(-1).patch.status, "cancelled");
+  assert.equal(updates.some(({ patch }) => patch.status === "ready"), false);
+});
