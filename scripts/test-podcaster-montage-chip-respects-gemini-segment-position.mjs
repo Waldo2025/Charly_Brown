@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-timeline-ui.js",
+  new URL("../public/podcaster/podcaster-timeline-ui.js", import.meta.url),
   "utf8"
 );
 
@@ -20,8 +20,14 @@ assert.match(
 
 assert.match(
   source,
-  /if \(alignMode === "segment"\) \{[\s\S]*chip\.style\.left = `\$\{leftPx\}px`;/,
-  "El lightweight render debe reposicionar chips Gemini desde startMs del segmento."
+  /const resolveGeminiSegmentTimelineStartMs = \(segment = null, rowId = ""\) => \{[\s\S]*return Math\.max\(sceneStartMs, segmentStartMs\);/,
+  "Los chips Gemini automáticos no deben iniciar antes de la escena runtime."
+);
+
+assert.match(
+  source,
+  /timelineMsToPx\(resolveGeminiSegmentTimelineStartMs\(segment, rowId\), activeSession\)/,
+  "El render de chips Gemini debe usar el inicio protegido contra desfases persistidos."
 );
 
 console.log("Podcaster montage chip respects Gemini segment position OK.");

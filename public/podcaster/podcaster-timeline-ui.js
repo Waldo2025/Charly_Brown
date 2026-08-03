@@ -432,6 +432,18 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, segmentVisibleMs, measuredAudioVisibleMs);
     };
 
+    // La geometría de las escenas se calcula desde el runtime. Un segmento Gemini
+    // persistido puede conservar un startMs previo mientras la escena Veo se movió
+    // o rehidrató; nunca debe dibujarse antes de su escena salvo que el usuario lo
+    // haya posicionado manualmente.
+    const resolveGeminiSegmentTimelineStartMs = (segment = null, rowId = "") => {
+      const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      if (segment?.manualStartMs === true || segment?.manualPosition === true) return segmentStartMs;
+      const runtimeEntry = runtimeEntryByRowId.get(String(rowId || segment?.rowId || "").trim()) || null;
+      const sceneStartMs = Math.max(0, Number(runtimeEntry?.startMs || 0) || 0);
+      return Math.max(sceneStartMs, segmentStartMs);
+    };
+
     const syncMontageAudioSubtrackAlignment = () => {
       if (!els.podcastVideoTimeline) return;
       if (mode !== "tracks") return;
@@ -458,7 +470,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (alignMode === "segment") {
           const segment = currentGeminiSegmentByRowId.get(rowId) || null;
           if (!segment) return;
-          const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+          const leftPx = Math.max(0, timelineMsToPx(resolveGeminiSegmentTimelineStartMs(segment, rowId), activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
           const durationMs = resolveGeminiSegmentVisibleDurationMs(segment);
           const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
           chip.style.left = `${leftPx}px`;
@@ -526,7 +538,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const hasGemini = Boolean(segment);
         const minWidthPx = hasGemini ? minAudioLoopPx : minClipPx;
         const startMs = hasGemini
-          ? Math.max(0, Number(segment?.startMs || 0) || 0)
+          ? resolveGeminiSegmentTimelineStartMs(segment, rowId)
           : Math.max(0, Number(clip.startMs || 0) || 0);
         const durationMs = hasGemini
           ? resolveGeminiSegmentVisibleDurationMs(segment)
@@ -951,7 +963,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (!hasStoredAudio) return "";
         const alignMode = segment ? "segment" : "clip";
         const startMs = alignMode === "segment"
-          ? Math.max(0, Number(segment?.startMs || 0) || 0)
+          ? resolveGeminiSegmentTimelineStartMs(segment, rowId)
           : Math.max(0, Number(timelineClip?.startMs || 0) || 0);
         const leftPx = Math.max(0, timelineMsToPx(startMs, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
         const remainingWidthPx = Math.max(0, canvasWidthPx - 4 - leftPx);
@@ -1019,7 +1031,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           const audioClip = resolveDialogueAudioForRow(activeSession, rowId);
           const alignMode = segment ? "segment" : "clip";
           const startMs = alignMode === "segment"
-            ? Math.max(0, Number(segment?.startMs || 0) || 0)
+            ? resolveGeminiSegmentTimelineStartMs(segment, rowId)
             : Math.max(0, Number(timelineClip?.startMs || 0) || 0);
           const adjustedAudioDurationSec = Math.max(0, Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0) / 1000;
           const durationMs = alignMode === "segment"
