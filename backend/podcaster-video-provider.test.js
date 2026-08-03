@@ -89,22 +89,22 @@ test("automatic routing uses Omni generally and Veo only for video-specific cont
   );
 });
 
-test("rejects incompatible in-scene text and correction combinations clearly", () => {
-  assert.throws(
-    () => resolveVideoGenerator({ generator: "veo", textPolicy: "in_scene", inSceneText: "CHARLY PODCAST" }),
-    (error) => error?.code === "in_scene_text_requires_omni" && /overlay/i.test(error.message)
+test("allows in-scene text with Veo while preserving capability validation", () => {
+  assert.equal(
+    resolveVideoGenerator({ generator: "veo", textPolicy: "in_scene", inSceneText: "CHARLY PODCAST" }),
+    "veo"
   );
-  assert.throws(
-    () => resolveVideoGenerator({ generator: "auto", hasReferenceVideo: true, inSceneText: "CHARLY PODCAST" }),
-    (error) => error?.code === "in_scene_text_requires_omni"
+  assert.equal(
+    resolveVideoGenerator({ generator: "auto", hasReferenceVideo: true, inSceneText: "CHARLY PODCAST" }),
+    "veo"
   );
-  assert.throws(
-    () => resolveVideoGenerator({
+  assert.equal(
+    resolveVideoGenerator({
       generator: "auto",
       model: "veo-3.1-fast-generate-preview",
       inSceneText: "CHARLY PODCAST"
     }),
-    (error) => error?.code === "in_scene_text_requires_omni"
+    "veo"
   );
   assert.throws(
     () => resolveVideoGenerator({ generator: "omni", hasLastFrame: true }),
@@ -138,18 +138,16 @@ test("rejects incompatible in-scene text and correction combinations clearly", (
   );
 });
 
-test("validates in-scene text as one line, six words and 48 characters", () => {
+test("validates multiline in-scene text up to its video-safe limit", () => {
   assert.equal(normalizeInSceneText("CHARLY PODCAST"), "CHARLY PODCAST");
+  assert.equal(normalizeInSceneText("CHARLY\nPODCAST"), "CHARLY\nPODCAST");
+  assert.equal(normalizeInSceneText("Este es un bloque de texto visible dentro de la escena, con suficiente espacio para explicar una idea breve al espectador."), "Este es un bloque de texto visible dentro de la escena, con suficiente espacio para explicar una idea breve al espectador.");
   assert.throws(
-    () => normalizeInSceneText("CHARLY\nPODCAST"),
+    () => normalizeInSceneText(Array.from({ length: 41 }, (_, index) => `palabra${index}`).join(" ")),
     (error) => error?.code === "in_scene_text_invalid"
   );
   assert.throws(
-    () => normalizeInSceneText("uno dos tres cuatro cinco seis siete"),
-    (error) => error?.code === "in_scene_text_invalid"
-  );
-  assert.throws(
-    () => normalizeInSceneText("X".repeat(49)),
+    () => normalizeInSceneText("X".repeat(281)),
     (error) => error?.code === "in_scene_text_invalid"
   );
 });

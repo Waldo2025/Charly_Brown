@@ -10,6 +10,9 @@ const VEO_VIDEO_MODELS = Object.freeze([
 const VIDEO_MODELS = Object.freeze([OMNI_VIDEO_MODEL, ...VEO_VIDEO_MODELS]);
 const PROVIDER_TIMEOUT_MS = 7 * 60 * 1000;
 const MEDIA_TIMEOUT_MS = 3 * 60 * 1000;
+const IN_SCENE_TEXT_MAX_CHARACTERS = 280;
+const IN_SCENE_TEXT_MAX_WORDS = 40;
+const IN_SCENE_TEXT_MAX_LINES = 4;
 
 const LEGACY_VIDEO_MODEL_MAP = Object.freeze({
   "veo-2.0-generate-001": DEFAULT_VEO_VIDEO_MODEL,
@@ -55,25 +58,29 @@ function normalizeAspectRatio(value = "16:9", isReel = false) {
 }
 
 function normalizeInSceneText(value = "", options = {}) {
-  const raw = String(value || "");
-  if (/[\r\n]/.test(raw) && options?.truncate !== true) {
-    throw createVideoContractError(
-      "in_scene_text_invalid",
-      "inSceneText admite una sola línea, máximo 6 palabras y 48 caracteres.",
-      { hasLineBreak: true, maxCharacters: 48, maxWords: 6 }
-    );
-  }
-  const text = cleanString(raw).replace(/[\r\n]+/g, " ");
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[\t\f\v ]+/g, " ").trim())
+    .filter(Boolean);
+  const text = lines.join("\n").trim();
   if (!text) return "";
   const words = text.split(/\s+/).filter(Boolean);
-  if (text.length > 48 || words.length > 6) {
+  if (text.length > IN_SCENE_TEXT_MAX_CHARACTERS || words.length > IN_SCENE_TEXT_MAX_WORDS || lines.length > IN_SCENE_TEXT_MAX_LINES) {
     if (options?.truncate === true) {
-      return words.slice(0, 6).join(" ").slice(0, 48).trim();
+      return words.slice(0, IN_SCENE_TEXT_MAX_WORDS).join(" ").slice(0, IN_SCENE_TEXT_MAX_CHARACTERS).trim();
     }
     throw createVideoContractError(
       "in_scene_text_invalid",
-      "inSceneText admite una sola línea, máximo 6 palabras y 48 caracteres.",
-      { characterCount: text.length, wordCount: words.length, maxCharacters: 48, maxWords: 6 }
+      "inSceneText admite hasta 4 líneas, 40 palabras y 280 caracteres.",
+      {
+        characterCount: text.length,
+        wordCount: words.length,
+        lineCount: lines.length,
+        maxCharacters: IN_SCENE_TEXT_MAX_CHARACTERS,
+        maxWords: IN_SCENE_TEXT_MAX_WORDS,
+        maxLines: IN_SCENE_TEXT_MAX_LINES
+      }
     );
   }
   return text;
@@ -151,13 +158,6 @@ function resolveVideoGenerator(options = {}) {
     throw createVideoContractError(
       "in_scene_text_required",
       "textPolicy=in_scene requiere inSceneText."
-    );
-  }
-  if (resolved === "veo" && inSceneText) {
-    throw createVideoContractError(
-      "in_scene_text_requires_omni",
-      "El texto natural dentro de la escena sólo está disponible con Gemini Omni. Conviértelo en overlay o retira la referencia/extensión de video.",
-      { requestedGenerator: requested, needsVeo }
     );
   }
   if (
