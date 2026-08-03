@@ -21,6 +21,10 @@ if (/resolveBlockingPersistedMontageExportJob/.test(serverSource)) {
   throw new Error("El submit de export no debe bloquear globalmente una nueva sesión por otro job activo.");
 }
 
+if (/activeDirectExportJobIds\.length && !hasActiveHeavyWorkJob\("montage_export", jobId\)/.test(serverSource)) {
+  throw new Error("El modo directo debe respetar el límite de concurrencia, sin reducirlo a una sola exportación.");
+}
+
 const snoopyBlock = renderYaml.match(/name: snoopy-export[\s\S]*?(?=\n  - type: worker)/)?.[0] || "";
 const workerBlock = renderYaml.match(/name: charly-brown-podcaster-export-worker[\s\S]*?(?=\n  - type: keyvalue)/)?.[0] || "";
 

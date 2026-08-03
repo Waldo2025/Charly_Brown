@@ -1304,11 +1304,6 @@ function isMontageExportQueueSubmissionEnabled() {
   return isEnvFlagEnabled(process.env.MONTAGE_EXPORT_USE_QUEUE, isMontageExportQueueRequired());
 }
 
-function isDirectMontageExportFallbackMode() {
-  if (!EXPORT_SERVICE_ONLY && EXPOSURE_IS_ROLE_BASED) return false;
-  return !isMontageExportQueueSubmissionEnabled() || !montageExportQueueConfigured || !montageExportQueue;
-}
-
 function ensureMontageExportServiceEnabled(res) {
   if (EXPORT_SERVICE_ONLY || BACKEND_SERVICE_ROLE === "all") return true;
   res.status(503).json({
@@ -1339,20 +1334,6 @@ function ensureGeminiGenerativeServiceEnabled(res) {
   return false;
 }
 
-function buildDirectFallbackBusyDetail(kind = "", activeJobIds = []) {
-  return {
-    kind: String(kind || "").trim() || "unknown",
-    requestedKind: String(kind || "").trim() || "unknown",
-    activeJobId: String(activeJobIds[0] || "").trim(),
-    activeJobIds: Array.isArray(activeJobIds) ? activeJobIds.filter(Boolean) : [],
-    activeCount: Array.isArray(activeJobIds) ? activeJobIds.filter(Boolean).length : 0,
-    fallbackMode: "direct_in_memory",
-    queueConfigured: montageExportQueueConfigured === true,
-    queueAvailable: Boolean(montageExportQueue),
-    retryable: true,
-    reason: "bullmq_queue_unavailable"
-  };
-}
 const analizarPdfJobStore = createAnalizarPdfJobStore();
 const analizarPdfGeneratedFileStore = new Map();
 const ANALIZAR_PDF_COLLECTION = "analizarPDF";
@@ -16078,23 +16059,6 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
           requireQueue: true
         }
       });
-    }
-
-    if (isDirectMontageExportFallbackMode()) {
-      const activeDirectExportJobIds = getActiveHeavyWorkJobIds("montage_export");
-      if (activeDirectExportJobIds.length && !hasActiveHeavyWorkJob("montage_export", jobId)) {
-        logHeavyWorkSlots("montage_export", "direct_fallback_rejected", {
-          jobId,
-          mode: "direct",
-          reason: "bullmq_queue_unavailable"
-        });
-        return res.status(429).json({
-          error: "backend_busy_with_export",
-          code: "backend_busy_with_export",
-          message: "El backend está en modo directo sin cola Redis; solo permite un export pesado a la vez para evitar reinicios por memoria.",
-          detail: buildDirectFallbackBusyDetail("montage_export", activeDirectExportJobIds)
-        });
-      }
     }
 
     let slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
