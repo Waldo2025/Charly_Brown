@@ -13,6 +13,8 @@ const {
 } = require("./vertex.js");
 const { registerUploadRoutes } = require("./uploads.js");
 const { registerAssetRoutes } = require("./assets.js");
+const { createLiveTicket } = require("./live-tickets.js");
+const { dispatchMontageToCloudRun } = require("./montage-dispatch.js");
 
 function createApp(service) {
   const app = express();
@@ -45,6 +47,9 @@ geminiApp.post("/api/gemini/generate", asyncRoute(async (req, res) => {
   }));
   return res.status(200).json(JSON.parse(JSON.stringify(response)));
 }));
+geminiApp.post("/api/gemini/live-token", asyncRoute(async (req, res) => {
+  return res.status(201).json(await createLiveTicket(req));
+}));
 installErrorHandler(geminiApp, { service: "gemini-api" });
 
 const veoApp = createApp("veo-api");
@@ -56,6 +61,7 @@ installErrorHandler(assetApp, { service: "asset-api" });
 
 exports.podcasterApi = onRequest({
   region: REGION,
+  serviceAccount: "charly-functions-core@charly-brown.iam.gserviceaccount.com",
   memory: "1GiB",
   timeoutSeconds: 60,
   minInstances: 1,
@@ -65,6 +71,7 @@ exports.podcasterApi = onRequest({
 
 exports.geminiApi = onRequest({
   region: REGION,
+  serviceAccount: "charly-functions-ai@charly-brown.iam.gserviceaccount.com",
   memory: "1GiB",
   timeoutSeconds: 60,
   minInstances: 0,
@@ -74,6 +81,7 @@ exports.geminiApi = onRequest({
 
 exports.veoApi = onRequest({
   region: REGION,
+  serviceAccount: "charly-functions-ai@charly-brown.iam.gserviceaccount.com",
   memory: "2GiB",
   timeoutSeconds: 60,
   minInstances: 0,
@@ -83,9 +91,33 @@ exports.veoApi = onRequest({
 
 exports.assetApi = onRequest({
   region: REGION,
+  serviceAccount: "charly-functions-core@charly-brown.iam.gserviceaccount.com",
   memory: "512MiB",
   timeoutSeconds: 30,
   minInstances: 0,
   maxInstances: 20,
   concurrency: 80
 }, assetApp);
+
+const montageTaskApp = createApp("montage-dispatch");
+montageTaskApp.post("/", asyncRoute(async (req, res) => {
+  const taskName = String(req.headers["x-cloudtasks-taskname"] || "").trim();
+  if (!taskName && process.env.FUNCTIONS_EMULATOR !== "true") {
+    throw Object.assign(new Error("cloud_tasks_request_required"), { status: 403 });
+  }
+  const jobId = String(req.body?.jobId || "").trim();
+  const result = await dispatchMontageToCloudRun({ jobId, taskName });
+  return res.status(200).json({ ok: true, ...result });
+}));
+installErrorHandler(montageTaskApp, { service: "montage-dispatch" });
+
+exports.dispatchMontageTask = onRequest({
+  region: REGION,
+  serviceAccount: "charly-montage-dispatcher@charly-brown.iam.gserviceaccount.com",
+  memory: "512MiB",
+  timeoutSeconds: 60,
+  minInstances: 0,
+  maxInstances: 4,
+  concurrency: 4,
+  invoker: "private"
+}, montageTaskApp);

@@ -19,6 +19,17 @@ const {
   isPublicLibraryPath,
   sessionIdFromStoragePath
 } = require("../src/assets.js");
+const {
+  QUEUES,
+  deterministicTaskId,
+  buildHttpTaskRequest
+} = require("../src/tasks.js");
+const {
+  buildRunJobRequest
+} = require("../src/montage-dispatch.js");
+const {
+  normalizeVoiceName
+} = require("../src/live-tickets.js");
 
 test("model aliases replace retired Gemini and Veo previews", () => {
   assert.equal(normalizeModel("gemini-2.5-flash"), DEFAULT_TEXT_MODEL);
@@ -76,4 +87,39 @@ test("signed asset adapter accepts only podcaster storage paths", () => {
   );
   assert.throws(() => normalizeStoragePath("other/private.txt"), /invalid_storage_path/);
   assert.throws(() => normalizeStoragePath("podcaster/../private.txt"), /invalid_storage_path/);
+});
+
+test("Cloud Tasks payload is thin, deterministic and authenticated with OIDC", () => {
+  const first = deterministicTaskId("montage", "job-42");
+  const second = deterministicTaskId("montage", "job-42");
+  assert.equal(first, second);
+  const request = buildHttpTaskRequest({
+    queue: QUEUES.montage,
+    kind: "montage",
+    jobId: "job-42",
+    targetUrl: "https://dispatch.example.test/",
+    serviceAccountEmail: "tasks@example.iam.gserviceaccount.com",
+    payload: { sessionId: "session-42" }
+  });
+  assert.match(request.task.name, /podcaster-montage\/tasks\/montage-/);
+  assert.equal(request.task.httpRequest.oidcToken.audience, "https://dispatch.example.test/");
+  assert.deepEqual(JSON.parse(request.task.httpRequest.body.toString("utf8")), {
+    jobId: "job-42",
+    sessionId: "session-42"
+  });
+});
+
+test("Cloud Run override sends only the durable montage job id", () => {
+  const request = buildRunJobRequest({ jobId: "job-42" });
+  assert.match(request.name, /jobs\/podcaster-montage-export$/);
+  const env = Object.fromEntries(request.overrides.containerOverrides[0].env.map((item) => [item.name, item.value]));
+  assert.equal(env.MONTAGE_JOB_ID, "job-42");
+  assert.equal(env.BACKEND_SERVICE_ROLE, "export");
+  assert.equal(request.overrides.taskCount, 1);
+  assert.equal(request.overrides.timeout.seconds, 1800);
+});
+
+test("Gemini Live only accepts the configured voice catalog", () => {
+  assert.equal(normalizeVoiceName("zephyr"), "Zephyr");
+  assert.equal(normalizeVoiceName("not-a-voice"), "Aoede");
 });

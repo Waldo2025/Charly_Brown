@@ -1,0 +1,10 @@
+.git
+.env
+node_modules
+backend/node_modules
+backend/.playwright-browsers
+**/*.test.js
+**/*.test.mjs
+diff.patch
+tmp_podcaster.html
+charly-brown-firebase-adminsdk-*.json
