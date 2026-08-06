@@ -1,0 +1,7 @@
+Science Activities Rive HUD
+
+Uses “Sci-fi reticle” by drawsgood as the animated FUI surface.
+
+Licensed under Creative Commons Attribution 4.0 (CC BY 4.0).
+Source: https://rive.app/community/files/7751-14934-sci-fi-reticle/
+License: https://creativecommons.org/licenses/by/4.0/

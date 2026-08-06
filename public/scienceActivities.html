@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <script src="js/cache-version-loader.js"></script>
+  <meta charset="UTF-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Science Activities Creator</title>
+  <link rel="icon" type="image/png" href="pigpen.png">
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" data-cache-href="tailwind-lite.css">
+  <link rel="stylesheet" data-cache-href="sidebar.css">
+  <link rel="stylesheet" data-cache-href="header.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="scienceActivities.css?v=20260731-session-panel-v1">
+  <link rel="stylesheet" href="science-hud-themes.css?v=20260802-rive-sequence-route-v2">
+  <style>
+    .sa-briefing-layer {
+      align-items: flex-start !important;
+      overflow-y: auto !important;
+      padding-block: clamp(10px, 2vh, 22px) !important;
+    }
+  </style>
+</head>
+<body data-page="scienceActivities.html" class="cb-main-layout sa-shell" data-sa-theme="dark">
+  <div id="app-container">
+    <div class="main-header"><div class="header-content"></div></div>
+    <div id="sidebar">
+      <button id="menuToggle" aria-label="Abrir menú"><i class="fas fa-bars"></i></button>
+      <div class="sidebar-menu"></div>
+    </div>
+
+    <div class="content-wrapper">
+      <main class="sa-page">
+        <aside class="sa-sessions sa-studio-panel" aria-label="Sesiones de Science Activities">
+          <div class="sa-panel-title sa-sessions-title">
+            <span>Sesiones</span>
+          </div>
+          <button id="quickNewBtn" class="sa-new-session-btn" type="button" aria-label="Nueva sesión" title="Nueva sesión">
+            <i class="fas fa-pen-to-square sa-new-session-icon" aria-hidden="true"></i>
+            <span>Nueva sesión</span>
+            <i class="fas fa-circle-plus sa-new-session-plus" aria-hidden="true"></i>
+          </button>
+          <div id="savedProjects" class="sa-session-list" role="list" aria-label="Sesiones guardadas"></div>
+        </aside>
+
+        <section class="sa-summary" aria-label="Barra principal de Science Activities">
+          <div class="sa-summary-actions">
+            <div class="sa-summary-group sa-summary-group-main" aria-label="Controles principales">
+              <button id="scienceThemeToggleBtn" class="sa-icon-button sa-theme-toggle" type="button" data-tooltip="Tema oscuro" aria-label="Cambiar tema" aria-pressed="false"><i class="fas fa-adjust" aria-hidden="true"></i></button>
+              <button id="newProjectBtn" class="sa-icon-button" type="button" data-tooltip="Nueva actividad" aria-label="Nueva actividad"><i class="fas fa-file-circle-plus"></i></button>
+              <button id="saveProjectBtn" class="sa-icon-button" type="button" data-tooltip="Guardar" aria-label="Guardar actividad"><i class="fas fa-bookmark"></i></button>
+              <button id="generateBtn" class="sa-icon-button sa-icon-gemini" type="button" data-tooltip="Crear con IA" aria-label="Crear actividad con IA"><span class="sa-action-sheen" aria-hidden="true"></span><i class="fas fa-wand-magic-sparkles"></i></button>
+              <button id="exportProjectBtn" class="sa-icon-button" type="button" data-tooltip="Exportar ZIP" aria-label="Exportar ZIP"><i class="fas fa-file-zipper"></i></button>
+            </div>
+            <div class="sa-summary-group sa-summary-group-panels" id="sa-panelHeaderControls" aria-label="Controles de paneles">
+              <!-- Los botones de expandir/contraer se insertan desde JS -->
+            </div>
+            <div class="sa-summary-group sa-summary-preview-title-group" aria-label="Título de la actividad activa">
+              <span id="previewTitle">Misión Antideslizante</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="sa-workspace" aria-label="Área de trabajo de Science Activities">
+          <aside class="sa-brief sa-studio-panel" aria-label="Brief científico">
+            <div class="sa-panel-title">
+              <span>Brief científico</span>
+              <i class="fas fa-sliders"></i>
+            </div>
+            <form id="activityForm" class="sa-form">
+              <label class="sa-field">
+                <span>Materia</span>
+                <select id="subjectSelect">
+                  <option value="physics">Física</option>
+                  <option value="chemistry">Química</option>
+                  <option value="biology">Biología</option>
+                  <option value="math">Matemáticas</option>
+                </select>
+              </label>
+
+              <label class="sa-field">
+                <span>Tema de referencia</span>
+                <select id="topicInput">
+                  <option value="Resistencia y fricción">Resistencia y fricción</option>
+                </select>
+              </label>
+
+              <label class="sa-field sa-custom-topic-field" id="customTopicField" hidden>
+                <span>Escribe el tema libre</span>
+                <input id="customTopicInput" type="text" maxlength="120" autocomplete="off" placeholder="Ej. Materia oscura, genética mendeliana…">
+                <small>La IA creará la explicación, las preguntas y la dinámica a partir de este tema.</small>
+              </label>
+
+              <label class="sa-field">
+                <span>Escenario del tema</span>
+                <select id="scenarioSelect"></select>
+              </label>
+
+              <div class="sa-field">
+                <span>¿Qué deben experimentar?</span>
+                <textarea id="experiencePrompt" rows="5" placeholder="Genera una propuesta auténtica o describe qué quieres que manipulen, observen y descubran…"></textarea>
+                <button id="generateExperienceBtn" class="sa-experience-generate" type="button" aria-label="Proponer experiencia con IA" title="Proponer experiencia con IA">
+                  <span class="sa-action-sheen" aria-hidden="true"></span>
+                  <i class="fas fa-wand-magic-sparkles"></i>
+                </button>
+              </div>
+
+              <label class="sa-field">
+                <span>Modalidad de la actividad</span>
+                <select id="gameModeSelect">
+                  <option value="game" selected>Videojuego educativo</option>
+                  <option value="simulator">Simulador científico</option>
+                </select>
+                <small>El videojuego usa retos y puntuación. El simulador permite experimentar libremente con variables científicas.</small>
+              </label>
+
+              <div class="sa-form-row" id="gameStructureFields">
+                <label class="sa-field">
+                  <span>Nivel</span>
+                  <select id="gradeSelect">
+                    <option>1º secundaria</option>
+                    <option selected>2º secundaria</option>
+                    <option>3º secundaria</option>
+                    <option>Bachillerato</option>
+                  </select>
+                </label>
+                <label class="sa-field">
+                  <span>Dificultad</span>
+                  <select id="difficultySelect">
+                    <option value="guided">Guiada</option>
+                    <option value="balanced" selected>Equilibrada</option>
+                    <option value="challenge">Desafío</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="sa-form-row">
+                <label class="sa-field">
+                  <span>Niveles del juego</span>
+                  <input id="gameLevelCount" type="number" min="1" step="1" value="3" inputmode="numeric">
+                </label>
+                <label class="sa-field" id="questionsPerLevelField">
+                  <span>Preguntas por nivel</span>
+                  <input id="questionsPerLevel" type="number" min="1" step="1" value="3" inputmode="numeric">
+                </label>
+              </div>
+
+              <label class="sa-field">
+                <span>Estilo visual</span>
+                <select id="visualStyleSelect">
+                  <optgroup label="Rive · HUD premium">
+                    <option value="rive-kawaii-signal" selected>Kawaii Signal</option>
+                    <option value="rive-tokyo-tech">Tokyo Tech</option>
+                    <option value="rive-arcade-matsuri">Arcade Matsuri</option>
+                  </optgroup>
+                  <optgroup label="Estilos clásicos">
+                  <option value="kawaii-lab">Laboratorio kawaii</option>
+                  <option value="tech-minimal">Tech minimal japonés</option>
+                  <option value="arcade-science">Arcade científico</option>
+                  <option value="pastel-adventure">Aventura pastel</option>
+                  <option value="cosmic-kawaii">Cosmos kawaii</option>
+                  <option value="eco-explorer">Explorador natural</option>
+                  <option value="storybook-science">Cuento científico</option>
+                  <option value="neon-lab">Laboratorio neón</option>
+                  <option value="ocean-discovery">Descubrimiento oceánico</option>
+                  </optgroup>
+                </select>
+              </label>
+
+              <div class="sa-character-field">
+                <label class="sa-field">
+                  <span>Personaje del juego</span>
+                  <select id="characterSelect" aria-describedby="characterDescription"></select>
+                </label>
+                <div class="sa-character-preview">
+                  <div id="characterPreviewSprite" class="sa-character-preview-sprite" aria-hidden="true"></div>
+                  <div class="sa-character-preview-copy">
+                    <strong id="characterPreviewName">Personaje</strong>
+                    <small id="characterDescription">Personaje adaptado a la materia y al estilo visual.</small>
+                    <button id="createCharacterBtn" class="sa-character-create" type="button">
+                      <span class="sa-action-sheen" aria-hidden="true"></span>
+                      <i class="fas fa-sliders"></i>
+                      <span>Personalizar personaje</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <label class="sa-field">
+                <span>Modelo de IA</span>
+                <select id="modelSelect">
+                  <option value="gemini-2.5-flash" selected>Generación rápida</option>
+                  <option value="gemini-2.5-pro">Generación avanzada</option>
+                  <option value="gemini-3-flash-preview">Generación experimental</option>
+                </select>
+              </label>
+
+            </form>
+            <footer class="sa-brief-footer">
+              <button id="formGenerateBtn" class="sa-generate-button" type="submit" form="activityForm">
+                <span class="sa-action-sheen" aria-hidden="true"></span>
+                <i class="fas fa-wand-magic-sparkles"></i>
+                <span>Crear Actividad</span>
+              </button>
+            </footer>
+          </aside>
+
+          <section class="sa-stage sa-studio-panel sa-preview-panel" aria-label="Preview interactivo">
+            <div class="sa-stage-toolbar">
+              <div>
+                <span class="sa-stage-kicker">Preview interactivo</span>
+              </div>
+              <div class="sa-stage-actions">
+                <div class="sa-stage-group">
+                  <button id="restartPreviewBtn" class="sa-icon-button" type="button" aria-label="Reiniciar juego desde el inicio" title="Reiniciar juego desde el inicio"><i class="fas fa-rotate-right"></i></button>
+                  <button id="fullscreenBtn" class="sa-icon-button" type="button" aria-label="Pantalla completa"><i class="fas fa-expand"></i></button>
+                  <button id="quickQuestionReviewBtn" class="sa-quick-question-review" type="button" title="Cargar y comprobar la respuesta correcta de la pregunta seleccionada" aria-label="Probar respuesta correcta en revisión rápida"><span class="sa-action-sheen" aria-hidden="true"></span><i class="fas fa-circle-check" aria-hidden="true"></i></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sa-game-frame">
+              <div id="scienceGameMount" class="sa-game-mount"></div>
+            </div>
+            <div id="scienceGameControls" class="sa-runtime-controls"></div>
+          </section>
+
+          <aside class="sa-inspector sa-studio-panel sa-content-panel" aria-label="Panel de contenido" data-active-tab="general">
+            <div class="sa-panel-title">
+              <span>Contenido</span>
+              <i class="fas fa-layer-group"></i>
+            </div>
+
+            <div class="sa-content-scroll">
+            <label class="sa-field">
+              <span>Título del juego</span>
+              <input id="activityTitle" value="Misión Antideslizante">
+            </label>
+            <label class="sa-field">
+              <span>Misión del alumno</span>
+              <textarea id="missionInput" rows="4">Lleva a Momo hasta la meta ajustando la fuerza y venciendo la resistencia sin usar más energía de la necesaria.</textarea>
+            </label>
+            <label class="sa-field">
+              <span>Principio científico</span>
+              <textarea id="principleInput" rows="4">La fuerza de fricción se opone al movimiento. Un objeto comienza a acelerar cuando la fuerza aplicada supera la resistencia.</textarea>
+            </label>
+
+            <div class="sa-inspector-section">
+              <div class="sa-inspector-heading">
+                <span>Consejos de la mascota</span>
+                <button id="addTipBtn" type="button" aria-label="Agregar consejo"><i class="fas fa-plus"></i></button>
+              </div>
+              <div id="coachTips" class="sa-tips"></div>
+            </div>
+
+            <div class="sa-inspector-section">
+              <span class="sa-section-label">Plantillas compatibles</span>
+              <div class="sa-template-tags">
+                <span>Fricción</span><span>Proyectiles</span><span>Circuitos</span><span>Partículas</span><span>Ecosistemas</span>
+              </div>
+            </div>
+            </div>
+
+            <footer class="sa-content-footer">
+              <button id="applyContentChanges" class="sa-generate-button sa-content-apply" type="button">
+                <span class="sa-action-sheen" aria-hidden="true"></span>
+                <i class="fas fa-play" aria-hidden="true"></i>
+                <span>Aplicar cambios al preview</span>
+              </button>
+            </footer>
+          </aside>
+        </section>
+  </main>
+
+  <div id="characterCreatorModal" class="sa-character-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="characterModalTitle">
+    <div class="sa-character-modal-dialog">
+      <header class="sa-character-modal-header">
+        <div>
+          <span>Editor de personaje jugable</span>
+          <h2 id="characterModalTitle">Crear personaje arcade</h2>
+        </div>
+        <button id="closeCharacterModalBtn" type="button" aria-label="Cerrar">
+          <i class="fas fa-xmark"></i>
+        </button>
+      </header>
+      <div class="sa-character-modal-body">
+        <section class="sa-character-modal-form">
+          <div class="sa-character-form-row">
+            <label class="sa-field">
+              <span>Nombre</span>
+              <input id="characterModalName" type="text" maxlength="28">
+            </label>
+            <label class="sa-field">
+              <span>Género / presentación</span>
+              <select id="characterGenderSelect">
+                <option value="female">Mujer</option>
+                <option value="male">Hombre</option>
+                <option value="nonbinary">Andrógino</option>
+              </select>
+            </label>
+          </div>
+          <label class="sa-field">
+            <span>Rol dentro del videojuego</span>
+            <input id="characterModalRole" type="text" maxlength="48" placeholder="Ej. especialista en energía">
+          </label>
+          <label class="sa-field">
+            <span>Estilo visual del jugador</span>
+            <select id="characterPlayerStyle">
+              <option value="arcade-hd">Arcade HD moderno</option>
+              <option value="pixel-16">Pixel art 16-bit</option>
+              <option value="anime-action">Anime de acción</option>
+              <option value="kawaii-teen">Kawaii adolescente</option>
+              <option value="graphic-novel">Novela gráfica</option>
+            </select>
+          </label>
+          <label class="sa-field">
+            <span>Descripción visual adicional</span>
+            <textarea id="characterPromptInput" rows="3" placeholder="Vestuario, cabello, accesorios científicos, personalidad visual…"></textarea>
+          </label>
+          <fieldset class="sa-character-movements">
+            <legend>Movimientos del personaje</legend>
+            <label><input type="checkbox" value="walkForward" data-character-movement checked> Caminar adelante</label>
+            <label><input type="checkbox" value="walkBackward" data-character-movement checked> Caminar atrás</label>
+            <label><input type="checkbox" value="jump" data-character-movement checked> Brincar</label>
+            <label><input type="checkbox" value="hit" data-character-movement checked> Golpear</label>
+            <label><input type="checkbox" value="crouch" data-character-movement checked> Agacharse</label>
+            <label><input type="checkbox" value="push" data-character-movement checked> Empujar</label>
+            <label><input type="checkbox" value="pull" data-character-movement checked> Jalar</label>
+            <label><input type="checkbox" value="throw" data-character-movement checked> Aventar</label>
+          </fieldset>
+        </section>
+        <section class="sa-character-modal-preview">
+          <div class="sa-character-sheet-stage">
+            <img id="characterModalPreview" alt="Plantilla de movimientos del personaje" hidden>
+            <div id="characterModalEmpty">
+              <i class="fas fa-person-running"></i>
+              <strong>La plantilla aparecerá aquí</strong>
+              <span>Se generarán ocho poses completas y consistentes.</span>
+            </div>
+          </div>
+          <p id="characterModalStatus">Configura el personaje y genera su plantilla de movimientos.</p>
+          <button id="generateCharacterTemplateBtn" class="sa-character-generate" type="button">
+            <i class="fas fa-wand-magic-sparkles"></i>
+            Generar plantilla
+          </button>
+        </section>
+      </div>
+      <footer class="sa-character-modal-footer">
+        <button id="cancelCharacterModalBtn" type="button">Cancelar</button>
+        <button id="saveCharacterFirebaseBtn" class="sa-character-save-cloud" type="button">
+          <i class="fas fa-cloud-arrow-up"></i>
+          Guardar personaje en Firebase
+        </button>
+      </footer>
+    </div>
+  </div>
+    </div>
+  </div>
+
+  <div id="toast" class="sa-toast" role="status" aria-live="polite"></div>
+  <div id="generationOverlay" class="sa-generation-overlay" aria-hidden="true">
+    <div class="sa-generation-card" role="status" aria-live="polite" aria-label="Generando actividad">
+      <div class="sa-kawaii-bubble-system" aria-hidden="true">
+        <div class="sa-kawaii-bubble-orbit">
+          <i></i><i></i><i></i>
+        </div>
+        <svg class="sa-kawaii-bubble-svg" viewBox="0 0 180 180" focusable="false">
+          <defs>
+            <radialGradient id="saBubbleFill" cx="32%" cy="24%" r="78%">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity=".96"></stop>
+              <stop offset="28%" stop-color="#bff8f0" stop-opacity=".94"></stop>
+              <stop offset="72%" stop-color="#87dff2" stop-opacity=".88"></stop>
+              <stop offset="100%" stop-color="#a58cf2" stop-opacity=".88"></stop>
+            </radialGradient>
+            <linearGradient id="saBubbleStroke" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffffff"></stop>
+              <stop offset="48%" stop-color="#76e4d5"></stop>
+              <stop offset="100%" stop-color="#9a7bea"></stop>
+            </linearGradient>
+          </defs>
+          <circle class="sa-kawaii-bubble-body" cx="90" cy="90" r="66" fill="url(#saBubbleFill)" stroke="url(#saBubbleStroke)" stroke-width="4"></circle>
+          <ellipse class="sa-kawaii-bubble-highlight" cx="63" cy="55" rx="23" ry="13" fill="#fff" opacity=".72" transform="rotate(-28 63 55)"></ellipse>
+          <circle cx="68" cy="91" r="6" fill="#243453"></circle>
+          <circle cx="112" cy="91" r="6" fill="#243453"></circle>
+          <circle cx="70" cy="89" r="2" fill="#fff"></circle>
+          <circle cx="114" cy="89" r="2" fill="#fff"></circle>
+          <ellipse cx="53" cy="107" rx="10" ry="5" fill="#ff9fb9" opacity=".62"></ellipse>
+          <ellipse cx="127" cy="107" rx="10" ry="5" fill="#ff9fb9" opacity=".62"></ellipse>
+          <path d="M79 108 Q90 120 101 108" fill="none" stroke="#243453" stroke-width="4" stroke-linecap="round"></path>
+        </svg>
+        <span class="sa-kawaii-mini-spark sa-kawaii-mini-spark-one">✦</span>
+        <span class="sa-kawaii-mini-spark sa-kawaii-mini-spark-two">✧</span>
+        <span class="sa-kawaii-mini-spark sa-kawaii-mini-spark-three">✦</span>
+      </div>
+      <div class="sa-kawaii-pop-particles" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <div class="sa-kawaii-travel-spark" aria-hidden="true">✦</div>
+    </div>
+  </div>
+
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="js/html-docx.js"></script>
+  <script src="vendor/rive/rive.js" defer></script>
+  <script src="js/science-rive-hud.js?v=20260731-rive-mission-controls-v1" defer></script>
+  <script type="module" data-cache-src="js/chromeLayout.js"></script>
+  <script type="module" data-cache-src="js/sidebar.js"></script>
+  <script type="module" src="js/scienceActivities.js?v=20260731-session-panel-v1"></script>
+  <script src="js/update-banner-loader.js" defer></script>
+</body>
+</html>

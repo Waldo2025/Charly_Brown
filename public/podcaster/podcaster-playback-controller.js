@@ -70,6 +70,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.mediaCacheName = 'podcaster-media-cache-v1';
     this.videoPrewarmKey = "";
     this.videoPrewarmPromise = null;
+    this.dialoguePreparationPromises = new Map();
 
 
     this.backgroundAudio = null;
@@ -2211,6 +2212,38 @@ export class PodcasterPlaybackController extends EventEmitter {
     return audio;
   }
 
+  prepareDialogueRowInBackground(session = null, rowId = "", clip = null, sourceKey = "") {
+    const key = String(rowId || "").trim();
+    if (!key || !sourceKey || !clip) return;
+    const preparationKey = `${key}|${sourceKey}`;
+    if (this.dialoguePreparationPromises.has(preparationKey)) return;
+
+    const promise = (async () => {
+      const rawSource = await this.resolveAudioSource(clip);
+      if (!rawSource) throw new Error(`No se pudo resolver el audio Gemini de ${key}.`);
+      let audioSrc = this.getBlobUrlSync(rawSource);
+      if (!audioSrc) {
+        audioSrc = await this.getBlobUrl(rawSource, {
+          persistent: this.resolveActiveMediaLoadMode(rawSource) === "blob"
+        });
+      }
+      if (!audioSrc) audioSrc = rawSource;
+
+      const player = this.getOrCreateDialoguePlayer(key, audioSrc, sourceKey, session);
+      player.preload = "auto";
+      return { ready: true, rowId: key, player, sourceKey };
+    })().catch((error) => {
+      this.dialoguePreparationPromises.delete(preparationKey);
+      this.emitMediaTelemetry?.("dialogue-audio-prepare-error", {
+        rowId: key,
+        sourceKey,
+        message: String(error?.message || error)
+      });
+      throw error;
+    });
+    this.dialoguePreparationPromises.set(preparationKey, promise);
+  }
+
   // --- Audio ---
   async syncAudio(currentMs, speed) {
     const session = this.state.session || this.deps?.getActiveSession?.();
@@ -2304,15 +2337,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
       if (!audioClip) continue;
       const sourceKey = this.resolveAudioSourceKey(audioClip);
-      const rawAudioSrc = await this.resolveAudioSource(audioClip);
-      if (!rawAudioSrc) continue;
+      if (!sourceKey) continue;
 
-      let audioSrc = this.getBlobUrlSync(rawAudioSrc);
-      if (!audioSrc) audioSrc = await this.getBlobUrl(rawAudioSrc, { persistent: true });
-      if (!audioSrc) continue;
-      
-      // hasVoice is already true from activeSegments.length > 0
-      let audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
+      let audio = this.dialoguePlayers[rowId];
+      if (!audio || String(this.dialogueAudioSourceKeys[rowId] || "") !== sourceKey) {
+        this.prepareDialogueRowInBackground(session, rowId, audioClip, sourceKey);
+        continue;
+      }
 
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const effectiveRate = this.clampPlaybackRate(speed * clipPlaybackRate);
@@ -2340,10 +2371,13 @@ export class PodcasterPlaybackController extends EventEmitter {
         ? 0.01
         : (isPaused ? 0.08 : 0.35);
       
-      // FIX C: Skip seek when offset is near 0 on first sync to avoid buffer flush cut-off
-      const needsSeek = isFirstSync
+      const hasPendingStart = Boolean(String(audio.dataset.pendingPlayIntent || "").trim());
+      
+      // FIX C: Skip seek when offset is near 0 on first sync to avoid buffer flush cut-off.
+      // Guard against seeking while the player is already seeking or waiting for startup data.
+      const needsSeek = !audio.seeking && !hasPendingStart && (isFirstSync
         ? (offsetSec > 0.05) // Si el offset es básicamente 0, no buscar — evita flush audible
-        : (drift > driftToleranceSec);
+        : (drift > driftToleranceSec));
 
       if (needsSeek) {
         this.seekTo(audio, offsetSec);

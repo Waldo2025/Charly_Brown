@@ -1,0 +1,260 @@
+.video-progress-report[hidden] { display: none !important; }
+    .video-progress-report {
+      position: fixed; inset: 0; z-index: 2147483200;
+      display: grid; place-items: center; padding: 28px;
+      color: var(--vp-text); font-family: inherit;
+      font-size: 0.875rem;
+      line-height: 1.45;
+    }
+    .video-progress-report__backdrop {
+      position: absolute; inset: 0; border: 0;
+      background: color-mix(in srgb, var(--vp-stage-bg) 78%, transparent);
+      backdrop-filter: blur(14px);
+    }
+    .video-progress-report__card {
+      position: relative; width: min(1380px, 96vw); height: min(860px, 92vh);
+      display: grid; grid-template-rows: auto auto 1fr;
+      overflow: hidden; border: 1px solid var(--vp-border);
+      border-radius: 14px; background: var(--vp-surface);
+      box-shadow: 0 30px 90px rgba(2, 8, 23, .28);
+    }
+    .video-progress-report__head {
+      min-height: 68px; display: flex; align-items: center; gap: 18px;
+      padding: 0 22px; border-bottom: 1px solid var(--vp-border);
+    }
+    .video-progress-report__eyebrow {
+      margin: 0 0 3px; color: var(--vp-accent);
+      font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+    }
+    .video-progress-report__head h2 { margin: 0; font-weight: 500; font-size: 1.15rem; line-height: 1.3; }
+    .video-progress-report__actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .video-progress-report__button {
+      min-height: 34px; display: inline-flex; align-items: center; gap: 8px;
+      border: 0; padding: 0 12px; color: var(--vp-text);
+      background: transparent; cursor: pointer;
+    }
+    .video-progress-report__button:hover { color: var(--vp-accent); background: var(--vp-control-hover); }
+    .video-progress-report__button.is-primary { color: var(--vp-accent); }
+    .video-progress-report__tabs {
+      display: flex; align-items: center; gap: 4px; padding: 0 18px;
+      border-bottom: 1px solid var(--vp-border);
+    }
+    .video-progress-report__tab {
+      min-height: 44px; border: 0; border-bottom: 2px solid transparent;
+      padding: 0 16px; color: var(--vp-text-muted); background: transparent; cursor: pointer;
+    }
+    .video-progress-report__tab.is-active { color: var(--vp-accent); border-bottom-color: var(--vp-accent); }
+    .video-progress-report__scene-filter {
+      margin-left: auto; min-height: 32px; display: inline-flex; align-items: center; gap: 8px;
+      padding: 0 10px; color: var(--vp-text-muted); background: transparent; cursor: pointer; white-space: nowrap;
+    }
+    .video-progress-report__scene-filter:hover { color: var(--vp-text); }
+    .video-progress-report__scene-filter input {
+      width: 15px; height: 15px; margin: 0; accent-color: var(--vp-accent); cursor: pointer;
+    }
+    .video-progress-report__scene-filter-count {
+      min-width: 20px; padding: 2px 6px; border-radius: 999px;
+      color: var(--vp-accent); background: var(--vp-control-bg);
+      font-variant-numeric: tabular-nums; text-align: center;
+    }
+    .video-progress-report__body { min-height: 0; overflow: auto; padding: 22px; }
+    .video-progress-report__loading { height: 100%; display: grid; place-items: center; color: var(--vp-text-muted); }
+    .video-progress-report__panel[hidden] { display: none; }
+    .video-progress-report__kpis {
+      display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 12px;
+    }
+    .video-progress-report__kpi {
+      padding: 18px; border: 1px solid var(--vp-border);
+      background: var(--vp-surface-strong); border-radius: 10px;
+    }
+    .video-progress-report__kpi span { display: block; color: var(--vp-text-muted); }
+    .video-progress-report__kpi strong { display: block; margin-top: 8px; color: var(--vp-accent); }
+    .video-progress-report__section { margin-top: 22px; }
+    .video-progress-report__section h3 { margin: 0 0 12px; font-weight: 600; }
+    .video-progress-report__table-wrap {
+      overflow: auto; border: 1px solid var(--vp-border); border-radius: 10px;
+    }
+    .video-progress-report__table {
+      width: 100%; border-collapse: collapse;
+    }
+    .video-progress-report__table th {
+      position: sticky; top: 0; z-index: 1; padding: 11px 12px;
+      text-align: left; white-space: nowrap; color: var(--vp-text-muted);
+      background: var(--vp-surface-strong); border-bottom: 1px solid var(--vp-border);
+      font-weight: 600;
+    }
+    .video-progress-report__table td {
+      padding: 11px 12px; vertical-align: top; border-bottom: 1px solid var(--vp-border);
+      color: var(--vp-text);
+    }
+    .video-progress-report__table tr:last-child td { border-bottom: 0; }
+    .video-progress-report__table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--vp-accent) 4%, transparent); }
+    .video-progress-report__status {
+      display: inline-flex; padding: 3px 8px; border-radius: 999px;
+      color: var(--vp-text); background: var(--vp-control-bg); white-space: nowrap;
+    }
+    .video-progress-report__status.is-ready { color: #10b981; }
+    .video-progress-report__status.is-pending { color: #f59e0b; }
+    .video-progress-report__owner {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px; padding: 18px; border: 1px solid var(--vp-border); border-radius: 10px;
+    }
+    .video-progress-report__owner span { display: block; color: var(--vp-text-muted); }
+    .video-progress-report__owner strong { display: block; margin-top: 5px; font-weight: 500; }
+    .video-progress-report__overview {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
+      margin-bottom: 18px; overflow: hidden; border: 1px solid var(--vp-border);
+      border-radius: 10px; background: var(--vp-border);
+    }
+    .video-progress-report__overview > div {
+      min-width: 0; padding: 14px 16px; background: var(--vp-surface-strong);
+    }
+    .video-progress-report__overview span {
+      display: block; color: var(--vp-text-muted);
+      letter-spacing: .05em; text-transform: uppercase;
+    }
+    .video-progress-report__overview strong {
+      display: block; margin-top: 5px; color: var(--vp-text); font-weight: 550;
+    }
+    .video-progress-report__scene-list { display: grid; gap: 14px; }
+    .video-progress-report__scene-card {
+      overflow: hidden; border: 1px solid var(--vp-border);
+      border-radius: 10px; background: var(--vp-surface);
+    }
+    .video-progress-report__scene-head {
+      display: grid; grid-template-columns: minmax(190px, 1fr) auto;
+      align-items: center; gap: 16px; padding: 15px 17px;
+      border-bottom: 1px solid var(--vp-border); background: var(--vp-surface-strong);
+    }
+    .video-progress-report__scene-number {
+      margin: 0 0 3px; color: var(--vp-accent);
+      font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    }
+    .video-progress-report__scene-head h3 {
+      margin: 0; color: var(--vp-text); font-weight: 550;
+    }
+    .video-progress-report__scene-meta {
+      display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px;
+    }
+    .video-progress-report__scene-stats {
+      display: flex; align-items: center; gap: 14px;
+      color: var(--vp-text-muted);
+    }
+    .video-progress-report__scene-card .video-progress-report__table-wrap {
+      border: 0; border-radius: 0;
+    }
+    .video-progress-report__empty {
+      padding: 18px; color: var(--vp-text-muted);
+    }
+    .video-progress-report__check {
+      display: inline-grid; place-items: center; width: 22px; height: 22px;
+      border: 1px solid var(--vp-border); border-radius: 5px;
+      color: var(--vp-text-muted); background: var(--vp-surface-strong);
+    }
+    .video-progress-report__check.is-complete {
+      color: #10b981; border-color: color-mix(in srgb, #10b981 55%, var(--vp-border));
+      background: color-mix(in srgb, #10b981 10%, var(--vp-surface));
+    }
+    .video-progress-report__change-text {
+      min-width: 280px; max-width: 620px; line-height: 1.5;
+    }
+    @media (max-width: 900px) {
+      .video-progress-report { padding: 0; }
+      .video-progress-report__card { width: 100vw; height: 100vh; border-radius: 0; }
+      .video-progress-report__kpis { grid-template-columns: repeat(2, 1fr); }
+      .video-progress-report__owner { grid-template-columns: 1fr; }
+      .video-progress-report__overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .video-progress-report__scene-head { grid-template-columns: 1fr; }
+      .video-progress-report__scene-meta { justify-content: flex-start; }
+      .video-progress-report__button span { display: none; }
+      .video-progress-report__scene-filter > span:not(.video-progress-report__scene-filter-count) { display: none; }
+    }
+    @media (min-width: 700px) and (max-width: 1366px) {
+    .video-progress-report { }
+    .video-progress-report__head { min-height: 88px; padding-inline: 28px; }
+    .video-progress-report__eyebrow { }
+    .video-progress-report__head h2 { line-height: 1.3; }
+      .video-progress-report__button {
+        min-width: 46px; min-height: 46px; justify-content: center;
+      padding-inline: 16px;
+      }
+    .video-progress-report__button i { }
+    .video-progress-report__tabs { min-height: 66px; padding-inline: 22px; }
+      .video-progress-report__tab {
+      min-height: 64px; padding-inline: 20px;
+      }
+      .video-progress-report__scene-filter {
+      min-height: 50px; gap: 12px; padding-inline: 14px;
+      }
+      .video-progress-report__scene-filter input { width: 20px; height: 20px; }
+    .video-progress-report__scene-filter-count { min-width: 32px; padding: 5px 9px; }
+    .video-progress-report__body { padding: 26px; }
+    .video-progress-report__overview span { }
+    .video-progress-report__overview strong { margin-top: 8px; }
+    .video-progress-report__overview > div { padding: 22px; }
+    .video-progress-report__scene-list { gap: 20px; }
+    .video-progress-report__scene-head { padding: 22px 24px; }
+    .video-progress-report__scene-number { }
+    .video-progress-report__scene-head h3 { line-height: 1.35; }
+    .video-progress-report__scene-stats { gap: 18px; line-height: 1.45; }
+    .video-progress-report__status { padding: 7px 11px; }
+    .video-progress-report__empty { padding: 22px 24px; line-height: 1.55; }
+    .video-progress-report__table { }
+      .video-progress-report__table th {
+      padding: 16px; line-height: 1.4;
+      }
+      .video-progress-report__table td {
+      padding: 16px; line-height: 1.55;
+      }
+    .video-progress-report__check { width: 28px; height: 28px; }
+    .video-progress-report span,
+    .video-progress-report p,
+    .video-progress-report td {
+      line-height: 1.55 !important;
+    }
+    .video-progress-report h3 {
+      line-height: 1.35 !important;
+    }
+    .video-progress-report thead,
+    .video-progress-report thead *,
+    .video-progress-report th {
+      line-height: 1.4 !important;
+    }
+    .video-progress-report h2 {
+    }
+    .video-progress-report__scene-number,
+    .video-progress-report__status,
+    .video-progress-report__tab,
+    .video-progress-report__button,
+    .video-progress-report__scene-filter {
+    }
+  }
+
+
+/* Tipografia centralizada del reporte: no depende de estilos heredados del sitio. */
+.video-progress-report {
+  font-family: "Sora", sans-serif !important;
+  font-size: 0.875rem !important;
+  line-height: 1.45 !important;
+}
+
+.video-progress-report :is(
+  span,
+  p,
+  strong,
+  small,
+  label,
+  button,
+  input,
+  select,
+  textarea,
+  th,
+  td
+) {
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+
+.video-progress-report i {
+  font-size: 1rem !important;
+}

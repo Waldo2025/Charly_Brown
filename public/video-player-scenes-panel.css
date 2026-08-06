@@ -1,0 +1,180 @@
+/* Panel de escenas de Video Player.
+   Toda su presentacion se mantiene fuera del markup y no altera Font Awesome. */
+
+#playerSidePanel {
+  font-family: "Sora", sans-serif;
+}
+
+#playerSidePanel :is(
+  span,
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  strong,
+  small,
+  label,
+  button,
+  input,
+  select,
+  textarea,
+  th,
+  td,
+  .info-value-box
+) {
+  font-family: "Sora", sans-serif !important;
+  font-size: inherit;
+  line-height: 1.35;
+}
+
+#playerSidePanel i {
+  font-size: 1em;
+}
+
+#playerSidePanel .scene-panel-is-hidden {
+  display: none;
+}
+
+#playerSidePanel .scene-reference {
+  margin-top: 0.5rem;
+}
+
+#playerSidePanel .inspector-row-reference-empty {
+  padding: 0.9rem;
+  border: 1px dashed var(--vp-border);
+  border-radius: 0.45rem;
+  color: var(--vp-text-muted);
+  background: color-mix(in srgb, var(--vp-panel) 82%, transparent);
+  font-style: italic;
+  text-align: center;
+}
+
+#playerSidePanel .scene-active-proposal-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #f59e0b;
+}
+
+#playerSidePanel .scene-proposal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+#playerSidePanel .scene-proposal-action {
+  display: inline-grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  color: var(--vp-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+#playerSidePanel .scene-proposal-action.is-apply {
+  color: #10b981;
+}
+
+#playerSidePanel .scene-proposal-action.is-delete {
+  color: #ef4444;
+}
+
+#playerSidePanel .scene-active-proposal-value {
+  border-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 8%, var(--vp-panel));
+}
+
+#playerSidePanel .scene-proposals-list {
+  display: flex;
+  max-height: 12rem;
+  padding: 0.5rem;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--vp-panel) 88%, #000);
+}
+
+#playerSidePanel .scene-new-proposal {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--vp-border);
+}
+
+#playerSidePanel .scene-proposal-help {
+  margin: 0 0 0.9rem;
+  color: var(--vp-text-muted);
+}
+
+#playerSidePanel .scene-proposal-reference-field {
+  margin: 0.75rem 0;
+}
+
+#playerSidePanel .btn-attach-reference {
+  display: flex;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border: 1px dashed color-mix(in srgb, var(--vp-accent) 45%, transparent);
+  border-radius: 0.45rem;
+  color: var(--vp-accent);
+  background: color-mix(in srgb, var(--vp-accent) 10%, transparent);
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+#playerSidePanel .scene-proposal-file-input {
+  display: none;
+}
+
+#playerSidePanel .scene-proposal-reference-preview {
+  position: relative;
+  margin-top: 0.6rem;
+  overflow: hidden;
+  border: 1px solid var(--vp-border);
+  border-radius: 0.45rem;
+}
+
+#playerSidePanel .scene-proposal-reference-image {
+  display: block;
+  width: 100%;
+  max-height: 12rem;
+  object-fit: contain;
+  background: #000;
+}
+
+#playerSidePanel .scene-proposal-reference-remove {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #ef4444;
+  background: rgb(0 0 0 / 68%);
+  cursor: pointer;
+}
+
+#playerSidePanel .scene-time-group {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--vp-border);
+}
+
+#playerSidePanel .scene-current-time {
+  color: var(--vp-accent);
+  font-family: "Sora", sans-serif !important;
+}
