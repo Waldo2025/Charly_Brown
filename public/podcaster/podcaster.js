@@ -70,7 +70,8 @@ import {
   registerPodcasterChatRuntime,
   registerPodcasterPublicLibraryRuntime,
   registerPodcasterScriptEditorRuntime,
-  requirePodcasterScriptEditorRuntime
+  requirePodcasterScriptEditorRuntime,
+  requirePodcasterPublicLibraryRuntime
 } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, requirePodcasterGenerationShared } from "./podcaster-generation-shared.js";
 
@@ -118,6 +119,169 @@ function requirePodcasterMediaReplacementApiFunction(name = "") {
   }
   return fn;
 }
+
+function resolvePodcasterPublicLibraryRuntimeApi() {
+  try {
+    return requirePodcasterPublicLibraryRuntime();
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolvePublicLibraryApiFunction(name = "") {
+  const api = resolvePodcasterPublicLibraryRuntimeApi();
+  const fn = api?.[name];
+  return typeof fn === "function" ? fn : null;
+}
+
+function resolvePublicLibraryState(stateName, fallback) {
+  const state = globalThis?.[stateName];
+  return state && typeof state === "object" ? state : fallback;
+}
+
+function createPublicLibraryStateBridge(stateName, fallbackState = {}) {
+  const defaultState = fallbackState;
+  return new Proxy(defaultState, {
+    get(_, property) {
+      const state = resolvePublicLibraryState(stateName, defaultState);
+      return state?.[property];
+    },
+    set(_, property, value) {
+      const state = resolvePublicLibraryState(stateName, defaultState);
+      if (state) {
+        state[property] = value;
+        return true;
+      }
+      return false;
+    }
+  });
+}
+
+const podcastSceneLibraryState = createPublicLibraryStateBridge("podcastSceneLibraryState", {
+  items: [],
+  loading: false,
+  loadedAt: "",
+  error: "",
+  filters: {
+    query: "",
+    tagColor: "all"
+  }
+});
+
+const podcastSceneInsertModalState = createPublicLibraryStateBridge("podcastSceneInsertModalState", {
+  open: false,
+  libraryItem: null,
+  selectedInsertIndex: 0
+});
+
+const podcastSceneLibraryEditModalState = createPublicLibraryStateBridge("podcastSceneLibraryEditModalState", {
+  open: false,
+  item: null
+});
+
+const renderPodcastSceneLibrary = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("renderPodcastSceneLibrary");
+  if (typeof fn !== "function") {
+    return undefined;
+  }
+  return fn(...args);
+};
+
+const fetchPodcastSceneLibrary = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("fetchPodcastSceneLibrary");
+  if (typeof fn !== "function") {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(fn(...args));
+};
+
+const publishCurrentSceneToLibrary = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("publishCurrentSceneToLibrary");
+  if (typeof fn !== "function") {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(fn(...args));
+};
+
+const setPodcastSceneLibraryEditModalOpen = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("setPodcastSceneLibraryEditModalOpen");
+  if (typeof fn !== "function") {
+    return undefined;
+  }
+  return fn(...args);
+};
+
+const setPodcastSceneInsertModalOpen = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("setPodcastSceneInsertModalOpen");
+  if (typeof fn !== "function") {
+    return undefined;
+  }
+  return fn(...args);
+};
+
+const closePodcastSceneLibraryEditModal = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("closePodcastSceneLibraryEditModal");
+  if (typeof fn !== "function") {
+    return undefined;
+  }
+  return fn(...args);
+};
+
+const closePodcastSceneInsertModal = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("closePodcastSceneInsertModal");
+  if (typeof fn !== "function") {
+    return undefined;
+  }
+  return fn(...args);
+};
+
+const confirmPodcastSceneInsertSelection = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("confirmPodcastSceneInsertSelection");
+  if (typeof fn !== "function") {
+    return false;
+  }
+  return fn(...args);
+};
+
+const playPodcastSceneLibraryPreview = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("playPodcastSceneLibraryPreview");
+  if (typeof fn !== "function") {
+    return Promise.resolve(false);
+  }
+  return Promise.resolve(fn(...args));
+};
+
+const savePodcastSceneLibraryEdit = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("savePodcastSceneLibraryEdit");
+  if (typeof fn !== "function") {
+    return Promise.resolve(false);
+  }
+  return Promise.resolve(fn(...args));
+};
+
+const deletePodcastSceneLibraryItem = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("deletePodcastSceneLibraryItem");
+  if (typeof fn !== "function") {
+    return Promise.resolve(false);
+  }
+  return Promise.resolve(fn(...args));
+};
+
+const getPodcastSceneLibraryMenuPortal = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("getPodcastSceneLibraryMenuPortal");
+  if (typeof fn !== "function") {
+    return document.getElementById("podcastSceneLibraryMenuPortal");
+  }
+  return fn(...args);
+};
+
+const openPodcastSceneLibraryMenu = (...args) => {
+  const fn = resolvePublicLibraryApiFunction("openPodcastSceneLibraryMenu");
+  if (typeof fn !== "function") {
+    return undefined;
+  }
+  return fn(...args);
+};
 const addChatMessage = (...args) => requirePodcasterChatAssistantApiFunction("addChatMessage")(...args);
 const removeChatMessage = (...args) => requirePodcasterChatAssistantApiFunction("removeChatMessage")(...args);
 const addScriptAssistantMessage = (...args) => requirePodcasterChatAssistantApiFunction("addScriptAssistantMessage")(...args);
@@ -17146,7 +17310,7 @@ function attachEvents() {
       stopPanelMusic();
     }
   });
-  els.promptForm.addEventListener("submit", async (event) => {
+  els.promptForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const prompt = getPromptInputPlainText();
     const promptHtml = getPromptInputHtml();

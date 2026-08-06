@@ -1,7 +1,31 @@
 import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.530";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
-const runtime = requirePodcasterPublicLibraryRuntime();
+let runtimeRuntime = null;
+const runtimeFallback = { els: {} };
+
+function resolveRuntime() {
+  if (runtimeRuntime) return runtimeRuntime;
+  try {
+    runtimeRuntime = requirePodcasterPublicLibraryRuntime();
+  } catch (_) {
+    runtimeRuntime = runtimeFallback;
+  }
+  return runtimeRuntime;
+}
+
+const runtime = new Proxy({}, {
+  get(_, property) {
+    if (typeof property === "symbol") {
+      return undefined;
+    }
+    const resolved = resolveRuntime() || runtimeFallback;
+    if (property === "els") {
+      return resolved?.els || runtimeFallback.els;
+    }
+    return resolved?.[property] ?? ((...args) => undefined);
+  }
+});
 
 // --- State ---
 const podcastSceneLibraryState = {
