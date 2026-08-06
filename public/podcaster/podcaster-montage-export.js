@@ -657,7 +657,7 @@ function isMontageExportStatusRedirectFailure(error = null) {
     && (
       message.includes("access to fetch at")
       || message.includes("access-control-allow-origin")
-      message.includes("failed to fetch")
+      || message.includes("failed to fetch")
       || message.includes("fetch failed")
       || message.includes("networkerror")
     );
