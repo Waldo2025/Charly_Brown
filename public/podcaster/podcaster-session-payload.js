@@ -27,6 +27,11 @@ function resolvePanelMusicPayloadSourceDurationMs(track = null) {
   return Math.max(durationFromSec, durationFromTrim, durationFromLoops);
 }
 
+function normalizePercent(value, fallback = 0) {
+  const raw = Number(value);
+  return Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : fallback;
+}
+
 function stripInlineMediaRecord(record = null) {
   if (!record || typeof record !== "object") return record;
   return {
@@ -135,6 +140,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     id: String(source.id || "").trim() || makeId?.("session"),
     title: String(source.title || "Sesión sin título").trim().slice(0, 160),
     prompt: String(source.prompt || "").slice(0, 4000),
+    promptHtml: String(source.promptHtml || "").slice(0, 120000),
     archived: source.archived === true,
     publicar: source.publicar === true,
     nivel: String(source.nivel || "").trim().slice(0, 60),
@@ -147,7 +153,8 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     chat: chat.slice(-220).map((msg) => ({
       id: String(msg?.id || makeId?.("msg")).trim(),
       role: ["assistant", "user", "system"].includes(String(msg?.role || "")) ? String(msg.role) : "assistant",
-      text: String(msg?.text || "").slice(0, 8000)
+      text: String(msg?.text || "").slice(0, 8000),
+      html: String(msg?.html || "").slice(0, 120000)
     })),
     script: {
       episodeTitle: String(source?.script?.episodeTitle || "Podcast").slice(0, 220),
@@ -164,7 +171,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
         if (typeof nextRow.sceneDescription === "string") nextRow.sceneDescription = nextRow.sceneDescription.slice(0, 4000);
         if (typeof nextRow.headlineText === "string") nextRow.headlineText = nextRow.headlineText.replace(/\s+/g, " ").trim().slice(0, 48);
         if (typeof nextRow.captionText === "string") nextRow.captionText = nextRow.captionText.trim().slice(0, 10000);
-        if (typeof nextRow.inSceneText === "string") nextRow.inSceneText = nextRow.inSceneText.replace(/\s+/g, " ").trim().slice(0, 48);
+        if (typeof nextRow.inSceneText === "string") nextRow.inSceneText = nextRow.inSceneText.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/[\t\f\v ]+/g, " ").trim()).filter(Boolean).slice(0, 4).join("\n").slice(0, 280);
         nextRow.overlayMode = new Set(["none", "headline", "captions", "both"]).has(String(nextRow.overlayMode || "").trim())
           ? String(nextRow.overlayMode).trim()
           : (String(nextRow.captionText || "").trim() ? "captions" : (String(nextRow.headlineText || "").trim() ? "headline" : "none"));
@@ -194,8 +201,13 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     disfluencyDefaults: normalizeDisfluencyConfig?.(source?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG) || {},
     panelMusicConfig: {
       preset: String(panelMusicConfig.preset || "ambient"),
-      volume: Math.max(0, Math.min(100, Number(panelMusicConfig.volume) || 0)),
-      montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? panelMusicConfig.volume ?? 0))),
+      volume: normalizePercent(panelMusicConfig.volume, 22),
+      montageVolume: normalizePercent(
+        Object.prototype.hasOwnProperty.call(panelMusicConfig || {}, "montageVolume")
+          ? panelMusicConfig.montageVolume
+          : (Object.prototype.hasOwnProperty.call(panelMusicConfig || {}, "volume") ? panelMusicConfig.volume : 100),
+        100
+      ),
       duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicConfig.stabilize === true,
       limiterEnabled: panelMusicConfig.limiterEnabled === true,

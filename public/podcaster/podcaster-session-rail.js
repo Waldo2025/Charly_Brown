@@ -34,7 +34,8 @@ export function createPodcasterSessionRailApi(deps = {}) {
     doc,
     firestoreDb,
     serverTimestamp,
-    shareSessionWithUser
+    shareSessionWithUser,
+    onSessionsRendered
   } = deps;
 
   function ensureSessionThreadsForRail(session = null) {
@@ -46,22 +47,34 @@ export function createPodcasterSessionRailApi(deps = {}) {
   }
 
   const sessionRailStatusCache = new Map();
+  let lastSessionListMarkup = null;
 
   function getSessionRailStatus(session = null) {
     const sessionId = String(session?.id || "").trim();
+    const rows = getSessionRows(session);
+    const proposalSignature = rows.map((row) => [
+      String(row?.id || "").trim(),
+      String(row?.visualNotesProposal || "").trim(),
+      Array.isArray(row?.visualNotesProposals)
+        ? row.visualNotesProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
+        : [],
+      Array.isArray(row?.visualNotesResolvedProposals)
+        ? row.visualNotesResolvedProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
+        : []
+    ]);
     const signature = [
       sessionId,
       String(session?.updatedAt || ""),
       session?.archived === true ? "1" : "0",
       session?.publicar === true ? "1" : "0",
-      String(session?.script?.rows?.length || session?.rows?.length || 0)
+      String(rows.length),
+      JSON.stringify(proposalSignature)
     ].join("|");
     const cached = sessionRailStatusCache.get(sessionId);
     if (cached && cached.signature === signature) {
       return cached.value;
     }
 
-    const rows = getSessionRows(session);
     let hasPendingProposal = false;
     let hasAnyProposalPool = false;
     let allProposalPoolsReviewed = true;
@@ -117,6 +130,32 @@ export function createPodcasterSessionRailApi(deps = {}) {
     state.expandedSessionIds = getExpandedSessionIds().filter((id) => id !== cleanSessionId);
   }
 
+  function setSessionVersionsExpanded(sessionId = "", expanded = false, cardElement = null) {
+    const cleanSessionId = String(sessionId || "").trim();
+    if (!cleanSessionId) return;
+    if (expanded) expandSession(cleanSessionId);
+    else collapseSession(cleanSessionId);
+    const card = cardElement || Array.from(els.sessionList?.querySelectorAll?.(".session-card[data-session-id]") || [])
+      .find((candidate) => String(candidate.dataset.sessionId || "").trim() === cleanSessionId) || null;
+    const versions = card?.querySelector(".session-card-versions");
+    const toggle = card?.querySelector('[data-action="toggle-session-versions"]');
+    card?.classList.toggle("is-expanded", expanded);
+    card?.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggle?.setAttribute("aria-label", expanded ? "Ocultar versiones" : "Mostrar versiones");
+    versions?.classList.toggle("is-collapsed", !expanded);
+    versions?.setAttribute("aria-hidden", expanded ? "false" : "true");
+    syncSessionVersionsHeight(card, expanded);
+  }
+
+  function syncSessionVersionsHeight(card = null, expanded = false) {
+    const versions = card?.querySelector?.(".session-card-versions");
+    const inner = versions?.querySelector?.(".session-card-versions-inner");
+    if (!versions || !inner) return;
+    const contentHeight = expanded ? Math.max(0, Math.ceil(inner.scrollHeight)) : 0;
+    versions.style.setProperty("--session-versions-height", `${contentHeight}px`);
+  }
+
   function renderSessionThreadList(session = null) {
     const threads = ensureSessionThreadsForRail(session);
     if (!threads.length) return "";
@@ -146,18 +185,25 @@ export function createPodcasterSessionRailApi(deps = {}) {
 
   function renderSessionCard(session = null, activeId = "") {
     const sessionStatus = getSessionRailStatus(session);
-    const sessionThreadList = isSessionExpanded(session.id) ? renderSessionThreadList(session) : "";
+    const isActive = session.id === activeId;
+    const showSessionVersions = isActive && isSessionExpanded(session.id);
+    const sessionThreadList = isActive ? renderSessionThreadList(session) : "";
     return `
-      <article class="session-card${session.id === activeId ? " is-active" : ""}" data-action="open-session" data-session-id="${escapeHtml(session.id)}" tabindex="0" role="button" aria-pressed="${session.id === activeId ? "true" : "false"}" aria-expanded="${isSessionExpanded(session.id) ? "true" : "false"}">
+      <article class="session-card${isActive ? " is-active" : ""}${showSessionVersions ? " is-expanded" : ""}" data-action="open-session" data-session-id="${escapeHtml(session.id)}" tabindex="0" role="button" aria-pressed="${isActive ? "true" : "false"}" aria-expanded="${showSessionVersions ? "true" : "false"}">
         <div class="session-card-header${sessionStatus.hasPendingProposal ? " has-pending-proposal" : sessionStatus.hasOnlyReviewedProposals ? " has-reviewed-proposals" : ""}">
           <span class="session-card-title">
-            <i class="far fa-folder session-card-folder-icon" aria-hidden="true"></i>
             <strong>${escapeHtml(session.title || "Sesión sin título")}</strong>
             ${session?.publicar === true ? `<span class="session-card-published-badge" role="img" aria-label="Sesión publicada" title="Sesión publicada"></span>` : ""}
           </span>
-          <div class="session-card-menu">
+          <div class="session-card-actions">
+            ${isActive ? `
+              <button class="session-card-collapse-btn" type="button" data-action="toggle-session-versions" data-session-id="${escapeHtml(session.id)}" aria-label="${showSessionVersions ? "Ocultar versiones" : "Mostrar versiones"}" title="${showSessionVersions ? "Ocultar versiones" : "Mostrar versiones"}" aria-expanded="${showSessionVersions ? "true" : "false"}">
+                <i class="fas fa-chevron-down" aria-hidden="true"></i>
+              </button>
+            ` : ""}
+            <div class="session-card-menu">
             <button class="session-menu-btn" type="button" data-action="toggle-session-menu" data-session-id="${escapeHtml(session.id)}" aria-label="Más opciones" aria-expanded="false">
-              <i class="fas fa-ellipsis-v"></i>
+              <i class="fas fa-ellipsis-vertical" aria-hidden="true"></i>
             </button>
             <div class="session-menu" hidden>
               <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
@@ -167,9 +213,10 @@ export function createPodcasterSessionRailApi(deps = {}) {
               <button type="button" data-action="${session.archived === true ? "restore-session" : "archive-session"}" data-session-id="${escapeHtml(session.id)}">${session.archived === true ? "Desarchivar" : "Archivar"}</button>
               <button type="button" data-action="delete-session" data-session-id="${escapeHtml(session.id)}">Eliminar</button>
             </div>
+            </div>
           </div>
         </div>
-        ${sessionThreadList}
+        ${isActive ? `<div class="session-card-versions${showSessionVersions ? "" : " is-collapsed"}" aria-hidden="${showSessionVersions ? "false" : "true"}"><div class="session-card-versions-inner">${sessionThreadList}</div></div>` : ""}
       </article>
     `;
   }
@@ -207,6 +254,9 @@ export function createPodcasterSessionRailApi(deps = {}) {
     els.toggleArchivedSessionsBtn.setAttribute("aria-pressed", isActive ? "true" : "false");
     els.toggleArchivedSessionsBtn.setAttribute("title", isActive ? "Ver sesiones activas" : "Ver sesiones archivadas");
     els.toggleArchivedSessionsBtn.setAttribute("aria-label", isActive ? "Ver sesiones activas" : "Ver sesiones archivadas");
+    const icon = els.toggleArchivedSessionsBtn.querySelector("i");
+    icon?.classList.toggle("fa-box-archive", !isActive);
+    icon?.classList.toggle("fa-box-open", isActive);
   }
 
   function renderSessions() {
@@ -219,10 +269,19 @@ export function createPodcasterSessionRailApi(deps = {}) {
       if (activeFilter === "all") return true;
       return getSessionRailType(session) === activeFilter;
     });
+    const nextMarkup = visibleSessions.map((session) => renderSessionCard(session, activeId)).join("") || `<div class="session-list-empty">${showArchived ? "No hay sesiones archivadas." : "No hay sesiones activas."}</div>`;
     els.sessionList.classList.toggle("is-archived-view", showArchived);
-    els.sessionList.innerHTML = visibleSessions.map((session) => renderSessionCard(session, activeId)).join("") || `<div class="session-list-empty">${showArchived ? "No hay sesiones archivadas." : "No hay sesiones activas."}</div>`;
+    const didUpdate = nextMarkup !== lastSessionListMarkup;
+    if (didUpdate) {
+      els.sessionList.innerHTML = nextMarkup;
+      lastSessionListMarkup = nextMarkup;
+    }
+    Array.from(els.sessionList.querySelectorAll?.(".session-card.is-active") || []).forEach((card) => {
+      syncSessionVersionsHeight(card, card.classList.contains("is-expanded"));
+    });
     syncFilterUi();
     syncArchivedToggleUi();
+    onSessionsRendered?.({ didUpdate, visibleSessions });
   }
 
   function closeMenus() {
@@ -284,9 +343,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
     const cleanSessionId = String(sessionId || "").trim();
     if (!cleanSessionId) return;
     if (state.activeSessionId === cleanSessionId) {
-      if (isSessionExpanded(cleanSessionId)) collapseSession(cleanSessionId);
-      else expandSession(cleanSessionId);
-      render();
+      setSessionVersionsExpanded(cleanSessionId, !isSessionExpanded(cleanSessionId));
       return;
     }
     expandSession(cleanSessionId);
@@ -427,6 +484,14 @@ export function createPodcasterSessionRailApi(deps = {}) {
           return;
         }
         const sessionId = action.dataset.sessionId;
+        if (action.dataset.action === "toggle-session-versions") {
+          event.preventDefault();
+          event.stopPropagation();
+          const card = action.closest(".session-card");
+          const willExpand = !isSessionExpanded(sessionId);
+          setSessionVersionsExpanded(sessionId, willExpand, card);
+          return;
+        }
         if (action.dataset.action === "open-session") await toggleOrOpenSession(sessionId);
         if (action.dataset.action === "open-session-thread") {
           event.preventDefault();

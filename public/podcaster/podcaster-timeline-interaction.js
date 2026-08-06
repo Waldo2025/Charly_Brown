@@ -1,3 +1,8 @@
+import {
+  removeStoredTimelineRowHeight,
+  setStoredTimelineRowHeight
+} from "./podcaster-timeline-row-heights.js";
+
 export function createPodcasterTimelineInteractionApi(deps = {}) {
   const {
     els,
@@ -15,7 +20,6 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     syncPodcastStudioInspector,
     syncTimelineGapSelectionUi,
     syncGeminiDialogueTrackWithRuntime,
-    persistCompactedTimelineTrackFromRow,
     flushSessionLocalPersistNow,
     renderPodcastVideoTimeline,
     syncTimelineModeButtons,
@@ -86,6 +90,35 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
 
   let timelinePointerMoveRafId = 0;
   let lastTimelinePointerEvent = null;
+
+  function getGeminiDragDeltaPx(drag = null, event = null) {
+    const timeline = els.podcastVideoTimeline;
+    if (!drag || !event || !timeline) {
+      return Number(event?.clientX || 0) - Number(drag?.startClientX || 0);
+    }
+    const rect = timeline.getBoundingClientRect?.();
+    const edgePx = 56;
+    const maxScrollStepPx = 28;
+    let scrollDeltaPx = 0;
+    if (rect?.width > 0) {
+      const pointerX = Number(event.clientX || 0);
+      if (pointerX < rect.left + edgePx) {
+        const proximity = Math.max(0, Math.min(1, (rect.left + edgePx - pointerX) / edgePx));
+        scrollDeltaPx = -Math.max(2, Math.round(maxScrollStepPx * proximity));
+      } else if (pointerX > rect.right - edgePx) {
+        const proximity = Math.max(0, Math.min(1, (pointerX - (rect.right - edgePx)) / edgePx));
+        scrollDeltaPx = Math.max(2, Math.round(maxScrollStepPx * proximity));
+      }
+    }
+    if (scrollDeltaPx) {
+      const previousScrollLeft = Math.max(0, Number(timeline.scrollLeft || 0));
+      const maxScrollLeft = Math.max(0, Number(timeline.scrollWidth || 0) - Number(timeline.clientWidth || 0));
+      timeline.scrollLeft = Math.max(0, Math.min(maxScrollLeft, previousScrollLeft + scrollDeltaPx));
+    }
+    const initialScrollLeft = Math.max(0, Number(drag.initialTimelineScrollLeft || 0));
+    return Number(event.clientX || 0) - Number(drag.startClientX || 0)
+      + (Math.max(0, Number(timeline.scrollLeft || 0)) - initialScrollLeft);
+  }
 
   function beginClipDrag(mode = "move", rowId = "", event = null, options = {}) {
     const key = String(rowId || "").trim();
@@ -402,6 +435,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     podcastVideoState.timelineDrag = {
       mode: "gemini-segment-move",
       startClientX: Number(event.clientX || 0),
+      initialTimelineScrollLeft: Math.max(0, Number(els.podcastVideoTimeline?.scrollLeft || 0)),
       segmentsSnapshot
     };
     document.body.classList.add("podcast-timeline-dragging");
@@ -568,6 +602,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       const trackId = String(drag.trackId || "").trim();
       const nextHeight = Math.round(Math.max(56, Math.min(520, Number(drag.currentHeightPx || drag.startHeightPx || 0))));
       if (trackId && nextHeight > 0) {
+        setStoredTimelineRowHeight(getActiveSession(), trackId, nextHeight);
         upsertPodcastVideoConfig((cfg) => ({
           ...cfg,
           timelineTrackHeightsById: {
@@ -618,18 +653,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       syncTimelineModeButtons(session);
       return;
     }
-    if (dragMode === "trim-start" || dragMode === "trim-end") {
-      syncGeminiDialogueTrackWithRuntime({
-        render: false,
-        preserveStartMs: true,
-        isTrimStart: dragMode === "trim-start",
-        syncTextToScene: true
-      });
-      persistCompactedTimelineTrackFromRow(String(podcastVideoState.timelineDrag.rowId || "").trim(), {
-        render: false,
-        syncGemini: false,
-        autosave: false
-      });
+    if (dragMode === "trim-start") {
+      syncTrimmedSceneGeminiAnchor(podcastVideoState.timelineDrag);
     }
     podcastVideoState.timelineJustDraggedUntil = Date.now() + 240;
     finalizeClipDrag();
@@ -756,6 +781,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       const trackId = String(resizeHandle.dataset.trackId || "").trim();
       if (!trackId) return;
       if (event.detail >= 2) {
+        removeStoredTimelineRowHeight(getActiveSession(), trackId);
         const lane = els.podcastVideoTimeline?.querySelector(`.podcast-video-track-lane[data-track-id="${CSS.escape(trackId)}"]`);
         if (lane) {
           lane.style.height = "";
@@ -788,13 +814,21 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
     }
     const playhead = event.target.closest("[data-action='timeline-drag-playhead']");
     if (playhead) {
+      try {
+        playhead.setPointerCapture?.(event.pointerId);
+      } catch (_) { }
       podcastVideoState.timelineDrag = {
         mode: "playhead",
         startClientX: Number(event.clientX || 0),
         lastClientX: Number(event.clientX || 0)
       };
       podcastVideoState.playheadDragging = true;
-      seekStudioTimelineByClientX(event.clientX, { stopMontage: true, autoplay: false, lightweightPlayhead: true });
+      seekStudioTimelineByClientX(event.clientX, {
+        stopMontage: true,
+        autoplay: false,
+        lightweightPlayhead: true,
+        deferPreview: true
+      });
       event.preventDefault();
       return;
     }
@@ -990,7 +1024,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
         podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
       }
-      selectTimelineSceneRow(rowId, { syncStage: true });
+      selectTimelineSceneRow(rowId, { syncStage: false });
       renderPodcastVideoTimeline(getActiveSession());
       return true;
     }
@@ -1063,8 +1097,9 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           ...cfg,
           ...buildManualOnScreenTextTrackConfig(cfg, {
             ...(nextClips[drag.rowId] || updatedCurrent),
-            hidden: false,
-            autoHidden: false
+            // Changing its timing must not turn a deliberately hidden subtitle on.
+            hidden: current.hidden === true,
+            autoHidden: current.autoHidden === true
           }, drag.rowId),
           timelineOnScreenTextClipsByRowId: nextClips
         }), { autosave: false, persist: false, recordHistory: false });
@@ -1132,8 +1167,9 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           ...cfg,
           ...buildManualOnScreenTextTrackConfig(cfg, {
             ...(nextClips[drag.rowId] || current),
-            hidden: false,
-            autoHidden: false
+            // Keep the visibility state while trimming the start handle.
+            hidden: current.hidden === true,
+            autoHidden: current.autoHidden === true
           }, drag.rowId),
           timelineOnScreenTextClipsByRowId: nextClips
         }), { autosave: false, persist: false, recordHistory: false });
@@ -1185,8 +1221,9 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           ...cfg,
           ...buildManualOnScreenTextTrackConfig(cfg, {
             ...(nextClips[drag.rowId] || updatedCurrent),
-            hidden: false,
-            autoHidden: false
+            // Keep the visibility state while trimming the end handle.
+            hidden: current.hidden === true,
+            autoHidden: current.autoHidden === true
           }, drag.rowId),
           timelineOnScreenTextClipsByRowId: nextClips
         }), { autosave: false, persist: false, recordHistory: false });
@@ -1377,7 +1414,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       const baseTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
       const snapshot = Array.isArray(drag.segmentsSnapshot) ? drag.segmentsSnapshot : [];
       if (!baseTrack.enabled || !snapshot.length) return;
-      let targetDelta = deltaMs;
+      const geminiDeltaPx = getGeminiDragDeltaPx(drag, event);
+      let targetDelta = snapTimelineMsWithStep(timelinePxToMs(geminiDeltaPx), dragStepMs);
       const minProjected = snapshot.reduce((acc, segment) => Math.min(acc, Number(segment.startMs || 0) + targetDelta), Number.POSITIVE_INFINITY);
       if (minProjected < 0) {
         targetDelta = targetDelta - minProjected;
@@ -1582,8 +1620,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           ...(constrainedTextClip
             ? buildManualOnScreenTextTrackConfig(cfg, {
               ...constrainedTextClip,
-              hidden: false,
-              autoHidden: false
+              hidden: currentTextClip?.hidden === true,
+              autoHidden: currentTextClip?.autoHidden === true
             }, drag.rowId)
             : {
               timelineOnScreenTextTrackVersion: STUDIO_TIMELINE_TRACK_VERSION,
@@ -1641,8 +1679,8 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           ...(constrainedTextClip
             ? buildManualOnScreenTextTrackConfig(cfg, {
               ...constrainedTextClip,
-              hidden: false,
-              autoHidden: false
+              hidden: currentTextClip?.hidden === true,
+              autoHidden: currentTextClip?.autoHidden === true
             }, drag.rowId)
             : {
               timelineOnScreenTextTrackVersion: STUDIO_TIMELINE_TRACK_VERSION,
@@ -1662,6 +1700,58 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       syncTimelineClipDurationModalInputs();
       //     syncPodcastStudioInspector(getActiveSession());
     }
+  }
+
+  function syncTrimmedSceneGeminiAnchor(drag = null) {
+    const rowId = String(drag?.rowId || "").trim();
+    if (!rowId) return false;
+    const initialStartMs = Math.max(0, Number(drag?.initialStartMs || 0));
+    let changed = false;
+
+    upsertPodcastVideoConfig((cfg) => {
+      const sceneClip = normalizeTimelineClipsByRowId(cfg?.timelineClipsByRowId || {})[rowId];
+      if (!sceneClip) return cfg;
+      const nextSceneStartMs = Math.max(0, Number(sceneClip.startMs || 0));
+      const deltaMs = nextSceneStartMs - initialStartMs;
+      if (Math.abs(deltaMs) < 0.5) return cfg;
+
+      const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+      let found = false;
+      const segments = (track.segments || []).map((segment) => {
+        if (String(segment?.rowId || "").trim() !== rowId) return segment;
+        found = true;
+        const currentStartMs = Math.max(0, Number(segment?.startMs || 0));
+        const durationMs = Math.max(
+          0,
+          Number(segment?.durationMs || 0)
+          || (Number(segment?.endMs || 0) - currentStartMs)
+        );
+        const nextStartMs = Math.max(0, currentStartMs + deltaMs);
+        return {
+          ...segment,
+          startMs: nextStartMs,
+          endMs: nextStartMs + durationMs,
+          durationMs,
+          anchorStartMs: segment?.anchorStartMs === null || segment?.anchorStartMs === undefined
+            ? nextSceneStartMs
+            : Math.max(0, Number(segment.anchorStartMs || 0) + deltaMs)
+        };
+      });
+      if (!found) return cfg;
+      changed = true;
+      return {
+        ...cfg,
+        geminiDialogueTrack: {
+          ...track,
+          segments
+        }
+      };
+    });
+
+    if (changed) {
+      syncOnScreenTextClipsWithSceneTrack({ render: false, autosave: false });
+    }
+    return changed;
   }
 
   function finalizeClipDrag() {

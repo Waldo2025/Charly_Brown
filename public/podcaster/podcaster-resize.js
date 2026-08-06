@@ -12,6 +12,16 @@ export const POD_INSPECTOR_WIDTH_KEY = "cb_pod_inspector_width_v1";
 export const POD_INSPECTOR_WIDTH_MIN = 260;
 export const POD_INSPECTOR_WIDTH_MAX = 800;
 export const POD_INSPECTOR_WIDTH_DEFAULT = 340;
+export const SESSIONS_RAIL_WIDTH_KEY = "cb_snoopy_sessions_rail_width_v1";
+export const SESSIONS_RAIL_WIDTH_MIN = 220;
+export const SESSIONS_RAIL_WIDTH_MAX = 480;
+export const SESSIONS_RAIL_WIDTH_DEFAULT = 280;
+export const PODCASTER_SIDEPANEL_WIDTH_KEY = "cb_snoopy_sidepanel_width_v1";
+export const PODCASTER_SIDEPANEL_WIDTH_MIN = 180;
+export const PODCASTER_SIDEPANEL_WIDTH_MAX = 640;
+export const PODCASTER_SIDEPANEL_WIDTH_DEFAULT = 380;
+export const COMPOSER_SHELL_HEIGHT_KEY = "cb_podcaster_composer_height_v1";
+export const COMPOSER_SHELL_HEIGHT_MIN = 150;
 export const POD_VIDEO_LIBRARY_COLLAPSED_KEY = "cb_podcast_video_library_collapsed_v1";
 
 // State (migrated from podcaster.js)
@@ -38,6 +48,39 @@ export let podcastStudioInspectorWidth = (() => {
 
 export let podcastStudioInspectorResizeCleanup = null;
 export let podcastStudioInspectorResizeObserver = null;
+export let sessionsRailResizeCleanup = null;
+export let sessionsRailWidth = (() => {
+  try {
+    const storedWidth = Number(window.localStorage.getItem(SESSIONS_RAIL_WIDTH_KEY));
+    return Number.isFinite(storedWidth) && storedWidth > 0
+      ? Math.max(SESSIONS_RAIL_WIDTH_MIN, Math.min(SESSIONS_RAIL_WIDTH_MAX, storedWidth))
+      : SESSIONS_RAIL_WIDTH_DEFAULT;
+  } catch (_) {
+    return SESSIONS_RAIL_WIDTH_DEFAULT;
+  }
+})();
+export let podcasterSidepanelResizeCleanup = null;
+export let podcasterSidepanelWidth = (() => {
+  try {
+    const storedWidth = Number(window.localStorage.getItem(PODCASTER_SIDEPANEL_WIDTH_KEY));
+    return Number.isFinite(storedWidth) && storedWidth > 0
+      ? Math.max(PODCASTER_SIDEPANEL_WIDTH_MIN, Math.min(PODCASTER_SIDEPANEL_WIDTH_MAX, storedWidth))
+      : PODCASTER_SIDEPANEL_WIDTH_DEFAULT;
+  } catch (_) {
+    return PODCASTER_SIDEPANEL_WIDTH_DEFAULT;
+  }
+})();
+export let composerShellResizeCleanup = null;
+export let composerShellHeight = (() => {
+  try {
+    const storedHeight = Number(window.localStorage.getItem(COMPOSER_SHELL_HEIGHT_KEY));
+    return Number.isFinite(storedHeight) && storedHeight >= COMPOSER_SHELL_HEIGHT_MIN
+      ? Math.round(storedHeight)
+      : null;
+  } catch (_) {
+    return null;
+  }
+})();
 
 export let podcastVideoLibraryCollapsed = (() => {
   try {
@@ -96,7 +139,7 @@ export function setPodcastVideoStageMaxHeight(nextHeightPx = null, { persist = t
     return;
   }
 
-  podcastStageMaxHeightPx = Math.max(280, Math.min(POD_STAGE_MAX_HEIGHT_PX_MAX, Math.round(numericHeight)));
+  podcastStageMaxHeightPx = Math.max(120, Math.min(POD_STAGE_MAX_HEIGHT_PX_MAX, Math.round(numericHeight)));
   shell.style.setProperty("--pod-stage-max-height", `${podcastStageMaxHeightPx}px`);
   stage.classList.add("is-user-resized");
   
@@ -251,9 +294,9 @@ export function setupPodcastStudioInspectorResize(els = {}, options = {}) {
     event.currentTarget?.setPointerCapture?.(event.pointerId);
     document.body.classList.add("is-resizing-podcast-inspector");
     
-    const shellRect = els.podcastVideoShell?.getBoundingClientRect();
+    const inspectorRect = els.podcastStudioInspector.getBoundingClientRect();
     const layoutRect = els.podcastStudioInspector.parentElement?.getBoundingClientRect();
-    const rightEdge = shellRect?.right || layoutRect?.right || window.innerWidth;
+    const rightEdge = inspectorRect?.right || layoutRect?.right || window.innerWidth;
     
     const onPointerMove = (moveEvent) => {
       const nextWidth = rightEdge - moveEvent.clientX;
@@ -287,6 +330,7 @@ export function setupPodcastStudioInspectorResize(els = {}, options = {}) {
     podcastStudioInspectorResizeObserver = new ResizeObserver((entries) => {
       if (!entries.length) return;
       if (window.innerWidth <= 920 || isCollapsed()) return;
+      if (document.body.classList.contains("is-resizing-podcast-inspector")) return;
       const entry = entries[0];
       const nextWidth = entry.borderBoxSize?.[0]?.inlineSize || entry.contentRect?.width || 0;
       if (!nextWidth) return;
@@ -295,6 +339,252 @@ export function setupPodcastStudioInspectorResize(els = {}, options = {}) {
     });
     podcastStudioInspectorResizeObserver.observe(els.podcastStudioInspector);
   }
+}
+
+export function setSessionsRailWidth(nextWidth, { persist = true, els = {} } = {}) {
+  const normalizedWidth = Math.round(Math.max(
+    SESSIONS_RAIL_WIDTH_MIN,
+    Math.min(SESSIONS_RAIL_WIDTH_MAX, Number(nextWidth) || SESSIONS_RAIL_WIDTH_DEFAULT)
+  ));
+  sessionsRailWidth = normalizedWidth;
+  els.podcasterLayout?.style.setProperty("--sessions-rail-width", `${normalizedWidth}px`);
+
+  if (persist) {
+    try {
+      window.localStorage.setItem(SESSIONS_RAIL_WIDTH_KEY, String(normalizedWidth));
+    } catch (_) { }
+  }
+}
+
+export function setupSessionsRailResize(els = {}) {
+  setSessionsRailWidth(sessionsRailWidth, { persist: false, els });
+
+  if (sessionsRailResizeCleanup) {
+    sessionsRailResizeCleanup();
+    sessionsRailResizeCleanup = null;
+  }
+
+  const handle = els.sessionsRailResizeHandle;
+  if (!handle || !els.podcasterLayout) return;
+
+  const onPointerDown = (event) => {
+    if (event.button !== 0 || window.innerWidth <= 920) return;
+    event.preventDefault();
+    handle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add("is-resizing-sessions-rail");
+    const layoutLeft = els.podcasterLayout.getBoundingClientRect().left;
+
+    const onPointerMove = (moveEvent) => {
+      setSessionsRailWidth(moveEvent.clientX - layoutLeft, { persist: false, els });
+    };
+
+    const stopResize = () => {
+      document.body.classList.remove("is-resizing-sessions-rail");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      setSessionsRailWidth(sessionsRailWidth, { persist: true, els });
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener("pointercancel", stopResize, { once: true });
+  };
+
+  const onDoubleClick = () => {
+    setSessionsRailWidth(SESSIONS_RAIL_WIDTH_DEFAULT, { persist: true, els });
+  };
+
+  handle.addEventListener("pointerdown", onPointerDown);
+  handle.addEventListener("dblclick", onDoubleClick);
+  sessionsRailResizeCleanup = () => {
+    handle.removeEventListener("pointerdown", onPointerDown);
+    handle.removeEventListener("dblclick", onDoubleClick);
+  };
+}
+
+export function setPodcasterSidepanelWidth(nextWidth, { persist = true, els = {} } = {}) {
+  const normalizedWidth = Math.round(Math.max(
+    PODCASTER_SIDEPANEL_WIDTH_MIN,
+    Math.min(PODCASTER_SIDEPANEL_WIDTH_MAX, Number(nextWidth) || PODCASTER_SIDEPANEL_WIDTH_DEFAULT)
+  ));
+  podcasterSidepanelWidth = normalizedWidth;
+  els.podcasterLayout?.style.setProperty("--pod-sidepanel-max", `${normalizedWidth}px`);
+
+  if (persist) {
+    try {
+      window.localStorage.setItem(PODCASTER_SIDEPANEL_WIDTH_KEY, String(normalizedWidth));
+    } catch (_) { }
+  }
+}
+
+export function setupPodcasterSidepanelResize(els = {}) {
+  setPodcasterSidepanelWidth(podcasterSidepanelWidth, { persist: false, els });
+
+  if (podcasterSidepanelResizeCleanup) {
+    podcasterSidepanelResizeCleanup();
+    podcasterSidepanelResizeCleanup = null;
+  }
+
+  const handle = els.podcasterSidepanelResizeHandle;
+  if (!handle || !els.sidepanel || !els.podcasterLayout) return;
+
+  const onPointerDown = (event) => {
+    if (event.button !== 0 || window.innerWidth <= 920) return;
+    event.preventDefault();
+    handle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add("is-resizing-podcaster-sidepanel");
+    const rightEdge = els.sidepanel.getBoundingClientRect().right;
+
+    const onPointerMove = (moveEvent) => {
+      setPodcasterSidepanelWidth(rightEdge - moveEvent.clientX, { persist: false, els });
+    };
+
+    const stopResize = () => {
+      document.body.classList.remove("is-resizing-podcaster-sidepanel");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      setPodcasterSidepanelWidth(podcasterSidepanelWidth, { persist: true, els });
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener("pointercancel", stopResize, { once: true });
+  };
+
+  const onDoubleClick = () => {
+    setPodcasterSidepanelWidth(PODCASTER_SIDEPANEL_WIDTH_DEFAULT, { persist: true, els });
+  };
+
+  handle.addEventListener("pointerdown", onPointerDown);
+  handle.addEventListener("dblclick", onDoubleClick);
+  podcasterSidepanelResizeCleanup = () => {
+    handle.removeEventListener("pointerdown", onPointerDown);
+    handle.removeEventListener("dblclick", onDoubleClick);
+  };
+}
+
+function getComposerShellHeightMax(els = {}) {
+  const stageHeight = Number(els.chatStage?.getBoundingClientRect?.().height || window.innerHeight || 0);
+  return Math.max(COMPOSER_SHELL_HEIGHT_MIN, Math.floor(stageHeight - 72));
+}
+
+export function setComposerShellHeight(nextHeight, { persist = true, els = {}, onResize = () => {} } = {}) {
+  const shell = els.composerShell;
+  if (!shell) return;
+
+  const numericHeight = Number(nextHeight);
+  if (!Number.isFinite(numericHeight) || numericHeight <= 0) {
+    composerShellHeight = null;
+    shell.classList.remove("is-user-resized");
+    shell.style.removeProperty("--pod-composer-height");
+    els.composerResizeHandle?.removeAttribute("aria-valuenow");
+    if (persist) {
+      try {
+        window.localStorage.removeItem(COMPOSER_SHELL_HEIGHT_KEY);
+      } catch (_) { }
+    }
+    onResize();
+    return;
+  }
+
+  composerShellHeight = Math.round(Math.max(
+    COMPOSER_SHELL_HEIGHT_MIN,
+    Math.min(getComposerShellHeightMax(els), numericHeight)
+  ));
+  shell.style.setProperty("--pod-composer-height", `${composerShellHeight}px`);
+  shell.classList.add("is-user-resized");
+  els.composerResizeHandle?.setAttribute("aria-valuenow", String(composerShellHeight));
+  if (persist) {
+    try {
+      window.localStorage.setItem(COMPOSER_SHELL_HEIGHT_KEY, String(composerShellHeight));
+    } catch (_) { }
+  }
+  onResize();
+}
+
+export function setupComposerShellResize(els = {}, options = {}) {
+  const onResize = typeof options.onResize === "function" ? options.onResize : () => {};
+  if (composerShellResizeCleanup) {
+    composerShellResizeCleanup();
+    composerShellResizeCleanup = null;
+  }
+
+  const shell = els.composerShell;
+  const handle = els.composerResizeHandle;
+  if (!shell || !handle) return;
+
+  handle.setAttribute("aria-valuemin", String(COMPOSER_SHELL_HEIGHT_MIN));
+  handle.setAttribute("aria-valuemax", String(getComposerShellHeightMax(els)));
+  setComposerShellHeight(composerShellHeight, { persist: false, els, onResize });
+
+  const resetHeight = () => {
+    setComposerShellHeight(null, { persist: true, els, onResize });
+  };
+
+  const onPointerDown = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    handle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add("is-resizing-composer-shell");
+    const startY = event.clientY;
+    const startHeight = shell.getBoundingClientRect().height;
+
+    const onPointerMove = (moveEvent) => {
+      setComposerShellHeight(startHeight + startY - moveEvent.clientY, {
+        persist: false,
+        els,
+        onResize
+      });
+    };
+
+    const stopResize = () => {
+      document.body.classList.remove("is-resizing-composer-shell");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      setComposerShellHeight(composerShellHeight, { persist: true, els, onResize });
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener("pointercancel", stopResize, { once: true });
+  };
+
+  const onKeyDown = (event) => {
+    if (event.key === "Home") {
+      event.preventDefault();
+      resetHeight();
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 32 : 12;
+    const currentHeight = shell.getBoundingClientRect().height;
+    const direction = event.key === "ArrowUp" ? 1 : -1;
+    setComposerShellHeight(currentHeight + (step * direction), { persist: true, els, onResize });
+  };
+
+  const onWindowResize = () => {
+    handle.setAttribute("aria-valuemax", String(getComposerShellHeightMax(els)));
+    if (composerShellHeight !== null) {
+      setComposerShellHeight(composerShellHeight, { persist: false, els, onResize });
+    }
+  };
+
+  handle.addEventListener("pointerdown", onPointerDown);
+  handle.addEventListener("dblclick", resetHeight);
+  handle.addEventListener("keydown", onKeyDown);
+  window.addEventListener("resize", onWindowResize);
+
+  composerShellResizeCleanup = () => {
+    handle.removeEventListener("pointerdown", onPointerDown);
+    handle.removeEventListener("dblclick", resetHeight);
+    handle.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("resize", onWindowResize);
+    document.body.classList.remove("is-resizing-composer-shell");
+  };
 }
 
 /**

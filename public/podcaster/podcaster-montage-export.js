@@ -36,6 +36,7 @@ const MONTAGE_FRONTEND_EXPORT_FPS = 24;
 const MONTAGE_FRONTEND_EXPORT_MAX_DURATION_MS = 3 * 60 * 1000;
 const MONTAGE_FRONTEND_EXPORT_SCENE_SEEK_TIMEOUT_MS = 2200;
 const MONTAGE_FRONTEND_EXPORT_DRIFT_SEEK_THRESHOLD_SEC = 0.45;
+const MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION = "scene-probe-single-frame-v2";
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
@@ -252,12 +253,14 @@ function loadPersistedMontageExportActiveJob() {
     const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY) || "{}");
     const jobId = String(parsed?.jobId || "").trim();
     const startedAtMs = Math.max(0, Number(parsed?.startedAtMs || 0) || 0);
+    const pipelineRevision = String(parsed?.pipelineRevision || "").trim();
+    const backendBase = String(parsed?.backendBase || "").trim();
     if (!jobId) return null;
     if (startedAtMs > 0 && (Date.now() - startedAtMs) > MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS) {
       localStorage.removeItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY);
       return null;
     }
-    return { jobId, startedAtMs };
+    return { jobId, startedAtMs, pipelineRevision, backendBase };
   } catch (_) {
     return null;
   }
@@ -272,7 +275,9 @@ function persistMontageExportActiveJob(jobId = "", startedAtMs = 0) {
     }
     localStorage.setItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY, JSON.stringify({
       jobId: cleanJobId,
-      startedAtMs: Math.max(0, Number(startedAtMs || 0) || 0)
+      startedAtMs: Math.max(0, Number(startedAtMs || 0) || 0),
+      pipelineRevision: MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION,
+      backendBase: String(buildMontageExportEndpoint("") || "").trim()
     }));
   } catch (_) {
     // noop
@@ -551,6 +556,7 @@ function updateMontageExportFloatingCardVisibility() {
   const isReady = String(window.montageExportJobState?.lastStage || "").trim() === "ready";
   const shouldShow = Boolean(
     window.els.montageExportModal?.hidden === true
+    && card.dataset.dismissed !== "true"
     && !isReady
     && (
       activeJobId
@@ -594,6 +600,7 @@ function updateMontageExportFloatingCardVisibility() {
 export function reopenMontageExportModalFromCard() {
   setMontageExportOpen(true);
   if (window.els.montageExportFloatingCard) {
+    delete window.els.montageExportFloatingCard.dataset.dismissed;
     window.els.montageExportFloatingCard.hidden = true;
   }
   if (window.els.montageExportModal) {
@@ -665,6 +672,37 @@ function buildMontageExportEndpoint(path = "") {
   return buildExportApiUrl(path);
 }
 
+async function assertMontageExportBackendRevision() {
+  let health = null;
+  try {
+    health = await authFetchJson(buildMontageExportEndpoint("/api/health"), {
+      auth: false
+    });
+  } catch (error) {
+    logMontageExportDevtools("backend_revision_check_unavailable", {
+      expected: MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION,
+      message: String(error?.message || error || "").trim() || undefined
+    }, "warn");
+    return true;
+  }
+  const actual = String(health?.montageExportPipelineRevision || "").trim();
+  logMontageExportDevtools("backend_revision_check", {
+    expected: MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION,
+    actual: actual || undefined,
+    startupSignature: String(health?.startupSignature || "").trim() || undefined,
+    service: String(health?.service || "").trim() || undefined
+  }, actual === MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION ? "info" : "error");
+  if (actual === MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION) return true;
+  const error = new Error("montage_export_backend_outdated");
+  error.code = "montage_export_backend_outdated";
+  error.detail = {
+    expectedPipelineRevision: MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION,
+    actualPipelineRevision: actual || null,
+    startupSignature: String(health?.startupSignature || "").trim() || null
+  };
+  throw error;
+}
+
 function sanitizeMontageExportJobFirestorePayload(job = null) {
   const source = job && typeof job === "object" ? job : {};
   const payload = {
@@ -682,6 +720,7 @@ function sanitizeMontageExportJobFirestorePayload(job = null) {
   if (source.sceneSubstage) payload.sceneSubstage = String(source.sceneSubstage || "").trim();
   if (source.currentStoragePath) payload.currentStoragePath = String(source.currentStoragePath || "").trim();
   if (source.currentDownloadUrl) payload.currentDownloadUrl = String(source.currentDownloadUrl || "").trim();
+  if (source.pipelineRevision) payload.pipelineRevision = String(source.pipelineRevision || "").trim();
   if (source.heartbeatAt) payload.heartbeatAt = String(source.heartbeatAt || "").trim();
   if (source.lastHeartbeatAt) payload.heartbeatAt = String(source.lastHeartbeatAt || "").trim();
   if (source.degraded === true) payload.degraded = true;
@@ -1359,6 +1398,11 @@ function applyMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl 
     mediaEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-motion-duration", `${Number(spec.motion?.durationSec || 12).toFixed(3)}s`);
+    mediaEl.style.setProperty("--kb-duration", `${Number(spec.kenBurns?.playbackDurationSec || spec.motion?.durationSec || 12).toFixed(3)}s`);
+    mediaEl.style.setProperty("--kb-pan-start-x", `${Number(spec.kenBurns?.traversal?.startXPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--kb-pan-end-x", `${Number(spec.kenBurns?.traversal?.endXPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--kb-pan-start-y", `${Number(spec.kenBurns?.traversal?.startYPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--kb-pan-end-y", `${Number(spec.kenBurns?.traversal?.endYPx || 0).toFixed(3)}px`);
   };
   const targetMediaEl = mediaEl || (String(preview.mediaType || "").startsWith("image/")
     ? window.els.montageExportPreviewImage
@@ -1988,6 +2032,9 @@ export async function closeMontageExportModal({ cancelActiveJob = false } = {}) 
     window.exportPreviewController.stop();
   }
   setMontageExportOpen(false);
+  if (keepJobVisible && window.els.montageExportFloatingCard) {
+    delete window.els.montageExportFloatingCard.dataset.dismissed;
+  }
   if (!keepJobVisible) {
     resetMontageExportJobState();
     resetMontageExportPreviewState();
@@ -2418,6 +2465,39 @@ export async function continueMontageExportPolling() {
     setMontageExportContinueButton({ visible: false });
     return;
   }
+  if (
+    persistedJob?.jobId === jobId
+    && String(persistedJob?.pipelineRevision || "").trim() !== MONTAGE_EXPORT_REQUIRED_PIPELINE_REVISION
+  ) {
+    clearMontageExportPolling();
+    persistMontageExportActiveJob("");
+    window.montageExportJobState.jobId = "";
+    setMontageExportContinueButton({ visible: false });
+    setMontageExportStatus(
+      "La exportación anterior usaba el pipeline antiguo.",
+      "Se descartó su seguimiento. Presiona Exportar para crear un job nuevo con el probe corregido.",
+      { tone: "warning" }
+    );
+    return;
+  }
+  try {
+    await assertMontageExportBackendRevision();
+  } catch (error) {
+    if (String(error?.code || error?.message || "").trim() !== "montage_export_backend_outdated") throw error;
+    clearMontageExportPolling();
+    persistMontageExportActiveJob("");
+    window.montageExportJobState.jobId = "";
+    window.montageExportBusy = false;
+    setMontageExportBusy(false);
+    setMontageExportProgress(null);
+    setMontageExportContinueButton({ visible: false });
+    setMontageExportStatus(
+      "Backend de exportación desactualizado.",
+      "El job anterior pertenece al probe antiguo. Despliega o reinicia snoopy-export e inicia una exportación nueva.",
+      { tone: "error" }
+    );
+    return;
+  }
   logMontageExportDevtools("continue_polling_clicked", { jobId });
   clearMontageExportPolling();
   if (!String(window.montageExportJobState.jobId || "").trim()) {
@@ -2495,11 +2575,13 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
   });
   if (!selected || typeof selected !== "object") return null;
   const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
-  const directDataUrl = String(video?.dataUrl || video?.localDataUrl || "").trim();
+  const stopMotion = window.PodcasterStopMotion?.normalizeStopMotion?.(video?.stopMotion || null);
+  const firstStopMotionFrame = stopMotion?.frames?.[0] || null;
+  const directDataUrl = String(firstStopMotionFrame?.dataUrl || video?.dataUrl || video?.localDataUrl || "").trim();
   const localMediaCacheKey = String(video?.localMediaCacheKey || "").trim();
-  const directDownloadUrl = String(video?.downloadUrl || "").trim();
-  const rawUrl = String(video?.url || "").trim();
-  const storagePath = String(video?.storagePath || "").trim();
+  const directDownloadUrl = String(firstStopMotionFrame?.downloadUrl || video?.downloadUrl || "").trim();
+  const rawUrl = String(firstStopMotionFrame?.url || video?.url || "").trim();
+  const storagePath = String(firstStopMotionFrame?.storagePath || video?.storagePath || "").trim();
   let src = directDataUrl;
   if (!src && localMediaCacheKey) {
     try {
@@ -2547,6 +2629,7 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     mediaMotionPreset: selected?.mediaMotionPreset || "none",
     visualLayoutMode: String(selected?.visualLayoutMode || "default").trim() || "default",
     visualEffects: selected?.visualEffects || null,
+    stopMotion,
     durationMs: Math.max(
       200,
       Number(selected?.durationMs || 0)
@@ -5672,9 +5755,9 @@ export function buildMontageExportPayload(session = null) {
     }).filter(Boolean);
   };
 
-  const resolveGeminiSegmentTimelineDurationMs = (segment = null, rowId = "", runtime = null) => {
+  const resolveGeminiSegmentTimelineDurationMs = (segment = null, rowId = "", runtime = null, playbackRate = 1) => {
     const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-    const playbackRate = Math.max(0.5, Math.min(10, Number(window.resolveDialogueAudioPlaybackRate?.(activeSession, rowId) || 1) || 1));
+    const safePlaybackRate = Math.max(0.5, Math.min(10, Number(playbackRate || 1) || 1));
     const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
     const trimOutMs = Math.max(0, Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0));
     const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
@@ -5684,16 +5767,26 @@ export function buildMontageExportPayload(session = null) {
     );
     const segmentTimelineMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round((trimmedVisibleMs || declaredDurationMs) / playbackRate)
+      Math.round((trimmedVisibleMs || declaredDurationMs) / safePlaybackRate)
     );
-    const measuredAudioVisibleMs = rowId
-      ? Math.max(0, Math.round(Number(window.resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0) - Math.round(trimInMs / playbackRate))
+    const audioClip = rowId && typeof window.resolveDialogueAudioForRow === "function"
+      ? window.resolveDialogueAudioForRow(activeSession, rowId)
+      : null;
+    const cachedActualDurationMs = Math.max(0, Number(window.podcastVideoState?.montageAudioActualDurationsMs?.[rowId] || 0) || 0);
+    const storedDurationMs = Math.max(0, Math.round(Number(audioClip?.durationSec || 0) * 1000));
+    const sourceDurationMs = Math.max(storedDurationMs, cachedActualDurationMs);
+    const rowAudioDurationMs = rowId
+      ? Math.max(0, Math.round(sourceDurationMs / safePlaybackRate))
       : 0;
-    return Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      segmentTimelineMs,
-      measuredAudioVisibleMs
-    );
+    const measuredAudioVisibleMs = rowId && trimmedVisibleMs > 0
+      ? Math.max(0, Math.round((trimmedVisibleMs / safePlaybackRate)))
+      : (rowId
+        ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / safePlaybackRate))
+        : 0);
+    const cappedDurationMs = measuredAudioVisibleMs > 0
+      ? Math.min(segmentTimelineMs, measuredAudioVisibleMs)
+      : segmentTimelineMs;
+    return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, cappedDurationMs);
   };
 
   const buildGeminiTimelineSegments = () => {
@@ -5737,8 +5830,14 @@ export function buildMontageExportPayload(session = null) {
         const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
         if (!effectiveSrc) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-        const playbackRate = Math.max(0.5, Math.min(10, Number(window.resolveDialogueAudioPlaybackRate?.(activeSession, rowId) || 1) || 1));
-        const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime);
+        const playbackRate = Math.max(
+          0.5,
+          Math.min(
+            10,
+            Number(storedAudio?.playbackRate || row?.playbackRate || runtime?.clip?.playbackRate || 1) || 1
+          )
+        );
+        const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime, playbackRate);
         const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
         const trimOutMsRaw = Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0);
         // En export, el segmento debe durar `durationMs` dentro del timeline.
@@ -5939,6 +6038,7 @@ export function buildMontageExportPayload(session = null) {
       const resolvedGeminiVolumePct = Number.isFinite(Number(sceneMix?.geminiPct))
         ? Math.max(0, Math.min(100, Math.round(Number(sceneMix.geminiPct))))
         : normalizeLegacyPct(entry?.clip?.geminiVolumeOverridePct, normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100));
+      const audioPlaybackRate = Math.max(0.5, Math.min(10, Number(audio?.playbackRate || row?.playbackRate || 1) || 1));
       const useNativeVideoAudio = window.shouldKeepNativeVideoAudioForRow?.(activeSession, rowId) || resolvedVeoVolumePct > 0.0001;
       const transitionOut = entry?.transitionOut
         || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
@@ -6016,7 +6116,8 @@ export function buildMontageExportPayload(session = null) {
             mimeType: videoMimeType,
             type: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
             mediaKind: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
-            localMediaCacheKey: videoCacheKey
+            localMediaCacheKey: videoCacheKey,
+            stopMotion: window.PodcasterStopMotion?.normalizeStopMotion?.(primarySegment?.stopMotion || clip?.stopMotion || null) || null
           },
           // When the montage timeline audio is active, Gemini voice is mixed in the
           // final audio pass together with background tracks. Keeping the per-scene
@@ -6029,6 +6130,7 @@ export function buildMontageExportPayload(session = null) {
               downloadUrl: audioDownloadUrl || "",
               dataUrl: audioDataUrl || "",
               localDataUrl: audioDataUrl || "",
+              playbackRate: audioPlaybackRate,
               mimeType: audioMimeType,
               localMediaCacheKey: audioCacheKey
             } : null,
@@ -6157,6 +6259,7 @@ export async function runMontageExport() {
       loading: true,
       label: "Preparando exportación…"
     });
+    await assertMontageExportBackendRevision();
     const session = window.getActiveSession?.() || null;
     setMontageExportStatus(
       "Preparando exportación…",
@@ -6285,7 +6388,7 @@ export async function runMontageExport() {
     const activeJobId = String(detail?.activeJobId || apiPayload?.activeJobId || "").trim();
     const activeJobKind = String(detail?.kind || apiPayload?.kind || "").trim();
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
-    const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
+    const code = String(error?.code || apiPayload?.error || error?.error || error?.message || "").trim();
     try {
       if (status === 429 || code === "backend_busy_with_export") {
         console.warn("[podcaster][montage-export] export already active or backend busy", {
@@ -6334,6 +6437,9 @@ export async function runMontageExport() {
         persistMontageExportActiveJob(previousJobId, Date.now());
         setMontageExportContinueButton({ visible: true });
       }
+    } else if (code === "montage_export_backend_outdated") {
+      hintParts.push("El backend de exportación todavía ejecuta una versión anterior.");
+      hintParts.push("Despliega o reinicia snoopy-export antes de volver a intentar.");
     } else if (status === 503 && code === "montage_export_queue_unavailable") {
       hintParts.push("El backend no pudo iniciar la exportación en este momento.");
       hintParts.push("Intenta de nuevo manualmente.");

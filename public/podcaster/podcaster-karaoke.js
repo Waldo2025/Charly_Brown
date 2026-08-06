@@ -1,3 +1,5 @@
+import "./podcaster-text-render.js";
+
 const api = globalThis.PodcasterTextRenderSpec || globalThis.PodcasterKaraokeRenderSpec;
 
 if (!api) {

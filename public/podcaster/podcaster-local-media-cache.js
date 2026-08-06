@@ -135,3 +135,12 @@ export async function deletePodcasterLocalMediaKey(key = "") {
   });
   return true;
 }
+
+export async function clearPodcasterLocalMediaCache() {
+  await withStore("readwrite", (store, resolve, reject) => {
+    const request = store.clear();
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => reject(request.error || new Error("No se pudo vaciar la caché local de medios."));
+  });
+  return true;
+}

@@ -34,11 +34,14 @@ export function createPodcasterSceneSelectionApi(deps = {}) {
       podcastVideoState.transitionFromRowId = key;
       podcastVideoState.transitionToRowId = nextRowId;
     }
-    if (podcastVideoState.montageActive || options.lightweightUi === true) {
+    // Selecting a scene is ephemeral UI state. Rebuilding the timeline here
+    // recreates Gemini segments and can visibly shift their chips even though
+    // no timing data changed. Structural callers must opt in explicitly.
+    if (options.renderTimelineStructure === true) {
+      renderPodcastVideoTimeline(session, { reason: String(options.reason || "structure").trim() || "structure" });
+    } else {
       syncPodcastTimelineSelectionUi(session);
       syncPodcastTimelinePlayhead(session);
-    } else {
-      renderPodcastVideoTimeline(session, { reason: String(options.reason || "structure").trim() || "structure" });
     }
     if (options.skipInspectorSync !== true) {
       syncPodcastStudioInspector(session);

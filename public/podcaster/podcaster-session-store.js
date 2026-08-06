@@ -966,6 +966,7 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     } else {
       window.setGenerationStatus?.("Sesión guardada", "is-live");
     }
+    window.playSessionSavedAnimation?.();
     if (options.render !== false) {
       deps.render?.();
     }

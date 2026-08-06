@@ -16,14 +16,14 @@
   --studio-panel-radius-sm: 12px;
   --studio-panel-blur: blur(22px);
   position: relative;
+  container-type: inline-size;
+  container-name: podcaster-sidepanel;
   min-width: 0;
   height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 0px;
-  padding: 10px;
-  padding-top: 0px;
-  padding-right: 0px;
+  padding: 0 0 4px 4px;
   overflow: hidden;
   color: var(--studio-panel-text);
   transition: background 180ms ease, box-shadow 180ms ease, border-color 180ms ease, transform 220ms ease;
@@ -166,6 +166,106 @@
   background: linear-gradient(135deg, #1e40af, #2563eb);
 }
 
+/* Header controls now live inside the chat header, not as fixed floating buttons. */
+.chat-stage-header .chat-stage-header-actions {
+  display: flex !important;
+  flex-flow: row nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+}
+
+.chat-stage-header #openSidepanelBtn,
+.chat-stage-header #togglePodcastVideoBtn {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  flex: 0 0 34px !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.chat-stage-header #openSidepanelBtn:hover,
+.chat-stage-header #openSidepanelBtn:focus-visible,
+.chat-stage-header #togglePodcastVideoBtn:hover,
+.chat-stage-header #togglePodcastVideoBtn:focus-visible,
+.chat-stage-header #togglePodcastVideoBtn.is-active {
+  color: var(--studio-panel-accent) !important;
+  background: rgba(29, 78, 216, 0.08) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Flat, horizontal icon toolbar for the scene panel. */
+#podcasterSidepanel > header.sidepanel-header {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-height: 48px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions {
+  display: flex !important;
+  flex-flow: row nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  width: 100% !important;
+  min-height: 48px !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  overflow-x: auto !important;
+  scrollbar-width: none;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions::-webkit-scrollbar {
+  display: none;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button {
+  flex: 0 0 40px !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button:hover,
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button:focus-visible {
+  color: var(--studio-panel-accent) !important;
+  background: rgba(29, 78, 216, 0.08) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
 #podcasterSidepanel [data-sidepanel-player] {
   display: grid;
   gap: 12px;
@@ -293,7 +393,7 @@
   min-height: 0;
   height: 100%;
   overflow: auto;
-  padding: 2px 2px 26px;
+  padding: 2px 2px 10px;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -424,7 +524,7 @@
     top: var(--cb-header-mobile-height, 56px);
     height: calc(100vh - var(--cb-header-mobile-height, 56px));
     width: min(100vw, 420px);
-    padding: 14px;
+    padding: 8px;
   }
 
   #podcasterSidepanel > header {
@@ -480,4 +580,264 @@
     grid-template-columns: minmax(0, 1fr) auto auto auto;
     gap: 8px;
   }
+}
+
+@container podcaster-sidepanel (max-width: 239px) {
+  #podcasterSidepanel > header.sidepanel-header {
+    min-height: 0 !important;
+    padding: 4px !important;
+  }
+
+  #podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions {
+    display: grid !important;
+    grid-template-columns: none !important;
+    grid-template-rows: repeat(2, 32px) !important;
+    grid-auto-flow: column;
+    grid-auto-columns: 32px;
+    justify-content: end !important;
+    justify-items: stretch;
+    align-content: start;
+    width: auto !important;
+    min-height: 0 !important;
+    margin-left: auto !important;
+    gap: 2px !important;
+    overflow: visible !important;
+  }
+
+  #podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+}
+
+/* Shared luminous controls: one visual system for the studio and scene panel. */
+.podcaster-app {
+  --pod-header-action-size: 34px;
+}
+
+.chat-stage-header-actions > .chat-stage-header-action,
+.chat-stage-header-actions > .creator-mode-menu > .chat-stage-header-action {
+  flex: 0 0 var(--pod-header-action-size) !important;
+  width: var(--pod-header-action-size) !important;
+  min-width: var(--pod-header-action-size) !important;
+  max-width: var(--pod-header-action-size) !important;
+  height: var(--pod-header-action-size) !important;
+  min-height: var(--pod-header-action-size) !important;
+  max-height: var(--pod-header-action-size) !important;
+}
+
+@keyframes podcaster-control-sheen {
+  0%, 58% { transform: translateX(-210%) skewX(-22deg); opacity: 0; }
+  64% { opacity: .82; }
+  88%, 100% { transform: translateX(410%) skewX(-22deg); opacity: 0; }
+}
+
+.podcaster-app :is(
+  #togglePodcastVideoBtn,
+  #toggleSnoopyCreatorThemeBtn,
+  .creator-mode-menu > summary,
+  #openSidepanelBtn,
+  #podcasterSidepanel .sidepanel-header-actions > button
+) {
+  position: relative !important;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.podcaster-app :is(
+  #togglePodcastVideoBtn,
+  #toggleSnoopyCreatorThemeBtn,
+  .creator-mode-menu > summary,
+  #openSidepanelBtn,
+  #podcasterSidepanel .sidepanel-header-actions > button
+)::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -45% auto -45% -62%;
+  width: 38%;
+  pointer-events: none;
+  transform: translateX(-210%) skewX(-22deg);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .9), transparent);
+  animation: podcaster-control-sheen 4.4s ease-in-out infinite;
+}
+
+.podcaster-app :is(
+  #togglePodcastVideoBtn,
+  #toggleSnoopyCreatorThemeBtn,
+  .creator-mode-menu > summary,
+  #openSidepanelBtn,
+  #podcasterSidepanel .sidepanel-header-actions > button
+) > i {
+  position: relative;
+  z-index: 1;
+}
+
+.chat-stage-header #togglePodcastVideoBtn,
+.podcaster-app #toggleSnoopyCreatorThemeBtn,
+.podcaster-app .creator-mode-menu > summary {
+  color: var(--pod-text) !important;
+  background: transparent !important;
+}
+
+.podcaster-app .creator-mode-menu[open] > .creator-mode-menu-toggle,
+.podcaster-app .creator-mode-menu > summary:hover,
+.podcaster-app .creator-mode-menu > summary:focus-visible,
+.chat-stage-header #togglePodcastVideoBtn:hover,
+.chat-stage-header #togglePodcastVideoBtn:focus-visible,
+.chat-stage-header #togglePodcastVideoBtn.is-active,
+.podcaster-app #toggleSnoopyCreatorThemeBtn:hover,
+.podcaster-app #toggleSnoopyCreatorThemeBtn:focus-visible {
+  filter: brightness(1.045);
+  box-shadow: none !important;
+}
+
+/* The scene-panel toggle stays transparent; only the moving reflection is visible. */
+.chat-stage-header #openSidepanelBtn,
+.chat-stage-header #openSidepanelBtn:hover,
+.chat-stage-header #openSidepanelBtn:focus-visible {
+  margin-left: 2px !important;
+  color: var(--pod-text) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(var(--pod-header-action-size), 1fr)) !important;
+  grid-auto-flow: row !important;
+  justify-content: stretch !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  gap: 5px !important;
+  padding: 5px !important;
+  overflow: visible !important;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button {
+  justify-self: center;
+  width: var(--pod-header-action-size) !important;
+  min-width: var(--pod-header-action-size) !important;
+  max-width: var(--pod-header-action-size) !important;
+  height: var(--pod-header-action-size) !important;
+  min-height: var(--pod-header-action-size) !important;
+  max-height: var(--pod-header-action-size) !important;
+  border-radius: 8px !important;
+  color: var(--pod-text) !important;
+  background: transparent !important;
+}
+
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button:hover,
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button:focus-visible {
+  color: var(--pod-text) !important;
+  background: transparent !important;
+  filter: none;
+  box-shadow: none !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Transparent header controls: animated sheen plus a restrained white icon relief. */
+.chat-stage-header-actions :is(button, summary),
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button,
+.chat-stage-header-actions :is(button, summary):is(:hover, :focus-visible, .is-active, [aria-pressed="true"]),
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button:is(:hover, :focus-visible, .is-active, [aria-pressed="true"]) {
+  color: var(--pod-text) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.chat-stage-header-actions :is(button, summary) > i,
+#podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions > button > i {
+  color: currentColor !important;
+  text-shadow:
+    0 -1px 0 rgba(255, 255, 255, .88),
+    0 1px 1px rgba(7, 12, 24, .32);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, .42));
+}
+
+@container podcaster-sidepanel (max-width: 239px) {
+  #podcasterSidepanel > header.sidepanel-header > .sidepanel-header-actions {
+    grid-template-columns: repeat(4, minmax(28px, 1fr)) !important;
+    grid-template-rows: none !important;
+    grid-auto-flow: row !important;
+    grid-auto-columns: auto !important;
+    width: 100% !important;
+    margin: 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .podcaster-app :is(
+    #togglePodcastVideoBtn,
+    #toggleSnoopyCreatorThemeBtn,
+    .creator-mode-menu > summary,
+    #openSidepanelBtn,
+    #podcasterSidepanel .sidepanel-header-actions > button,
+    .row-field-inline-actions > button
+  )::before {
+    animation: none;
+    opacity: .22;
+  }
+}
+
+/* Floating scene-panel toggle, anchored below the chat header without taking feed space. */
+.chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle,
+.chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle:is(:hover, :focus-visible, .is-open) {
+  position: sticky !important;
+  inset: auto !important;
+  top: 8px !important;
+  z-index: 12;
+  float: right;
+  display: inline-flex !important;
+  width: var(--pod-header-action-size) !important;
+  min-width: var(--pod-header-action-size) !important;
+  max-width: var(--pod-header-action-size) !important;
+  height: var(--pod-header-action-size) !important;
+  min-height: var(--pod-header-action-size) !important;
+  max-height: var(--pod-header-action-size) !important;
+  margin: 8px -12px calc(var(--pod-header-action-size) * -1 - 8px) 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  color: var(--pod-text) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* On overlay layouts, keep the toggle above the resized scene panel. */
+@media (max-width: 1180px) {
+  .chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle,
+  .chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle:is(:hover, :focus-visible, .is-open) {
+    position: fixed !important;
+    top: calc(var(--cb-header-height, 64px) + 8px) !important;
+    right: calc(min(var(--pod-sidepanel-max), 100vw) - 20px) !important;
+    z-index: 1004;
+    float: none;
+    margin: 0 !important;
+  }
+
+  .podcaster-layout:not(.has-sidepanel)
+    .chat-stage
+    > .chat-scroll-region
+    > #openSidepanelBtn.chat-scroll-sidepanel-toggle {
+    right: 14px !important;
+  }
+}
+
+@media (max-width: 920px) {
+  .chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle,
+  .chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle:is(:hover, :focus-visible, .is-open) {
+    top: calc(var(--cb-header-mobile-height, 56px) + 8px) !important;
+  }
+}
+
+.chat-stage > .chat-scroll-region > #openSidepanelBtn.chat-scroll-sidepanel-toggle > i {
+  color: currentColor !important;
+  text-shadow:
+    0 -1px 0 rgba(255, 255, 255, .88),
+    0 1px 1px rgba(7, 12, 24, .32);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, .42));
 }

@@ -14,12 +14,15 @@ import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
 import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.536";
+import { createPodcasterMediaRuntimeApi } from "../podcaster/podcaster-media-runtime.js?v=2026-1.0.10.539";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
 import { buildPreviewDocument } from "./escape-room-package-builder.mjs";
 import "../podcaster/podcaster-scene-media-render-spec.js";
+import { createVideoPlayerReviewManager } from "./video-player-review-manager.js";
+import { setScenePanelSectionVisibility, bindNewProposalToggleButtons } from "./video-player-panel-ui.js";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -3039,28 +3042,92 @@ async function mutateDashboardProposalSession(activeRowId = "", mutator = null) 
   }
 }
 
+async function mutateDashboardSessionRows(mutator = null) {
+  const sessionId = String(currentMultimediaSession?.id || "").trim();
+  if (!sessionId || typeof mutator !== "function") return { ok: false, session: currentMultimediaSession };
+
+  const sessionRef = doc(db, "podcaster_sessions", sessionId);
+  try {
+    const sessionSnap = await getDoc(sessionRef);
+    const now = new Date().toISOString();
+    if (!sessionSnap.exists()) return { ok: false, session: currentMultimediaSession };
+
+    const sDoc = sessionSnap.data() || {};
+    const sSession = sDoc.session || sDoc;
+    let sRows = null;
+
+    if (Array.isArray(sSession.script?.rows)) {
+      sRows = sSession.script.rows;
+    } else if (Array.isArray(sSession.rows)) {
+      sRows = sSession.rows;
+    } else if (Array.isArray(sDoc.rows)) {
+      sRows = sDoc.rows;
+    }
+
+    if (!Array.isArray(sRows)) return { ok: false, session: currentMultimediaSession };
+
+    const rowsCopy = sRows.map((row) => ({ ...row }));
+    if (mutator(rowsCopy, sSession) !== true) return { ok: false, session: currentMultimediaSession };
+
+    const payload = {
+      "session.script.rows": buildDashboardProposalShallowRows(rowsCopy),
+      "session.updatedAt": now,
+      sessionUpdatedAt: now,
+      updatedAt: now
+    };
+    if (sSession.rowReferenceImageMap) payload["session.rowReferenceImageMap"] = sSession.rowReferenceImageMap;
+    if (sSession.rowReferenceImageListMap) payload["session.rowReferenceImageListMap"] = sSession.rowReferenceImageListMap;
+    if (sSession.rowReferenceModeByRowId) payload["session.rowReferenceModeByRowId"] = sSession.rowReferenceModeByRowId;
+
+    await updateDoc(sessionRef, payload);
+    return { ok: true, session: currentMultimediaSession };
+  } catch (err) {
+    console.error("[Dashboard] Error crítico en mutateDashboardSessionRows:", err);
+    return { ok: false, session: currentMultimediaSession };
+  }
+}
+
+let videoPlayerReviewManager;
+function getVideoPlayerReviewManager() {
+  if (!videoPlayerReviewManager) {
+    videoPlayerReviewManager = createVideoPlayerReviewManager({
+      getDb: () => db,
+      getAuth: () => auth,
+      getSession: () => currentMultimediaSession,
+      setSession: (session) => {
+        currentMultimediaSession = session;
+      },
+      getController: () => multimediaPlaybackController,
+      getRows: (session) => extractDashboardSessionRows(session),
+      buildTimelineEntries: (session) => multimediaPlaybackDeps.buildTimelineRuntimeEntries(session),
+      resolveActiveRow: (rows, activeEntry) => resolveDashboardActiveRow(rows, activeEntry),
+      getCurrentUserName: () => currentUserName,
+      mutateProposalSession: mutateDashboardProposalSession,
+      mutateAllRows: mutateDashboardSessionRows,
+      loadFullSession: loadFullDashboardPodcasterSession,
+      syncTransport: () => multimediaPlaybackDeps.updatePodcastVideoTransportUi(),
+      notifyActivity
+    });
+  }
+  return videoPlayerReviewManager;
+}
+
 const storage = getStorage(app);
 const multimediaPlaybackController = new PodcasterPlaybackController();
-const staleProxyMediaUrls = new Set();
 let homeStageVideoLoadTokenSeq = 0;
 const homeStageVideoLoadTokensByEl = new WeakMap();
+const multimediaMediaRuntimeApi = createPodcasterMediaRuntimeApi({
+  buildApiUrlPreferRemote,
+  buildApiUrl
+});
+const multimediaRuntimeResolveStaleAwareProxyMediaUrl = multimediaMediaRuntimeApi.resolveStaleAwareProxyMediaUrl;
+const markStaleProxyMediaUrl = multimediaMediaRuntimeApi.markStaleProxyMediaUrl;
 
 function formatMs(ms) {
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function markStaleProxyMediaUrl(url = "", reason = "proxy-media-404", payload = {}) {
-  const clean = String(url || "").trim();
-  if (!clean) return;
-  staleProxyMediaUrls.add(clean);
-}
-
-function isMarkedStaleProxyMediaUrl(url = "") {
-  const clean = String(url || "").trim();
-  return clean ? staleProxyMediaUrls.has(clean) : false;
 }
 
 function parseFirebaseStorageObjectUrl(rawUrl = "") {
@@ -3110,22 +3177,7 @@ function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
 }
 
 function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media") {
-  const clean = String(rawUrl || "").trim();
-  const cleanStoragePath = String(storagePath || "").trim();
-  const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
-  if (cleanStoragePath) {
-    const storageProxyUrl = buildApiUrlPreferRemote(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}`);
-    if (!isMarkedStaleProxyMediaUrl(storageProxyUrl)) {
-      return storageProxyUrl;
-    }
-  }
-  if (!clean) return "";
-  try {
-    const parsed = new URL(clean, window.location.origin);
-    return buildApiUrlPreferRemote(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`);
-  } catch (_) {
-    return clean;
-  }
+  return multimediaRuntimeResolveStaleAwareProxyMediaUrl(rawUrl, storagePath, kind);
 }
 
 function resolveStorageVideoUrl(downloadUrl, storagePath) {
@@ -3208,6 +3260,11 @@ function normalizeHomePanelMusicDuckingWhenGeminiPct(value, fallback = 60) {
   return fallback;
 }
 
+function normalizeHomePanelMusicVolume(value, fallback = 0) {
+  const raw = Number(value);
+  return Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : fallback;
+}
+
 function normalizeHomePanelMusicMutedLoopIndexes(value = []) {
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(
@@ -3271,7 +3328,10 @@ function normalizeHomePanelMusicTrack(track = null) {
     model: String(track.model || "").trim(),
     prompt: String(track.prompt || "").trim(),
     durationMeasuredWith: String(track.durationMeasuredWith || "").trim().toLowerCase(),
-    montageVolume: track.montageVolume !== undefined ? Math.max(0, Math.min(100, Number(track.montageVolume) || 0)) : 100,
+    montageVolume: normalizeHomePanelMusicVolume(
+      track.montageVolume !== undefined ? track.montageVolume : 100,
+      100
+    ),
     duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(track.duckingWhenGeminiPct, 60),
     stabilize: track.stabilize === true,
     loopSettings: normalizeHomePanelMusicLoopSettings(track.loopSettings || [], sourceDurationMs),
@@ -3350,7 +3410,7 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
   if (!Array.isArray(sourceItems)) return [];
   const resolveAudio = typeof options.resolveStorageAudioUrl === "function" ? options.resolveStorageAudioUrl : resolveStorageAudioUrl;
   const uploadedTracks = getHomePanelMusicUploadedTracks(cfg);
-  const panelVolume = Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 100) || 0));
+  const panelVolume = normalizeHomePanelMusicVolume(cfg?.montageVolume, 100);
   const panelDucking = normalizeHomePanelMusicDuckingWhenGeminiPct(cfg?.duckingWhenGeminiPct, 60);
   return sourceItems.map((item) => {
     const trackIndex = Math.max(0, Math.floor(Number(item?.trackIndex || 0) || 0));
@@ -3410,8 +3470,8 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
       localDataUrl,
       localMediaCacheKey,
       volume: item?.volume !== undefined
-        ? Math.max(0, Math.min(100, Number(item.volume) || 0))
-        : (track?.montageVolume !== undefined ? track.montageVolume : panelVolume),
+        ? normalizeHomePanelMusicVolume(item.volume, panelVolume)
+        : (track?.montageVolume !== undefined ? normalizeHomePanelMusicVolume(track.montageVolume, panelVolume) : panelVolume),
       duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(
         item?.duckingWhenGeminiPct ?? item?.duckingPct ?? track?.duckingWhenGeminiPct,
         panelDucking
@@ -3576,8 +3636,8 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
   const cfg = rawCfg ? JSON.parse(JSON.stringify(rawCfg)) : { sourceType: "none" };
   const normalized = {
     preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
-    volume: Math.max(0, Math.min(100, Number(cfg?.volume ?? 22) || 22)),
-    montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 100) || 0)),
+    volume: normalizeHomePanelMusicVolume(cfg?.volume, 22),
+    montageVolume: normalizeHomePanelMusicVolume(cfg?.montageVolume, 100),
     duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(cfg?.duckingWhenGeminiPct ?? cfg?.duckingPct, 60),
     stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
     limiterEnabled: cfg?.limiterEnabled === true || String(cfg?.limiterEnabled || "").trim().toLowerCase() === "true",
@@ -3662,9 +3722,10 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
     : "";
   const localDataUrl = String(activeTrack?.localDataUrl || "").trim();
   const localMediaCacheKey = String(activeTrack?.localMediaCacheKey || "").trim();
+  const hasActiveTrackSource = Boolean(sourceUrl || localDataUrl || localMediaCacheKey);
   const sourceType = uploadedMode
     ? (sourceItems.length ? "track" : "none")
-    : (normalized.sourceType === "track" && sourceUrl ? "track" : "none");
+    : (normalized.sourceType === "track" || hasActiveTrackSource ? "track" : "none");
   return {
     sourceType,
     preset: normalized.preset,
@@ -4317,6 +4378,7 @@ const multimediaPlaybackDeps = {
           const visualEl = document.getElementById("infoSceneVisual");
           const timeEl = document.getElementById("infoSceneTime");
           const proposalTextarea = document.getElementById("infoSceneProposalText");
+          getVideoPlayerReviewManager().syncSceneApprovalUi(row);
 
           // Guardar el ID actual para el guardado
           window._currentActiveRowId = activeEntry.rowId;
@@ -4408,7 +4470,7 @@ const multimediaPlaybackDeps = {
           if (activeProposalGroup && activeProposalEl) {
             const activeProposalBadge = activeProposalGroup.querySelector(".info-label");
             if (displayedProposal) {
-              activeProposalGroup.style.display = "block";
+              setScenePanelSectionVisibility(activeProposalGroup, false);
               activeProposalEl.textContent = displayedProposal;
               const isResolved = isDashboardProposalResolved(row, displayedProposal);
               activeProposalEl.classList.toggle("is-resolved", isResolved);
@@ -4434,7 +4496,7 @@ const multimediaPlaybackDeps = {
                 };
               }
             } else {
-              activeProposalGroup.style.display = "none";
+              setScenePanelSectionVisibility(activeProposalGroup, true);
               activeProposalEl.classList.remove("is-resolved");
             }
           }
@@ -4455,7 +4517,7 @@ const multimediaPlaybackDeps = {
 
 
             if (allUnique.length > 0) {
-              if (proposalsGroup) proposalsGroup.style.display = "block";
+              setScenePanelSectionVisibility(proposalsGroup, false);
               const resolvedSet = new Set(normalizeDashboardProposalState(resolved));
 
               const html = allUnique.map((p) => {
@@ -4488,7 +4550,7 @@ const multimediaPlaybackDeps = {
               proposalsList.querySelectorAll(".btn-delete-proposal-dashboard").forEach(b => b.onclick = (e) => eliminarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
               proposalsList.querySelectorAll(".btn-unresolve-proposal-dashboard").forEach(b => b.onclick = (e) => unresolvePropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
             } else {
-              if (proposalsGroup) proposalsGroup.style.display = "none";
+              setScenePanelSectionVisibility(proposalsGroup, true);
               proposalsList.innerHTML = "";
             }
           }
@@ -4619,6 +4681,7 @@ function initMultimediaPlayer() {
   if (stopBtn) stopBtn.onclick = () => multimediaPlaybackController.stop();
   if (prevBtn) prevBtn.onclick = () => multimediaPlaybackController.prev();
   if (nextBtn) nextBtn.onclick = () => multimediaPlaybackController.next();
+  getVideoPlayerReviewManager().bindToolbarButtons();
 
   if (scenePanel && scenePanelResizeHandle) {
     const playerShell = scenePanel.closest(".video-player-shell");
@@ -5080,36 +5143,14 @@ async function abrirReproductorMultimedia(session) {
     if (playBtn) playBtn.innerHTML = '<i class="fas fa-play"></i>';
 
     // Nueva lógica del botón de propuesta (+)
-    const btnToggleProposal = document.getElementById("btnShowNewProposal");
-    const newProposalContainer = document.getElementById("newProposalContainer");
-    const proposalTextarea = document.getElementById("infoSceneProposalText");
-
-    if (btnToggleProposal && newProposalContainer) {
-      btnToggleProposal.onclick = () => {
-        const isHidden = newProposalContainer.style.display === "none";
-
-        if (isHidden) {
-          // Caso 1: Estaba oculto -> Mostrar
-          newProposalContainer.style.display = "block";
-          btnToggleProposal.style.color = "#fbbf24"; // Ámbar (activo)
-          if (proposalTextarea) proposalTextarea.focus();
-
-          // Notificar actividad: empezando a redactar
-          notifyActivity("está proponiendo cambios", window._currentActiveRowId?.replace("row_", "") || -1);
-        } else {
-          // Caso 2: Ya estaba visible -> "Crear nueva" (Limpiar y enfocar)
-          if (proposalTextarea) {
-            proposalTextarea.value = "";
-            proposalTextarea.focus();
-            // Opcional: Feedback visual rápido de limpieza
-            proposalTextarea.style.backgroundColor = "rgba(251, 191, 36, 0.1)";
-            setTimeout(() => {
-              if (proposalTextarea) proposalTextarea.style.backgroundColor = "";
-            }, 300);
-          }
-        }
-      };
-    }
+    bindNewProposalToggleButtons({
+      buttonId: "btnShowNewProposal",
+      containerId: "newProposalContainer",
+      proposalTextAreaId: "infoSceneProposalText",
+      notifyActivity: (action) => {
+        notifyActivity(action, window._currentActiveRowId?.replace("row_", "") || -1);
+      }
+    });
 
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session);
     if (entries.length > 0) {

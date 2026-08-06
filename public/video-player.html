@@ -1,24 +1,1819 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.530"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.537"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reproductor de video | Charly Brown</title>
+  <link rel="icon" type="image/png" href="SnoopyPodcastCreator.png">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" data-cache-href="home.css">
   <link rel="stylesheet" data-cache-href="podcaster.css">
-  <link rel="stylesheet" data-cache-href="video-player-scenes-panel.css">
-  <link rel="stylesheet" data-cache-href="video-progress-report.css">
+  <link rel="stylesheet" data-cache-href="video-progress-report.css?v=2026-1.0.10.615">
+  <link rel="stylesheet" data-cache-href="video-player-scenes-panel.css?v=2026-1.0.10.616">
   <style>
+    :root {
+      color-scheme: dark;
+      --vp-font-family: "Nunito Sans", "Avenir Next", "Segoe UI", sans-serif;
+      --vp-canvas: #1f2733;
+      --vp-canvas-accent: rgba(96, 165, 250, 0.12);
+      --vp-surface: #252e3a;
+      --vp-surface-raised: #2b3543;
+      --vp-surface-soft: #202936;
+      --vp-stage: #07101f;
+      --vp-control: #303b4b;
+      --vp-control-hover: #3a4759;
+      --vp-border: #3b4757;
+      --vp-border-strong: #536176;
+      --vp-text: #f4f7fb;
+      --vp-text-soft: #d8e0eb;
+      --vp-muted: #aab6c7;
+      --vp-accent: #8fc1ff;
+      --vp-accent-strong: #60a5fa;
+      --vp-accent-soft: rgba(96, 165, 250, 0.16);
+      --vp-brand-blue: #8fc1ff;
+      --vp-title-accent: #8fc1ff;
+      --vp-positive: #34d399;
+      --vp-warning: #fbbf24;
+      --vp-danger: #fb7185;
+      --vp-input: #202936;
+      --vp-overlay: rgba(9, 14, 24, 0.72);
+      --vp-shadow: 0 18px 54px rgba(2, 8, 23, 0.3);
+      --vp-divider: rgba(148, 163, 184, 0.2);
+    }
+
+    html[data-video-player-theme="mid"] {
+      color-scheme: light;
+      --vp-canvas: #cbd4df;
+      --vp-canvas-accent: rgba(59, 130, 246, 0.11);
+      --vp-surface: #dce3eb;
+      --vp-surface-raised: #e7ecf2;
+      --vp-surface-soft: #d2dae4;
+      --vp-stage: #111827;
+      --vp-control: #c6d0dc;
+      --vp-control-hover: #b8c5d4;
+      --vp-border: #aebac9;
+      --vp-border-strong: #8f9daf;
+      --vp-text: #202b3a;
+      --vp-text-soft: #344256;
+      --vp-muted: #657389;
+      --vp-accent: #2563a8;
+      --vp-accent-strong: #2563eb;
+      --vp-accent-soft: rgba(37, 99, 235, 0.13);
+      --vp-title-accent: #2563a8;
+      --vp-input: #edf1f6;
+      --vp-overlay: rgba(27, 37, 51, 0.58);
+      --vp-shadow: 0 18px 48px rgba(51, 65, 85, 0.2);
+      --vp-divider: rgba(71, 85, 105, 0.2);
+    }
+
+    html[data-video-player-theme="light"] {
+      color-scheme: light;
+      --vp-canvas: #edf2f8;
+      --vp-canvas-accent: rgba(59, 130, 246, 0.08);
+      --vp-surface: #ffffff;
+      --vp-surface-raised: #f7f9fc;
+      --vp-surface-soft: #eef3f8;
+      --vp-stage: #0b1220;
+      --vp-control: #e8eef5;
+      --vp-control-hover: #dce6f0;
+      --vp-border: #d4deea;
+      --vp-border-strong: #b8c5d5;
+      --vp-text: #182235;
+      --vp-text-soft: #344258;
+      --vp-muted: #64748b;
+      --vp-accent: #2563a8;
+      --vp-accent-strong: #2563eb;
+      --vp-accent-soft: rgba(37, 99, 235, 0.1);
+      --vp-title-accent: #2563a8;
+      --vp-input: #f8fafc;
+      --vp-overlay: rgba(30, 41, 59, 0.42);
+      --vp-shadow: 0 18px 48px rgba(71, 85, 105, 0.14);
+      --vp-divider: rgba(100, 116, 139, 0.18);
+    }
+
+    html,
+    body.is-shared-video-view,
+    body.is-shared-video-view button,
+    body.is-shared-video-view input,
+    body.is-shared-video-view select,
+    body.is-shared-video-view textarea {
+      font-family: var(--vp-font-family) !important;
+    }
+
     html:not(.video-player-authenticated) #videoPlayerPage {
       visibility: hidden;
     }
+
+    body.is-shared-video-view {
+      color: var(--vp-text);
+      background: var(--vp-canvas) !important;
+    }
+
+    body.is-shared-video-view #appLoadingScreen {
+      color: var(--vp-text);
+      background:
+        radial-gradient(circle at 50% 42%, var(--vp-canvas-accent), transparent 30%),
+        var(--vp-canvas) !important;
+    }
+
+    #videoPlayerPage.video-player-page {
+      color: var(--vp-text);
+      background:
+        radial-gradient(circle at 50% 0%, var(--vp-canvas-accent), transparent 44%),
+        var(--vp-canvas) !important;
+    }
+
+    .video-player-shell.multimedia-player-card {
+      color: var(--vp-text);
+      background: var(--vp-surface) !important;
+    }
+
+    .video-player-shell .multimedia-player-head {
+      min-height: 62px !important;
+      padding: 0 18px !important;
+      color: var(--vp-text) !important;
+      background: var(--vp-surface) !important;
+      border-bottom: 1px solid var(--vp-divider) !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell .player-info,
+    .video-player-shell #playerTitle {
+      color: var(--vp-text) !important;
+    }
+
+    .video-player-shell .player-info > i {
+      color: var(--vp-accent) !important;
+    }
+
+    .video-player-shell #playerTitle {
+      font-size: 0.94rem !important;
+      line-height: 1.2;
+      font-weight: 500 !important;
+      letter-spacing: 0.01em;
+    }
+
+    .video-player-shell .player-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .video-player-shell :is(.player-action-btn, .player-btn, .row-icon-btn) {
+      color: var(--vp-text-soft) !important;
+      background: transparent !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell :is(.player-action-btn, .player-btn, .row-icon-btn):hover,
+    .video-player-shell :is(.player-action-btn, .player-btn, .row-icon-btn):focus-visible {
+      color: var(--vp-accent) !important;
+      background: var(--vp-accent-soft) !important;
+      outline-color: var(--vp-accent) !important;
+    }
+
+    .video-player-shell #toggleVideoPlayerThemeBtn {
+      color: var(--vp-accent) !important;
+    }
+
+    .video-player-shell .multimedia-player-content,
+    .video-player-shell .multimedia-player-main {
+      background: var(--vp-canvas) !important;
+    }
+
+    .video-player-shell #playerStage {
+      background: var(--vp-stage) !important;
+      border: 1px solid var(--vp-border-strong) !important;
+      border-radius: 8px !important;
+      box-shadow: var(--vp-shadow) !important;
+    }
+
+    .video-player-shell #playerStage #playerMediaLoadingOverlay {
+      display: none !important;
+    }
+
+    .video-player-shell.is-preparing-media #playerStage #playerMediaLoadingOverlay {
+      opacity: 1 !important;
+      visibility: visible !important;
+      pointer-events: auto;
+    }
+
+    .video-player-shell.is-preparing-media #playerStage :is(
+      #playerVideoA,
+      #playerVideoB,
+      #podcastActiveSpeakerBackdropVideo,
+      #podcastActiveSpeakerBackdropVideoAlt,
+      #podcastActiveSpeakerImage,
+      #podcastActiveSpeakerImageAlt,
+      #podcastStylizedTextOverlay,
+      #playerOverlay,
+      .podcast-stage-brand-mark,
+      .podcast-stage-fullscreen-btn,
+      .player-timeline-wrapper
+    ) {
+      visibility: hidden !important;
+    }
+
+    .video-player-shell #playerControls {
+      color: var(--vp-text);
+      background: color-mix(in srgb, var(--vp-surface-raised) 94%, transparent) !important;
+      border: 1px solid var(--vp-border) !important;
+      border-radius: 10px !important;
+      box-shadow: var(--vp-shadow) !important;
+      backdrop-filter: blur(16px);
+    }
+
+    .video-player-shell #playerControls {
+      position: relative !important;
+      display: inline-flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      justify-content: center !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      z-index: 74;
+      width: max-content !important;
+      min-width: 0;
+      margin: 7px auto 0 !important;
+      padding: 5px 8px !important;
+      transform: none !important;
+      align-self: center;
+    }
+
+    .video-player-shell #playerControls .player-transport-btns {
+      display: flex !important;
+      flex-direction: row !important;
+      flex-wrap: nowrap !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 5px !important;
+      width: auto !important;
+    }
+
+    .video-player-shell #playerControls .player-btn {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      padding: 0 !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--vp-text-soft) !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 6px !important;
+      opacity: 1 !important;
+    }
+
+    .video-player-shell #playerControls .player-btn i {
+      color: inherit !important;
+      opacity: 1 !important;
+    }
+
+    .video-player-shell #playerControls .player-btn:hover,
+    .video-player-shell #playerControls .player-btn:focus-visible,
+    .video-player-shell #playerControls .player-btn.is-play {
+      color: var(--vp-accent) !important;
+      background: var(--vp-accent-soft) !important;
+    }
+
+    .video-player-shell #playerStage:is(.is-stage-fullscreen, .is-stage-expanded)
+      #playerControls.is-attached-to-stage-fullscreen {
+      transform: none !important;
+    }
+
+    .video-player-shell .multimedia-player-main > .player-timeline-wrapper {
+      position: relative;
+      z-index: 72;
+      width: min(100%, 136dvh);
+      height: 42px !important;
+      min-height: 42px !important;
+      max-height: 42px !important;
+      flex: 0 0 42px !important;
+      align-self: center;
+      box-sizing: border-box;
+      min-width: 0;
+      margin: 6px auto 0;
+      padding: 5px 10px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      color: var(--vp-text);
+      background: color-mix(in srgb, var(--vp-surface) 86%, transparent);
+      border: 1px solid color-mix(in srgb, var(--vp-border) 80%, transparent);
+      border-radius: 7px;
+      box-shadow: 0 8px 26px rgba(2, 8, 23, 0.22);
+      backdrop-filter: blur(14px);
+    }
+
+    .video-player-shell .multimedia-player-main:has(#playerStage.is-reel-mode) > .player-timeline-wrapper {
+      width: min(100%, 39dvh);
+    }
+
+    .video-player-shell .multimedia-player-main > .player-timeline-wrapper .player-timeline {
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+    }
+
+    .video-player-shell .player-time-label {
+      color: var(--vp-muted) !important;
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .video-player-shell :is(.player-timeline, input[type="range"]) {
+      accent-color: var(--vp-accent-strong);
+    }
+
+    .video-player-shell .player-side-panel {
+      color: var(--vp-text);
+      background: var(--vp-surface) !important;
+      border-left: 1px solid var(--vp-divider) !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell .side-panel-header {
+      min-height: 62px;
+      padding: 0 18px !important;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: var(--vp-surface) !important;
+      border-bottom: 1px solid var(--vp-divider) !important;
+    }
+
+    .video-player-shell .side-panel-header h3 {
+      margin: 0;
+      color: var(--vp-text) !important;
+      font-size: 0.84rem !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }
+
+    /* Acciones consistentes en el header principal y el monitor de escena. */
+    .video-player-shell :is(
+      .player-head-actions,
+      .side-panel-header .scene-review-actions
+    ) {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 0 !important;
+    }
+
+    .video-player-shell :is(
+      .player-head-actions .player-action-btn,
+      .side-panel-header .scene-review-actions button
+    ) {
+      position: relative;
+      display: inline-grid !important;
+      place-items: center !important;
+      width: 40px !important;
+      min-width: 40px !important;
+      height: 40px !important;
+      min-height: 40px !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      color: var(--vp-text-soft) !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell :is(
+      .player-head-action-group,
+      .side-panel-header .scene-review-actions
+    ) > button + button {
+      border-left: 1px solid var(--vp-divider) !important;
+    }
+
+    .video-player-shell :is(
+      .player-head-actions .player-action-btn,
+      .side-panel-header .scene-review-actions button
+    ) i {
+      color: inherit !important;
+      font-size: 16px !important;
+      line-height: 1 !important;
+    }
+
+    .video-player-shell :is(
+      .player-head-actions .player-action-btn,
+      .side-panel-header .scene-review-actions button
+    ):is(:hover, :focus-visible) {
+      color: var(--vp-accent) !important;
+      background: var(--vp-control-hover) !important;
+      outline: 0 !important;
+    }
+
+    .video-player-shell .side-panel-content {
+      color: var(--vp-text);
+      background: var(--vp-surface) !important;
+    }
+
+    .video-player-shell .info-group {
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-bottom: 1px solid var(--vp-divider) !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell .info-label {
+      color: var(--vp-muted) !important;
+      font-size: 0.72rem !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.035em;
+      text-transform: none;
+    }
+
+    .video-player-shell :is(.info-value-box, .info-textarea) {
+      color: var(--vp-text) !important;
+      background: var(--vp-input) !important;
+      border: 1px solid var(--vp-border) !important;
+      border-radius: 7px !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell :is(.info-value-box, .info-textarea)::placeholder {
+      color: var(--vp-muted) !important;
+    }
+
+    .video-player-shell .inspector-row-reference-empty {
+      color: var(--vp-muted) !important;
+      background: var(--vp-surface-soft) !important;
+      border-color: var(--vp-border) !important;
+    }
+
+    .video-player-shell #btnShowNewProposal,
+    .video-player-shell .btn-attach-reference,
+    .video-player-shell .btn-save-proposal {
+      color: var(--vp-accent) !important;
+      background: var(--vp-accent-soft) !important;
+      border-color: color-mix(in srgb, var(--vp-accent) 48%, transparent) !important;
+      border-radius: 7px !important;
+      font-weight: 600 !important;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell .player-side-panel-resize-handle::after {
+      background: var(--vp-border) !important;
+    }
+
+    .video-player-shell .player-side-panel-resize-handle:hover::after,
+    body.is-resizing-scene-panel .video-player-shell .player-side-panel-resize-handle::after {
+      background: var(--vp-accent) !important;
+    }
+
+    body.is-shared-video-view .floating-panel-modal {
+      color: var(--vp-text);
+      background: var(--vp-overlay);
+    }
+
+    body.is-shared-video-view :is(.floating-panel-card, .montage-export-panel) {
+      color: var(--vp-text);
+      background: var(--vp-surface) !important;
+      border-color: var(--vp-border) !important;
+      box-shadow: var(--vp-shadow) !important;
+    }
+
+    body.is-shared-video-view :is(.floating-panel-head, .montage-export-actions) {
+      color: var(--vp-text);
+      background: var(--vp-surface) !important;
+      border-color: var(--vp-divider) !important;
+    }
+
+    body.is-shared-video-view :is(.montage-export-body, .montage-export-status, .montage-export-preview-card) {
+      color: var(--vp-text);
+      background: var(--vp-surface-raised) !important;
+      border-color: var(--vp-border) !important;
+    }
+
+    body.is-shared-video-view :is(.row-field span, .montage-export-status-hint) {
+      color: var(--vp-muted) !important;
+    }
+
+    body.is-shared-video-view :is(select, textarea, input:not([type="range"])) {
+      color: var(--vp-text);
+      background: var(--vp-input);
+      border-color: var(--vp-border);
+    }
+
+    body.is-shared-video-view .shared-video-error {
+      color: var(--vp-text) !important;
+      background: var(--vp-surface) !important;
+      border-color: var(--vp-border) !important;
+      box-shadow: var(--vp-shadow) !important;
+    }
+
+    @media (max-width: 720px) {
+      .video-player-shell .multimedia-player-head {
+        min-height: 56px !important;
+        padding-inline: 12px !important;
+      }
+
+      .video-player-shell .player-head-actions {
+        gap: 1px;
+      }
+
+      .video-player-shell #playerTitle {
+        font-size: 0.84rem !important;
+      }
+
+      .video-player-shell .multimedia-player-main > .player-timeline-wrapper {
+        width: 100%;
+        margin-top: 5px;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+      }
+
+      .video-player-shell .multimedia-player-main > .player-timeline-wrapper .player-time-label {
+        justify-self: end;
+        font-size: 0.68rem;
+      }
+    }
   </style>
-  <script type="module" src="js/video-player-auth-guard.js?v=2026-1.0.10.530"></script>
+  <script>
+    (() => {
+      const allowedThemes = ["dark", "mid", "light"];
+      let savedTheme = "dark";
+      try {
+        savedTheme = localStorage.getItem("snoopyVideoPlayerTheme") || "dark";
+      } catch (_) {}
+      document.documentElement.dataset.videoPlayerTheme =
+        allowedThemes.includes(savedTheme) ? savedTheme : "dark";
+    })();
+  </script>
+  <script type="module" src="js/video-player-auth-guard.js?v=2026-1.0.10.537"></script>
+  <style>
+    .video-player-shell .side-panel-header {
+      min-height: 38px;
+      padding-block: 5px;
+      padding-inline: 12px;
+      box-sizing: border-box;
+    }
+
+    .video-player-shell #sceneInfoContent {
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr);
+      align-content: start;
+      gap: 6px;
+      column-gap: 6px;
+      row-gap: 6px;
+    }
+
+    .video-player-shell #playerSidePanel {
+      container-name: scene-info-panel;
+      container-type: inline-size;
+    }
+
+    .video-player-shell #sceneInfoContent > .info-group {
+      min-width: 0;
+    }
+
+    @container scene-info-panel (min-width: 480px) {
+      .video-player-shell #sceneInfoContent {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 12px;
+      }
+
+      .video-player-shell #sceneInfoContent > :is(
+        #infoSceneActiveProposalGroup,
+        #infoSceneProposalsGroup,
+        #newProposalContainer,
+        .info-group:last-child
+      ) {
+        grid-column: 1 / -1;
+      }
+    }
+
+    .video-player-shell #sceneInfoContent .info-label {
+      font-weight: 400 !important;
+    }
+
+    .video-player-shell #playerTitle {
+      color: var(--vp-title-accent) !important;
+      font-weight: 400 !important;
+    }
+
+    .video-player-shell #playerTimeLabel {
+      color: var(--vp-muted) !important;
+    }
+
+    .video-player-shell #btnPurgeVideoCache {
+      color: var(--vp-positive) !important;
+    }
+
+    .video-player-shell #btnOpenExportModal {
+      color: var(--vp-warning) !important;
+    }
+
+    .video-player-shell #btnToggleSceneInfo {
+      color: var(--vp-brand-blue) !important;
+    }
+
+    .video-player-shell .multimedia-player-head .player-head-actions .player-action-btn,
+    .video-player-shell .multimedia-player-head :is(
+      #toggleVideoPlayerThemeBtn,
+      #btnPurgeVideoCache,
+      #btnOpenExportModal,
+      #btnToggleSceneInfo
+    ) {
+      color: var(--vp-text-soft) !important;
+      background: transparent !important;
+    }
+
+    .video-player-shell .multimedia-player-head .player-head-actions .player-action-btn:hover,
+    .video-player-shell .multimedia-player-head .player-head-actions .player-action-btn:focus-visible {
+      color: var(--vp-text) !important;
+      background: color-mix(in srgb, var(--vp-text) 7%, transparent) !important;
+    }
+
+    .video-player-shell .multimedia-player-head .player-head-actions .player-action-btn:is(
+      .active,
+      .is-active,
+      [aria-pressed="true"]
+    ) {
+      color: var(--vp-text) !important;
+    }
+
+    .video-player-shell .multimedia-player-head .player-head-actions .player-action-btn:is(
+      .active,
+      .is-active,
+      [aria-pressed="true"]
+    )::after,
+    .video-player-shell .multimedia-player-head #toggleVideoPlayerThemeBtn::after {
+      background: var(--vp-text-soft) !important;
+    }
+
+    .video-player-shell #playerControls :is(#playerPrevBtn, #playerNextBtn) {
+      color: var(--vp-brand-blue) !important;
+    }
+
+    .video-player-shell #playerControls :is(#playerPlayBtn, #playerPauseBtn) {
+      color: var(--vp-positive) !important;
+    }
+
+    .video-player-shell #playerControls #playerStopBtn {
+      color: var(--vp-danger) !important;
+    }
+
+    .video-player-shell #playerControls #playerStopBtn:hover,
+    .video-player-shell #playerControls #playerStopBtn:focus-visible {
+      background: color-mix(in srgb, var(--vp-danger) 13%, transparent) !important;
+    }
+
+    .video-player-shell #btnShowNewProposal i {
+      color: var(--vp-positive) !important;
+    }
+
+    .video-player-shell .multimedia-player-head {
+      min-height: 52px !important;
+      height: 52px;
+      padding: 0 14px !important;
+      border-radius: 0 !important;
+      background: var(--vp-surface) !important;
+      border-bottom: 1px solid var(--vp-divider) !important;
+    }
+
+    .video-player-shell .player-head-actions {
+      align-self: stretch;
+      display: inline-flex;
+      align-items: stretch;
+      gap: 0;
+      margin-left: auto;
+    }
+
+    .video-player-shell .player-head-action-group {
+      position: relative;
+      display: inline-flex;
+      align-items: stretch;
+      gap: 4px;
+      padding-inline: 10px;
+    }
+
+    .video-player-shell .player-head-action-group:first-of-type {
+      padding-left: 0;
+    }
+
+    .video-player-shell .player-head-action-group:last-child {
+      padding-right: 0;
+    }
+
+    .video-player-shell .player-head-action-group + .player-head-action-group::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 1px;
+      height: 24px;
+      background: var(--vp-divider);
+      transform: translateY(-50%);
+    }
+
+    .video-player-shell .player-head-actions .player-action-btn {
+      position: relative;
+      display: inline-grid !important;
+      place-items: center;
+      width: 38px !important;
+      min-width: 38px !important;
+      height: 100% !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      color: var(--vp-text-soft) !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      opacity: 1;
+    }
+
+    .video-player-shell .player-head-actions .player-action-btn::after {
+      content: "";
+      position: absolute;
+      left: 5px;
+      right: 5px;
+      bottom: 0;
+      height: 3px;
+      background: transparent;
+      transition: background-color 160ms ease;
+    }
+
+    .video-player-shell .player-head-actions .player-action-btn i {
+      color: inherit !important;
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .video-player-shell .player-head-actions .player-action-btn:hover,
+    .video-player-shell .player-head-actions .player-action-btn:focus-visible {
+      color: var(--vp-accent) !important;
+      background: transparent !important;
+      outline: 0 !important;
+    }
+
+    .video-player-shell .player-head-actions .player-action-btn:hover::after,
+    .video-player-shell .player-head-actions .player-action-btn:focus-visible::after,
+    .video-player-shell .player-head-actions .player-action-btn.active::after,
+    .video-player-shell .player-head-actions .player-action-btn.is-active::after,
+    .video-player-shell .player-head-actions .player-action-btn[aria-pressed="true"]::after,
+    .video-player-shell #toggleVideoPlayerThemeBtn::after {
+      background: var(--vp-accent);
+    }
+
+    .video-player-shell .player-head-actions .player-action-btn.active,
+    .video-player-shell .player-head-actions .player-action-btn.is-active,
+    .video-player-shell .player-head-actions .player-action-btn[aria-pressed="true"],
+    .video-player-shell #toggleVideoPlayerThemeBtn {
+      color: var(--vp-accent) !important;
+    }
+
+    .video-player-shell .player-update-badge {
+      align-self: center;
+      margin-right: 10px;
+    }
+
+    .video-player-shell .player-media-loading-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 90;
+      display: grid;
+      place-items: center;
+      color: var(--vp-text);
+      background:
+        radial-gradient(circle at 50% 46%, var(--vp-canvas-accent), transparent 34%),
+        color-mix(in srgb, var(--vp-stage) 96%, var(--vp-surface));
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 220ms ease, visibility 220ms ease;
+    }
+
+    .video-player-shell .player-media-loading-overlay.is-hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .video-player-shell .player-media-loading-content {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .video-player-shell .player-media-loading-logo {
+      display: none !important;
+    }
+
+    .video-player-shell #playerMediaLoadingStatus {
+      margin: 0;
+      color: var(--vp-text);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: center;
+    }
+
+    .video-player-shell #playerMediaLoadingRetry {
+      margin-top: 4px;
+      padding: 7px 14px;
+      border: 1px solid color-mix(in srgb, var(--vp-accent) 45%, transparent);
+      border-radius: 7px;
+      background: transparent;
+      color: var(--vp-accent);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .video-player-shell #playerMediaLoadingRetry:hover,
+    .video-player-shell #playerMediaLoadingRetry:focus-visible {
+      background: color-mix(in srgb, var(--vp-accent) 12%, transparent);
+      outline: none;
+    }
+
+    @keyframes playerMediaLogoSpin {
+      from { transform: rotate(0deg) scale(0.96); }
+      50% { transform: rotate(180deg) scale(1.04); }
+      to { transform: rotate(360deg) scale(0.96); }
+    }
+
+    @keyframes playerHeaderReveal {
+      from { opacity: 0.35; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes playerStageBubbleReveal {
+      0% {
+        opacity: 0.25;
+        transform: scale(0.94, 0.9);
+        filter: blur(7px) saturate(0.8);
+      }
+      55% {
+        opacity: 1;
+        transform: scale(1.012, 0.986);
+        filter: blur(0) saturate(1.06);
+      }
+      76% { transform: scale(0.994, 1.008); }
+      90% { transform: scale(1.003, 0.998); }
+      100% {
+        opacity: 1;
+        transform: scale(1);
+        filter: none;
+      }
+    }
+
+    @keyframes playerControlsReveal {
+      0% { opacity: 0; transform: translateY(9px) scale(0.94); }
+      68% { opacity: 1; transform: translateY(-1px) scale(1.015); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes playerPanelReveal {
+      from { opacity: 0.2; transform: translateX(12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .video-player-shell.is-player-ready .multimedia-player-head {
+      animation: playerHeaderReveal 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .video-player-shell.is-player-ready #playerStage {
+      transform-origin: 50% 52%;
+      animation: playerStageBubbleReveal 520ms cubic-bezier(0.2, 0.88, 0.26, 1.12) 40ms both;
+    }
+
+    .video-player-shell.is-player-ready #playerControls {
+      animation: playerControlsReveal 330ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
+    }
+
+    .video-player-shell.is-player-ready .player-side-panel {
+      animation: playerPanelReveal 320ms cubic-bezier(0.22, 1, 0.36, 1) 110ms both;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .video-player-shell .player-media-loading-logo,
+      .video-player-shell.is-player-ready :is(
+        .multimedia-player-head,
+        #playerStage,
+        #playerControls,
+        .player-side-panel
+      ) {
+        animation: none !important;
+      }
+    }
+  </style>
+  <style>
+    .video-player-shell .scene-review-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: auto;
+    }
+
+    .video-player-shell .scene-review-actions > button {
+      width: 30px !important;
+      min-width: 30px !important;
+      height: 30px !important;
+      min-height: 30px !important;
+      display: inline-grid !important;
+      place-items: center;
+      margin: 0 !important;
+      padding: 0 !important;
+      color: var(--vp-text-muted) !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 6px !important;
+      box-shadow: none !important;
+      cursor: pointer;
+    }
+
+    .video-player-shell .scene-review-actions > button:hover,
+    .video-player-shell .scene-review-actions > button:focus-visible {
+      color: var(--vp-accent) !important;
+      background: var(--vp-control-hover) !important;
+    }
+
+    .video-player-shell #btnToggleSceneApproval.is-approved {
+      color: #23b26d !important;
+      background: color-mix(in srgb, #23b26d 12%, transparent) !important;
+    }
+
+    .video-player-shell .scene-approval-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 25px;
+      padding: 0 9px;
+      color: color-mix(in srgb, #23b26d 74%, var(--vp-text));
+      background: color-mix(in srgb, #23b26d 13%, var(--vp-panel));
+      border: 1px solid color-mix(in srgb, #23b26d 38%, transparent);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .video-player-shell .scene-approval-badge[hidden] {
+      display: none !important;
+    }
+  </style>
+  <style>
+    .video-player-shell .player-quality-control {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      height: 100%;
+      min-width: 44px;
+      color: var(--vp-text-soft);
+    }
+
+    .video-player-shell .player-quality-control > i {
+      position: absolute;
+      left: 11px;
+      z-index: 1;
+      color: var(--vp-accent);
+      font-size: 13px;
+      pointer-events: none;
+    }
+
+    .video-player-shell #playerPlaybackQuality {
+      width: 44px;
+      height: 100%;
+      padding: 0 8px 0 31px;
+      color: transparent;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      outline: 0;
+      cursor: pointer;
+      appearance: none;
+    }
+
+    .video-player-shell #playerPlaybackQuality:focus-visible {
+      box-shadow: inset 0 -3px 0 var(--vp-accent);
+    }
+
+    .video-player-shell #playerPlaybackQuality option {
+      color: var(--vp-text);
+      background: var(--vp-surface);
+    }
+
+    .video-player-shell .player-scene-inspector-hint {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      z-index: 31;
+      display: none;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      color: #f8fbff;
+      background: rgba(7, 15, 29, 0.74);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 550;
+      line-height: 1;
+      pointer-events: none;
+      backdrop-filter: blur(12px);
+      animation: playerHintFloat 2.8s ease-in-out infinite;
+    }
+
+    .video-player-shell .player-scene-inspector-hint i {
+      color: var(--vp-accent);
+    }
+
+    .video-player-shell .player-side-panel-backdrop {
+      position: fixed;
+      inset: 52px 0 0;
+      z-index: 109;
+      display: none;
+      background: rgba(4, 10, 20, 0.42);
+      opacity: 0;
+      backdrop-filter: blur(3px);
+      transition: opacity 220ms ease;
+    }
+
+    .video-player-shell .player-side-panel-backdrop.is-visible {
+      opacity: 1;
+    }
+
+    .video-player-shell .scene-monitor-close {
+      display: none;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      color: var(--vp-text-soft);
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+    }
+
+    .video-player-shell #btnApproveAllScenes {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      min-width: 30px;
+      height: 30px;
+      padding: 0;
+      color: var(--vp-accent);
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .video-player-shell #btnApproveAllScenes:hover,
+    .video-player-shell #btnApproveAllScenes:focus-visible {
+      color: var(--vp-text);
+      background: var(--vp-control-hover);
+      outline: 0;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference {
+      display: block;
+      width: 100%;
+      padding: 8px;
+      color: var(--vp-text);
+      text-align: left;
+      background: var(--vp-surface-raised);
+      border: 1px solid var(--vp-border);
+      border-radius: 10px;
+      cursor: zoom-in;
+      transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference:hover,
+    .video-player-shell #infoSceneReference .inspector-row-reference:focus-visible {
+      border-color: var(--vp-accent);
+      box-shadow: 0 10px 28px color-mix(in srgb, var(--vp-accent) 16%, transparent);
+      transform: translateY(-1px);
+      outline: 0;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      color: var(--vp-text-soft);
+      font-size: 11px;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference-open {
+      color: var(--vp-accent);
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference-preview {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      max-height: 180px;
+      overflow: hidden;
+      background: var(--vp-stage);
+      border-radius: 7px;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference-preview img {
+      width: 100%;
+      max-height: 180px;
+      object-fit: contain;
+    }
+
+    .video-player-shell #infoSceneReference .inspector-row-reference-empty {
+      padding: 14px;
+      color: var(--vp-text-muted);
+      background: var(--vp-surface-raised);
+      border: 1px dashed var(--vp-border);
+      border-radius: 9px;
+      font-size: 11px;
+      font-style: italic;
+      text-align: center;
+    }
+
+    .scene-reference-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      display: grid;
+      place-items: center;
+      padding: clamp(14px, 3vw, 36px);
+      background: rgba(3, 8, 18, 0.84);
+      backdrop-filter: blur(18px);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 180ms ease, visibility 180ms ease;
+    }
+
+    .scene-reference-viewer.is-open {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .scene-reference-viewer-card {
+      position: relative;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      width: min(1120px, 96vw);
+      height: min(820px, 92dvh);
+      overflow: hidden;
+      background: var(--vp-stage);
+      border: 1px solid var(--vp-border-strong);
+      border-radius: 14px;
+      box-shadow: 0 34px 100px rgba(0, 0, 0, 0.48);
+      transform: scale(0.94) translateY(12px);
+      transition: transform 220ms cubic-bezier(.2, .9, .25, 1.15);
+    }
+
+    .scene-reference-viewer.is-open .scene-reference-viewer-card {
+      transform: scale(1) translateY(0);
+    }
+
+    .scene-reference-viewer-media {
+      display: grid;
+      place-items: center;
+      min-height: 0;
+      padding: 18px;
+    }
+
+    .scene-reference-viewer-media img {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .scene-reference-viewer-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 8px 12px 8px 16px;
+      color: var(--vp-text);
+      background: var(--vp-surface);
+      border-top: 1px solid var(--vp-divider);
+    }
+
+    .scene-reference-viewer-title {
+      min-width: 0;
+      margin-right: auto;
+      overflow: hidden;
+      color: var(--vp-text);
+      font-size: 13px;
+      font-weight: 550;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .scene-reference-viewer-toolbar button {
+      display: inline-grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      color: var(--vp-text-soft);
+      background: transparent;
+      border: 0;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+
+    .scene-reference-viewer-toolbar button:hover,
+    .scene-reference-viewer-toolbar button:focus-visible {
+      color: var(--vp-accent);
+      background: var(--vp-control-hover);
+      outline: 0;
+    }
+
+    @media (max-width: 1366px) {
+      .video-player-shell .multimedia-player-content {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+
+      .video-player-shell .multimedia-player-main {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .video-player-shell .player-stage {
+        width: min(100%, 1120px);
+        max-width: 1120px;
+        cursor: pointer;
+      }
+
+      .video-player-shell .player-scene-inspector-hint {
+        display: inline-flex;
+      }
+
+      .video-player-shell .player-side-panel-backdrop {
+        display: block;
+        pointer-events: none;
+      }
+
+      .video-player-shell .player-side-panel-backdrop.is-visible {
+        pointer-events: auto;
+      }
+
+      .video-player-shell #playerSidePanel {
+        position: fixed !important;
+        top: 52px !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        left: auto !important;
+        z-index: 110 !important;
+        width: min(520px, 88vw) !important;
+        max-width: none !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: hidden;
+        border-left: 1px solid var(--vp-border) !important;
+        box-shadow: -24px 0 70px rgba(4, 10, 20, 0.28) !important;
+        transform: translateX(102%);
+        visibility: hidden;
+        transition: transform 260ms cubic-bezier(.2, .85, .25, 1), visibility 260ms ease;
+      }
+
+      .video-player-shell #playerSidePanel.is-open {
+        transform: translateX(0);
+        visibility: visible;
+      }
+
+      .video-player-shell #playerSidePanel .side-panel-content {
+        height: calc(100% - 52px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .video-player-shell #playerSidePanelResizeHandle {
+        display: none !important;
+      }
+
+      .video-player-shell .scene-monitor-close {
+        display: inline-grid;
+      }
+    }
+
+    /* Escala táctil y legible para iPad mini, iPad, Air y Pro. */
+    @media (min-width: 721px) and (max-width: 1366px) {
+      .video-player-page,
+      .video-player-shell {
+        font-size: 16px !important;
+      }
+
+      .video-player-shell .multimedia-player-head {
+        min-height: 60px !important;
+        height: 60px !important;
+        padding-inline: 18px !important;
+      }
+
+      .video-player-shell #playerTitle {
+        font-size: 1rem !important;
+      }
+
+      .video-player-shell .player-info > i {
+        font-size: 18px !important;
+      }
+
+      .video-player-shell .player-head-actions {
+        align-items: center !important;
+        gap: 8px !important;
+      }
+
+      .video-player-shell .player-head-action-group {
+        align-items: center !important;
+        gap: 4px !important;
+        padding-inline: 5px !important;
+      }
+
+      .video-player-shell :is(
+        .player-head-actions .player-action-btn,
+        .side-panel-header .scene-review-actions button
+      ) {
+        width: 46px !important;
+        min-width: 46px !important;
+        height: 46px !important;
+        min-height: 46px !important;
+      }
+
+      .video-player-shell :is(
+        .player-head-actions .player-action-btn,
+        .side-panel-header .scene-review-actions button
+      ) i {
+        font-size: 19px !important;
+      }
+
+      .video-player-shell .player-quality-control {
+        min-height: 44px !important;
+        gap: 7px !important;
+        padding-inline: 8px !important;
+      }
+
+      .video-player-shell .player-quality-control > i {
+        font-size: 17px !important;
+      }
+
+      .video-player-shell #playerPlaybackQuality {
+        font-size: 14px !important;
+      }
+
+      .video-player-shell #playerControls {
+        margin-top: 9px !important;
+        padding: 7px 10px !important;
+      }
+
+      .video-player-shell #playerControls .player-transport-btns {
+        gap: 10px !important;
+      }
+
+      .video-player-shell #playerControls .player-btn {
+        width: 44px !important;
+        min-width: 44px !important;
+        height: 44px !important;
+        min-height: 44px !important;
+      }
+
+      .video-player-shell #playerControls .player-btn i {
+        font-size: 18px !important;
+      }
+
+      .video-player-shell .side-panel-header h3,
+      .video-player-shell .scene-info-title {
+        font-size: 1rem !important;
+      }
+
+      .video-player-shell .info-label,
+      .video-player-shell .scene-info-label {
+        font-size: 0.86rem !important;
+        line-height: 1.35 !important;
+      }
+
+      .video-player-shell :is(.info-value-box, .scene-info-value, .proposal-textarea, .proposal-input) {
+        font-size: 0.96rem !important;
+        line-height: 1.48 !important;
+      }
+
+      .video-player-shell .player-time-label,
+      .video-player-shell .player-scene-inspector-hint {
+        font-size: 0.86rem !important;
+      }
+
+      .video-player-shell :is(button, input, select, textarea) {
+        font-size: max(14px, 0.9rem);
+      }
+    }
+
+    @media (max-width: 900px), (max-width: 1100px) and (orientation: portrait) {
+      .video-player-shell {
+        min-height: 100dvh;
+      }
+
+      .video-player-shell .multimedia-player-content {
+        padding: 12px 10px 18px !important;
+      }
+
+      .video-player-shell .player-stage {
+        border-radius: 10px;
+      }
+
+      .video-player-shell .player-scene-inspector-hint {
+        left: 10px;
+        bottom: 10px;
+      }
+
+      .video-player-shell #playerSidePanel {
+        top: auto !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: min(78dvh, 760px) !important;
+        border-top: 1px solid var(--vp-border) !important;
+        border-left: 0 !important;
+        border-radius: 16px 16px 0 0 !important;
+        box-shadow: 0 -24px 70px rgba(4, 10, 20, 0.34) !important;
+        transform: translateY(102%);
+      }
+
+      .video-player-shell #playerSidePanel.is-open {
+        transform: translateY(0);
+      }
+
+      .video-player-shell #playerSidePanel .side-panel-header {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+      }
+
+      .video-player-shell #playerSidePanel .side-panel-header::before {
+        content: "";
+        position: absolute;
+        top: 5px;
+        left: 50%;
+        width: 38px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--vp-border-strong);
+        transform: translateX(-50%);
+      }
+
+      .video-player-shell #sceneInfoContent {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 0 16px !important;
+      }
+
+      .video-player-shell .player-timeline-wrapper {
+        margin-top: 7px !important;
+      }
+
+      .video-player-shell #playerControls {
+        margin-top: 8px !important;
+      }
+
+      .scene-reference-viewer {
+        padding: 0;
+      }
+
+      .scene-reference-viewer-card {
+        width: 100vw;
+        height: 100dvh;
+        border: 0;
+        border-radius: 0;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .video-player-shell #sceneInfoContent {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+
+      .video-player-shell .player-quality-control {
+        min-width: 38px;
+      }
+
+      .video-player-shell #playerPlaybackQuality {
+        width: 38px;
+      }
+    }
+
+    @keyframes playerHintFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-3px); }
+    }
+  </style>
+  <style id="videoPlayerTabletTypography">
+    /* Capa final: evita que los breakpoints móviles reduzcan la legibilidad en iPad. */
+    @media (min-width: 700px) and (max-width: 1366px) {
+      .video-player-page,
+      .video-player-shell {
+        font-size: 18px !important;
+      }
+
+      .video-player-shell #playerTitle {
+        font-size: 1rem !important;
+        line-height: 1.25 !important;
+      }
+
+      .video-player-shell :is(
+        .side-panel-header h3,
+        .scene-info-title,
+        .proposal-panel-title
+      ) {
+        font-size: 1.08rem !important;
+        line-height: 1.3 !important;
+      }
+
+      .video-player-shell :is(
+        .info-label,
+        .scene-info-label,
+        .info-group > label,
+        .proposal-field label,
+        .reference-field-label
+      ) {
+        font-size: 0.94rem !important;
+        line-height: 1.4 !important;
+        letter-spacing: 0.015em !important;
+      }
+
+      .video-player-shell :is(
+        .info-value-box,
+        .scene-info-value,
+        .proposal-textarea,
+        .proposal-input,
+        .proposal-select,
+        input,
+        textarea,
+        select
+      ) {
+        font-size: 1rem !important;
+        line-height: 1.5 !important;
+      }
+
+      .video-player-shell :is(
+        button,
+        .player-quality-control,
+        .scene-approval-badge,
+        .player-update-badge
+      ) {
+        font-size: 0.92rem !important;
+        line-height: 1.25 !important;
+      }
+
+      .video-player-shell :is(
+        .player-time-label,
+        .scene-current-time,
+        #infoCurrentTime,
+        .player-scene-inspector-hint,
+        .info-reference-empty
+      ) {
+        font-size: 0.94rem !important;
+        line-height: 1.4 !important;
+      }
+
+      .video-player-shell .side-panel-content {
+        padding-inline: 24px !important;
+      }
+
+      .video-player-shell #sceneInfoContent {
+        column-gap: 18px !important;
+        row-gap: 12px !important;
+      }
+    }
+  </style>
+  <style id="videoPlayerLaptopTypography">
+    @media (min-width: 901px) {
+      .video-player-shell #sceneInfoContent > .info-group {
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 5px 0 !important;
+        gap: 4px !important;
+        align-self: start;
+      }
+
+      .video-player-shell #sceneInfoContent > .info-group :is(
+        .info-value-box,
+        .info-value-text
+      ) {
+        min-height: 0 !important;
+        padding-block: 8px !important;
+      }
+    }
+
+    /* Escala compacta exclusiva para laptops; iPad/tablet conserva su capa 700-1366px. */
+    @media (min-width: 1367px) and (max-width: 1799px) {
+      .video-player-page,
+      .video-player-shell {
+        font-size: 14px !important;
+      }
+
+      .video-player-shell #playerTitle {
+        font-size: 14px !important;
+        line-height: 1.25 !important;
+      }
+
+      .video-player-shell :is(
+        .side-panel-header h3,
+        .scene-info-title,
+        .proposal-panel-title
+      ) {
+        font-size: 14px !important;
+        line-height: 1.3 !important;
+      }
+
+      .video-player-shell :is(
+        .info-label,
+        .proposal-field label,
+        .reference-field-label
+      ) {
+        font-size: 12px !important;
+        line-height: 1.35 !important;
+      }
+
+      .video-player-shell :is(
+        .info-value-box,
+        .info-value-text,
+        input,
+        textarea,
+        select,
+        button
+      ) {
+        font-size: 14px !important;
+        line-height: 1.4 !important;
+      }
+
+      .video-player-shell :is(
+        .proposal-status,
+        .proposal-meta,
+        .scene-approval-badge,
+        .player-update-badge,
+        .player-scene-inspector-hint,
+        .info-reference-empty,
+        .player-time-label
+      ) {
+        font-size: 12px !important;
+        line-height: 1.35 !important;
+      }
+
+      :root {
+        --vp-font-caption: 0.68rem;
+        --vp-font-label: 0.72rem;
+        --vp-font-body: 0.82rem;
+        --vp-font-title: 0.9rem;
+      }
+    }
+
+    /* Móviles en horizontal: no deben heredar la escala amplia de iPad. */
+    @media (min-width: 700px) and (max-width: 1366px) and (max-height: 600px) {
+      .video-player-page,
+      .video-player-shell {
+        font-size: 13px !important;
+      }
+
+      .video-player-shell #playerTitle {
+        font-size: 13px !important;
+      }
+
+      .video-player-shell #sceneInfoContent {
+        column-gap: 10px !important;
+        row-gap: 0 !important;
+      }
+
+      .video-player-shell #sceneInfoContent > .info-group {
+        padding-block: 3px !important;
+        gap: 3px !important;
+      }
+
+      .video-player-shell #sceneInfoContent :is(
+        .info-label,
+        .proposal-field label,
+        .reference-field-label,
+        .proposal-meta,
+        .proposal-status,
+        .player-scene-inspector-hint,
+        .info-reference-empty
+      ) {
+        font-size: 11px !important;
+        line-height: 1.25 !important;
+      }
+
+      .video-player-shell #sceneInfoContent :is(
+        .info-value-box,
+        .info-value-text,
+        input,
+        textarea,
+        select,
+        button
+      ) {
+        width: 100%;
+        min-height: 36px !important;
+        height: auto !important;
+        max-height: none !important;
+        padding: 7px 9px !important;
+        font-size: 13px !important;
+        line-height: 1.3 !important;
+        overflow-wrap: anywhere;
+      }
+    }
+
+    /* Tokens tipográficos fluidos, siguiendo la escala de Open Props sin dependencia externa. */
+    :root {
+      --vp-font-caption: clamp(0.7rem, 0.68rem + 0.08vw, 0.76rem);
+      --vp-font-label: clamp(0.76rem, 0.73rem + 0.1vw, 0.84rem);
+      --vp-font-body: clamp(0.84rem, 0.8rem + 0.12vw, 0.94rem);
+      --vp-font-title: clamp(0.9rem, 0.86rem + 0.14vw, 1rem);
+      --vp-line-compact: 1.25;
+      --vp-line-body: 1.42;
+    }
+
+    /* Las pantallas táctiles de tamaño tablet conservan una escala más legible. */
+    @media (pointer: coarse) and (min-width: 700px) and (min-height: 601px) {
+      :root {
+        --vp-font-caption: clamp(0.78rem, 0.72rem + 0.16vw, 0.88rem);
+        --vp-font-label: clamp(0.86rem, 0.8rem + 0.18vw, 0.96rem);
+        --vp-font-body: clamp(0.94rem, 0.88rem + 0.2vw, 1.06rem);
+        --vp-font-title: clamp(1rem, 0.94rem + 0.22vw, 1.14rem);
+      }
+    }
+
+    /* Un teléfono horizontal usa la escala compacta aunque supere 700px de ancho. */
+    @media (max-height: 600px) and (pointer: coarse) {
+      :root {
+        --vp-font-caption: 0.68rem;
+        --vp-font-label: 0.74rem;
+        --vp-font-body: 0.82rem;
+        --vp-font-title: 0.9rem;
+      }
+    }
+
+    .video-player-shell {
+      font-size: var(--vp-font-body) !important;
+    }
+
+    .video-player-shell #playerTitle,
+    .video-player-shell :is(
+      .side-panel-header h3,
+      .scene-info-title,
+      .proposal-panel-title
+    ) {
+      font-size: var(--vp-font-title) !important;
+      line-height: var(--vp-line-compact) !important;
+    }
+
+    .video-player-shell :is(
+      .info-label,
+      .proposal-field label,
+      .reference-field-label
+    ) {
+      font-size: var(--vp-font-label) !important;
+      line-height: var(--vp-line-compact) !important;
+    }
+
+    .video-player-shell :is(
+      .info-value-box,
+      .info-value-text,
+      input,
+      textarea,
+      select,
+      button
+    ) {
+      font-size: var(--vp-font-body) !important;
+      line-height: var(--vp-line-body) !important;
+    }
+
+    .video-player-shell :is(
+      .proposal-status,
+      .proposal-meta,
+      .scene-approval-badge,
+      .player-update-badge,
+      .player-scene-inspector-hint,
+      .info-reference-empty,
+      .player-time-label
+    ) {
+      font-size: var(--vp-font-caption) !important;
+      line-height: var(--vp-line-compact) !important;
+    }
+  </style>
 </head>
 <body class="is-shared-video-view">
   <div id="appLoadingScreen">
@@ -39,18 +1834,53 @@
              <i class="fas fa-sync-alt"></i>
              <span>Cambios disponibles</span>
           </div>
-          <button id="btnOpenExportModal" class="player-action-btn" title="Exportar Video">
-            <i class="fas fa-file-export"></i>
-          </button>
-          <button id="btnToggleSceneInfo" class="player-action-btn" title="Datos de la escena">
-            <i class="fas fa-info-circle"></i>
-          </button>
+          <div class="player-head-action-group is-theme" role="group" aria-label="Tema del visor">
+            <button id="toggleVideoPlayerThemeBtn" class="player-action-btn" type="button"
+              title="Activar tema medio" aria-label="Activar tema medio">
+              <i class="fas fa-moon" aria-hidden="true"></i>
+            </button>
+            <label class="player-quality-control" title="Calidad de reproducción" aria-label="Calidad de reproducción">
+              <i class="fas fa-gauge-high" aria-hidden="true"></i>
+              <select id="playerPlaybackQuality">
+                <option value="auto">Automática</option>
+                <option value="high">Máxima</option>
+                <option value="medium">Media</option>
+                <option value="low">Baja</option>
+              </select>
+            </label>
+          </div>
+          <div class="player-head-action-group is-media" role="group" aria-label="Medios del visor">
+            <button id="btnPurgeVideoCache" class="player-action-btn player-cache-purge-btn" type="button"
+              title="Actualizar sitio y recargar medios"
+              aria-label="Purgar caché y cargar la versión más reciente del sitio">
+              <i class="fas fa-broom" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="player-head-action-group is-view" role="group" aria-label="Exportación y datos">
+            <button id="btnOpenProgressReport" class="player-action-btn" type="button"
+              title="Reporte de producción y revisión" aria-label="Abrir reporte de producción y revisión">
+              <i class="fas fa-chart-column" aria-hidden="true"></i>
+            </button>
+            <button id="btnOpenExportModal" class="player-action-btn" title="Exportar Video">
+              <i class="fas fa-file-export"></i>
+            </button>
+            <button id="btnToggleSceneInfo" class="player-action-btn" title="Datos de la escena">
+              <i class="fas fa-info-circle"></i>
+            </button>
+          </div>
         </div>
       </div>
 
       <div class="multimedia-player-content">
         <div class="multimedia-player-main">
           <div id="playerStage" class="player-stage">
+            <div id="playerMediaLoadingOverlay" class="player-media-loading-overlay" aria-live="polite">
+              <div class="player-media-loading-content">
+                <img src="SnoopyPodcastCreator.png" alt="" class="player-media-loading-logo" aria-hidden="true">
+                <p id="playerMediaLoadingStatus">Preparando videos y voces...</p>
+                <button id="playerMediaLoadingRetry" type="button" hidden>Reintentar carga</button>
+              </div>
+            </div>
             <video id="podcastActiveSpeakerBackdropVideo" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
             <video id="playerVideoA" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
             <video id="podcastActiveSpeakerBackdropVideoAlt" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
@@ -64,18 +1894,22 @@
             </button>
             <div id="podcastStylizedTextOverlay" class="podcast-stylized-text-overlay"></div>
             <div id="playerOverlay" class="player-overlay"></div>
+            <div class="player-scene-inspector-hint" aria-hidden="true">
+              <i class="fas fa-hand-pointer"></i>
+              Toca para ver la escena
+            </div>
           <style>
             .player-stage {
               position: relative;
               width: 100%;
               max-width: 800px;
               aspect-ratio: 16 / 9;
-              background: #020617;
+              background: var(--vp-stage);
               overflow: hidden;
               border-radius: 14px;
               margin: 0 auto;
-              border: 1px solid rgba(255, 255, 255, 0.1);
-              box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+              border: 1px solid var(--vp-border-strong);
+              box-shadow: var(--vp-shadow);
             }
             .player-stage.is-reel-mode {
               aspect-ratio: 9 / 16 !important;
@@ -105,7 +1939,7 @@
               z-index: 1;
               display: block !important;
               transition: opacity 0.4s ease, transform 0.4s ease;
-              background: #020617;
+              background: var(--vp-stage);
               will-change: opacity, transform;
             }
             .player-video-backdrop {
@@ -134,7 +1968,7 @@
               opacity: 0;
               visibility: hidden;
               z-index: 1;
-              background: #020617;
+              background: var(--vp-stage);
               will-change: opacity, transform, filter;
             }
             .podcast-active-speaker-image.is-visible {
@@ -207,6 +2041,36 @@
             .player-update-badge:hover {
               transform: scale(1.05);
             }
+            .video-player-shell .player-cache-purge-btn {
+              position: relative;
+              color: #cbd5e1;
+            }
+            .video-player-shell .player-cache-purge-btn:hover,
+            .video-player-shell .player-cache-purge-btn:focus-visible {
+              color: #67e8f9;
+              background: rgba(34, 211, 238, 0.12);
+              outline: 2px solid rgba(103, 232, 249, 0.65);
+              outline-offset: 2px;
+            }
+            .video-player-shell .player-cache-purge-btn.is-loading {
+              color: #fbbf24;
+              cursor: wait;
+            }
+            .video-player-shell .player-cache-purge-btn.is-loading i {
+              animation: playerCachePurgeSpin 0.85s linear infinite;
+            }
+            .video-player-shell .player-cache-purge-btn.is-success {
+              color: #34d399;
+              background: rgba(52, 211, 153, 0.12);
+            }
+            @keyframes playerCachePurgeSpin {
+              to { transform: rotate(360deg); }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              .video-player-shell .player-cache-purge-btn.is-loading i {
+                animation: none;
+              }
+            }
             html,
             body.is-shared-video-view {
               width: 100%;
@@ -215,7 +2079,7 @@
             }
             body.is-shared-video-view {
               overflow: hidden;
-              background: #070b14;
+              background: var(--vp-canvas);
             }
             #videoPlayerPage.video-player-page {
               box-sizing: border-box;
@@ -230,8 +2094,8 @@
               align-items: stretch;
               align-self: stretch;
               background:
-                radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.13), transparent 42%),
-                #070b14;
+                radial-gradient(circle at 50% 0%, var(--vp-canvas-accent), transparent 42%),
+                var(--vp-canvas);
             }
             .video-player-shell.multimedia-player-card {
               box-sizing: border-box;
@@ -256,19 +2120,19 @@
             }
             .video-player-shell .multimedia-player-head {
               flex: 0 0 auto;
-              min-height: 72px;
-              color: #f8fafc !important;
+              min-height: 62px;
+              color: var(--vp-text) !important;
             }
             .video-player-shell .player-info {
               min-width: 0;
               display: flex;
               align-items: center;
               gap: 12px;
-              color: #f8fafc !important;
+              color: var(--vp-text) !important;
             }
             .video-player-shell .player-info > i {
               flex: 0 0 auto;
-              color: #38bdf8 !important;
+              color: var(--vp-accent) !important;
               font-size: 1.15rem;
             }
             .video-player-shell .player-titles {
@@ -281,9 +2145,9 @@
             }
             .video-player-shell #playerTitle {
               overflow: hidden;
-              color: #f8fafc !important;
-              font-size: 1rem;
-              font-weight: 750;
+              color: var(--vp-title-accent) !important;
+              font-size: 0.94rem;
+              font-weight: 400 !important;
               text-overflow: ellipsis;
             }
             .video-player-shell .multimedia-player-main,
@@ -296,7 +2160,7 @@
               padding-bottom: 0 !important;
             }
             .video-player-shell #playerStage {
-              width: min(100%, 124dvh) !important;
+              width: min(100%, 136dvh) !important;
               max-width: none !important;
               height: auto !important;
               aspect-ratio: 16 / 9 !important;
@@ -311,20 +2175,25 @@
             }
             @media (max-height: 700px) {
               .video-player-shell #playerStage {
-                width: min(100%, 112dvh) !important;
+                width: min(100%, 124dvh) !important;
+              }
+              .video-player-shell .multimedia-player-main > .player-timeline-wrapper {
+                width: min(100%, 124dvh);
               }
               .video-player-shell #playerStage.is-reel-mode {
                 width: min(100%, 35dvh) !important;
+              }
+              .video-player-shell .multimedia-player-main:has(#playerStage.is-reel-mode) > .player-timeline-wrapper {
+                width: min(100%, 35dvh);
               }
             }
             .video-player-shell #playerControls {
               flex: 0 0 auto;
               width: auto;
-              left: 1.5rem;
-              right: 1.5rem;
-              bottom: 10px;
-              position: absolute;
-              transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+              position: relative;
+              inset: auto;
+              margin: 7px auto 0;
+              transition: none;
             }
             .video-player-shell #playerStage .podcast-stage-fullscreen-controls-host {
               z-index: 80 !important;
@@ -385,7 +2254,7 @@
             }
             .player-side-panel-resize-handle:hover::after,
             body.is-resizing-scene-panel .player-side-panel-resize-handle::after {
-              background: #38bdf8;
+              background: var(--vp-accent);
             }
             .player-side-panel:not(.is-open) .player-side-panel-resize-handle {
               display: none;
@@ -399,19 +2268,45 @@
               align-items: center;
               justify-content: center;
               gap: 9px;
-              border: 1px solid rgba(56, 189, 248, 0.38);
+              border: 1px solid color-mix(in srgb, var(--vp-accent) 45%, transparent);
               border-radius: 10px;
-              background: rgba(56, 189, 248, 0.12);
-              color: #7dd3fc;
+              background: var(--vp-accent-soft);
+              color: var(--vp-accent);
               font-size: 0.88rem;
               font-weight: 750;
               cursor: pointer;
               transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
             }
             .video-player-shell #btnShowNewProposal:hover {
-              border-color: #38bdf8;
-              background: rgba(56, 189, 248, 0.2);
-              color: #f0f9ff;
+              border-color: var(--vp-accent);
+              background: var(--vp-accent-soft);
+              color: var(--vp-text);
+            }
+            .video-player-shell .side-panel-header #btnShowNewProposal {
+              width: 40px !important;
+              min-width: 40px !important;
+              height: 40px !important;
+              min-height: 40px !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              display: inline-grid !important;
+              place-items: center;
+              flex: 0 0 40px;
+              gap: 0 !important;
+              color: var(--vp-accent) !important;
+              background: transparent !important;
+              border: 0 !important;
+              border-radius: 0 !important;
+              box-shadow: none !important;
+            }
+            .video-player-shell .side-panel-header #btnShowNewProposal i {
+              color: var(--vp-accent) !important;
+            }
+            .video-player-shell .side-panel-header #btnShowNewProposal:hover,
+            .video-player-shell .side-panel-header #btnShowNewProposal:focus-visible {
+              color: var(--vp-accent) !important;
+              background: var(--vp-control-hover) !important;
+              outline: 0;
             }
             body.is-resizing-scene-panel {
               cursor: col-resize !important;
@@ -421,10 +2316,10 @@
               width: min(520px, calc(100% - 40px));
               margin: auto;
               padding: 40px;
-              border: 1px solid rgba(148, 163, 184, 0.2);
+              border: 1px solid var(--vp-border);
               border-radius: 20px;
-              background: rgba(15, 23, 42, 0.92);
-              color: #e2e8f0;
+              background: var(--vp-surface);
+              color: var(--vp-text);
               text-align: center;
               box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
             }
@@ -449,25 +2344,44 @@
             }
           </style>
         </div>
-          <div id="playerControls" class="player-controls">
-            <div class="player-transport-btns">
-              <button id="playerPrevBtn" class="player-btn" title="Escena anterior"><i class="fas fa-step-backward"></i></button>
-              <button id="playerPlayBtn" class="player-btn is-play" title="Reproducir"><i class="fas fa-play"></i></button>
-              <button id="playerPauseBtn" class="player-btn" title="Pausar" style="display: none;"><i class="fas fa-pause"></i></button>
-              <button id="playerStopBtn" class="player-btn" title="Detener"><i class="fas fa-stop"></i></button>
-              <button id="playerNextBtn" class="player-btn" title="Siguiente escena"><i class="fas fa-step-forward"></i></button>
-            </div>
-            <div class="player-timeline-wrapper">
-              <input type="range" id="playerTimeline" class="player-timeline" value="0" min="0" max="100">
-              <span id="playerTimeLabel" class="player-time-label">00:00 / 00:00</span>
-            </div>
+        <div class="player-timeline-wrapper">
+          <input type="range" id="playerTimeline" class="player-timeline" value="0" min="0" max="100">
+          <span id="playerTimeLabel" class="player-time-label">00:00 / 00:00</span>
+        </div>
+        <div id="playerControls" class="player-controls">
+          <div class="player-transport-btns">
+            <button id="playerPrevBtn" class="player-btn" title="Escena anterior"><i class="fas fa-step-backward"></i></button>
+            <button id="playerPlayBtn" class="player-btn is-play" title="Reproducir"><i class="fas fa-play"></i></button>
+            <button id="playerPauseBtn" class="player-btn" title="Pausar" style="display: none;"><i class="fas fa-pause"></i></button>
+            <button id="playerStopBtn" class="player-btn" title="Detener"><i class="fas fa-stop"></i></button>
+            <button id="playerNextBtn" class="player-btn" title="Siguiente escena"><i class="fas fa-step-forward"></i></button>
           </div>
+        </div>
         </div> <!-- Fin multimedia-player-main -->
 
         <aside id="playerSidePanel" class="player-side-panel is-open">
           <div id="playerSidePanelResizeHandle" class="player-side-panel-resize-handle" role="separator" aria-label="Redimensionar panel de datos" aria-orientation="vertical"></div>
           <div class="side-panel-header">
-            <h3>Monitor de Escena</h3>
+            <div class="scene-review-actions">
+              <span id="sceneApprovalBadge" class="scene-approval-badge" hidden>
+                <i class="fas fa-check-circle" aria-hidden="true"></i>
+                Aprobada
+              </span>
+              <button id="btnToggleSceneApproval" type="button" title="Aprobar escena" aria-label="Aprobar escena" aria-pressed="false">
+                <i class="fas fa-check-circle" aria-hidden="true"></i>
+              </button>
+              <button id="btnApproveAllScenes" type="button" title="Aprobar todas las escenas"
+                aria-label="Aprobar todas las escenas">
+                <i class="fas fa-check-double" aria-hidden="true"></i>
+              </button>
+              <button id="btnShowNewProposal" type="button" title="Proponer nuevos cambios" aria-label="Proponer nuevos cambios">
+                <i class="fas fa-plus" aria-hidden="true"></i>
+              </button>
+              <button id="btnCloseSceneMonitor" class="scene-monitor-close" type="button"
+                title="Cerrar monitor" aria-label="Cerrar monitor de escena">
+                <i class="fas fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
           </div>
           <div id="sceneInfoContent" class="side-panel-content">
             <div class="info-group">
@@ -489,57 +2403,53 @@
             <div class="info-group">
               <span class="info-label">Elemento Visual</span>
               <div id="infoSceneVisual" class="info-value-box">--</div>
-              <button id="btnShowNewProposal" type="button" title="Proponer cambios nuevos">
-                <i class="fas fa-plus-circle" aria-hidden="true"></i>
-                <span>Proponer nuevos cambios</span>
-              </button>
             </div>
 
             <div class="info-group">
               <span class="info-label">Referencia Visual</span>
-              <div id="infoSceneReference" class="inspector-row-reference" style="margin-top: 8px;">
-                <div class="inspector-row-reference-empty" style="color: #64748b; font-size: 11px; font-style: italic; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 12px; text-align: center;">
+              <div id="infoSceneReference" class="inspector-row-reference scene-reference">
+                <div class="inspector-row-reference-empty">
                   Sin imagen de referencia
                 </div>
               </div>
             </div>
 
-            <div class="info-group" id="infoSceneActiveProposalGroup" style="display: none;">
-              <span class="info-label" style="color: #fbbf24; display: flex; align-items: center; justify-content: space-between;">
+            <div class="info-group scene-panel-is-hidden" id="infoSceneActiveProposalGroup">
+              <span class="info-label scene-active-proposal-label">
                 Propuesta Pendiente
-                <div style="display: flex; gap: 8px;">
-                  <button id="btnApplyActiveProposal" title="Aplicar esta propuesta" style="background: none; border: none; color: #10b981; cursor: pointer; font-size: 14px; padding: 0;">
+                <div class="scene-proposal-actions">
+                  <button id="btnApplyActiveProposal" class="scene-proposal-action is-apply" title="Aplicar esta propuesta">
                     <i class="fas fa-check-circle"></i>
                   </button>
-                  <button id="btnDeleteActiveProposal" title="Marcar propuesta como realizada" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 14px; padding: 0;">
+                  <button id="btnDeleteActiveProposal" class="scene-proposal-action is-delete" title="Marcar propuesta como realizada">
                     <i class="fas fa-trash"></i>
                   </button>
                 </div>
               </span>
-              <div id="infoSceneActiveProposal" class="info-value-box" style="border-color: #fbbf24; background: rgba(251, 191, 36, 0.05);">--</div>
+              <div id="infoSceneActiveProposal" class="info-value-box scene-active-proposal-value">--</div>
             </div>
 
-            <div class="info-group" id="infoSceneProposalsGroup" style="display: none;">
+            <div class="info-group scene-panel-is-hidden" id="infoSceneProposalsGroup">
               <span class="info-label">Historial de Propuestas</span>
-              <div id="infoSceneProposalsList" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+              <div id="infoSceneProposalsList" class="scene-proposals-list">
                 <!-- Lista de propuestas -->
               </div>
             </div>
 
-            <div id="newProposalContainer" class="info-group" style="display: none; margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.5rem;">
+            <div id="newProposalContainer" class="info-group scene-new-proposal scene-panel-is-hidden">
               <span class="info-label">Proponer Cambios Nuevos</span>
-              <p style="font-size: 11px; color: #64748b; margin-bottom: 0.75rem;">Sugiere una mejora para la generación de este elemento visual.</p>
+              <p class="scene-proposal-help">Sugiere una mejora para la generación de este elemento visual.</p>
               <textarea id="infoSceneProposalText" class="info-textarea" placeholder="Escribe aquí tu propuesta de cambio visual..."></textarea>
 
               <!-- Adjuntar imagen de referencia -->
-              <div style="margin: 10px 0;">
-                <button type="button" id="btnAttachProposalReference" data-action="attach-row-reference-image" class="btn-attach-reference" style="background: rgba(56, 189, 248, 0.1); border: 1px dashed rgba(56, 189, 248, 0.3); color: #38bdf8; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+              <div class="scene-proposal-reference-field">
+                <button type="button" id="btnAttachProposalReference" data-action="attach-row-reference-image" class="btn-attach-reference">
                   <i class="fas fa-paperclip"></i> Adjuntar imagen de referencia
                 </button>
-                <input type="file" id="proposalReferenceFileInput" accept="image/*" style="display: none;">
-                <div id="proposalReferencePreviewContainer" style="display: none; margin-top: 8px; position: relative; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
-                  <img id="proposalReferencePreviewImg" style="width: 100%; max-height: 120px; object-fit: contain; background: #000;">
-                  <button type="button" id="btnRemoveProposalReference" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.6); border: none; color: #ef4444; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;">
+                <input type="file" id="proposalReferenceFileInput" class="scene-proposal-file-input" accept="image/*">
+                <div id="proposalReferencePreviewContainer" class="scene-proposal-reference-preview scene-panel-is-hidden">
+                  <img id="proposalReferencePreviewImg" class="scene-proposal-reference-image">
+                  <button type="button" id="btnRemoveProposalReference" class="scene-proposal-reference-remove">
                     <i class="fas fa-times"></i>
                   </button>
                 </div>
@@ -550,9 +2460,9 @@
               </button>
             </div>
             
-            <div class="info-group" style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+            <div class="info-group scene-time-group">
               <span class="info-label">Tiempo Actual</span>
-              <span id="infoSceneTime" style="color: #38bdf8; font-family: monospace; font-size: 1.2rem;">00:00.0</span>
+              <span id="infoSceneTime" class="scene-current-time">00:00.0</span>
             </div>
           </div>
         </aside>
@@ -755,11 +2665,200 @@
   <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
   <script data-cache-src="podcaster/podcaster-text-render.js"></script>
   <script data-cache-src="podcaster/podcaster-scene-media-render-spec.js"></script>
-  <script type="module" data-cache-type="module" data-cache-src="js/video-player-panel-ui.js"></script>
-  <script type="module" data-cache-type="module" data-cache-src="js/video-progress-report.js"></script>
-  <script type="module" data-cache-type="module" data-cache-src="js/video-player-review-manager.js"></script>
-  <script type="module" data-cache-type="module" data-cache-src="podcaster/podcaster-playback-controller.js"></script>
-  <script type="module" data-cache-type="module" data-cache-src="podcaster/podcaster-overlay-cards.js"></script>
-  <script type="module" data-cache-type="module" data-cache-src="js/home.js"></script>
+  <!-- PodcasterPlaybackController se carga desde home.js como módulo importado -->
+  <script data-cache-src="podcaster/podcaster-stop-motion.js"></script>
+  <script type="module" data-cache-src="podcaster/podcaster-overlay-cards.js"></script>
+  <script>
+    (() => {
+      const button = document.getElementById("toggleVideoPlayerThemeBtn");
+      if (!button) return;
+
+      const themes = ["dark", "mid", "light"];
+      const themeMeta = {
+        dark: { icon: "fa-moon", nextLabel: "Activar tema medio" },
+        mid: { icon: "fa-adjust", nextLabel: "Activar tema claro" },
+        light: { icon: "fa-sun", nextLabel: "Activar tema oscuro" }
+      };
+
+      const applyTheme = (theme, persist = false) => {
+        const normalizedTheme = themes.includes(theme) ? theme : "dark";
+        document.documentElement.dataset.videoPlayerTheme = normalizedTheme;
+        const meta = themeMeta[normalizedTheme];
+        const icon = button.querySelector("i");
+        if (icon) {
+          icon.classList.remove("fa-moon", "fa-adjust", "fa-sun");
+          icon.classList.add(meta.icon);
+        }
+        button.dataset.theme = normalizedTheme;
+        button.title = meta.nextLabel;
+        button.setAttribute("aria-label", meta.nextLabel);
+        if (persist) {
+          try {
+            localStorage.setItem("snoopyVideoPlayerTheme", normalizedTheme);
+          } catch (_) {}
+        }
+      };
+
+      applyTheme(document.documentElement.dataset.videoPlayerTheme);
+      button.addEventListener("click", () => {
+        const currentTheme = document.documentElement.dataset.videoPlayerTheme || "dark";
+        const nextTheme = themes[(themes.indexOf(currentTheme) + 1) % themes.length];
+        applyTheme(nextTheme, true);
+      });
+    })();
+  </script>
+  <script type="module" data-cache-src="js/home.js"></script>
+  <div id="sceneReferenceViewer" class="scene-reference-viewer" role="dialog" aria-modal="true"
+    aria-labelledby="sceneReferenceViewerTitle" aria-hidden="true">
+    <div class="scene-reference-viewer-card">
+      <div class="scene-reference-viewer-media">
+        <img id="sceneReferenceViewerImage" alt="Referencia visual ampliada">
+      </div>
+      <div class="scene-reference-viewer-toolbar">
+        <span id="sceneReferenceViewerTitle" class="scene-reference-viewer-title">Referencia visual</span>
+        <button id="downloadSceneReferenceBtn" type="button" title="Descargar imagen" aria-label="Descargar imagen">
+          <i class="fas fa-download" aria-hidden="true"></i>
+        </button>
+        <button id="closeSceneReferenceViewerBtn" type="button" title="Cerrar visor" aria-label="Cerrar visor">
+          <i class="fas fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const shell = document.querySelector(".video-player-shell");
+      const stage = document.getElementById("playerStage");
+      const panel = document.getElementById("playerSidePanel");
+      const closePanelButton = document.getElementById("btnCloseSceneMonitor");
+      const togglePanelButton = document.getElementById("btnToggleSceneInfo");
+      const qualitySelect = document.getElementById("playerPlaybackQuality");
+      const referenceViewer = document.getElementById("sceneReferenceViewer");
+      const referenceViewerImage = document.getElementById("sceneReferenceViewerImage");
+      const referenceViewerTitle = document.getElementById("sceneReferenceViewerTitle");
+      const closeReferenceButton = document.getElementById("closeSceneReferenceViewerBtn");
+      const downloadReferenceButton = document.getElementById("downloadSceneReferenceBtn");
+      const tabletQuery = window.matchMedia("(max-width: 1366px)");
+      const backdrop = document.createElement("div");
+      backdrop.className = "player-side-panel-backdrop";
+      backdrop.setAttribute("aria-hidden", "true");
+      shell?.appendChild(backdrop);
+
+      const setPanelOpen = (open) => {
+        if (!panel) return;
+        panel.classList.toggle("is-open", !!open);
+        backdrop.classList.toggle("is-visible", !!open && tabletQuery.matches);
+        togglePanelButton?.setAttribute("aria-expanded", String(!!open));
+        document.body.classList.toggle("is-scene-monitor-open", !!open && tabletQuery.matches);
+      };
+      const syncPanelMode = () => {
+        if (tabletQuery.matches) setPanelOpen(false);
+        else setPanelOpen(true);
+      };
+      syncPanelMode();
+      tabletQuery.addEventListener?.("change", syncPanelMode);
+
+      stage?.addEventListener("click", (event) => {
+        if (!tabletQuery.matches) return;
+        if (event.target.closest("button, input, select, a")) return;
+        setPanelOpen(true);
+      });
+      closePanelButton?.addEventListener("click", () => setPanelOpen(false));
+      backdrop.addEventListener("click", () => setPanelOpen(false));
+      togglePanelButton?.addEventListener("click", () => {
+        if (!tabletQuery.matches) return;
+        requestAnimationFrame(() => setPanelOpen(!panel?.classList.contains("is-open")));
+      });
+
+      let savedQuality = "auto";
+      try {
+        savedQuality = localStorage.getItem("snoopyVideoPlayerPlaybackQuality") || "auto";
+      } catch (_) {}
+      if (!["auto", "high", "medium", "low"].includes(savedQuality)) savedQuality = "auto";
+      if (qualitySelect) qualitySelect.value = savedQuality;
+      qualitySelect?.addEventListener("change", () => {
+        try {
+          localStorage.setItem("snoopyVideoPlayerPlaybackQuality", qualitySelect.value);
+        } catch (_) {}
+        qualitySelect.disabled = true;
+        qualitySelect.title = "Aplicando calidad de reproducción...";
+        window.setTimeout(() => window.location.reload(), 90);
+      });
+
+      const openReferenceViewer = (source, name) => {
+        if (!referenceViewer || !referenceViewerImage || !source) return;
+        referenceViewerImage.src = source;
+        referenceViewerImage.alt = name || "Referencia visual ampliada";
+        referenceViewerTitle.textContent = name || "Referencia visual";
+        referenceViewer.dataset.source = source;
+        referenceViewer.dataset.name = name || "referencia-visual";
+        referenceViewer.classList.add("is-open");
+        referenceViewer.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+        closeReferenceButton?.focus({ preventScroll: true });
+      };
+      const closeReferenceViewer = () => {
+        if (!referenceViewer?.classList.contains("is-open")) return false;
+        referenceViewer.classList.remove("is-open");
+        referenceViewer.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+        window.setTimeout(() => {
+          referenceViewerImage?.removeAttribute("src");
+          delete referenceViewer.dataset.source;
+        }, 190);
+        return true;
+      };
+
+      document.addEventListener("click", (event) => {
+        const referenceButton = event.target.closest("#infoSceneReference .js-open-scene-reference");
+        if (!referenceButton) return;
+        openReferenceViewer(referenceButton.dataset.referenceSrc, referenceButton.dataset.referenceName);
+      });
+      closeReferenceButton?.addEventListener("click", closeReferenceViewer);
+      referenceViewer?.addEventListener("click", (event) => {
+        if (event.target === referenceViewer) closeReferenceViewer();
+      });
+      downloadReferenceButton?.addEventListener("click", async () => {
+        const source = String(referenceViewer?.dataset.source || "").trim();
+        if (!source) return;
+        const safeName = String(referenceViewer?.dataset.name || "referencia-visual")
+          .replace(/[^\w.-]+/g, "-")
+          .replace(/^-+|-+$/g, "") || "referencia-visual";
+        try {
+          const response = await fetch(source);
+          if (!response.ok) throw new Error("download_failed");
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = blobUrl;
+          anchor.download = /\.[a-z0-9]{2,5}$/i.test(safeName)
+            ? safeName
+            : `${safeName}.${String(blob.type || "").includes("png") ? "png" : "jpg"}`;
+          anchor.click();
+          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        } catch (_) {
+          const anchor = document.createElement("a");
+          anchor.href = source;
+          anchor.target = "_blank";
+          anchor.rel = "noopener";
+          anchor.download = safeName;
+          anchor.click();
+        }
+      });
+      window.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (closeReferenceViewer()) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+        if (tabletQuery.matches && panel?.classList.contains("is-open")) {
+          setPanelOpen(false);
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+    })();
+  </script>
 </body>
 </html>

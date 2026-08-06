@@ -12,7 +12,8 @@ const {
   resolvePodcasterSceneOverlayText,
   getPodcasterSceneKaraokeTokenOffset,
   getOnScreenTextClipText,
-  isValidPodcasterHeadlineText
+  isValidPodcasterHeadlineText,
+  normalizePodcasterInSceneText
 } = require("./podcaster-on-screen-text.js");
 
 function createFakeDocument() {
@@ -252,10 +253,16 @@ test("validates optional headlines as two to six words and at most 48 characters
   assert.equal(isValidPodcasterHeadlineText("EDUCACIÓN SIN LÍMITES"), true);
 });
 
+test("preserves permitted multiline in-scene text independently from headline limits", () => {
+  const text = "NUEVA TEMPORADA\nHistorias que inspiran";
+  assert.equal(normalizePodcasterInSceneText(text, { strict: true }), text);
+  assert.equal(normalizePodcasterInSceneText("X".repeat(281), { strict: true }), "");
+});
+
 test("normalizes karaoke highlight style settings with safe defaults", () => {
   const defaults = normalizeOnScreenTextTrackSettings({});
   assert.equal(defaults.karaokeHighlightColor, "#facc15");
-  assert.equal(defaults.karaokeHighlightStyle, "glow");
+  assert.equal(defaults.karaokeHighlightStyle, "pill");
   assert.equal(defaults.karaokeHighlightOpacity, 0.92);
   assert.equal(defaults.karaokeHighlightPaddingXPx, 10);
   assert.equal(defaults.karaokeHighlightPaddingYPx, 4);
@@ -277,7 +284,7 @@ test("normalizes karaoke highlight style settings with safe defaults", () => {
   assert.equal(custom.karaokeHighlightRadiusPx, 10);
   assert.equal(
     normalizeOnScreenTextTrackSettings({ karaokeHighlightStyle: "invalid" }).karaokeHighlightStyle,
-    "glow"
+    "pill"
   );
 });
 

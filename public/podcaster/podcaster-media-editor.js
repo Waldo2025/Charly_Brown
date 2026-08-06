@@ -545,7 +545,7 @@ async function openStylizedTextEditor() {
     if (!els.textModal) return;
 
     if (String(window.PodcasterState?.activeRowId || '').trim() !== rowId) {
-        window.PodcasterUI?.setPodcastVideoRow?.(rowId, { syncStage: true, lightweightUi: true });
+        window.PodcasterUI?.setPodcastVideoRow?.(rowId, { syncStage: false, lightweightUi: true });
     }
 
     currentEditingRowId = rowId;
@@ -730,9 +730,9 @@ function setupEventListeners() {
             const rowId = String(editBtn.dataset.rowId || '').trim();
             if (rowId) {
                 if (typeof window.PodcasterUI?.selectTimelineSceneRow === 'function') {
-                    window.PodcasterUI.selectTimelineSceneRow(rowId, { syncStage: true });
+                    window.PodcasterUI.selectTimelineSceneRow(rowId, { syncStage: false });
                 } else if (typeof window.PodcasterUI?.setPodcastVideoRow === 'function') {
-                    window.PodcasterUI.setPodcastVideoRow(rowId, { syncStage: true, lightweightUi: true });
+                    window.PodcasterUI.setPodcastVideoRow(rowId, { syncStage: false, lightweightUi: true });
                 }
             }
             openStylizedTextEditor();

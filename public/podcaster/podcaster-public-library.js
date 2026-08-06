@@ -1,4 +1,4 @@
-import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.530";
+import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
 const runtime = requirePodcasterPublicLibraryRuntime();
@@ -25,6 +25,15 @@ const podcastSceneLibraryEditModalState = {
   open: false,
   item: null
 };
+const sceneLibraryMarkupCache = new WeakMap();
+
+function updateSceneLibraryMarkup(markup = "") {
+  const target = runtime.els.podcastSceneLibraryList;
+  if (!target || sceneLibraryMarkupCache.get(target) === markup) return false;
+  target.innerHTML = markup;
+  sceneLibraryMarkupCache.set(target, markup);
+  return true;
+}
 
 // --- Constants ---
 const PODCAST_LIBRARY_TAG_COLORS = [
@@ -139,22 +148,22 @@ function renderPodcastSceneLibrary(session = null) {
     }
   }
   if (podcastSceneLibraryState.loading) {
-    runtime.els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">Cargando librería pública...</div>`;
+    updateSceneLibraryMarkup(`<div class="podcast-scene-library-empty">Cargando librería pública...</div>`);
     return;
   }
   if (podcastSceneLibraryState.error) {
-    runtime.els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">${runtime.escapeHtml(podcastSceneLibraryState.error)}</div>`;
+    updateSceneLibraryMarkup(`<div class="podcast-scene-library-empty">${runtime.escapeHtml(podcastSceneLibraryState.error)}</div>`);
     return;
   }
   if (!podcastSceneLibraryState.items.length) {
-    runtime.els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">No hay escenas públicas todavía. Publica una escena para verla aquí.</div>`;
+    updateSceneLibraryMarkup(`<div class="podcast-scene-library-empty">No hay escenas públicas todavía. Publica una escena para verla aquí.</div>`);
     return;
   }
   if (!filteredItems.length) {
-    runtime.els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">No se encontraron escenas con esos filtros.</div>`;
+    updateSceneLibraryMarkup(`<div class="podcast-scene-library-empty">No se encontraron escenas con esos filtros.</div>`);
     return;
   }
-  runtime.els.podcastSceneLibraryList.innerHTML = filteredItems.map((item) => {
+  const nextMarkup = filteredItems.map((item) => {
     const title = String(item.title || "Escena pública").trim() || "Escena pública";
     const duration = runtime.secondsToClock(Math.max(VIDEO_SCENE_MIN_SEC, Number(item.durationSec) || VIDEO_SCENE_MIN_SEC));
     const thumbUrl = String(item.thumbUrl || item.downloadUrl || "").trim();
@@ -185,7 +194,9 @@ function renderPodcastSceneLibrary(session = null) {
       </article>
     `;
   }).join("");
-  runtime.attachPodcastLibraryThumbnailLoading();
+  if (updateSceneLibraryMarkup(nextMarkup)) {
+    runtime.attachPodcastLibraryThumbnailLoading();
+  }
 }
 
 function getPodcastSceneLibraryMenuPortal() {
@@ -319,15 +330,52 @@ function renderPodcastSceneInsertModal() {
     runtime.els.podcastSceneInsertHint.textContent = "Elige dónde colocar la escena en el timeline. También puedes crear un track nuevo para dejarla en otra fila.";
   }
   if (runtime.els.podcastSceneInsertList) {
-    runtime.els.podcastSceneInsertList.innerHTML = positions.map((position) => {
-      const selected = Number(position.insertIndex) === Number(podcastSceneInsertModalState.selectedInsertIndex);
-      return `
-        <button type="button" class="podcast-scene-insert-option${selected ? " is-selected" : ""}" data-action="select-scene-insert-position" data-insert-index="${runtime.escapeHtml(position.insertIndex)}">
-          <strong>${runtime.escapeHtml(position.label)}</strong>
-          <span>${runtime.escapeHtml(position.detail)}</span>
+    const rows = getSessionRows(session);
+    const timelineItems = [];
+    for (let insertIndex = 0; insertIndex <= rows.length; insertIndex += 1) {
+      const selected = Number(insertIndex) === Number(podcastSceneInsertModalState.selectedInsertIndex);
+      const destinationLabel = rows.length === 0
+        ? "Insertar como primera escena"
+        : insertIndex === 0
+          ? "Antes de Escena 1"
+          : insertIndex === rows.length
+            ? `Después de Escena ${rows.length}`
+            : `Entre Escena ${insertIndex} y ${insertIndex + 1}`;
+      timelineItems.push(`
+        <button type="button"
+          class="podcast-scene-insert-slot${selected ? " is-selected" : ""}"
+          data-action="select-scene-insert-position"
+          data-insert-index="${runtime.escapeHtml(insertIndex)}"
+          data-tooltip="${runtime.escapeHtml(destinationLabel)}"
+          aria-label="${runtime.escapeHtml(destinationLabel)}"
+          title="${runtime.escapeHtml(destinationLabel)}">
+          <i class="fas fa-random" aria-hidden="true"></i>
         </button>
-      `;
-    }).join("");
+      `);
+      if (insertIndex < rows.length) {
+        const row = rows[insertIndex] || {};
+        const sceneSummary = String(
+          row.title
+          || row.dialogue
+          || row.script
+          || row.sceneDescription
+          || row.description
+          || `Escena ${insertIndex + 1}`
+        ).trim();
+        timelineItems.push(`
+          <article class="podcast-scene-insert-card" aria-label="Escena ${insertIndex + 1}">
+            <div class="podcast-scene-insert-card-preview">
+              <img src="SnoopyPodcastCreator.png" alt="" loading="lazy">
+            </div>
+            <div class="podcast-scene-insert-card-copy">
+              <strong>Escena ${insertIndex + 1} · Narrador</strong>
+              <span>${runtime.escapeHtml(sceneSummary)}</span>
+            </div>
+          </article>
+        `);
+      }
+    }
+    runtime.els.podcastSceneInsertList.innerHTML = timelineItems.join("");
   }
   if (runtime.els.confirmPodcastSceneInsertBtn) {
     runtime.els.confirmPodcastSceneInsertBtn.disabled = !item;
@@ -363,18 +411,339 @@ function closePodcastSceneInsertModal() {
   }
 }
 
+function createPodcastSceneInsertFlightGhost(item = null) {
+  const panel = runtime.els.podcastSceneInsertModal?.querySelector?.(".podcast-scene-insert-panel");
+  if (!panel) return null;
+  const rect = panel.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const sourceX = rect.left + (rect.width / 2);
+  const sourceY = rect.top + (rect.height / 2);
+  const root = document.createElement("div");
+  root.className = "podcast-scene-insert-vector-flight";
+  root.setAttribute("aria-hidden", "true");
+  root.dataset.sourceX = String(sourceX);
+  root.dataset.sourceY = String(sourceY);
+  root.innerHTML = `
+    <svg class="podcast-scene-insert-flight-path" width="100%" height="100%" aria-hidden="true">
+      <path fill="none" stroke="var(--studio-accent, #60a5fa)" stroke-width="3"
+        stroke-linecap="round" stroke-dasharray="8 12" opacity=".72"></path>
+    </svg>
+    <div class="podcast-scene-insert-flight-symbol">
+      <svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true">
+        <defs>
+          <linearGradient id="sceneInsertVectorGradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#38bdf8"></stop>
+            <stop offset=".52" stop-color="#3b82f6"></stop>
+            <stop offset="1" stop-color="#8b5cf6"></stop>
+          </linearGradient>
+          <filter id="sceneInsertVectorGlow" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="5" result="blur"></feGaussianBlur>
+            <feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+          </filter>
+        </defs>
+        <circle class="scene-insert-vector-orbit is-outer" cx="60" cy="60" r="50"
+          fill="none" stroke="url(#sceneInsertVectorGradient)" stroke-width="3" stroke-dasharray="18 10"></circle>
+        <circle class="scene-insert-vector-orbit is-inner" cx="60" cy="60" r="39"
+          fill="rgba(37,99,235,.16)" stroke="#7dd3fc" stroke-width="2" stroke-dasharray="6 8"></circle>
+        <rect x="35" y="39" width="50" height="42" rx="8" fill="url(#sceneInsertVectorGradient)"
+          filter="url(#sceneInsertVectorGlow)"></rect>
+        <path d="M45 51h30M45 60h22M45 69h27" fill="none" stroke="#fff" stroke-width="4"
+          stroke-linecap="round"></path>
+        <path class="scene-insert-vector-arrow" d="M81 60h20m-8-8 8 8-8 8" fill="none"
+          stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <span>${runtime.escapeHtml(String(item?.title || "Nueva escena").trim() || "Nueva escena")}</span>
+    </div>
+    <div class="podcast-scene-insert-flight-burst" aria-hidden="true">
+      <svg viewBox="-90 -90 180 180" width="180" height="180">
+        <circle class="scene-insert-burst-ring is-outer" cx="0" cy="0" r="34"
+          fill="none" stroke="#38bdf8" stroke-width="4"></circle>
+        <circle class="scene-insert-burst-ring is-inner" cx="0" cy="0" r="22"
+          fill="none" stroke="#a78bfa" stroke-width="5"></circle>
+        ${Array.from({ length: 12 }, (_, index) => {
+          const angle = (Math.PI * 2 * index) / 12;
+          const x = Math.cos(angle) * 24;
+          const y = Math.sin(angle) * 24;
+          return `<circle class="scene-insert-burst-particle" data-angle="${angle}" cx="${x}" cy="${y}" r="${index % 3 === 0 ? 5 : 3.5}" fill="${index % 2 === 0 ? "#38bdf8" : "#a78bfa"}"></circle>`;
+        }).join("")}
+      </svg>
+    </div>
+  `;
+  Object.assign(root.style, {
+    position: "fixed",
+    inset: "0",
+    pointerEvents: "none",
+    zIndex: "2147483646",
+    overflow: "hidden"
+  });
+  const pathSvg = root.querySelector(".podcast-scene-insert-flight-path");
+  Object.assign(pathSvg.style, { position: "absolute", inset: "0", overflow: "visible" });
+  const symbol = root.querySelector(".podcast-scene-insert-flight-symbol");
+  Object.assign(symbol.style, {
+    position: "absolute",
+    left: "-60px",
+    top: "-60px",
+    width: "120px",
+    display: "grid",
+    justifyItems: "center",
+    color: "var(--studio-accent-contrast, #f8fafc)",
+    fontSize: "12px",
+    fontWeight: "600",
+    textShadow: "0 2px 12px rgba(15,23,42,.8)",
+    willChange: "transform, opacity"
+  });
+  const label = symbol.querySelector("span");
+  Object.assign(label.style, {
+    maxWidth: "150px",
+    marginTop: "-4px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
+  });
+  const burst = root.querySelector(".podcast-scene-insert-flight-burst");
+  Object.assign(burst.style, {
+    position: "absolute",
+    left: "-90px",
+    top: "-90px",
+    width: "180px",
+    height: "180px",
+    opacity: "0",
+    visibility: "hidden",
+    willChange: "transform, opacity"
+  });
+  document.body.appendChild(root);
+  return { element: root, sourceRect: rect };
+}
+
+function findInsertedTimelineSceneElement(rowId = "") {
+  const safeRowId = String(rowId || "").trim();
+  if (!safeRowId) return null;
+  const escapedRowId = CSS.escape(safeRowId);
+  const selector = (
+    `.podcast-video-timeline-clip[data-row-id="${escapedRowId}"], `
+    + `.podcast-video-timeline-item[data-row-id="${escapedRowId}"], `
+    + `.podcast-video-clip-body[data-row-id="${escapedRowId}"]`
+  );
+  return runtime.els.podcastVideoTimeline?.querySelector?.(selector)
+    || document.querySelector(selector);
+}
+
+async function animatePodcastSceneInsertToTimeline(flight = null, rowId = "") {
+  const root = flight?.element;
+  if (!root) return;
+  const removeFlight = () => root.remove();
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const target = findInsertedTimelineSceneElement(rowId);
+  if (!target) {
+    removeFlight();
+    return;
+  }
+  target.style.visibility = "hidden";
+  target.style.opacity = "0";
+  const revealTarget = () => {
+    target.style.visibility = "";
+    target.style.opacity = "";
+  };
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+    revealTarget();
+    removeFlight();
+    return;
+  }
+
+  const anime = typeof runtime.loadAnimeJs === "function"
+    ? await runtime.loadAnimeJs()
+    : window.anime;
+  if (typeof anime !== "function") {
+    revealTarget();
+    removeFlight();
+    return;
+  }
+
+  target.scrollIntoView?.({ block: "nearest", inline: "center", behavior: "smooth" });
+  await new Promise((resolve) => window.setTimeout(resolve, 220));
+  const refreshedTarget = findInsertedTimelineSceneElement(rowId) || target;
+  refreshedTarget.style.visibility = "hidden";
+  refreshedTarget.style.opacity = "0";
+  const targetRect = refreshedTarget.getBoundingClientRect();
+  if (!targetRect.width || !targetRect.height) {
+    revealTarget();
+    removeFlight();
+    return;
+  }
+
+  const sourceX = Number(root.dataset.sourceX || window.innerWidth / 2);
+  const sourceY = Number(root.dataset.sourceY || window.innerHeight / 2);
+  const targetX = targetRect.left + (targetRect.width / 2);
+  const targetY = targetRect.top + (targetRect.height / 2);
+  const curveLift = Math.max(110, Math.min(260, Math.abs(targetY - sourceY) * 0.45));
+  const path = root.querySelector(".podcast-scene-insert-flight-path path");
+  path.setAttribute(
+    "d",
+    `M ${sourceX} ${sourceY} C ${sourceX} ${sourceY - curveLift}, ${targetX} ${targetY - curveLift}, ${targetX} ${targetY}`
+  );
+  const symbol = root.querySelector(".podcast-scene-insert-flight-symbol");
+  const outerOrbit = root.querySelector(".scene-insert-vector-orbit.is-outer");
+  const innerOrbit = root.querySelector(".scene-insert-vector-orbit.is-inner");
+  const arrow = root.querySelector(".scene-insert-vector-arrow");
+  const burst = root.querySelector(".podcast-scene-insert-flight-burst");
+  const burstRings = root.querySelectorAll(".scene-insert-burst-ring");
+  const burstParticles = Array.from(root.querySelectorAll(".scene-insert-burst-particle"));
+  const motionPath = anime.path(path);
+  const lane = refreshedTarget.closest(".podcast-video-track-lane, .podcast-video-track-row");
+  const neighbors = Array.from(lane?.querySelectorAll?.(
+    ".podcast-video-timeline-clip[data-row-id], .podcast-video-timeline-item[data-row-id]"
+  ) || []).filter((node) => node !== refreshedTarget && !node.contains(refreshedTarget));
+  const leftNeighbors = neighbors.filter((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.left + (rect.width / 2) < targetX;
+  });
+  const rightNeighbors = neighbors.filter((node) => !leftNeighbors.includes(node));
+
+  anime.remove([
+    symbol,
+    path,
+    outerOrbit,
+    innerOrbit,
+    arrow,
+    burst,
+    ...burstRings,
+    ...burstParticles,
+    refreshedTarget,
+    ...neighbors
+  ]);
+  anime.set(symbol, { translateX: sourceX, translateY: sourceY, scale: 0 });
+  anime.set(burst, {
+    translateX: targetX,
+    translateY: targetY,
+    scale: 0.2,
+    opacity: 0,
+    visibility: "hidden"
+  });
+  anime.set(burstRings, { scale: 0.2, opacity: 0 });
+  anime.set(burstParticles, { translateX: 0, translateY: 0, scale: 0, opacity: 0 });
+  anime({
+    targets: outerOrbit,
+    rotate: [0, 720],
+    duration: 1350,
+    easing: "linear"
+  });
+  anime({
+    targets: innerOrbit,
+    rotate: [0, -540],
+    duration: 1350,
+    easing: "linear"
+  });
+  anime({
+    targets: arrow,
+    translateX: [0, 8, 0],
+    duration: 420,
+    direction: "alternate",
+    loop: 3,
+    easing: "easeInOutSine"
+  });
+  anime({
+    targets: path,
+    strokeDashoffset: [anime.setDashoffset, 0],
+    opacity: [0, 0.9, 0],
+    duration: 1320,
+    easing: "easeInOutSine"
+  });
+  anime({
+    targets: leftNeighbors,
+    translateX: [0, -54, -72, 0],
+    duration: 920,
+    delay: 610,
+    easing: "easeOutElastic(1, .48)"
+  });
+  anime({
+    targets: rightNeighbors,
+    translateX: [0, 54, 72, 0],
+    duration: 920,
+    delay: 610,
+    easing: "easeOutElastic(1, .48)"
+  });
+  anime.timeline({
+    complete: () => {
+      refreshedTarget.style.visibility = "";
+      refreshedTarget.style.opacity = "0";
+      anime({
+        targets: refreshedTarget,
+        opacity: [0, 1],
+        scale: [0.35, 1.16, 0.92, 1.04, 1],
+        filter: ["brightness(1.65)", "brightness(1.18)", "brightness(1)"],
+        duration: 760,
+        easing: "easeOutElastic(1, .48)",
+        complete: removeFlight
+      });
+    }
+  })
+    .add({
+      targets: symbol,
+      translateX: motionPath("x"),
+      translateY: motionPath("y"),
+      rotate: motionPath("angle"),
+      scale: [
+        { value: 1.08, duration: 220, easing: "easeOutBack" },
+        { value: 0.88, duration: 700, easing: "easeInOutSine" },
+        { value: 0.08, duration: 260, easing: "easeInBack" }
+      ],
+      opacity: [1, 1, 0],
+      duration: 1280,
+      easing: "easeInOutCubic"
+    })
+    .add({
+      targets: burst,
+      visibility: "visible",
+      opacity: [0, 1, 1, 0],
+      scale: [0.15, 1, 1.18],
+      duration: 520,
+      easing: "easeOutQuad",
+      begin: () => {
+        anime({
+          targets: burstRings,
+          scale: [0.2, 1.8],
+          opacity: [0, 1, 0],
+          delay: anime.stagger(55),
+          duration: 460,
+          easing: "easeOutExpo"
+        });
+        burstParticles.forEach((particle, index) => {
+          const angle = Number(particle.dataset.angle || 0);
+          const distance = 48 + ((index % 3) * 12);
+          anime({
+            targets: particle,
+            translateX: [0, Math.cos(angle) * distance],
+            translateY: [0, Math.sin(angle) * distance],
+            scale: [0, 1.35, 0],
+            opacity: [0, 1, 0],
+            duration: 480,
+            delay: index * 12,
+            easing: "easeOutCubic"
+          });
+        });
+      }
+    }, "-=70");
+}
+
 function confirmPodcastSceneInsertSelection(options = {}) {
   const item = podcastSceneInsertModalState.libraryItem;
   if (!item) return false;
+  const flight = createPodcastSceneInsertFlightGhost(item);
   const insertIndex = Math.max(0, Math.round(runtime.toFiniteNumber(podcastSceneInsertModalState.selectedInsertIndex, 0)));
-  const inserted = insertLibrarySceneIntoSession(item, {
+  const insertedRowId = insertLibrarySceneIntoSession(item, {
     insertIndex,
     insertIntoNewTrack: options.insertIntoNewTrack === true
   });
-  if (inserted) {
+  if (insertedRowId) {
     closePodcastSceneInsertModal();
+    if (typeof runtime.reorderTimelineClipsByTracks === "function") {
+      runtime.reorderTimelineClipsByTracks();
+    }
+    void animatePodcastSceneInsertToTimeline(flight, insertedRowId);
+  } else {
+    flight?.element?.remove();
   }
-  return inserted;
+  return Boolean(insertedRowId);
 }
 
 function setPodcastSceneLibraryEditModalOpen(isOpen = false, item = null) {
@@ -922,7 +1291,7 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
     sourceUrl: String(normalized.downloadUrl || "").trim(),
     mimeType: String(normalized.mimeType || "video/mp4").trim() || "video/mp4"
   }).catch(() => { });
-  return true;
+  return rowId || true;
 }
 
 async function clonePublicSceneLibraryVideoToSession({

@@ -390,10 +390,16 @@ function renderChatTextWithMarkdownTables(text = "") {
   return htmlChunks.join("<br>");
 }
 
+function wrapChatTables(html = "") {
+  return String(html || "")
+    .replace(/<table(\s[^>]*)?>/gi, '<div class="chat-table-scroll"><table$1>')
+    .replace(/<\/table>/gi, "</table></div>");
+}
+
 function renderChatMessageBody(message = {}) {
   const html = sanitizeChatHtml(message?.html || "");
-  if (html) return html;
-  return renderChatTextWithMarkdownTables(String(message?.text || ""));
+  if (html) return wrapChatTables(html);
+  return wrapChatTables(renderChatTextWithMarkdownTables(String(message?.text || "")));
 }
 
 function isConsoleOnlyAssistantMessage(message = {}) {
@@ -406,6 +412,19 @@ function isConsoleOnlyAssistantMessage(message = {}) {
 }
 
 // --- Render Chat Flow ---
+const chatRenderMarkupCache = new WeakMap();
+let chatScrollEndFrame = 0;
+
+function scrollChatToEnd() {
+  const scroller = window.els?.chatScrollRegion || document.querySelector(".chat-scroll-region");
+  if (!scroller) return;
+  if (chatScrollEndFrame) window.cancelAnimationFrame(chatScrollEndFrame);
+  chatScrollEndFrame = window.requestAnimationFrame(() => {
+    chatScrollEndFrame = 0;
+    scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  });
+}
+
 function renderChat(session) {
   const messages = session.chat || [];
   const visibleMessages = messages.filter((message, index) => {
@@ -415,7 +434,7 @@ function renderChat(session) {
     return true;
   });
   const target = window.els.chatFeedMessages || window.els.chatFeed;
-  target.innerHTML = visibleMessages.map((message) => `
+  const nextMarkup = visibleMessages.map((message) => `
     <article class="chat-message ${message.role === "user" || message.role === "system" ? escapeHtml(message.role) : "assistant"}" data-message-id="${escapeHtml(message.id || "")}">
       <div class="chat-message-body">${renderChatMessageBody(message)}</div>
       <div class="chat-message-actions">
@@ -440,8 +459,13 @@ function renderChat(session) {
       </div>
     </article>
   `).join("");
+  const chatChanged = chatRenderMarkupCache.get(target) !== nextMarkup;
+  if (chatChanged) {
+    target.innerHTML = nextMarkup;
+    chatRenderMarkupCache.set(target, nextMarkup);
+  }
   window.els.chatStage?.classList.toggle("has-messages", visibleMessages.length > 0);
-  window.els.chatFeed.scrollTop = window.els.chatFeed.scrollHeight;
+  scrollChatToEnd();
 }
 
 const podcasterChatAssistantApi = {
@@ -457,7 +481,9 @@ const podcasterChatAssistantApi = {
   isMarkdownDividerCell,
   convertMarkdownTableAt,
   renderChatTextWithMarkdownTables,
+  wrapChatTables,
   renderChatMessageBody,
+  scrollChatToEnd,
   renderChat
 };
 

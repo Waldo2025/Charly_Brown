@@ -137,10 +137,6 @@ export function createPodcasterPromptComposerApi(deps = {}) {
       || clipboardData.getData("text")
       || clipboardData.getData("Text")
       || "";
-    if (/<(?:table|thead|tbody|tr|td|th)\b/i.test(html || "")) {
-      window.setTimeout(autoResize, 0);
-      return;
-    }
     const htmlRows = parseHtmlTableToRows(html);
     const plainRows = parsePlainTextTableToRows(plainText);
     const rows = htmlRows.length ? htmlRows : plainRows;

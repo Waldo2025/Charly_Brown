@@ -571,6 +571,7 @@ function ensureOverlayCardBaseStyles() {
   style.id = "podcastOverlayCardBaseStyles";
   style.textContent = `
     .podcast-overlay-card-layer{position:absolute;inset:0;z-index:38;pointer-events:none}
+    .podcast-overlay-card-layer.is-interactive{z-index:214748250;pointer-events:auto;touch-action:none}
     .podcast-overlay-card.is-exiting{animation:pod-overlay-card-exit var(--pod-card-exit-duration,520ms) cubic-bezier(.55,.05,.55,.95) both}
     .podcast-overlay-card[data-enter-animation=slide-right]{--pod-card-enter-x:42%;--pod-card-enter-y:0%}.podcast-overlay-card[data-enter-animation=slide-left]{--pod-card-enter-x:-42%;--pod-card-enter-y:0%}.podcast-overlay-card[data-enter-animation=slide-up]{--pod-card-enter-x:0%;--pod-card-enter-y:-42%}.podcast-overlay-card[data-enter-animation=slide-down]{--pod-card-enter-x:0%;--pod-card-enter-y:42%}.podcast-overlay-card[data-enter-animation=fade]{--pod-card-enter-x:0%;--pod-card-enter-y:0%}
     .podcast-overlay-card[data-exit-animation=slide-right]{--pod-card-exit-x:42%;--pod-card-exit-y:0%}.podcast-overlay-card[data-exit-animation=slide-left]{--pod-card-exit-x:-42%;--pod-card-exit-y:0%}.podcast-overlay-card[data-exit-animation=slide-up]{--pod-card-exit-x:0%;--pod-card-exit-y:-42%}.podcast-overlay-card[data-exit-animation=slide-down]{--pod-card-exit-x:0%;--pod-card-exit-y:42%}.podcast-overlay-card[data-exit-animation=fade]{--pod-card-exit-x:0%;--pod-card-exit-y:0%}
@@ -1141,12 +1142,14 @@ function attachOverlayCardStageDrag(container = document.querySelector("#podcast
   if (!container || container.dataset.overlayCardStageDragReady === "true") return;
   container.dataset.overlayCardStageDragReady = "true";
   let dragState = null;
+  const getCardFromEvent = (event) => event.target?.closest?.(".podcast-overlay-card");
   container.addEventListener("pointerdown", (event) => {
-    const deleteBtn = event.target?.closest?.(".podcast-overlay-card-delete");
-    if (deleteBtn) return;
-    const card = event.target?.closest?.(".podcast-overlay-card");
     const layer = event.target?.closest?.(".podcast-overlay-card-layer.is-interactive");
+    if (!layer) return;
+    const deleteBtn = event.target?.closest?.(".podcast-overlay-card-delete");
+    const card = getCardFromEvent(event);
     if (!card || !layer) return;
+    if (deleteBtn) return;
     const cardId = String(card.dataset.cardId || "").trim();
     if (!cardId) return;
     const stageRect = container.getBoundingClientRect();
@@ -1163,6 +1166,7 @@ function attachOverlayCardStageDrag(container = document.querySelector("#podcast
     };
     container.dataset.overlayCardDragging = "true";
     card.setPointerCapture?.(event.pointerId);
+    layer.setPointerCapture?.(event.pointerId);
     event.preventDefault();
   });
   container.addEventListener("pointermove", (event) => {

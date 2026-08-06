@@ -277,9 +277,10 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     }
     const referenceImages = canonical.rowReferenceImageListMap[key] || [];
     const referenceVideo = canonical.rowReferenceVideoMap[key] || null;
-    const referenceMode = canonical.rowReferenceModeByRowId[key] === "video" && referenceVideo
+    const mode = String(canonical.rowReferenceModeByRowId[key] || "").trim().toLowerCase();
+    const referenceMode = mode === "video" && referenceVideo
       ? "video"
-      : "image";
+      : (mode === "none" ? "none" : "image");
     return {
       referenceMode,
       referenceImages: referenceMode === "image" ? referenceImages : [],
@@ -533,8 +534,14 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     const validKeys = new Set([...Object.keys(imageMap || {}), ...Object.keys(videoMap || {})]);
     Object.entries(source).forEach(([key, value]) => {
       const cleanKey = String(key || "").trim();
-      if (!cleanKey || !validKeys.has(cleanKey)) return;
-      const mode = String(value || "").trim().toLowerCase() === "video" ? "video" : "image";
+      if (!cleanKey) return;
+      const val = String(value || "").trim().toLowerCase();
+      if (val === "none") {
+        next[cleanKey] = "none";
+        return;
+      }
+      if (!validKeys.has(cleanKey)) return;
+      const mode = val === "video" ? "video" : "image";
       if (mode === "video" && !videoMap[cleanKey]) return;
       if (mode === "image" && !imageMap[cleanKey]) return;
       next[cleanKey] = mode;
@@ -769,8 +776,8 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       if (limitedList.length) {
         delete nextVideoMap[key];
         nextModeMap[key] = "image";
-      } else if (nextModeMap[key] === "image") {
-        delete nextModeMap[key];
+      } else {
+        nextModeMap[key] = "none";
       }
       return {
         ...current,
@@ -808,8 +815,8 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
         delete nextImageMap[key];
         delete nextImageListMap[key];
         nextModeMap[key] = "video";
-      } else if (nextModeMap[key] === "video") {
-        delete nextModeMap[key];
+      } else {
+        nextModeMap[key] = "none";
       }
       return {
         ...current,

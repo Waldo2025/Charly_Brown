@@ -4,7 +4,6 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
   const localProxyMediaUnavailableTtlMs = Math.max(1000, Number(deps.localProxyMediaUnavailableTtlMs || 45000) || 45000);
   let localProxyMediaUnavailable = false;
   let localProxyMediaUnavailableAt = 0;
-  let staleMediaReRenderTimer = null;
 
   function buildMediaProxyUrl(path = "") {
     const clean = String(path || "").trim();
@@ -75,12 +74,6 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     staleProxyMediaUrls.add(clean);
     const staleKey = normalizeProxyMediaStaleKey(clean);
     if (staleKey) staleProxyMediaUrls.add(staleKey);
-    if (staleMediaReRenderTimer) clearTimeout(staleMediaReRenderTimer);
-    staleMediaReRenderTimer = setTimeout(() => {
-      if (typeof deps.renderPodcastVideoTimeline === "function") {
-        deps.renderPodcastVideoTimeline(deps.getActiveSession?.(), { force: true, reason: "media-stale" });
-      }
-    }, 250);
     if (deps.isRenderDebugEnabled?.() === true) {
       void reason;
       void payload;
@@ -277,26 +270,17 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
       }
     }
     let finalUrl = "";
-    let blockedUnsafeFirebaseFallback = false;
-    if (proxyStoragePath) {
+    if (cleanStoragePath) {
       const proxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(proxyStoragePath)}${noRange ? "&noRange=1" : ""}`);
-      if (isMarkedStaleProxyMediaUrl(proxyUrl)) {
-        blockedUnsafeFirebaseFallback = isUnsafeDirectFirebaseMediaUrl(clean);
-        finalUrl = blockedUnsafeFirebaseFallback ? "" : clean;
-      } else {
-        finalUrl = proxyUrl;
-      }
+      const isStale = isMarkedStaleProxyMediaUrl(proxyUrl);
+      finalUrl = isStale ? "" : proxyUrl;
     }
-    if (!finalUrl && clean && !blockedUnsafeFirebaseFallback) {
+    if (!finalUrl && clean) {
       try {
         const parsed = new URL(clean, window.location.origin);
         const proxyUrl = buildMediaProxyUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}${noRange ? "&noRange=1" : ""}`);
-        if (isMarkedStaleProxyMediaUrl(proxyUrl)) {
-          blockedUnsafeFirebaseFallback = isUnsafeDirectFirebaseMediaUrl(clean);
-          finalUrl = blockedUnsafeFirebaseFallback ? "" : clean;
-        } else {
-          finalUrl = proxyUrl;
-        }
+        const isStale = isMarkedStaleProxyMediaUrl(proxyUrl);
+        finalUrl = isStale ? "" : proxyUrl;
       } catch (_) {
         finalUrl = clean;
       }
@@ -304,11 +288,9 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     if (finalUrl && timestamp && finalUrl.includes("/api/assets/proxy-")) {
       const separator = finalUrl.includes("?") ? "&" : "?";
       finalUrl = `${finalUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
-      if (isMarkedStaleProxyMediaUrl(finalUrl)) {
-        finalUrl = isUnsafeDirectFirebaseMediaUrl(clean) ? "" : clean;
-      }
+      if (isMarkedStaleProxyMediaUrl(finalUrl)) finalUrl = "";
     }
-    return finalUrl || (blockedUnsafeFirebaseFallback ? "" : clean) || "";
+    return finalUrl || "";
   }
 
   function markStaleDialogueVideoSource(sessionId = "", rowId = "", source = null, reason = "stale-scene-video-storage-path") {

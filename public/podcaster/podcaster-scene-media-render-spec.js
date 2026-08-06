@@ -190,6 +190,43 @@
       durationSec: Math.max(0.2, Number(input.durationSec || 12) || 12)
     };
     const kenBurns = resolveSceneMediaKenBurns(input.visualEffects);
+    kenBurns.playbackDurationSec = Math.max(
+      0.2,
+      Math.min(Number(motion.durationSec || 12), Number(kenBurns.durationSec || 12))
+    );
+    const kenBurnsWidth = scaledWidth * Number(kenBurns.panScale || 1.2);
+    const kenBurnsHeight = scaledHeight * Number(kenBurns.panScale || 1.2);
+    const kenBurnsBaseLeft = leftPx - ((kenBurnsWidth - scaledWidth) / 2);
+    const kenBurnsBaseTop = topPx;
+    const kenBurnsLeftEdge = frameRect.x;
+    const kenBurnsRightEdge = frameRect.x + frameRect.width - kenBurnsWidth;
+    const kenBurnsTopEdge = frameRect.y;
+    const kenBurnsBottomEdge = frameRect.y + frameRect.height - kenBurnsHeight;
+    let kenBurnsStartXPx = 0;
+    let kenBurnsEndXPx = 0;
+    let kenBurnsStartYPx = 0;
+    let kenBurnsEndYPx = 0;
+    if (kenBurns.effect === "pan-left") {
+      kenBurnsStartXPx = kenBurnsLeftEdge - kenBurnsBaseLeft;
+      kenBurnsEndXPx = kenBurnsRightEdge - kenBurnsBaseLeft;
+    } else if (kenBurns.effect === "pan-right") {
+      kenBurnsStartXPx = kenBurnsRightEdge - kenBurnsBaseLeft;
+      kenBurnsEndXPx = kenBurnsLeftEdge - kenBurnsBaseLeft;
+    } else if (kenBurns.effect === "pan-up") {
+      kenBurnsStartYPx = kenBurnsTopEdge - kenBurnsBaseTop;
+      kenBurnsEndYPx = kenBurnsBottomEdge - kenBurnsBaseTop;
+    } else if (kenBurns.effect === "pan-down") {
+      kenBurnsStartYPx = kenBurnsBottomEdge - kenBurnsBaseTop;
+      kenBurnsEndYPx = kenBurnsTopEdge - kenBurnsBaseTop;
+    }
+    kenBurns.traversal = {
+      width: kenBurnsWidth,
+      height: kenBurnsHeight,
+      startXPx: kenBurnsStartXPx,
+      endXPx: kenBurnsEndXPx,
+      startYPx: kenBurnsStartYPx,
+      endYPx: kenBurnsEndYPx
+    };
     return {
       canvasRect: { width: canvasWidth, height: canvasHeight },
       frameRect,

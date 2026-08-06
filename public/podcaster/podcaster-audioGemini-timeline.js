@@ -15,25 +15,24 @@ const computeDurationSpeedMultiplier = (text, target, limits) => {
  * Preloads dialogue audio through the persistent playback controllers. The metadata probes below remain
  * only for duration reconciliation; they are no longer the preview playback cache.
  */
-function preloadAllDialogueAudios(session = null, options = {}) {
+async function preloadAllDialogueAudios(session = null, options = {}) {
   const activeSession = session || window.getActiveSession();
-  if (!activeSession) return;
+  if (!activeSession) return false;
   const audioMap = window.getDialogueAudioMap(activeSession);
-  if (!audioMap) return;
+  if (!audioMap) return false;
   const keys = Object.keys(audioMap);
-  if (!keys.length) return;
+  if (!keys.length) return false;
 
   const targetRowIds = Array.isArray(options.rowIds)
     ? options.rowIds.map((rowId) => String(rowId || "").trim()).filter(Boolean)
     : [];
-  [window.playbackController, window.exportPreviewController]
+  const controllerTasks = [window.playbackController, window.exportPreviewController]
     .filter((controller) => controller && typeof controller.prewarmDialogueAudios === "function")
-    .forEach((controller) => {
+    .map((controller) => {
       if (targetRowIds.length && typeof controller.prewarmDialogueAudioRows === "function") {
-        controller.prewarmDialogueAudioRows(activeSession, targetRowIds);
-      } else {
-        controller.prewarmDialogueAudios(activeSession);
+        return controller.prewarmDialogueAudioRows(activeSession, targetRowIds);
       }
+      return controller.prewarmDialogueAudios(activeSession);
     });
 
   keys.forEach((rowId) => {
@@ -110,6 +109,8 @@ function preloadAllDialogueAudios(session = null, options = {}) {
 
 
   });
+  await Promise.allSettled(controllerTasks);
+  return true;
 }
 
 /**
@@ -224,26 +225,44 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       nextSourceKey: nextAudioSourceKey,
       revokeBlobUrls: true
     };
+    const invalidationTasks = [];
     if (typeof window.playbackController?.invalidateRowAudioCache === "function") {
-      window.playbackController.invalidateRowAudioCache(key, invalidateOptions);
+      invalidationTasks.push(window.playbackController.invalidateRowAudioCache(key, invalidateOptions));
     }
     if (typeof window.exportPreviewController?.invalidateRowAudioCache === "function") {
-      window.exportPreviewController.invalidateRowAudioCache(key, invalidateOptions);
+      invalidationTasks.push(window.exportPreviewController.invalidateRowAudioCache(key, invalidateOptions));
+    }
+    await Promise.allSettled(invalidationTasks);
+
+    // La duración medida pertenece al blob anterior. Obliga al probe del chip
+    // a medir el archivo regenerado incluso cuando conserva el mismo rowId/path.
+    if (window.podcastVideoState?.montageAudioActualDurationsMs) {
+      delete window.podcastVideoState.montageAudioActualDurationsMs[key];
     }
 
-    // Medir la nueva duración e incorporar al timeline inmediatamente
-    preloadAllDialogueAudios(window.getActiveSession(), {
+    // Reconstruir primero el track y, sobre todo, reemplazar el snapshot de sesión
+    // que conservan los controladores. Las escenas de biblioteca pública nacen sin
+    // audio explícito: si el controller mantiene ese snapshot, ignora el clip recién
+    // generado y puede intentar usar un blob anterior que ya fue revocado.
+    window.syncGeminiDialogueTrackWithRuntime({
+      render: false,
+      preserveStartMs: true,
+      forceDurationFromAudio: true
+    });
+    const refreshedSession = window.getActiveSession();
+    const refreshedConfig = window.getPodcastVideoConfig?.(refreshedSession);
+    [window.playbackController, window.exportPreviewController]
+      .filter((controller) => controller && typeof controller.sync === "function")
+      .forEach((controller) => controller.sync(refreshedSession, refreshedConfig));
+
+    // Medir la nueva duración e incorporar al timeline inmediatamente.
+    await preloadAllDialogueAudios(refreshedSession, {
       rowIds: [key],
       suppressTimelineRender: true
     });
 
-    // Sincronizar track
-    window.syncGeminiDialogueTrackWithRuntime({
-      render: false,
-      preserveStartMs: true
-    });
-    window.renderPodcastVideoTimeline?.(window.getActiveSession(), { force: true, reason: "dialogue-audio-regenerated" });
-    window.syncPodcastStudioInspector?.(window.getActiveSession());
+    window.renderPodcastVideoTimeline?.(refreshedSession, { force: true, reason: "dialogue-audio-regenerated" });
+    window.syncPodcastStudioInspector?.(refreshedSession);
     window.scheduleSessionLocalPersist?.("dialogue-audio-regenerated");
 
     return finalAudio;
@@ -296,7 +315,14 @@ async function regenerateAllGeminiDialogueAudios(session = null) {
     const rowId = String(row?.id || "").trim();
     if (!rowId) continue;
     const step = index + 1;
-    window.setGenerationStatus(`Regenerando audios Gemini (${step}/${total})...`, "is-busy", { sessionId });
+    window.updateGeminiAudioGenerationAnimation?.({
+      current: index,
+      total,
+      generated,
+      failed,
+      sceneNumber: step
+    });
+    window.setGenerationStatus(`Generando Voz en off · Escena ${step} de ${total}`, "is-busy", { sessionId });
     try {
       const clip = await podcasterGenerationShared.generateDialogueAudioForRow(rowId, { regenerate: true, silent: true });
       if (clip && window.hasStoredMediaSource(clip)) {
@@ -307,6 +333,13 @@ async function regenerateAllGeminiDialogueAudios(session = null) {
     } catch (_) {
       failed += 1;
     }
+    window.updateGeminiAudioGenerationAnimation?.({
+      current: step,
+      total,
+      generated,
+      failed,
+      sceneNumber: step
+    });
   }
   if (generated === total) {
     window.setGenerationStatus(`Audios Gemini regenerados (${generated}/${total}).`, "is-live", { sessionId });

@@ -167,6 +167,9 @@
   const PODCAST_HEADLINE_MIN_WORDS = 2;
   const PODCAST_HEADLINE_MAX_WORDS = 6;
   const PODCAST_HEADLINE_MAX_CHARS = 48;
+  const PODCAST_IN_SCENE_TEXT_MAX_WORDS = 40;
+  const PODCAST_IN_SCENE_TEXT_MAX_CHARS = 280;
+  const PODCAST_IN_SCENE_TEXT_MAX_LINES = 4;
   const PODCAST_OVERLAY_MODES = new Set(["none", "headline", "captions", "both"]);
   const PODCAST_TEXT_SOURCES = new Set(["generated", "manual", "migrated"]);
 
@@ -225,10 +228,11 @@
   }
 
   function normalizePodcasterInSceneText(value = "", options = {}) {
-    const text = normalizePodcasterTextValue(value);
+    const text = normalizePodcasterTextValue(value, { preserveLineBreaks: true });
     if (!text) return "";
-    const isValid = text.length <= PODCAST_HEADLINE_MAX_CHARS
-      && countPodcasterTextWords(text) <= PODCAST_HEADLINE_MAX_WORDS;
+    const isValid = text.length <= PODCAST_IN_SCENE_TEXT_MAX_CHARS
+      && countPodcasterTextWords(text) <= PODCAST_IN_SCENE_TEXT_MAX_WORDS
+      && text.split("\n").length <= PODCAST_IN_SCENE_TEXT_MAX_LINES;
     if (options?.strict === true && !isValid) return "";
     return text;
   }

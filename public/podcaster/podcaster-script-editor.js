@@ -11,6 +11,7 @@ import {
 
 // Local Sortable reference
 let scriptSortable = null;
+const scriptRenderMarkupCache = new WeakMap();
 
 const escapeHtml = typeof window.escapeHtml === "function"
   ? window.escapeHtml
@@ -87,7 +88,7 @@ function autoSizeScriptTextarea(textarea) {
 
 function autoSizeScriptTextareas(root = null) {
   const scope = root && typeof root.querySelectorAll === "function" ? root : document;
-  scope.querySelectorAll("textarea.dialog-editor, textarea[data-field='notes'], textarea[data-field='captionText']").forEach((node) => {
+  scope.querySelectorAll("textarea.dialog-editor, textarea[data-field='notes'], textarea[data-field='captionText'], textarea[data-field='inSceneText']").forEach((node) => {
     autoSizeScriptTextarea(node);
   });
 }
@@ -149,23 +150,12 @@ function renderScript(session) {
           <button class="script-row-collapse-btn" type="button" data-action="toggle-script-row-collapse" data-row-id="${escapeHtml(row.id)}" aria-expanded="${window.isScriptRowCollapsed(row.id, session) ? "false" : "true"}" aria-label="${window.isScriptRowCollapsed(row.id, session) ? "Expandir escena" : "Colapsar escena"}" title="${window.isScriptRowCollapsed(row.id, session) ? "Expandir escena" : "Colapsar escena"}">
             <i class="fas fa-chevron-down" aria-hidden="true"></i>
           </button>
-          <span class="row-chip">${panelCopy.videoMode ? "Secuencia" : "Escena"} ${index + 1}</span>
+          <span class="row-chip row-chip-scene">Escena ${index + 1}</span>
           ${activeVisualProposal ? `<span class="row-chip row-chip-proposal-new">Propuesta nueva</span>` : ""}
           ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
           ${(panelCopy.videoMode || panelCopy.videoPodcastMode) && String(row?.publicSceneLibraryId || "").trim()
         ? `<span class="row-chip row-chip-public">Pública</span>`
         : ""}
-          ${(() => {
-        if (!(panelCopy.videoMode || panelCopy.videoPodcastMode)) return "";
-        const reference = window.resolveRowReferenceAsset(String(row.id || "").trim(), session);
-        if (!reference) return "";
-        const label = reference.kind === "video"
-          ? `Ref video: ${reference.name}`
-          : reference.imageCount > 1
-            ? `${reference.imageCount} refs`
-            : `Ref: ${reference.name}`;
-        return `<span class="row-chip">${escapeHtml(label)}</span>`;
-      })()}
           <span class="row-chip row-chip-elapsed" data-row-play-elapsed="${escapeHtml(row.id)}">0:00</span>
         </div>
         <div class="row-actions">
@@ -215,8 +205,7 @@ function renderScript(session) {
   `;
   };
 
-  if (els.scriptTableBody) {
-    els.scriptTableBody.innerHTML = rows.flatMap((row, index) => ([
+  const nextScriptMarkup = rows.flatMap((row, index) => ([
       buildScriptRowCard(row, index),
       index < rows.length - 1
         ? `
@@ -226,16 +215,24 @@ function renderScript(session) {
         `
         : ""
     ])).join("");
+  const scriptChanged = Boolean(
+    els.scriptTableBody
+    && scriptRenderMarkupCache.get(els.scriptTableBody) !== nextScriptMarkup
+  );
+
+  if (scriptChanged) {
+    els.scriptTableBody.innerHTML = nextScriptMarkup;
+    scriptRenderMarkupCache.set(els.scriptTableBody, nextScriptMarkup);
     autoSizeScriptTextareas(els.scriptTableBody);
-  }
+    window.animatePodcasterScriptElementsOnce?.();
 
-  if (scriptSortable) {
-    scriptSortable.destroy();
-    scriptSortable = null;
-  }
+    if (scriptSortable) {
+      scriptSortable.destroy();
+      scriptSortable = null;
+    }
 
-  if (window.Sortable && els.scriptTableBody) {
-    scriptSortable = window.Sortable.create(els.scriptTableBody, {
+    if (window.Sortable) {
+      scriptSortable = window.Sortable.create(els.scriptTableBody, {
       animation: 150,
       handle: ".script-row-head",
       draggable: ".script-row",
@@ -270,7 +267,8 @@ function renderScript(session) {
           window.render();
         });
       }
-    });
+      });
+    }
   }
 
   if (typeof window.updateRowPlayButtons === "function") {
@@ -343,9 +341,8 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
           <span class="row-field-head">
             <span>Guion</span>
             <span class="row-field-inline-actions">
-              <label class="row-video-dialogue-toggle" title="Generar sólo con la dirección visual y las referencias. El Guion se conserva para audio, subtítulos y montaje.">
-                <input type="checkbox" data-field="excludeScriptFromVideoPrompt" data-row-id="${escapeHtml(creativeRow.id)}"${creativeRow.excludeScriptFromVideoPrompt === true ? " checked" : ""}>
-                <span>No usar guion</span>
+              <label class="row-video-dialogue-toggle" title="No usar guion">
+                <input type="checkbox" data-field="excludeScriptFromVideoPrompt" data-row-id="${escapeHtml(creativeRow.id)}" aria-label="No usar guion"${creativeRow.excludeScriptFromVideoPrompt === true ? " checked" : ""}>
               </label>
               ${String(creativeRow.publicSceneLibraryId || "").trim() ? `<span class="row-chip row-chip-public">Pública</span>` : ""}
               <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(creativeRow.id)}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
@@ -367,12 +364,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
         </label>
         <label class="row-field wide">
           <span class="row-field-head">
-            <span>Texto en pantalla</span>
-            <span class="row-field-inline-actions">
-              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="copy-voiceover-to-onscreen-text" data-row-id="${escapeHtml(creativeRow.id)}" title="Copiar guion → texto en pantalla" aria-label="Copiar guion a texto en pantalla">
-                <i class="fas fa-level-down-alt" aria-hidden="true"></i>
-              </button>
-            </span>
+            <span>Subtítulo</span>
           </span>
           <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.headlineText || creativeRow.onScreenText || "")}" placeholder="Texto breve en pantalla">
         </label>
@@ -611,7 +603,7 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
           ${speakerReference ? `<button class="row-icon-btn" type="button" data-action="clear-speaker-reference-image" data-speaker="${escapeHtml(host)}" title="Quitar referencia del locutor"><i class="fas fa-times"></i></button>` : ""}
         </div>
         ${speakerReference
-          ? `<div class="inspector-row-reference-preview"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(speakerReference))}" alt="${escapeHtml(speakerReference.name || host)}"></div>`
+          ? `<div class="inspector-row-reference-preview"><button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(speakerReference))}" data-reference-title="${escapeHtml(speakerReference.name || host)}" data-reference-meta="Locutor de referencia" aria-label="Ampliar imagen de referencia del locutor"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(speakerReference))}" alt="${escapeHtml(speakerReference.name || host)}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button></div>`
           : `<div class="inspector-row-reference-empty">Adjunta una imagen de referencia para ${escapeHtml(window.resolveSpeakerDisplayName(host, session))}.</div>`}
       </div>
       <div class="inspector-row-reference">
@@ -627,7 +619,7 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
         </div>
         ${activeScenario
           ? (scenarioReference
-            ? `<div class="inspector-row-reference-preview"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(scenarioReference))}" alt="${escapeHtml(scenarioReference.name || activeScenario.title || "Escenario")}"></div>`
+            ? `<div class="inspector-row-reference-preview"><button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(scenarioReference))}" data-reference-title="${escapeHtml(scenarioReference.name || activeScenario.title || "Escenario")}" data-reference-meta="Escenario de referencia" aria-label="Ampliar imagen de referencia del escenario"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(scenarioReference))}" alt="${escapeHtml(scenarioReference.name || activeScenario.title || "Escenario")}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button></div>`
             : `<div class="inspector-row-reference-empty">Escenario activo: ${escapeHtml(activeScenario.title || "Escenario")}. Puedes adjuntar una referencia visual para guiarlo.</div>`)
           : `<div class="inspector-row-reference-empty">Selecciona o genera un escenario global para los locutores.</div>`}
       </div>
@@ -642,6 +634,7 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
   const safeIndex = Number.isFinite(index) && index >= 0 ? index : 0;
   const panelCopy = window.getPanelModeCopy(session);
   const isVideo = panelCopy.videoMode === true;
+  const sceneTextFields = normalizeSceneTextFields(row);
   const activeVisualProposal = window.resolveActiveVisualProposal(row);
   const rowId = String(row?.id || "").trim();
   const speaker = String(row?.speaker || "").trim() || "Host A";
@@ -658,7 +651,7 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
     <article class="script-row script-row-inspector" data-row-id="${escapeHtml(row.id)}">
       <div class="script-row-head script-row-head-inspector">
         <div class="row-head-left">
-          <span class="row-chip">${panelCopy.videoMode ? "Secuencia" : "Escena"} ${safeIndex + 1}</span>
+          <span class="row-chip row-chip-scene">Escena ${safeIndex + 1}</span>
           ${activeVisualProposal ? `<span class="row-chip row-chip-proposal-new">Propuesta nueva</span>` : ""}
           ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
         </div>
@@ -693,14 +686,36 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
         ? `<div class="inspector-row-reference-preview">${rowReference.kind === "video"
           ? `<video src="${escapeHtml(rowReference.dataUrl || window.resolveStorageVideoUrl(rowReference.downloadUrl, rowReference.storagePath))}" muted playsinline controls preload="metadata"></video>`
           : rowReferenceImages.length > 1
-            ? `<div class="inspector-row-reference-gallery">${rowReferenceImages.map((image, imageIndex) => `<img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(image))}" alt="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}">`).join("")}</div>`
-            : `<img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(rowReference))}" alt="${escapeHtml(rowReference.name)}">`
+            ? `<div class="inspector-row-reference-gallery">${rowReferenceImages.map((image, imageIndex) => `<button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(image))}" data-reference-title="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}" data-reference-meta="Escena ${safeIndex + 1}" aria-label="Ampliar ${escapeHtml(image.name || `referencia ${imageIndex + 1}`)}"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(image))}" alt="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button>`).join("")}</div>`
+            : `<button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(rowReference))}" data-reference-title="${escapeHtml(rowReference.name || `Referencia de escena ${safeIndex + 1}`)}" data-reference-meta="Escena ${safeIndex + 1}" aria-label="Ampliar imagen de referencia de la escena"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(rowReference))}" alt="${escapeHtml(rowReference.name)}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button>`
         }</div>`
         : `<div class="inspector-row-reference-empty">Adjunta una imagen o video para guiar el video de esta escena.</div>`}
           </div>
         `
       : ""}
       ${podcastReferenceSections}
+      ${(panelCopy.videoMode || panelCopy.videoPodcastMode)
+      ? `
+          <label class="row-field wide inspector-in-scene-text-field">
+            <span class="row-field-head">
+              <span class="row-field-title-inline">
+                <i class="fas fa-font" aria-hidden="true"></i>
+                Texto dentro de la escena
+              </span>
+              <span class="inspector-in-scene-text-limit">Hasta 4 líneas · 40 palabras · 280 caracteres</span>
+            </span>
+            <textarea
+              data-field="inSceneText"
+              data-row-id="${escapeHtml(row.id)}"
+              maxlength="280"
+              rows="3"
+              autocomplete="off"
+              placeholder="Texto exacto que debe aparecer dentro del video"
+              aria-label="Texto exacto dentro de la escena"
+            >${escapeHtml(sceneTextFields.inSceneText || "")}</textarea>
+          </label>
+        `
+      : ""}
       ${buildScriptRowEditorMarkup(session, row, safeIndex)}
     </article>
   `;
@@ -777,7 +792,7 @@ function shouldHandleScriptFieldOnInput(event) {
 function handleScriptFieldUpdate(event) {
   const target = event.target.closest("[data-row-id][data-field]");
   if (!target) return;
-  if (target.matches?.("textarea.dialog-editor, textarea[data-field='notes'], textarea[data-field='captionText']")) {
+  if (target.matches?.("textarea.dialog-editor, textarea[data-field='notes'], textarea[data-field='captionText'], textarea[data-field='inSceneText']")) {
     autoSizeScriptTextarea(target);
   }
   const rowId = target.dataset.rowId;
@@ -952,6 +967,38 @@ function handleScriptFieldUpdate(event) {
         }))
       }
     }), { ...baseSessionUpdateOptions, render: nextRender });
+    scheduleConfirmedLocalPersist();
+    return;
+  }
+  if (field === "inSceneText") {
+    const normalizedInSceneText = String(value || "")
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/[\t\f\v ]+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 4)
+      .join("\n")
+      .slice(0, 280);
+    window.upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        rows: updateSingleScriptRow(current, rowId, (row) => ({
+          ...row,
+          inSceneText: normalizedInSceneText,
+          textSource: "manual",
+          lastEditedAt: Date.now()
+        }))
+      }
+    }), {
+      ...baseSessionUpdateOptions,
+      render: false,
+      persist: false,
+      markDirty: false,
+      recordHistory: true,
+      syncThread: false,
+      invalidateRuntimeCache: false
+    });
     scheduleConfirmedLocalPersist();
     return;
   }

@@ -8,7 +8,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     preset: "ambient",
     volume: 22,
     montageVolume: 100,
-    duckingWhenGeminiPct: 60,
+    duckingWhenGeminiPct: 46,
     stabilize: false,
     limiterEnabled: false,
     playing: false,
@@ -67,10 +67,17 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   const maxLocalMusicDataUrlChars = Math.max(1000, Number(deps.maxLocalMusicDataUrlChars || 1_800_000) || 1_800_000);
   const panelMusicStorageKeyBase = String(deps.panelMusicStorageKeyBase || "cb_podcaster_panel_music_v1").trim() || "cb_podcaster_panel_music_v1";
 
+  function normalizePercent(value, fallback = 0) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return fallback;
+    return Math.max(0, Math.min(100, raw));
+  }
+
   function getGlobalAudioMixState(session = null) {
     const cfg = getPodcastVideoConfig(session);
+    const configuredMasterVolume = Number(cfg?.masterVolume);
     return {
-      masterVolume: Math.max(0, Math.min(100, Number(cfg?.masterVolume ?? 100) || 100)),
+      masterVolume: Math.max(0, Math.min(100, Number.isFinite(configuredMasterVolume) ? configuredMasterVolume : 50)),
       stabilize: cfg?.audioMasterStabilize === true,
       limiterEnabled: cfg?.audioMasterLimiterEnabled === true
     };
@@ -267,8 +274,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       model: String(track.model || "").trim(),
       prompt: String(track.prompt || "").trim(),
       durationMeasuredWith: String(track.durationMeasuredWith || "").trim().toLowerCase(),
-      montageVolume: track.montageVolume !== undefined ? Math.max(0, Math.min(100, Number(track.montageVolume) || 0)) : 100,
-      duckingWhenGeminiPct: track.duckingWhenGeminiPct !== undefined ? Math.max(40, Math.min(100, Number(track.duckingWhenGeminiPct) || 0)) : 60,
+      montageVolume: track.montageVolume !== undefined ? normalizePercent(track.montageVolume, 100) : 100,
+      duckingWhenGeminiPct: track.duckingWhenGeminiPct !== undefined ? Math.max(40, Math.min(100, Number(track.duckingWhenGeminiPct) || 0)) : 46,
       stabilize: track.stabilize === true,
       loopSettings: normalizePanelMusicLoopSettings(track.loopSettings || [], sourceDurationMs),
       mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(track.mutedLoopIndexes || []),
@@ -387,7 +394,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       preset: panelMusicState.preset,
       volume: panelMusicState.volume,
       montageVolume: panelMusicState.montageVolume,
-      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
+      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 46))),
       stabilize: panelMusicState.stabilize === true,
       limiterEnabled: panelMusicState.limiterEnabled === true,
       sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
@@ -1222,7 +1229,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         trackIndex,
         loopIndex,
         muted: mutedLoopIndexes.has(loopIndex),
-        volume: track?.montageVolume !== undefined ? track.montageVolume : panelMusicState.montageVolume,
+        volume: normalizePercent(track?.montageVolume, panelMusicState.montageVolume),
         duckingWhenGeminiPct: track?.duckingWhenGeminiPct !== undefined ? track.duckingWhenGeminiPct : panelMusicState.duckingWhenGeminiPct,
         stabilize: track?.stabilize !== undefined ? track.stabilize : panelMusicState.stabilize
       };
@@ -1246,9 +1253,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       localMediaCacheKey: String(activeTrack?.localMediaCacheKey || "").trim(),
       sourceItems,
       loopEnabled: activeTrack?.loopEnabled !== false,
-      volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
-      montageVolume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
-      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
+      volume: normalizePercent(panelMusicState.montageVolume, 100),
+      montageVolume: normalizePercent(panelMusicState.montageVolume, 100),
+      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 46))),
       stabilize: panelMusicState.stabilize === true,
       limiterEnabled: panelMusicState.limiterEnabled === true,
       durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
@@ -1460,9 +1467,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     try {
       const parsed = JSON.parse(localStorage.getItem(storageKey) || "{}");
       const preset = ["ambient", "focus", "pulse"].includes(parsed?.preset) ? parsed.preset : "ambient";
-      const volume = Math.max(0, Math.min(100, Number(parsed?.volume ?? 22)));
-      const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? 0)));
-      const duckingWhenGeminiPct = normalizeDucking(parsed?.duckingWhenGeminiPct, 60);
+      const volume = normalizePercent(parsed?.volume, 22);
+      const montageVolume = normalizePercent(parsed?.montageVolume, 100);
+      const duckingWhenGeminiPct = normalizeDucking(parsed?.duckingWhenGeminiPct, 46);
       const stabilize = parsed?.stabilize === true || String(parsed?.stabilize || "").trim().toLowerCase() === "true";
       const limiterEnabled = parsed?.limiterEnabled === true || String(parsed?.limiterEnabled || "").trim().toLowerCase() === "true";
       const sourceType = parsed?.sourceType === "track" ? "track" : "preset";
@@ -1501,7 +1508,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         preset: "ambient",
         volume: 22,
         montageVolume: 100,
-        duckingWhenGeminiPct: 60,
+        duckingWhenGeminiPct: 46,
         stabilize: false,
         limiterEnabled: false,
         sourceType: "preset",
@@ -1651,7 +1658,80 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return resolvePanelMusicTrackSourceValue(panelMusicState.track);
   }
 
-  function stopPanelMusic() {
+  const panelMusicPreviewState = {
+    trackId: "",
+    loading: false,
+    audioEl: null
+  };
+
+  function stopPanelMusicPreview() {
+    if (panelMusicPreviewState.audioEl) {
+      try { panelMusicPreviewState.audioEl.pause(); } catch (_) { }
+      panelMusicPreviewState.audioEl = null;
+    }
+    panelMusicPreviewState.trackId = "";
+    panelMusicPreviewState.loading = false;
+  }
+
+  function updatePanelMusicPreviewVolume(volPct = 22) {
+    if (panelMusicPreviewState.audioEl) {
+      panelMusicPreviewState.audioEl.volume = Math.max(0, Math.min(1, normalizePercent(volPct, 22) / 100));
+    }
+  }
+
+  async function togglePanelMusicTrackPreview(track = null, trackId = "") {
+    if (panelMusicPreviewState.trackId === trackId) {
+      stopPanelMusicPreview();
+      syncMusicControls();
+      return;
+    }
+    stopPanelMusicPreview();
+    if (panelMusicAudioEl || panelMusicState.playing) {
+      if (panelMusicAudioEl) {
+        try { panelMusicAudioEl.pause(); } catch (_) { }
+        panelMusicAudioEl = null;
+      }
+      panelMusicNodes.forEach((node) => {
+        try { if (node?.stop) node.stop(); } catch (_) { }
+        try { if (node?.disconnect) node.disconnect(); } catch (_) { }
+      });
+      panelMusicNodes = [];
+      panelMusicState.playing = false;
+    }
+    panelMusicPreviewState.trackId = trackId;
+    panelMusicPreviewState.loading = true;
+    syncMusicControls();
+
+    const src = await resolvePanelMusicTrackPlayableSrc(track);
+    if (!src || panelMusicPreviewState.trackId !== trackId) {
+      stopPanelMusicPreview();
+      syncMusicControls();
+      return;
+    }
+
+    const audio = new Audio(src);
+    audio.crossOrigin = "anonymous";
+    audio.volume = Math.max(0, Math.min(1, normalizePercent(panelMusicState.volume, 22) / 100));
+    audio.onended = () => {
+      stopPanelMusicPreview();
+      syncMusicControls();
+    };
+    audio.onerror = () => {
+      stopPanelMusicPreview();
+      syncMusicControls();
+    };
+    panelMusicPreviewState.audioEl = audio;
+    panelMusicPreviewState.loading = false;
+    await audio.play().catch(() => {
+      stopPanelMusicPreview();
+    });
+    syncMusicControls();
+  }
+
+  function stopPanelMusic(opts = {}) {
+    if (opts?.forcePreviewStop === true) {
+      stopPanelMusicPreview();
+    }
     if (panelMusicAudioEl) {
       try { panelMusicAudioEl.pause(); } catch (_) { }
       panelMusicAudioEl = null;
@@ -1675,7 +1755,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const audio = new Audio(musicSrc);
       audio.crossOrigin = "anonymous";
       audio.loop = true;
-      audio.volume = Math.max(0, Math.min(1, (Number(panelMusicState.volume) || 0) / 100));
+      audio.volume = Math.max(0, Math.min(1, normalizePercent(panelMusicState.volume, 22) / 100));
       panelMusicAudioEl = audio;
       await audio.play();
       panelMusicState.playing = true;
@@ -1690,7 +1770,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     filter.type = "lowpass";
     filter.frequency.value = 900;
     filter.Q.value = 0.9;
-    master.gain.value = Math.max(0, Math.min(1, (Number(panelMusicState.volume) || 0) / 100 * 0.22));
+    master.gain.value = Math.max(0, Math.min(1, normalizePercent(panelMusicState.volume, 22) / 100 * 0.22));
     filter.connect(master);
     master.connect(ctx.destination);
     const pushOsc = (type, freq, gainValue, detune = 0) => {
@@ -1718,12 +1798,12 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const lfo = ctx.createOscillator();
     const lfoGain = ctx.createGain();
     lfo.type = "sine";
-    lfo.frequency.value = panelMusicState.preset === "pulse" ? 0.22 : 0.08;
-    lfoGain.gain.value = panelMusicState.preset === "pulse" ? 0.04 : 0.02;
+    lfo.frequency.value = 0.12;
+    lfoGain.gain.value = 80;
     lfo.connect(lfoGain);
-    lfoGain.connect(master.gain);
+    lfoGain.connect(filter.frequency);
     lfo.start();
-    panelMusicNodes.push(master, filter, lfo, lfoGain);
+    panelMusicNodes.push(lfo, lfoGain);
     panelMusicState.playing = true;
     syncMusicControls();
   }
@@ -1732,8 +1812,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const els = getEls();
     if (els.panelMusicPreset) els.panelMusicPreset.value = panelMusicState.preset;
     if (els.panelMusicVolume) els.panelMusicVolume.value = String(panelMusicState.volume);
-    const _volDisplay = document.getElementById("panelMusicVolumeDisplay");
-    if (_volDisplay) _volDisplay.textContent = String(panelMusicState.volume);
+    if (els.panelMusicVolumeDisplay) els.panelMusicVolumeDisplay.textContent = String(panelMusicState.volume);
     if (els.panelMusicTrackInfo) {
       const uploadedTracks = getPanelMusicUploadedTracks();
       const track = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
@@ -1754,6 +1833,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const selectedCount = uploadedTracks.filter((track) => track?.enabledInSession !== false).length;
       els.panelMusicTrackList.innerHTML = uploadedTracks.length
         ? uploadedTracks.map((track, index) => {
+          const trackId = `session-${index}`;
+          const isPreviewPlaying = panelMusicPreviewState.trackId === trackId && !panelMusicPreviewState.loading && !!panelMusicPreviewState.audioEl;
+          const isPreviewLoading = panelMusicPreviewState.trackId === trackId && panelMusicPreviewState.loading;
           const isSelected = panelMusicState.selectedTrackKind === "uploaded"
             && !panelMusicState.track?.model
             && String(panelMusicState.track?.slotLabel || "").trim() === String(track.slotLabel || "").trim();
@@ -1766,6 +1848,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
                 <span>${escapeHtml(track.name || "Audio")} · ${escapeHtml(origin)} · ${escapeHtml(`${Math.round(getPanelMusicTrackDurationSec(track))}s`)} · ${isEnabledInSession ? "Seleccionado" : "No seleccionado"}</span>
               </span>
               <span class="panel-music-track-item-actions">
+                <button class="row-icon-btn${isPreviewPlaying ? " is-playing" : ""}" type="button" data-action="preview-session-audio-item" data-track-index="${index}" title="${isPreviewPlaying ? "Detener reproducción" : "Reproducir este audio"}">
+                  <i class="fas ${isPreviewLoading ? "fa-spinner fa-spin" : (isPreviewPlaying ? "fa-pause" : "fa-play")}"></i>
+                </button>
                 <button class="row-icon-btn" type="button" data-action="toggle-session-audio-enabled" data-track-index="${index}" title="${isEnabledInSession ? "Quitar de esta sesión" : "Seleccionar para esta sesión"}">
                   <i class="fas ${isEnabledInSession ? "fa-check-square" : "fa-square"}"></i>
                 </button>
@@ -1789,22 +1874,30 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       } else if (panelMusicGlobalLibraryState.error) {
         els.panelMusicGlobalLibraryList.innerHTML = `<div class="music-track-info">${escapeHtml(panelMusicGlobalLibraryState.error)}</div>`;
       } else if (panelMusicGlobalLibraryState.items.length) {
-        els.panelMusicGlobalLibraryList.innerHTML = panelMusicGlobalLibraryState.items.map((track) => `
-          <div class="panel-music-track-item">
-            <span class="panel-music-track-item-copy">
-              <strong>${escapeHtml(track.name || "Audio")}</strong>
-              <span>${escapeHtml(`${Math.round(getPanelMusicTrackDurationSec(track))}s`)}${track.ownerEmail ? ` · ${escapeHtml(track.ownerEmail)}` : ""}</span>
-            </span>
-            <span class="panel-music-track-item-actions">
-              <button class="row-icon-btn" type="button" data-action="use-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="Añadir a esta sesión">
-                <i class="fas fa-plus"></i>
-              </button>
-              <button class="row-icon-btn" type="button" data-action="delete-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="Eliminar de la biblioteca global">
-                <i class="fas fa-trash"></i>
-              </button>
-            </span>
-          </div>
-        `).join("");
+        els.panelMusicGlobalLibraryList.innerHTML = panelMusicGlobalLibraryState.items.map((track) => {
+          const trackId = `global-${track.libraryId}`;
+          const isPreviewPlaying = panelMusicPreviewState.trackId === trackId && !panelMusicPreviewState.loading && !!panelMusicPreviewState.audioEl;
+          const isPreviewLoading = panelMusicPreviewState.trackId === trackId && panelMusicPreviewState.loading;
+          return `
+            <div class="panel-music-track-item">
+              <span class="panel-music-track-item-copy">
+                <strong>${escapeHtml(track.name || "Audio")}</strong>
+                <span>${escapeHtml(`${Math.round(getPanelMusicTrackDurationSec(track))}s`)}${track.ownerEmail ? ` · ${escapeHtml(track.ownerEmail)}` : ""}</span>
+              </span>
+              <span class="panel-music-track-item-actions">
+                <button class="row-icon-btn${isPreviewPlaying ? " is-playing" : ""}" type="button" data-action="preview-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="${isPreviewPlaying ? "Detener reproducción" : "Reproducir este audio"}">
+                  <i class="fas ${isPreviewLoading ? "fa-spinner fa-spin" : (isPreviewPlaying ? "fa-pause" : "fa-play")}"></i>
+                </button>
+                <button class="row-icon-btn" type="button" data-action="use-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="Añadir a esta sesión">
+                  <i class="fas fa-plus"></i>
+                </button>
+                <button class="row-icon-btn" type="button" data-action="delete-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="Eliminar de la biblioteca global">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </span>
+            </div>
+          `;
+        }).join("");
       } else {
         els.panelMusicGlobalLibraryList.innerHTML = `<div class="music-track-info">No hay audios globales todavía.</div>`;
       }
@@ -1847,8 +1940,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const currentLimiterEnabled = globalAudioMix.limiterEnabled;
     if (els.audioTrackMontageVolume) els.audioTrackMontageVolume.value = String(Math.max(0, Math.min(100, Number(currentVolume) || 0)));
     if (els.audioTrackMontageVolumeNumber) els.audioTrackMontageVolumeNumber.value = String(Math.max(0, Math.min(100, Number(currentVolume) || 0)));
-    if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 60)));
-    if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 60)));
+    if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 46)));
+    if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 46)));
     if (els.audioTrackStabilizeToggle) els.audioTrackStabilizeToggle.checked = currentStabilize === true;
     if (els.audioTrackLimiterToggle) els.audioTrackLimiterToggle.checked = currentLimiterEnabled;
     if (els.audioTrackMixInfo) {
@@ -1868,11 +1961,16 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     };
     const next = {
       preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
-      volume: Math.max(0, Math.min(100, Number(cfg?.volume) || 22)),
-      montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? cfg?.volume ?? 0))),
+      volume: normalizePercent(cfg?.volume, 22),
+      montageVolume: normalizePercent(
+        Object.prototype.hasOwnProperty.call(cfg || {}, "montageVolume")
+          ? cfg?.montageVolume
+          : (Object.prototype.hasOwnProperty.call(cfg || {}, "volume") ? cfg?.volume : 100),
+        100
+      ),
       duckingWhenGeminiPct: (() => {
         const raw = Number(cfg?.duckingWhenGeminiPct);
-        if (!Number.isFinite(raw)) return 60;
+        if (!Number.isFinite(raw)) return 46;
         if (raw >= 40 && raw <= 100) return raw;
         if (raw >= 0 && raw < 40) return Math.max(40, 100 - raw);
         return 60;
@@ -1928,7 +2026,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     syncMusicControls();
   }
 
-  function setPanelMontageDuckingWhenGeminiPct(nextValue = 60) {
+  function setPanelMontageDuckingWhenGeminiPct(nextValue = 46) {
     const clamped = Math.max(40, Math.min(100, Number(nextValue) || 0));
     if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
       const currentTrack = normalizePanelMusicTrack(panelMusicState.track);
@@ -2197,6 +2295,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     setPanelMontageLimiterEnabled,
     stopPanelMusic,
     startPanelMusic,
+    togglePanelMusicTrackPreview,
+    stopPanelMusicPreview,
+    updatePanelMusicPreviewVolume,
     resolvePanelMusicTrackSrc,
     getPanelMontageMusicConfig,
     handleTimelineSelectAudioLoopChip,

@@ -13,6 +13,7 @@ import {
   resolveActiveKaraokeWordIndex
 } from "./podcaster-karaoke.js";
 import {
+  clearPodcasterLocalMediaCache,
   deletePodcasterLocalMediaKey,
   getPodcasterLocalMediaBlob,
   putPodcasterLocalMediaBlob
@@ -23,6 +24,37 @@ import {
  * Unified Playback Controller for Podcaster Studio
  * Handles Play/Pause/Stop, Audio/Video Sync, Overlays, and master clock.
  */
+
+const STAGE_VIDEO_FRAME_TIMEOUT_MS = 1800;
+const STAGE_VIDEO_FRAME_SOFT_TIMEOUT_MS = 520;
+const VIDEO_MEDIA_READY_TIMEOUT_MS = 1800;
+const VIDEO_MEDIA_READY_TIMEOUT_PERSISTENT_MS = 2200;
+const STAGE_PRELOADER_TIMEOUT_MS = 1200;
+
+const PLAYBACK_PREPARE_LOOKAHEAD_MS = 9000;
+const PLAYBACK_SEEK_LOOKAHEAD_MS = 7000;
+const SYNC_VIDEO_UPCOMING_LOOKAHEAD_MS = 45000;
+const SYNC_VIDEO_UPCOMING_MAX_ENTRIES = 8;
+const OVERLAP_TRANSITION_DEFAULT_DURATION_MS = 320;
+const OVERLAP_ENTRY_SIGNATURE_SEPARATOR = "||";
+const OVERLAP_ENTRY_MEDIA_KIND_VIDEO = "video";
+const OVERLAP_ENTRY_MEDIA_KIND_IMAGE = "image";
+const BACKGROUND_AUDIO_START_TIMEOUT_MS = 1400;
+const BACKGROUND_AUDIO_PREPARE_TIMEOUT_MS = 3500;
+const BACKGROUND_AUDIO_RETRY_GRACE_MS = 120;
+const BACKGROUND_AUDIO_PLAY_RETRY_GRACE_MS = 900;
+const DIALOGUE_AUDIO_READY_TIMEOUT_MS = 8000;
+const DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS = 1800;
+const DIALOGUE_AUDIO_CARRYOVER_TOLERANCE_MS = 260;
+const SESSION_MEDIA_READY_TIMEOUT_MS = 12000;
+const LEGACY_AUTOMATIC_DIALOGUE_OFFSET_MS = 1000;
+const TICK_PREV_OFFSET_MS = 500;
+const TICK_NEXT_OFFSET_MS = 120;
+const STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC = 0.04;
+const STAGE_VIDEO_RESYNC_TOLERANCE_SEC = 0.35;
+const STAGE_VIDEO_RESYNC_TOLERANCE_DEFAULT_SEC = 0.75;
+const STAGE_VIDEO_BACKDROP_RESYNC_TOLERANCE_SEC = 0.9;
+const DIALOGUE_AUDIO_UPCOMING_LOOKAHEAD_MS = 30000;
 
 class EventEmitter {
   constructor() { this.listeners = {}; }
@@ -55,8 +87,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       isTickProcessing: false,
       stopAtMs: 0,
       standaloneAudio: null,
-      isPreparing: false
+      isPreparing: false,
+      forceStageMediaSync: false
     };
+    this.dialogueAudioActivePrepareSignature = "";
+    this.dialogueAudioActivePrepareAtMs = 0;
     this.lastTickMs = 0;
     this.cachedTickEntries = null;
     this.cachedTickEntriesTime = 0;
@@ -65,12 +100,17 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.dialoguePlayers = {};
     this.audioCache = {};
     this.dialogueAudioSourceKeys = {};
+    this.dialoguePreparationPromises = new Map();
+    this.sessionMediaPreparationKey = "";
+    this.sessionMediaPreparationPromise = null;
+    this.clockRebaseRequested = false;
     this.blobCache = new Map();
     this.fetchPromises = new Map();
     this.mediaCacheName = 'podcaster-media-cache-v1';
     this.videoPrewarmKey = "";
     this.videoPrewarmPromise = null;
-    this.dialoguePreparationPromises = new Map();
+    this.videoLookAheadKey = "";
+    this.lastSessionSyncSignature = "";
 
 
     this.backgroundAudio = null;
@@ -86,6 +126,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundResolvedSource = "";
     this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
+    this.backgroundFadeSegmentSignature = "";
     this.backgroundSegmentSkewMs = null;
     this.backgroundSegmentIndex = -1;
     this.backgroundSyncAnchorMs = null;
@@ -107,15 +148,22 @@ export class PodcasterPlaybackController extends EventEmitter {
       imageLoadingPromise: null,
       imageSwapToken: 0
     };
+    this.podcastStageVideoLoadTokenSeq = 0;
+    this.podcastStageVideoLoadTokensByEl = new WeakMap();
     this.stageSwitchSeq = 0;
     this.activeLoopId = 0;
     this.visualLayoutMode = "default";
     this.overlapState = {
       key: "",
       backSlot: 0,
-      frontSlot: 1
+      frontSlot: 1,
+      backSignature: "",
+      frontSignature: ""
     };
     this.prepareSequence = 0;
+    this.playbackRangePreparationSignature = "";
+    this.playbackRangePreparationAtMs = 0;
+    this.pendingTimelineSeekTick = null;
     this.mediaTelemetry = {
       sourceAssignments: 0,
       prepareCount: 0
@@ -132,6 +180,15 @@ export class PodcasterPlaybackController extends EventEmitter {
     const start = Math.max(0, Number(startMs || 0));
     const end = Math.max(start, Number(endMs || 0));
     return current >= (start - toleranceMs) && current <= (end + toleranceMs);
+  }
+  isVideoSurfaceReady(videoEl = null, expectedSrc = "") {
+    if (!videoEl) return false;
+    const cleanExpectedSrc = String(expectedSrc || "").trim();
+    const haveCurrentData = typeof HTMLMediaElement !== "undefined"
+      ? HTMLMediaElement.HAVE_CURRENT_DATA
+      : 2;
+    return (!cleanExpectedSrc || String(videoEl.dataset?.src || "").trim() === cleanExpectedSrc)
+      && Number(videoEl.readyState || 0) >= haveCurrentData;
   }
   clampPlaybackRate(rate, min = 0.5, max = 10) {
     return Math.max(min, Math.min(max, Number(rate) || 1));
@@ -276,7 +333,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       || this.resolveStageMediaScaleContainer()
       || null;
     const width = Math.max(2, Number(container?.clientWidth || 0) || 0);
-    const height = Math.max(2, Number(container?.clientHeight || 0) || 0);
+    const containerHeight = Math.max(2, Number(container?.clientHeight || 0) || 0);
+    const floatingHeadHeight = container?.classList?.contains("is-timeline-floating-preview")
+      ? Math.max(0, Number.parseFloat(
+          window.getComputedStyle(container).getPropertyValue("--podcast-timeline-floating-preview-head-height")
+        ) || 0)
+      : 0;
+    const height = Math.max(2, containerHeight - floatingHeadHeight);
     return {
       container,
       width: width || 1280,
@@ -322,6 +385,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", `${Number(spec.motion?.startOffsetYPx || 0).toFixed(3)}px`);
     surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", `${Number(spec.motion?.endOffsetYPx || 0).toFixed(3)}px`);
     surfaceEl.style.setProperty("--pod-scene-media-motion-duration", `${Number(spec.motion?.durationSec || 12).toFixed(3)}s`);
+    surfaceEl.style.setProperty("--kb-duration", `${Number(spec.kenBurns?.playbackDurationSec || spec.motion?.durationSec || 12).toFixed(3)}s`);
+    surfaceEl.style.setProperty("--kb-pan-start-x", `${Number(spec.kenBurns?.traversal?.startXPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--kb-pan-end-x", `${Number(spec.kenBurns?.traversal?.endXPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--kb-pan-start-y", `${Number(spec.kenBurns?.traversal?.startYPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--kb-pan-end-y", `${Number(spec.kenBurns?.traversal?.endYPx || 0).toFixed(3)}px`);
   }
   reapplyEntryVisualLayout(entry = null, surfaceEl = null) {
     if (!surfaceEl) return;
@@ -361,6 +429,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       surfaceEl.style.setProperty("--pod-scene-media-motion-start-y", "0px");
       surfaceEl.style.setProperty("--pod-scene-media-motion-end-y", "0px");
       surfaceEl.style.setProperty("--pod-scene-media-motion-duration", "12s");
+      surfaceEl.style.setProperty("--kb-duration", "12s");
+      surfaceEl.style.setProperty("--kb-pan-start-x", "0px");
+      surfaceEl.style.setProperty("--kb-pan-end-x", "0px");
+      surfaceEl.style.setProperty("--kb-pan-start-y", "0px");
+      surfaceEl.style.setProperty("--kb-pan-end-y", "0px");
     }
     surfaceEl.style.setProperty("--pod-scene-media-scale", String(state.mediaScale));
     surfaceEl.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
@@ -398,11 +471,18 @@ export class PodcasterPlaybackController extends EventEmitter {
     surfaceEl.style.removeProperty("--pod-scene-media-motion-start-y");
     surfaceEl.style.removeProperty("--pod-scene-media-motion-end-y");
     surfaceEl.style.removeProperty("--pod-scene-media-motion-duration");
+    surfaceEl.style.removeProperty("--kb-duration");
+    surfaceEl.style.removeProperty("--kb-pan-start-x");
+    surfaceEl.style.removeProperty("--kb-pan-end-x");
+    surfaceEl.style.removeProperty("--kb-pan-start-y");
+    surfaceEl.style.removeProperty("--kb-pan-end-y");
     surfaceEl.style.removeProperty("--pod-scene-media-scale");
     surfaceEl.style.removeProperty("--pod-scene-media-x");
     surfaceEl.style.removeProperty("--pod-scene-media-y");
     delete surfaceEl.dataset.sceneMediaMotionPreset;
     delete surfaceEl.dataset.sceneMediaLayout;
+    delete surfaceEl.dataset.sceneMediaVisualStateKey;
+    delete surfaceEl.dataset.sceneMediaKenBurnsAnimationKey;
   }
   resolveSegmentSourceOffsetSec(currentMs, segmentStartMs, trimInMs = 0, clipPlaybackRate = 1) {
     const safeTrimInMs = Math.max(0, Number(trimInMs || 0));
@@ -424,10 +504,18 @@ export class PodcasterPlaybackController extends EventEmitter {
       || 500
     );
     const segmentTimelineMs = Math.max(500, Math.round(rawVisibleMs / safeRate));
-    const measuredAudioVisibleMs = rowId
-      ? Math.max(0, Math.round(Number(this.deps?.resolveRowAudioDurationMs?.(rowId, this.state?.session) || 0) || 0) - Math.round(trimInMs / safeRate))
+    const rowAudioDurationMs = rowId
+      ? Math.max(0, Math.round(Number(this.deps?.resolveRowAudioDurationMs?.(rowId, this.state?.session) || 0) || 0))
       : 0;
-    return Math.max(500, segmentTimelineMs, measuredAudioVisibleMs);
+    const measuredAudioVisibleMs = rowId && trimmedVisibleMs > 0
+      ? Math.max(0, Math.round(trimmedVisibleMs / safeRate))
+      : (rowId
+        ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / safeRate))
+        : 0);
+    const durationMs = measuredAudioVisibleMs > 0
+      ? Math.min(segmentTimelineMs, measuredAudioVisibleMs)
+      : segmentTimelineMs;
+    return Math.max(500, durationMs);
   }
   resolveGeminiSegmentWindowForRow(session = null, cfg = null, rowId = "", currentMs = 0) {
     const key = String(rowId || "").trim();
@@ -551,6 +639,106 @@ export class PodcasterPlaybackController extends EventEmitter {
       return isVideo ? "streaming" : "blob";
     }
     return configMode;
+  }
+  shouldPersistStageVideoSource(url = "") {
+    const cleanUrl = String(url || "").trim();
+    if (!cleanUrl || cleanUrl.startsWith("blob:") || cleanUrl.startsWith("data:")) return false;
+    return this.resolveActiveMediaLoadMode(cleanUrl) === "blob";
+  }
+  shouldResyncStageVideo(videoEl = null, targetTimeSec = 0, options = {}) {
+    if (!videoEl || !Number.isFinite(Number(targetTimeSec))) return false;
+    const currentTimeSec = Number(videoEl.currentTime || 0) || 0;
+    const driftSec = Math.abs(currentTimeSec - Number(targetTimeSec));
+    if (driftSec < STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC) return false;
+    if (options.force === true || this.state.forceStageMediaSync === true || this.state.isPlaying !== true || options.isHoldActive === true) {
+      return true;
+    }
+    const haveCurrentData = typeof HTMLMediaElement !== "undefined"
+      ? HTMLMediaElement.HAVE_CURRENT_DATA
+      : 2;
+    // Seeking a streaming video while its decoder is recovering flushes the
+    // buffer again. Let the existing request finish instead of creating the
+    // pause/jump loop observed in the Snoopy editor.
+    if (videoEl.seeking === true || Number(videoEl.readyState || 0) < haveCurrentData) return false;
+    const toleranceSec = Math.max(
+      STAGE_VIDEO_RESYNC_TOLERANCE_SEC,
+      Number(options.toleranceSec ?? STAGE_VIDEO_RESYNC_TOLERANCE_DEFAULT_SEC)
+        || STAGE_VIDEO_RESYNC_TOLERANCE_DEFAULT_SEC
+    );
+    return driftSec > toleranceSec;
+  }
+  buildOverlapEntrySignature(entry = null, isImage = false) {
+    if (!entry) return "";
+    const kind = isImage === true ? OVERLAP_ENTRY_MEDIA_KIND_IMAGE : OVERLAP_ENTRY_MEDIA_KIND_VIDEO;
+    const rowId = String(entry.rowId || "").trim();
+    const src = String(entry.videoSrc || "").trim();
+    const entryType = Number(entry.clip?.trimInMs || 0) || 0;
+    return `${kind}${OVERLAP_ENTRY_SIGNATURE_SEPARATOR}${rowId}${OVERLAP_ENTRY_SIGNATURE_SEPARATOR}${src}${OVERLAP_ENTRY_SIGNATURE_SEPARATOR}${entryType}`;
+  }
+  waitForStageVideoFrame(videoEl = null, expectedSrc = "", timeoutMs = STAGE_VIDEO_FRAME_TIMEOUT_MS) {
+    if (!videoEl) return Promise.resolve(false);
+    const cleanExpectedSrc = String(expectedSrc || "").trim();
+    const isCurrentSourceReady = () => this.isVideoSurfaceReady(videoEl, cleanExpectedSrc);
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let frameCallbackId = 0;
+      let fallbackFrameId = 0;
+      const finish = (ready = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        videoEl.removeEventListener("error", onError);
+        videoEl.removeEventListener("emptied", onError);
+        videoEl.removeEventListener("seeked", onFallbackCandidate);
+        videoEl.removeEventListener("loadeddata", onFallbackCandidate);
+        videoEl.removeEventListener("timeupdate", onFallbackCandidate);
+        if (frameCallbackId && typeof videoEl.cancelVideoFrameCallback === "function") {
+          try { videoEl.cancelVideoFrameCallback(frameCallbackId); } catch (_) { }
+        }
+        if (fallbackFrameId && typeof cancelAnimationFrame === "function") {
+          try { cancelAnimationFrame(fallbackFrameId); } catch (_) { }
+        }
+        resolve(Boolean(ready) && isCurrentSourceReady());
+      };
+      const onError = () => finish(false);
+      const onFallbackCandidate = () => {
+        if (!isCurrentSourceReady() || typeof videoEl.requestVideoFrameCallback === "function") return;
+        if (fallbackFrameId || typeof requestAnimationFrame !== "function") {
+          if (typeof requestAnimationFrame !== "function") finish(true);
+          return;
+        }
+        // Two paint turns are the closest fallback to a compositor frame on
+        // browsers without requestVideoFrameCallback.
+        fallbackFrameId = requestAnimationFrame(() => {
+          fallbackFrameId = requestAnimationFrame(() => finish(true));
+        });
+      };
+      const timeoutId = setTimeout(
+        () => finish(isCurrentSourceReady()),
+        Math.max(250, Number(timeoutMs || STAGE_VIDEO_FRAME_TIMEOUT_MS))
+      );
+      videoEl.addEventListener("error", onError, { once: true });
+      videoEl.addEventListener("emptied", onError, { once: true });
+
+      if (typeof videoEl.requestVideoFrameCallback === "function") {
+        frameCallbackId = videoEl.requestVideoFrameCallback(() => finish(true));
+      } else {
+        videoEl.addEventListener("seeked", onFallbackCandidate);
+        videoEl.addEventListener("loadeddata", onFallbackCandidate);
+        videoEl.addEventListener("timeupdate", onFallbackCandidate);
+        onFallbackCandidate();
+      }
+    });
+  }
+  async waitForStageVideoFrameReady(videoEl = null, expectedSrc = "", timeoutMs = STAGE_VIDEO_FRAME_TIMEOUT_MS, options = {}) {
+    const primaryReady = await this.waitForStageVideoFrame(videoEl, expectedSrc, timeoutMs);
+    if (primaryReady || this.isVideoSurfaceReady(videoEl, expectedSrc)) return true;
+
+    const softTimeoutMs = Number(options?.softTimeoutMs || STAGE_VIDEO_FRAME_SOFT_TIMEOUT_MS) || 0;
+    if (softTimeoutMs <= 0) return false;
+    const softReady = await this.waitForStageVideoFrame(videoEl, expectedSrc, softTimeoutMs);
+    return softReady || this.isVideoSurfaceReady(videoEl, expectedSrc);
   }
   getBlobUrlSync(url) {
     if (!url) return "";
@@ -710,7 +898,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       } else {
         const resolvedDirectSource = this.deps?.resolveStorageAudioUrl?.(directSource, clip?.storagePath);
         if (resolvedDirectSource && String(resolvedDirectSource).trim()) {
-          return this.getBlobUrl(resolvedDirectSource, { persistent: true });
+          return this.getBlobUrl(resolvedDirectSource, {
+            persistent: this.resolveActiveMediaLoadMode(resolvedDirectSource) === "blob"
+          });
         }
         return directSource;
       }
@@ -720,19 +910,63 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!rawUrl) {
       const fallbackUrl = downloadUrl;
       if (!fallbackUrl) return "";
-      return this.getBlobUrl(fallbackUrl, { persistent: true });
+      return this.getBlobUrl(fallbackUrl, {
+        persistent: this.resolveActiveMediaLoadMode(fallbackUrl) === "blob"
+      });
     }
-    return this.getBlobUrl(rawUrl, { persistent: true });
+    return this.getBlobUrl(rawUrl, {
+      persistent: this.resolveActiveMediaLoadMode(rawUrl) === "blob"
+    });
+  }
+
+  async resolveDialoguePlaybackAudioSource(clip = null) {
+    const resolvedSource = await this.resolveAudioSource(clip);
+    if (!resolvedSource) return "";
+    if (/^(?:blob:|data:)/i.test(String(resolvedSource).trim())) return String(resolvedSource).trim();
+    const playableSource = await this.getBlobUrl(String(resolvedSource).trim(), { persistent: true });
+    if (!playableSource) {
+      this.emitMediaTelemetry("dialogue-audio-source-resolve-failed", {
+        source: resolvedSource,
+        sourceKey: this.resolveAudioSourceKey(clip)
+      });
+    }
+    return playableSource;
+  }
+
+  normalizeAudioSourceKey(rawUrl = "") {
+    const clean = String(rawUrl || "").trim();
+    if (!clean) return "";
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      const params = new URLSearchParams(parsed.search || "");
+      const volatileParams = ["token", "downloadToken", "X-Goog-Algorithm", "X-Goog-Credential", "X-Goog-Date", "X-Goog-Expires", "X-Goog-SignedHeaders", "X-Goog-Signature"];
+      volatileParams.forEach((key) => params.delete(key));
+      parsed.search = params.toString();
+      return `${parsed.origin}${parsed.pathname}${parsed.search ? `?${params.toString()}` : ""}${parsed.hash || ""}`;
+    } catch (_) {
+      return clean;
+    }
+  }
+
+  normalizeTimelineSourceKey(rawUrl = "") {
+    const clean = String(rawUrl || "").trim();
+    if (!clean) return "";
+    if (clean.startsWith("podcaster-local-media:")) {
+      const localKey = clean.replace("podcaster-local-media:", "").trim();
+      return localKey ? `local:${localKey}` : clean;
+    }
+    if (/^(?:blob:|data:)/i.test(clean)) return clean;
+    return this.normalizeAudioSourceKey(clean);
   }
 
   resolveAudioSourceKey(clip = null) {
     const localMediaPrefix = "podcaster-local-media:";
     const remoteAudioUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
-    if (remoteAudioUrl) return String(remoteAudioUrl).trim();
+    if (remoteAudioUrl) return `audio:${this.normalizeAudioSourceKey(remoteAudioUrl)}`;
     const storagePath = String(clip?.storagePath || "").trim();
     if (storagePath) return `storage:${storagePath}`;
     const downloadUrl = String(clip?.downloadUrl || "").trim();
-    if (downloadUrl) return downloadUrl;
+    if (downloadUrl) return `audio:${this.normalizeAudioSourceKey(downloadUrl)}`;
     const localKey = String(clip?.localMediaCacheKey || "").trim();
     if (localKey) return `local:${localKey}`;
     const sourceUrl = String(clip?.sourceUrl || "").trim();
@@ -741,13 +975,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (normalizedLocalKey) return `local:${normalizedLocalKey}`;
       return sourceUrl;
     }
-    if (sourceUrl) return sourceUrl;
+    if (sourceUrl) return `audio:${this.normalizeAudioSourceKey(sourceUrl)}`;
     const localDataUrl = String(clip?.localDataUrl || clip?.dataUrl || "").trim();
     if (localDataUrl.startsWith(localMediaPrefix)) {
       const normalizedLocalKey = localDataUrl.replace(localMediaPrefix, "").trim();
       if (normalizedLocalKey) return `local:${normalizedLocalKey}`;
     }
-    if (localDataUrl) return localDataUrl.slice(0, 240);
+    if (localDataUrl) return this.normalizeAudioSourceKey(localDataUrl).slice(0, 240);
     return "";
   }
 
@@ -831,10 +1065,10 @@ export class PodcasterPlaybackController extends EventEmitter {
           this.blobCache.set(url, finalUrl);
           if (cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
           return finalUrl;
-        } catch (e) {
-          console.error("[podcaster-playback-controller] Error resolving streaming URL:", e);
-          return url;
-        } finally {
+          } catch (e) {
+            console.error("[podcaster-playback-controller] Error resolving streaming URL:", e);
+            throw e;
+          } finally {
           this.fetchPromises.delete(fetchPromiseKey);
         }
       })();
@@ -940,18 +1174,6 @@ export class PodcasterPlaybackController extends EventEmitter {
         let resp = await fetch(finalUrl, fetchOptions);
         
         // Fallback local si falla o da 404 estando en localhost
-        const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-        if (isLocal && (!resp.ok || resp.status === 404) && finalUrl.includes(".onrender.com")) {
-          try {
-            const parsed = new URL(finalUrl);
-            const localUrl = `http://127.0.0.1:8787/api${parsed.pathname.replace(/^\/api/, "")}${parsed.search}`;
-            const localResp = await fetch(localUrl, fetchOptions).catch(() => null);
-            if (localResp && localResp.ok) {
-              resp = localResp;
-            }
-          } catch (_) { }
-        }
-
         if (!resp.ok) {
           if (resp.status === 404 && this.deps?.markStaleProxyMediaUrl) {
             this.deps.markStaleProxyMediaUrl(url, 'proxy-media-404-from-controller');
@@ -987,9 +1209,13 @@ export class PodcasterPlaybackController extends EventEmitter {
           this.blobCache.set(url, "404");
           return "";
         } else {
-          this.blobCache.set(url, url); 
+          this.blobCache.set(url, "404");
+          this.emitMediaTelemetry("media-fetch-failed", {
+            source: url,
+            message: String(e?.message || "unknown")
+          });
+          return "";
         }
-        return url;
       } finally {
         this.fetchPromises.delete(fetchPromiseKey);
       }
@@ -1000,11 +1226,15 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   collectTimelineStageVideoEntries(session = null) {
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session || this.state.session || this.deps?.getActiveSession?.()) || [];
+    const normalizeSource = (value) => {
+      const normalized = this.normalizeTimelineSourceKey?.(String(value || "").trim());
+      return String(normalized || String(value || "").trim());
+    };
     const seen = new Set();
     return entries.filter((entry) => {
-      const src = String(entry?.videoSrc || "").trim();
-      if (!src || seen.has(src) || this.isImageStageEntry(entry)) return false;
-      seen.add(src);
+      const normalizedSrc = normalizeSource(entry?.videoSrc);
+      if (!normalizedSrc || seen.has(normalizedSrc) || this.isImageStageEntry(entry)) return false;
+      seen.add(normalizedSrc);
       return true;
     });
   }
@@ -1021,70 +1251,10 @@ export class PodcasterPlaybackController extends EventEmitter {
     });
   }
 
-  async preloadStageVideosAroundMs(currentMs = 0, options = {}) {
-    const session = options.session || this.state.session || this.deps?.getActiveSession?.();
-    const entries = Array.isArray(options.entries) ? options.entries : this.collectTimelineStageVideoEntries(session);
-    if (!entries.length) return false;
-    const sortedEntries = [...entries].sort((a, b) =>
-      Number(a?.startMs || 0) - Number(b?.startMs || 0)
-      || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
-      || Number(a?.index || 0) - Number(b?.index || 0)
-    );
-
-    const toleranceMs = this.getTimelineLookupToleranceMs();
-    const targetMs = Math.max(0, Number(currentMs || 0) || 0);
-    const activeIndex = resolveTimelineIndexAtMs(sortedEntries, targetMs, { toleranceMs });
-    const limit = Math.max(1, Math.min(6, Number(options.limit || 4) || 4));
-    const selectedSet = new Set();
-    const selected = [];
-    const addEntryByIndex = (index) => {
-      if (index < 0 || index >= sortedEntries.length) return;
-      const entry = sortedEntries[index] || null;
-      if (!entry) return;
-      const src = String(entry?.videoSrc || "").trim();
-      if (!src || selectedSet.has(src)) return;
-      selectedSet.add(src);
-      selected.push(entry);
-    };
-
-    if (activeIndex >= 0) {
-      addEntryByIndex(activeIndex);
-      for (let offset = 1; offset <= limit && selected.length < limit; offset += 1) {
-        addEntryByIndex(activeIndex + offset);
-      }
-      for (let offset = 1; offset <= limit && selected.length < limit; offset += 1) {
-        addEntryByIndex(activeIndex - offset);
-      }
-    }
-
-    if (selected.length < limit) {
-      const remaining = this.prioritizeStageVideoEntriesForMs(sortedEntries, targetMs)
-        .filter((entry) => !selectedSet.has(String(entry?.videoSrc || "").trim()));
-      for (const entry of remaining) {
-        if (selected.length >= limit) break;
-        selected.push(entry);
-        selectedSet.add(String(entry?.videoSrc || "").trim());
-      }
-    }
-
-    if (!selected.length) return false;
-    const current = selected[0] || null;
-    const tasks = selected.map((entry) => this.getBlobUrl(entry.videoSrc, { persistent: true }).catch(() => ""));
-    if (options.awaitCurrent === true && current) {
-      await tasks[0];
-      const next = selected[1];
-      if (selected.length > 1 && next) {
-        await tasks[1];
-      }
-    }
-    Promise.allSettled(tasks).catch(() => { });
-    return true;
-  }
-
   prewarmTimelineStageVideos(session = null, options = {}) {
     const entries = this.collectTimelineStageVideoEntries(session);
     if (!entries.length) return Promise.resolve(false);
-    const key = entries.map((entry) => String(entry?.videoSrc || "").trim()).filter(Boolean).join("|");
+    const key = entries.map((entry) => this.normalizeTimelineSourceKey?.(String(entry?.videoSrc || "").trim()) || String(entry?.videoSrc || "").trim()).filter(Boolean).join("|");
     if (!options.force && this.videoPrewarmKey === key && this.videoPrewarmPromise) {
       return this.videoPrewarmPromise;
     }
@@ -1099,7 +1269,11 @@ export class PodcasterPlaybackController extends EventEmitter {
           const entry = queue[index++];
           const src = String(entry?.videoSrc || "").trim();
           if (!src) continue;
-          try { await this.getBlobUrl(src, { persistent: true }); } catch (_) { }
+          try {
+            await this.getBlobUrl(src, {
+              persistent: this.shouldPersistStageVideoSource(src)
+            });
+          } catch (_) { }
         }
       };
       await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker()));
@@ -1163,7 +1337,94 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.state.useMse = false; // Force disable MSE as it is an incomplete experimental feature
     const totalMs = this.deps?.getTimelineTotalDurationMs?.(this.state.session) || 0;
     this.state.totalDurationMs = Number.isFinite(totalMs) ? Math.max(0, totalMs) : 0;
-    this.prewarmDialogueAudios(this.state.session);
+    const nextSyncSignature = this.buildSessionSyncSignature(this.state.session, this.state.config);
+    if (nextSyncSignature && nextSyncSignature !== this.lastSessionSyncSignature) {
+      this.lastSessionSyncSignature = nextSyncSignature;
+      this.playbackRangePreparationSignature = "";
+      this.playbackRangePreparationAtMs = 0;
+      void this.prepareSessionMedia({ session: this.state.session }).catch(() => {});
+    }
+  }
+
+  buildSessionSyncSignature(session, config = null) {
+    const targetSession = session || this.state.session || this.deps?.getActiveSession?.();
+    const targetConfig = config || this.state.config || this.deps?.getPodcastVideoConfig?.(targetSession);
+    if (!targetSession) return "";
+    const geminiTrackSignature = (() => {
+      const track = targetConfig?.geminiDialogueTrack || {};
+      const segments = Array.isArray(track?.segments) ? track.segments : [];
+      const segmentSignature = segments
+        .map((segment) => {
+          const rowId = String(segment?.rowId || "").trim();
+          const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+          const endMs = Math.max(0, Math.round(Number(segment?.endMs || 0) || 0));
+          const volume = Number.isFinite(Number(segment?.volume || 0)) ? Number(segment.volume) : 1;
+          const fadeInMs = Math.max(0, Math.round(Number(segment?.fadeInMs || 0) || 0));
+          const fadeOutMs = Math.max(0, Math.round(Number(segment?.fadeOutMs || 0) || 0));
+          const voiceId = String(segment?.dialogueAudioId || segment?.sourceId || "").trim();
+          return `${rowId}|${startMs}|${endMs}|${volume}|${fadeInMs}|${fadeOutMs}|${voiceId}`;
+        })
+        .filter(Boolean)
+        .sort()
+        .join("||");
+      return `${String(track?.volumePct ?? 100)}|${String(track?.duckingWhenGeminiPct ?? 60)}|${segments.length}|${segmentSignature}`;
+    })();
+    const rows = Array.isArray(targetSession?.script?.rows) ? targetSession.script.rows : [];
+    const rowSignature = rows.map((row) => {
+      const rowId = String(row?.id || "").trim();
+      if (!rowId) return "";
+      const clip = this.deps?.resolveDialogueAudioForRow?.(targetSession, rowId);
+      return `${rowId}:${this.resolveAudioSourceKey(clip) || "none"}`;
+    }).filter(Boolean).join("|");
+    const timelineEntries = this.deps?.buildTimelineRuntimeEntries?.(targetSession) || [];
+    const timelineSignature = timelineEntries.map((entry) => {
+      const rowId = String(entry?.rowId || "").trim();
+      const videoSrc = this.normalizeTimelineSourceKey(entry?.videoSrc || "");
+      const startMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+      return `${rowId}:${videoSrc}:${startMs}`;
+    }).filter(Boolean).join("|");
+    const configSignature = targetConfig
+      ? [
+          String(targetConfig?.timelineViewMode || "").trim(),
+          String(targetConfig?.reelModeEnabled || false),
+          String(Number.isFinite(Number(targetConfig?.geminiDialogueTrack?.volumePct || 100)) ? Number(targetConfig?.geminiDialogueTrack?.volumePct || 100) : 100),
+          String(this.resolveAudioSourceKey(targetConfig?.geminiDialogueTrack || null)),
+          String(geminiTrackSignature)
+        ].join("|")
+      : "";
+    return [
+      String(targetSession?.id || "").trim(),
+      configSignature,
+      rowSignature,
+      timelineSignature
+    ].join("|");
+  }
+
+  buildPlaybackRangePreparationSignature(atMs = this.state.currentMs, lookAheadMs = PLAYBACK_PREPARE_LOOKAHEAD_MS, options = {}) {
+    const session = options.session || this.state.session || this.deps?.getActiveSession?.();
+    const criticalOnly = options.criticalOnly !== false;
+    const signatureBase = this.buildSessionSyncSignature(session, this.state.config || this.deps?.getPodcastVideoConfig?.(session));
+    if (!signatureBase) return "";
+    const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
+    const fromMs = Math.max(0, Math.round(Number(atMs || 0) || 0));
+    const lookAhead = Math.max(1000, Number(lookAheadMs || 0) || PLAYBACK_PREPARE_LOOKAHEAD_MS);
+    const bucketMs = 250;
+    const bucketedMs = Math.floor(fromMs / bucketMs) * bucketMs;
+    const untilMs = fromMs + lookAhead;
+    const selected = entries
+      .filter((entry) => Number(entry?.endMs || 0) >= fromMs && Number(entry?.startMs || 0) <= untilMs)
+      .slice(0, 3);
+    const selectedSignature = selected
+      .map((entry) => {
+        const rowId = String(entry?.rowId || "").trim();
+        const videoSrc = String(entry?.videoSrc || "").trim();
+        const startMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+        const endMs = Math.max(0, Math.round(Number(entry?.endMs || 0) || 0));
+        return `${rowId}:${videoSrc}:${startMs}:${endMs}`;
+      })
+      .join("|");
+    const activeRangeSignature = criticalOnly ? "critical" : "full";
+    return `prepare:${signatureBase}|at:${bucketedMs}|look:${lookAhead}|range:${activeRangeSignature}|entries:${selectedSignature}`;
   }
 
   /**
@@ -1171,13 +1432,14 @@ export class PodcasterPlaybackController extends EventEmitter {
    * Call this whenever the audio source for a row changes (e.g. after regeneration)
    * so the next tick creates a fresh Audio element and fires loadedmetadata.
    */
-  invalidateRowAudioCache(rowId = "", options = {}) {
+  async invalidateRowAudioCache(rowId = "", options = {}) {
     const key = String(rowId || "").trim();
     if (!key) return;
     const session = this.state.session || this.deps?.getActiveSession?.();
     const currentClip = this.deps?.resolveDialogueAudioForRow?.(session, key);
     const audio = this.dialoguePlayers[key];
     const sourceCandidates = new Set();
+    const persistentEvictionKeys = new Set();
     const addSourceCandidate = (value = "") => {
       const candidate = String(value || "").trim();
       if (candidate) sourceCandidates.add(candidate);
@@ -1210,6 +1472,18 @@ export class PodcasterPlaybackController extends EventEmitter {
       addSourceCandidate(audio.currentSrc);
       addSourceCandidate(audio.src);
     }
+
+    // Desconecta primero el consumidor del blob. Revocarlo mientras el elemento
+    // todavía lo tiene asignado provoca ERR_FILE_NOT_FOUND durante regeneraciones.
+    if (audio) {
+      try { audio.pause(); } catch (_) { }
+      try { audio.removeAttribute("src"); } catch (_) { audio.src = ""; }
+      try { audio.load(); } catch (_) { }
+      delete this.dialoguePlayers[key];
+      delete this.audioCache[key];
+    }
+    delete this.dialogueAudioSourceKeys[key];
+
     sourceCandidates.forEach((candidate) => {
       const cacheKey = this.resolvePersistentMediaCacheKey(candidate);
       [candidate, cacheKey].filter(Boolean).forEach((cacheCandidate) => {
@@ -1221,19 +1495,33 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.fetchPromises.delete(cacheCandidate);
         this.fetchPromises.delete(`streaming:${cacheCandidate}`);
         this.fetchPromises.delete(`persistent:${cacheCandidate}`);
+        if (!/^(?:blob:|data:)/i.test(cacheCandidate)) {
+          persistentEvictionKeys.add(`stage-media:${cacheCandidate}`);
+        }
       });
       if (candidate.startsWith("blob:")) {
         try { URL.revokeObjectURL(candidate); } catch (_) { }
       }
     });
-    if (audio) {
-      try { audio.pause(); } catch (_) { }
-      try { audio.removeAttribute("src"); } catch (_) { audio.src = ""; }
-      try { audio.load(); } catch (_) { }
-      delete this.dialoguePlayers[key];
-      delete this.audioCache[key];
+
+    // Regeneration commonly overwrites the same Storage path. Memory eviction
+    // alone is insufficient because getBlobUrl(persistent) can immediately
+    // restore the old bytes from IndexedDB/Cache Storage before the new audio
+    // is rehydrated.
+    const persistentTasks = [...persistentEvictionKeys]
+      .map((cacheKey) => deletePodcasterLocalMediaKey(cacheKey).catch(() => false));
+    if (typeof caches !== "undefined" && sourceCandidates.size) {
+      persistentTasks.push(
+        caches.open(this.mediaCacheName).then((cache) => Promise.all(
+          [...sourceCandidates].flatMap((candidate) => {
+            const cacheKey = this.resolvePersistentMediaCacheKey(candidate);
+            return [candidate, cacheKey].filter(Boolean).map((value) => cache.delete(value).catch(() => false));
+          })
+        )).catch(() => false)
+      );
     }
-    delete this.dialogueAudioSourceKeys[key];
+    await Promise.allSettled(persistentTasks);
+    return true;
   }
 
   /**
@@ -1503,6 +1791,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundLimiterEnabled = null;
         this.backgroundSourceKey = "";
         this.backgroundSegmentIdentity = "";
+        this.backgroundFadeSegmentSignature = "";
         this.backgroundResolvedSource = "";
         this.emitMediaTelemetry("background-audio-recovery-retry", {
           reason,
@@ -1526,6 +1815,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   getOrCreateBackgroundAudioElement() {
     if (this.backgroundAudio) {
+      this.backgroundAudio.volume = 1;
       this.bindBackgroundAudioRecovery(this.backgroundAudio);
       return this.backgroundAudio;
     }
@@ -1552,18 +1842,19 @@ export class PodcasterPlaybackController extends EventEmitter {
     audio.playsInline = true;
     audio.defaultMuted = false;
     audio.muted = false;
+    // Keep media element gain at unity. Background level is controlled by Web Audio
+    // gain / fallback volume logic, and a zero element volume would silenciate both.
     audio.volume = 1;
     this.backgroundAudio = audio;
     this.bindBackgroundAudioRecovery(audio);
     return audio;
   }
 
-  async startBackgroundAudioWithoutBlockingClock(timeoutMs = 1400) {
+  async startBackgroundAudioWithoutBlockingClock(timeoutMs = BACKGROUND_AUDIO_START_TIMEOUT_MS) {
     const audio = this.backgroundAudio;
     if (!audio || this.state.isPlaying !== true || audio.paused !== true) return Boolean(audio && !audio.paused);
     audio.defaultMuted = false;
     audio.muted = false;
-    audio.volume = 1;
     try {
       if (this.audioCtx?.state === "suspended") await this.audioCtx.resume();
     } catch (_) { }
@@ -1579,18 +1870,17 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     };
     const waitForTimeout = () => new Promise((resolve) => {
-      window.setTimeout(() => resolve(false), Math.max(250, Number(timeoutMs) || 1400));
+      window.setTimeout(() => resolve(false), Math.max(250, Number(timeoutMs) || BACKGROUND_AUDIO_START_TIMEOUT_MS));
     });
     let started = await Promise.race([attemptPlay(), waitForTimeout()]);
     if (!started && audio.paused && audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       audio.defaultMuted = false;
       audio.muted = false;
-      audio.volume = 1;
       started = await Promise.race([attemptPlay(), waitForTimeout()]);
     }
     if (!started && audio.paused) {
       this.scheduleBackgroundAudioRecovery("play-failed", {
-        graceMs: 900,
+        graceMs: BACKGROUND_AUDIO_PLAY_RETRY_GRACE_MS,
         requireUnready: true
       });
     }
@@ -1603,7 +1893,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.emit("media-telemetry", payload);
   }
 
-  waitForMediaReady(mediaEl = null, timeoutMs = 2200) {
+  waitForMediaReady(mediaEl = null, timeoutMs = VIDEO_MEDIA_READY_TIMEOUT_MS) {
     if (!mediaEl || !["VIDEO", "AUDIO"].includes(String(mediaEl.tagName || "").toUpperCase())) return Promise.resolve(true);
     if (mediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -1621,8 +1911,323 @@ export class PodcasterPlaybackController extends EventEmitter {
       mediaEl.addEventListener("loadeddata", onReady, { once: true });
       mediaEl.addEventListener("canplay", onReady, { once: true });
       mediaEl.addEventListener("error", onError, { once: true });
-      setTimeout(() => done(mediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA), timeoutMs);
+      setTimeout(
+        () => done(mediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA),
+        Math.max(250, Number(timeoutMs || VIDEO_MEDIA_READY_TIMEOUT_MS))
+      );
     });
+  }
+
+  waitForDialogueReady(audio = null, timeoutMs = DIALOGUE_AUDIO_READY_TIMEOUT_MS) {
+    if (!audio) return Promise.resolve(false);
+    const haveCurrentData = typeof HTMLMediaElement !== "undefined"
+      ? HTMLMediaElement.HAVE_CURRENT_DATA
+      : 2;
+    if (Number(audio.readyState || 0) >= haveCurrentData) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId = 0;
+      const done = (ready = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        audio.removeEventListener("canplay", onReady);
+        audio.removeEventListener("canplaythrough", onReady);
+        audio.removeEventListener("loadeddata", onCandidate);
+        audio.removeEventListener("error", onError);
+        resolve(Boolean(ready) && Number(audio.readyState || 0) >= haveCurrentData);
+      };
+      const onReady = () => done(true);
+      const onCandidate = () => {
+        if (Number(audio.readyState || 0) >= haveCurrentData) done(true);
+      };
+      const onError = () => done(false);
+      audio.addEventListener("canplay", onReady, { once: true });
+      audio.addEventListener("canplaythrough", onReady, { once: true });
+      audio.addEventListener("loadeddata", onCandidate);
+      audio.addEventListener("error", onError, { once: true });
+      timeoutId = setTimeout(
+        () => done(Number(audio.readyState || 0) >= haveCurrentData),
+        Math.max(500, Number(timeoutMs || DIALOGUE_AUDIO_READY_TIMEOUT_MS))
+      );
+      if (Number(audio.readyState || 0) === 0) {
+        try { audio.load(); } catch (_) { }
+      }
+    });
+  }
+
+  normalizeRuntimeDialogueSegments(segments = [], entries = []) {
+    const entriesByRowId = new Map(
+      (Array.isArray(entries) ? entries : [])
+        .map((entry) => [String(entry?.rowId || "").trim(), entry])
+        .filter(([rowId]) => rowId)
+    );
+    return (Array.isArray(segments) ? segments : []).map((segment) => {
+      const rowId = String(segment?.rowId || "").trim();
+      const entry = entriesByRowId.get(rowId);
+      if (!entry || segment?.manualStartMs === true || segment?.manualPosition === true) return segment;
+      const sceneStartMs = Math.max(0, Number(entry?.startMs || 0) || 0);
+      const currentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      const legacyStartMs = sceneStartMs + LEGACY_AUTOMATIC_DIALOGUE_OFFSET_MS;
+      if (Math.abs(currentStartMs - legacyStartMs) > Math.max(20, this.getTimelineLookupToleranceMs())) return segment;
+      const durationMs = Math.max(
+        1,
+        Number(segment?.durationMs || 0)
+          || (Number(segment?.endMs || 0) - currentStartMs)
+          || Number(entry?.effectiveDurationMs || 0)
+          || 1
+      );
+      return {
+        ...segment,
+        startMs: sceneStartMs,
+        anchorStartMs: sceneStartMs,
+        relativeOffsetMs: 0,
+        endMs: sceneStartMs + durationMs
+      };
+    });
+  }
+
+  async prepareDialogueRow(session = null, rowId = "", options = {}) {
+    const key = String(rowId || "").trim();
+    if (!key) return { ready: true, rowId: key, player: null };
+    const clip = this.deps?.resolveDialogueAudioForRow?.(session, key);
+    const sourceKey = this.resolveAudioSourceKey(clip);
+    if (!sourceKey) return { ready: true, rowId: key, player: null };
+    const preparationKey = `${key}|${sourceKey}`;
+    
+    let promise;
+    if (!options.force && this.dialoguePreparationPromises.has(preparationKey)) {
+      promise = this.dialoguePreparationPromises.get(preparationKey);
+    } else {
+      promise = (async () => {
+        const audioSrc = await this.resolveDialoguePlaybackAudioSource(clip);
+        if (!audioSrc) throw new Error(`No se pudo resolver una fuente válida para el audio Gemini de ${key}.`);
+
+        const player = this.getOrCreateDialoguePlayer(key, audioSrc, sourceKey, session);
+        player.preload = "auto";
+        return { ready: true, rowId: key, player, sourceKey };
+      })().catch((error) => {
+        this.dialoguePreparationPromises.delete(preparationKey);
+        this.emitMediaTelemetry("dialogue-audio-prepare-error", {
+          rowId: key,
+          sourceKey,
+          message: String(error?.message || error)
+        });
+        throw error;
+      });
+      this.dialoguePreparationPromises.set(preparationKey, promise);
+    }
+
+    const prepared = await promise;
+    if (options.skipWait !== true && prepared.player) {
+      const ready = await this.waitForDialogueReady(
+        prepared.player,
+        Number(options.timeoutMs || DIALOGUE_AUDIO_READY_TIMEOUT_MS)
+      );
+      if (!ready) throw new Error(`El audio Gemini de ${key} no quedó listo.`);
+    }
+    this.emitMediaTelemetry("dialogue-audio-prepared", { rowId: key, sourceKey });
+    return prepared;
+  }
+
+  async ensureDialogueReadyAtMs(currentMs = this.state.currentMs) {
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
+    const config = this.deps?.getPodcastVideoConfig?.(session) || {};
+    let segments = Array.isArray(config?.geminiDialogueTrack?.segments)
+      ? config.geminiDialogueTrack.segments
+      : [];
+    if (!segments.length) {
+      segments = entries.map((entry) => ({
+        rowId: entry.rowId,
+        startMs: entry.startMs,
+        durationMs: Math.max(1, Number(entry?.effectiveDurationMs || 0) || 1),
+        trimInMs: 0
+      }));
+    }
+    segments = this.normalizeRuntimeDialogueSegments(segments, entries);
+    const toleranceMs = this.getTimelineLookupToleranceMs();
+    const segment = segments
+      .filter((candidate) => {
+        const rowId = String(candidate?.rowId || "").trim();
+        const playbackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
+        const durationMs = this.resolveSegmentTimelineDurationMs(candidate, playbackRate);
+        const startMs = Math.max(0, Number(candidate?.startMs || 0) || 0);
+        return this.isTimelineMsInRange(currentMs, startMs, startMs + Math.max(1, durationMs), {
+          toleranceMs
+        });
+      })
+      .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0))[0];
+    if (!segment?.rowId) return true;
+
+    const startedAt = performance.now();
+    const prepared = await this.prepareDialogueRow(session, segment.rowId, { skipWait: true });
+    const elapsedMs = performance.now() - startedAt;
+    if (elapsedMs > 16) {
+      this.clockRebaseRequested = true;
+      this.emitMediaTelemetry("dialogue-boundary-gate", {
+        rowId: String(segment.rowId),
+        atMs: Math.max(0, Number(currentMs) || 0),
+        elapsedMs: Math.round(elapsedMs)
+      });
+    }
+    const player = prepared?.player;
+    if (player && player.dataset.initialized !== "true") {
+      const playbackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, segment.rowId) || 1;
+      const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
+      const elapsedFromStartMs = Math.max(0, Number(currentMs || 0) - segmentStartMs);
+      const targetOffsetSec = elapsedFromStartMs <= 250
+        ? trimInMs / 1000
+        : this.resolveSegmentSourceOffsetSec(currentMs, segmentStartMs, trimInMs, playbackRate);
+      if (Math.abs(Number(player.currentTime || 0) - targetOffsetSec) > 0.03) {
+        this.seekTo(player, targetOffsetSec);
+      }
+      player.dataset.initialized = "true";
+    }
+    return true;
+  }
+
+  async prepareSessionMedia(options = {}) {
+    const session = options.session || this.state.session || this.deps?.getActiveSession?.();
+    const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
+    const videoEntries = entries.filter((entry) => entry?.videoSrc);
+    const rowIds = [...new Set(entries.map((entry) => String(entry?.rowId || "").trim()).filter(Boolean))];
+    const backgroundConfig = this.deps?.getPanelMontageMusicConfig?.(session) || {};
+    const backgroundItems = [
+      ...(Array.isArray(backgroundConfig?.sourceItems) ? backgroundConfig.sourceItems : []),
+      ...(String(backgroundConfig?.sourceUrl || "").trim()
+        ? [{
+            sourceUrl: backgroundConfig.sourceUrl,
+            downloadUrl: backgroundConfig.downloadUrl,
+            storagePath: backgroundConfig.storagePath,
+            localDataUrl: backgroundConfig.localDataUrl,
+            localMediaCacheKey: backgroundConfig.localMediaCacheKey
+          }]
+        : [])
+    ].filter((item, index, list) => {
+      const sourceKey = this.resolveAudioSourceKey(item);
+      return sourceKey && list.findIndex((candidate) => this.resolveAudioSourceKey(candidate) === sourceKey) === index;
+    });
+    const signature = [
+      String(session?.id || ""),
+      ...videoEntries.map((entry) => this.normalizeTimelineSourceKey(entry?.videoSrc || "")),
+      ...rowIds.map((rowId) => this.resolveAudioSourceKey(this.deps?.resolveDialogueAudioForRow?.(session, rowId))).sort(),
+      ...backgroundItems.map((item) => this.resolveAudioSourceKey(item)).sort()
+    ].join("|");
+    if (!options.force && signature === this.sessionMediaPreparationKey && this.sessionMediaPreparationPromise) {
+      return this.sessionMediaPreparationPromise;
+    }
+
+    const report = typeof options.onProgress === "function" ? options.onProgress : () => {};
+    const tasks = [];
+    videoEntries.forEach((entry) => {
+      const source = String(entry?.videoSrc || "").trim();
+      if (!source) return;
+      tasks.push({
+        kind: this.isImageStageEntry(entry) ? "image" : "video",
+        rowId: String(entry?.rowId || "").trim(),
+        source,
+        run: async () => {
+          if (this.isImageStageEntry(entry)) {
+            const ready = await this.preloadImageSrc(source);
+            if (!ready) throw new Error("No se pudo preparar la imagen.");
+            return;
+          }
+          const persistent = this.shouldPersistStageVideoSource(source);
+          await this.getBlobUrl(source, { persistent });
+          const preparedSource = this.getBlobUrlSync(source) || source;
+          if (typeof document === "undefined") return;
+          const probe = document.createElement("video");
+          probe.preload = "auto";
+          probe.muted = true;
+          probe.playsInline = true;
+          probe.src = preparedSource;
+          try { probe.load(); } catch (_) { }
+          const ready = await this.waitForMediaReady(probe, SESSION_MEDIA_READY_TIMEOUT_MS);
+          try {
+            probe.pause();
+            probe.removeAttribute("src");
+            probe.load();
+          } catch (_) { }
+          if (!ready) throw new Error("No se pudo decodificar el primer frame.");
+        }
+      });
+    });
+    rowIds.forEach((rowId) => {
+      if (!this.resolveAudioSourceKey(this.deps?.resolveDialogueAudioForRow?.(session, rowId))) return;
+      tasks.push({
+        kind: "audio",
+        rowId,
+        source: "",
+        run: () => this.prepareDialogueRow(session, rowId, {
+          force: options.force === true,
+          timeoutMs: SESSION_MEDIA_READY_TIMEOUT_MS
+        })
+      });
+    });
+    backgroundItems.forEach((item) => {
+      tasks.push({
+        kind: "background-audio",
+        rowId: "",
+        source: this.resolveAudioSourceKey(item),
+      run: async () => {
+        const preparedSource = await this.resolveDialoguePlaybackAudioSource(item);
+        if (!preparedSource) throw new Error("No se pudo resolver el audio de fondo.");
+        if (!preparedSource || typeof document === "undefined") return;
+        const probe = document.createElement("audio");
+          probe.preload = "auto";
+          probe.src = preparedSource;
+          try { probe.load(); } catch (_) { }
+          const ready = await this.waitForDialogueReady(probe, SESSION_MEDIA_READY_TIMEOUT_MS);
+          try {
+            probe.pause();
+            probe.removeAttribute("src");
+            probe.load();
+          } catch (_) { }
+          if (!ready) throw new Error("No se pudo preparar el audio de fondo.");
+        }
+      });
+    });
+
+    this.sessionMediaPreparationKey = signature;
+    this.sessionMediaPreparationPromise = (async () => {
+      const failures = [];
+      let completed = 0;
+      report({ state: "loading", completed, total: tasks.length, failures: [] });
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < tasks.length) {
+          const task = tasks[cursor++];
+          try {
+            await task.run();
+          } catch (error) {
+            failures.push({
+              kind: task.kind,
+              rowId: task.rowId,
+              source: task.source,
+              message: String(error?.message || error)
+            });
+          } finally {
+            completed += 1;
+            report({ state: "loading", completed, total: tasks.length, failures: [...failures] });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, Math.max(1, tasks.length)) }, () => worker()));
+      if (failures.length) {
+        const error = new Error(`No se pudieron preparar ${failures.length} recursos.`);
+        error.failures = failures;
+        report({ state: "error", completed, total: tasks.length, failures });
+        throw error;
+      }
+      report({ state: "ready", completed, total: tasks.length, failures: [] });
+      return { ready: true, completed, total: tasks.length };
+    })().catch((error) => {
+      this.sessionMediaPreparationPromise = null;
+      throw error;
+    });
+    return this.sessionMediaPreparationPromise;
   }
 
   async prepareBackgroundMusicAtMs(atMs = this.state.currentMs) {
@@ -1639,7 +2244,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       try { audio.load(); } catch (_) { }
     }
-    const ready = await this.waitForMediaReady(audio, 3500);
+    const ready = await this.waitForMediaReady(audio, BACKGROUND_AUDIO_PREPARE_TIMEOUT_MS);
     if (ready) {
       // Reaplica el offset ahora que metadata/datos están disponibles. El primer
       // sync puede ocurrir antes de que currentTime sea seekable.
@@ -1650,74 +2255,122 @@ export class PodcasterPlaybackController extends EventEmitter {
       });
     } else if (this.backgroundSourceKey) {
       this.scheduleBackgroundAudioRecovery("prepare-timeout", {
-        graceMs: 120,
+        graceMs: BACKGROUND_AUDIO_RETRY_GRACE_MS,
         requireUnready: true
       });
     }
     return ready;
   }
 
-  async preparePlaybackRange({ atMs = this.state.currentMs, lookAheadMs = 9000 } = {}) {
+  async preparePlaybackRange({ atMs = this.state.currentMs, lookAheadMs = PLAYBACK_PREPARE_LOOKAHEAD_MS, onProgress = null, criticalOnly = false } = {}) {
     const startedAt = performance.now();
+    const playbackRangeSignature = this.buildPlaybackRangePreparationSignature(atMs, lookAheadMs, {
+      criticalOnly,
+      session: this.state.session || this.deps?.getActiveSession?.()
+    });
+    if (playbackRangeSignature === this.playbackRangePreparationSignature) {
+      return true;
+    }
+
     const prepareId = ++this.prepareSequence;
     const session = this.state.session || this.deps?.getActiveSession?.();
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
     const fromMs = Math.max(0, Number(atMs) || 0);
-    const untilMs = fromMs + Math.max(1000, Number(lookAheadMs) || 9000);
+    const untilMs = fromMs + Math.max(1000, Number(lookAheadMs) || PLAYBACK_PREPARE_LOOKAHEAD_MS);
     const selected = entries
       .filter((entry) => Number(entry?.endMs || 0) >= fromMs && Number(entry?.startMs || 0) <= untilMs)
       .slice(0, 3);
     const activeEntry = selected.find((entry) => fromMs >= Number(entry?.startMs || 0) && fromMs <= Number(entry?.endMs || 0)) || selected[0] || null;
-    // Rehidrata toda la cola desde IndexedDB/Cache Storage en segundo plano. Solo los dos
-    // slots visibles esperan disponibilidad; el resto queda listo para los cambios de escena.
+    // Resuelve la cola en segundo plano. Blob sí hidrata persistencia.
     this.prewarmTimelineStageVideos(session, {
       currentMs: fromMs,
-      concurrency: 2
+      concurrency: 1
     }).catch(() => { });
-    const videoSlots = [this.getActiveStageVideoEl(), this.getInactiveStageVideoEl()].filter(Boolean);
-    const videoTasks = selected
+    const criticalEntries = criticalOnly && activeEntry ? [activeEntry] : selected;
+    const backgroundEntries = criticalOnly
+      ? selected.filter((entry) => entry && entry !== activeEntry)
+      : [];
+    const activeVideoEl = this.getActiveStageVideoEl();
+    const videoTasks = criticalEntries
       .filter((entry) => entry?.videoSrc && !this.isImageStageEntry(entry))
-      .slice(0, videoSlots.length)
-      .map(async (entry, index) => {
-        const videoEl = videoSlots[index];
+      .slice(0, activeVideoEl ? 1 : 0)
+      .map(async (entry) => {
+        const videoEl = activeVideoEl;
         const source = String(entry.videoSrc || "").trim();
         if (!videoEl || !source) return false;
-        await this.getBlobUrl(source, { persistent: true });
+        const persistent = this.shouldPersistStageVideoSource(source);
+        await this.getBlobUrl(source, { persistent });
         const cached = this.getBlobUrlSync(source);
         if (cached) this.emitMediaTelemetry("cache-hit-memory", { kind: "video", source });
         else if (source.startsWith("podcaster-local-media:")) this.emitMediaTelemetry("cache-hit-indexeddb", { kind: "video", source });
         const ready = await this.setStageVideoSourceForElement(videoEl, source, {
           keepHidden: entry !== activeEntry,
-          persistent: true
+          persistent
         });
-        return ready && this.waitForMediaReady(videoEl);
+        return ready;
       });
-    const imageTasks = selected
+    const imageTasks = criticalEntries
       .filter((entry) => entry?.videoSrc && this.isImageStageEntry(entry))
-      .map((entry) => this.preloadImageSrc(entry.videoSrc).catch(() => false));
-    const audioRows = new Set(selected.map((entry) => String(entry?.rowId || "").trim()).filter(Boolean));
+      .map((entry) => {
+        this.preloadEntryStopMotion(entry);
+        return this.preloadImageSrc(entry.videoSrc).catch(() => false);
+      });
+    const audioRows = new Set(criticalEntries.map((entry) => String(entry?.rowId || "").trim()).filter(Boolean));
     const audioTasks = [...audioRows].map(async (rowId) => {
       const clip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
       const sourceKey = this.resolveAudioSourceKey(clip);
       if (!sourceKey) return true;
-      const source = await this.resolveAudioSource(clip);
+      const source = await this.resolveDialoguePlaybackAudioSource(clip);
       if (!source) return false;
       const player = this.getOrCreateDialoguePlayer(rowId, source, sourceKey, session);
       player.preload = "auto";
-      try { player.load(); } catch (_) { }
-      return this.waitForMediaReady(player, 1800);
+      return this.waitForMediaReady(player, VIDEO_MEDIA_READY_TIMEOUT_MS);
     });
-    const backgroundAudioTask = this.prepareBackgroundMusicAtMs(fromMs);
+    if (criticalOnly && backgroundEntries.length) {
+      backgroundEntries.forEach((entry) => {
+        const source = String(entry?.videoSrc || "").trim();
+        if (!source) return;
+        if (this.isImageStageEntry(entry)) {
+          this.preloadEntryStopMotion(entry);
+          this.preloadImageSrc(source).catch(() => false);
+          return;
+        }
+        this.getBlobUrl(source, {
+          persistent: this.shouldPersistStageVideoSource(source)
+        }).catch(() => "");
+      });
+    }
+    const backgroundAudioTask = criticalOnly
+      ? Promise.resolve(true)
+      : this.prepareBackgroundMusicAtMs(fromMs);
+    if (criticalOnly) this.prepareBackgroundMusicAtMs(fromMs).catch(() => false);
     this.state.isPreparing = true;
     this.mediaTelemetry.prepareCount += 1;
-    this.emitMediaTelemetry("prepare-start", { atMs: fromMs, entries: selected.length, audioRows: audioRows.size });
-    await Promise.allSettled([...videoTasks, ...imageTasks, ...audioTasks, backgroundAudioTask]);
+    this.emitMediaTelemetry("prepare-start", { atMs: fromMs, entries: selected.length, audioRows: audioRows.size, criticalOnly });
+
+    // Progress reporting: wrap each task so onProgress fires after every settled item
+    const report = typeof onProgress === "function" ? onProgress : null;
+    const allRawTasks = [...videoTasks, ...imageTasks, ...audioTasks, backgroundAudioTask];
+    const total = allRawTasks.length;
+    if (report) report({ state: "loading", completed: 0, total });
+    let completed = 0;
+    const trackedTasks = allRawTasks.map((t) =>
+      Promise.resolve(t).finally(() => {
+        completed += 1;
+        if (report) report({ state: "loading", completed, total });
+      })
+    );
+    await Promise.allSettled(trackedTasks);
     if (prepareId !== this.prepareSequence) return false;
     this.state.isPreparing = false;
+    this.playbackRangePreparationSignature = playbackRangeSignature;
+    this.playbackRangePreparationAtMs = Number(this.state.currentMs || 0);
+    if (report) report({ state: "ready", completed, total });
     this.emitMediaTelemetry("prepare-ready", {
       atMs: fromMs,
       elapsedMs: Math.round(performance.now() - startedAt),
-      entries: selected.length
+      entries: selected.length,
+      criticalOnly
     });
     return true;
   }
@@ -1732,27 +2385,43 @@ export class PodcasterPlaybackController extends EventEmitter {
     // para que el navegador no bloquee la salida de audio del primer Play.
     this.initAudioContext();
     this.getOrCreateBackgroundAudioElement();
+    // Desbloquear todos los dialogue players dentro del contexto del gesto del usuario.
+    // Un await posterior rompe el contexto de gesto, por lo que el navegador rechaza
+    // audio.play() en los dialogue players con "not allowed" silencioso.
+    Object.values(this.dialoguePlayers).forEach((a) => {
+      if (a && a.paused) {
+        const vol = Number(a.volume || 0);
+        a.volume = 0;
+        a.play().then(() => { a.pause(); a.volume = vol; }).catch(() => { a.volume = vol; });
+      }
+    });
 
     if (options.prepare !== false) {
+      const prepareAtMs = this.state.currentMs;
+      const lookAheadMs = options.lookAheadMs || PLAYBACK_PREPARE_LOOKAHEAD_MS;
+      const willReportProgress = typeof options.onProgress === "function"
+        ? this.buildPlaybackRangePreparationSignature(prepareAtMs, lookAheadMs, {
+          criticalOnly: options.criticalOnly !== false,
+          session: this.state.session || this.deps?.getActiveSession?.()
+        }) !== this.playbackRangePreparationSignature
+        : false;
       this.deps?.setPodcastVideoStatus?.("Preparando escenas...");
       await this.preparePlaybackRange({
-        atMs: this.state.currentMs,
-        lookAheadMs: options.lookAheadMs || 9000
+        atMs: prepareAtMs,
+        lookAheadMs,
+        onProgress: willReportProgress ? options.onProgress : null,
+        criticalOnly: options.criticalOnly !== false
       });
     }
 
     this.state.isPlaying = true;
-    // Arranca la pista ya hidratada antes del reloj maestro. Así el primer tick
-    // no compite con IndexedDB, creación del elemento y decodificación inicial.
-    await this.syncBackgroundMusic(
+    // Arranca tanto Gemini como la música ya hidratados antes del reloj maestro.
+    // Si el reloj comienza primero, el primer tick puede calcular un offset
+    // adelantado y comerse el inicio de la voz mientras el elemento hace canplay.
+    await this.syncAudio(
       this.state.currentMs,
-      this.deps?.getPlaybackSpeed?.() || 1,
-      false
+      this.deps?.getPlaybackSpeed?.() || 1
     );
-    this.preloadStageVideosAroundMs(this.state.currentMs, {
-      awaitCurrent: false,
-      limit: 3
-    }).catch(() => { });
     this.prewarmTimelineStageVideos(this.state.session, {
       currentMs: this.state.currentMs,
       concurrency: 2
@@ -1810,15 +2479,31 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   async stop(opts = {}) {
+    const wasPlaying = this.state.isPlaying === true;
+    const stopSourceMs = Math.max(0, Number(this.state.currentMs || 0));
     this.state.isPlaying = false;
     this.stopClock();
     
     const shouldReset = opts.keepCursor !== true;
     if (shouldReset) {
-      this.state.currentMs = 0;
-      this.state.activeRowId = "";
+      const activeEntry = this.getEntryAtMs(stopSourceMs);
+      const sceneStartMs = Math.max(0, Number(activeEntry?.startMs || 0));
+      const previousStopTargetMs = Number(this.stopRewindTargetMs);
+      const isAtPreviousStopTarget = Number.isFinite(previousStopTargetMs)
+        && Math.abs(stopSourceMs - previousStopTargetMs) <= this.getTimelineLookupToleranceMs();
+      const shouldReturnToTimelineStart = !wasPlaying && isAtPreviousStopTarget;
+      const stopTargetMs = shouldReturnToTimelineStart ? 0 : sceneStartMs;
+      const targetEntry = stopTargetMs === 0
+        ? this.getEntryAtMs(0)
+        : activeEntry;
+      const targetRowId = String(targetEntry?.rowId || "").trim();
+
+      this.state.currentMs = stopTargetMs;
+      this.state.activeRowId = targetRowId;
+      this.stopRewindTargetMs = stopTargetMs > 0 ? stopTargetMs : null;
       if (this.deps?.podcastVideoState) {
-        this.deps.podcastVideoState.montageCursorMs = 0;
+        this.deps.podcastVideoState.montageCursorMs = stopTargetMs;
+        this.deps.podcastVideoState.activeRowId = targetRowId;
       }
     }
     
@@ -1833,6 +2518,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (shouldReset) {
           a.currentTime = 0;
           a.dataset.initialized = "false";
+          a.dataset.wasActive = "false";
           delete a.dataset.pendingSeek;
           delete a.dataset.pendingSeekSrc;
         }
@@ -1843,6 +2529,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (v) try { 
         v.pause(); 
         if (shouldReset) {
+          v.dataset.suppressTimelineTimeupdateUntil = String(Date.now() + 500);
           v.currentTime = 0;
         }
         v.style.opacity = 0; 
@@ -1961,8 +2648,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         const delta = now - lastTime;
         lastTime = now;
         const speed = this.deps?.getPlaybackSpeed?.() || 1;
-        const clampedDelta = Math.min(delta, 100);
-        const nextMs = this.state.currentMs + (clampedDelta * speed);
+        // The media elements keep advancing while an async tick performs DOM,
+        // audio or network work. Capping this delta made the software clock lag
+        // behind them and the next tick sought the video backwards repeatedly.
+        const nextMs = this.state.currentMs + (Math.max(0, delta) * speed);
 
         if (this.state.stopAtMs > 0 && nextMs >= this.state.stopAtMs) {
           this.state.currentMs = this.state.stopAtMs;
@@ -1981,6 +2670,10 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         this.state.currentMs = nextMs;
         await this.tick(nextMs);
+        if (this.clockRebaseRequested) {
+          lastTime = performance.now();
+          this.clockRebaseRequested = false;
+        }
         this.clockId = requestAnimationFrame(tickLoop);
       } catch (error) {
         console.error("[PlaybackController] Error in tickLoop:", error);
@@ -1999,7 +2692,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!entries.length) return;
     const markers = [...new Set(entries.map(e => Math.round(Number(e.startMs || 0))))].sort((a, b) => a - b);
     const current = this.state.currentMs;
-    const targetMs = [...markers].reverse().find(ms => ms < current - 500) ?? 0;
+    const targetMs = [...markers].reverse().find(ms => ms < current - TICK_PREV_OFFSET_MS) ?? 0;
     await this.seek(targetMs);
   }
 
@@ -2010,7 +2703,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!entries.length) return;
     const markers = [...new Set(entries.map(e => Math.round(Number(e.startMs || 0))))].sort((a, b) => a - b);
     const current = this.state.currentMs;
-    const targetMs = markers.find(ms => ms > current + 120) ?? markers[markers.length - 1];
+    const targetMs = markers.find(ms => ms > current + TICK_NEXT_OFFSET_MS) ?? markers[markers.length - 1];
     await this.seek(targetMs);
   }
 
@@ -2019,25 +2712,42 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.state.currentMs = ms;
     this.sceneMotionSyncRevision = Number(this.sceneMotionSyncRevision || 0) + 1;
     const useLightweightSeek = options.lightweight === true || this.deps?.useLightweightSeekDuringPlayback === true;
+    const skipAudioSync = options.deferPreview === true;
     if (options.allowConcurrentTick !== false) {
       this.stageSwitchSeq += 1;
       this.stageMachine.loadingSrc = "";
       this.state.isTickProcessing = false;
     }
     const session = this.state.session || this.deps?.getActiveSession?.();
-    const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
-    this.cachedTickEntries = entries;
+    this.cachedTickEntries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
     this.cachedTickEntriesTime = performance.now();
-    this.preloadStageVideosAroundMs(ms, {
-      session,
-      entries,
-      awaitCurrent: options.awaitStageVideo === true,
-      limit: 3
+    this.prewarmTimelineStageVideos(session, {
+      currentMs: ms,
+      concurrency: 2
     }).catch(() => { });
     if (options.prepare === true) {
-      await this.preparePlaybackRange({ atMs: ms, lookAheadMs: options.lookAheadMs || 7000 });
+      await this.preparePlaybackRange({
+        atMs: ms,
+        lookAheadMs: options.lookAheadMs || PLAYBACK_SEEK_LOOKAHEAD_MS,
+        criticalOnly: options.criticalOnly !== false
+      });
     }
-    await this.tick(ms, { lightweight: useLightweightSeek });
+    this.state.forceStageMediaSync = true;
+    try {
+      if (Object.keys(options).length === 0 && !skipAudioSync) {
+        await this.tick(ms, { lightweight: useLightweightSeek });
+      } else {
+        await this.tick(ms, {
+          lightweight: useLightweightSeek,
+          skipAudioSync,
+          deferPreview: options.deferPreview === true,
+          suppressAutoScroll: options.suppressAutoScroll === true,
+          navigationOnly: options.navigationOnly === true
+        });
+      }
+    } finally {
+      this.state.forceStageMediaSync = false;
+    }
     this.emit('seek', { currentMs: ms });
   }
 
@@ -2050,6 +2760,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     const lightweight = options.lightweight !== false;
+    const shouldSyncAudio = options.skipAudioSync !== true && this.state.isPlaying;
+    const navigationOnly = options.navigationOnly === true;
 
     if (this.deps?.syncPodcastTimelinePlayhead) {
       this.deps.syncPodcastTimelinePlayhead(this.state.session, { 
@@ -2059,6 +2771,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         suppressAutoScroll: options.suppressAutoScroll === true
       });
     }
+    const shouldDeferPreview = options.deferPreview === true;
 
     const activeEntry = this.getEntryAtMs(ms);
     const activeRowId = activeEntry?.rowId || "";
@@ -2080,14 +2793,19 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.state.activeRowId = activeRowId;
       const session = this.state.session || this.deps?.getActiveSession?.();
       const speaker = activeEntry?.speakerName || "";
-      if (session && this.deps?.syncPodcastStudioRuntimeUi) {
+      if (navigationOnly) {
+        if (this.deps?.podcastVideoState) {
+          this.deps.podcastVideoState.activeRowId = activeRowId;
+        }
+        this.deps?.syncPodcastTimelineSelectionUi?.(session);
+      } else if (session && this.deps?.syncPodcastStudioRuntimeUi) {
         this.deps.syncPodcastStudioRuntimeUi(session, activeRowId, speaker, {
           speaking: true,
           lightweightInspector: true
         });
       } else {
         this.deps?.setPodcastVideoRow?.(activeRowId, {
-          syncStage: true,
+          syncStage: !this.state.isPlaying,
           lightweightUi: true,
           preserveMontageCursor: true,
           reason: "playback",
@@ -2105,30 +2823,47 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.deps.syncStudioTimelinePreview(session, { currentMs: ms, autoplay: false });
     }
 
-    if (this.pendingTimelineRender && this.deps?.renderPodcastVideoTimeline) {
-      this.pendingTimelineRender = false;
-      this.deps.renderPodcastVideoTimeline(this.state.session, { force: true, reason: "throttled-metadata-sync" });
+    if (this.state.isTickProcessing) {
+      this.pendingTimelineSeekTick = { ms, options: { ...options } };
+      return;
     }
-
-    if (this.state.isTickProcessing) return;
     this.state.isTickProcessing = true;
     try {
       if (this.deps?.updatePodcastVideoTransportUi) this.deps.updatePodcastVideoTransportUi();
       const speed = this.deps?.getPlaybackSpeed?.() || 1;
-      
-      await Promise.all([
-        this.syncAudio(ms, speed),
+      if (shouldSyncAudio && this.state.isPlaying) {
+        try {
+          await this.ensureDialogueReadyAtMs(ms);
+        } catch (err) {
+          // Prevent dialogue preparation errors from stalling the entire timeline tick loop
+          void err;
+        }
+      }
+      const tickTasks = [
         this.syncVideo(ms),
-        this.syncOverlay ? this.syncOverlay(ms) : null,
-        this.syncStylizedText ? this.syncStylizedText(ms) : null,
-        this.syncOverlayCards ? this.syncOverlayCards(ms) : null
-      ]);
+        ...(!shouldDeferPreview
+          ? [
+              this.syncOverlay ? this.syncOverlay(ms) : null,
+              this.syncStylizedText ? this.syncStylizedText(ms) : null,
+              this.syncOverlayCards ? this.syncOverlayCards(ms) : null
+            ]
+          : [])
+      ];
+      if (shouldSyncAudio) {
+        tickTasks.unshift(this.syncAudio(ms, speed));
+      }
+      await Promise.all(tickTasks);
       
       this.emit('timeupdate', { currentMs: ms });
     } catch (e) {
       void e;
     } finally {
       this.state.isTickProcessing = false;
+      const pending = this.pendingTimelineSeekTick;
+      this.pendingTimelineSeekTick = null;
+      if (pending && Number.isFinite(Number(pending.ms))) {
+        void this.tick(pending.ms, pending.options);
+      }
     }
   }
 
@@ -2147,101 +2882,99 @@ export class PodcasterPlaybackController extends EventEmitter {
       const sourceKey = this.resolveAudioSourceKey(clip);
       if (!sourceKey) return false;
       const existingSourceKey = String(this.dialogueAudioSourceKeys[rowId] || "").trim();
-      if (existingSourceKey === sourceKey) return true;
-      const audioSrc = await this.resolveAudioSource(clip);
+      if (existingSourceKey === sourceKey) {
+        const existing = this.dialoguePlayers[rowId];
+        if (existing) {
+          existing.preload = "auto";
+          return this.waitForMediaReady(existing, VIDEO_MEDIA_READY_TIMEOUT_PERSISTENT_MS);
+        }
+      }
+      const audioSrc = await this.resolveDialoguePlaybackAudioSource(clip);
       if (!audioSrc) return false;
       const audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
       audio.preload = "auto";
-      try { audio.load(); } catch (_) { }
       this.emitMediaTelemetry("audio-row-prewarmed", { rowId });
-      return true;
+      return this.waitForMediaReady(audio, VIDEO_MEDIA_READY_TIMEOUT_PERSISTENT_MS);
     }));
+  }
+
+  getOrCreateDialogueAudioContainer() {
+    if (typeof document === "undefined") return null;
+    let container = document.getElementById("podcasterDialogueAudioContainer");
+    if (!container && document.body) {
+      container = document.createElement("div");
+      container.id = "podcasterDialogueAudioContainer";
+      container.style.display = "none";
+      container.setAttribute("aria-hidden", "true");
+      document.body.appendChild(container);
+    }
+    return container;
   }
 
   getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey = "", session) {
     let audio = this.dialoguePlayers[rowId];
     const nextSourceKey = String(sourceKey || "").trim();
-    if (!audio || String(this.dialogueAudioSourceKeys[rowId] || "") !== nextSourceKey) {
-      if (audio) {
-        try { audio.pause(); } catch (_) { }
-        const previousSrc = String(audio.dataset?.originalSrc || audio.src || "").trim();
-        if (previousSrc && previousSrc.startsWith("blob:")) {
-          try { URL.revokeObjectURL(previousSrc); } catch (_) { }
-        }
+    const cleanAudioSrc = String(audioSrc || "").trim();
+    if (audio) {
+      const currentSourceKey = String(this.dialogueAudioSourceKeys[rowId] || "").trim();
+      const currentSrc = String(audio.dataset?.originalSrc || audio.src || "").trim();
+      if (currentSourceKey === nextSourceKey) {
+        const container = this.getOrCreateDialogueAudioContainer();
+        if (container && !audio.parentNode) container.appendChild(audio);
+        return audio;
       }
-      audio = new Audio();
-      audio.crossOrigin = 'anonymous';
-      audio.src = audioSrc;
-      audio.dataset.originalSrc = audioSrc;
-      audio.dataset.sourceKey = nextSourceKey;
-      audio.dataset.initialized = "false";
-      audio.preload = "auto";
-      this.dialoguePlayers[rowId] = audio;
-      this.audioCache[rowId] = audio;
-      this.dialogueAudioSourceKeys[rowId] = nextSourceKey;
-      
-      audio.addEventListener("loadedmetadata", () => {
-        const nextMs = Math.round(audio.duration * 1000);
-        const pvs = this.deps?.podcastVideoState;
-        
-        const speed = this.deps?.getPlaybackSpeed?.() || 1;
-        const clipRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
-        const effectiveRate = this.clampPlaybackRate(speed * clipRate);
-        audio.playbackRate = effectiveRate;
-        audio.defaultPlaybackRate = effectiveRate;
+    }
+    if (audio) {
+      try { audio.pause(); } catch (_) { }
+      try { audio.remove(); } catch (_) { }
+      const previousSrc = String(audio.dataset?.originalSrc || audio.src || "").trim();
+      if (previousSrc && previousSrc.startsWith("blob:") && previousSrc !== cleanAudioSrc) {
+        try { URL.revokeObjectURL(previousSrc); } catch (_) { }
+      }
+    }
+    audio = new Audio();
+    audio.crossOrigin = 'anonymous';
+    audio.src = cleanAudioSrc;
+    audio.dataset.originalSrc = cleanAudioSrc;
+    audio.dataset.sourceKey = nextSourceKey;
+    audio.dataset.initialized = "false";
+    audio.dataset.wasActive = "false";
+    audio.preload = "auto";
+    audio.playsInline = true;
+    const container = this.getOrCreateDialogueAudioContainer();
+    if (container) container.appendChild(audio);
+    this.dialoguePlayers[rowId] = audio;
+    this.audioCache[rowId] = audio;
+    this.dialogueAudioSourceKeys[rowId] = nextSourceKey;
 
-        if (pvs && Number.isFinite(nextMs)) {
-          if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
-          if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
-            pvs.montageAudioActualDurationsMs[rowId] = nextMs;
+    audio.addEventListener("loadedmetadata", () => {
+      const nextMs = Math.round(audio.duration * 1000);
+      const pvs = this.deps?.podcastVideoState;
+      const speed = this.deps?.getPlaybackSpeed?.() || 1;
+      const clipRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
+      const effectiveRate = this.clampPlaybackRate(speed * clipRate);
+      audio.playbackRate = effectiveRate;
+      audio.defaultPlaybackRate = effectiveRate;
+      if (pvs && Number.isFinite(nextMs)) {
+        if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
+        if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
+          pvs.montageAudioActualDurationsMs[rowId] = nextMs;
+          setTimeout(() => {
             if (typeof window.invalidateStudioRuntimeCache === "function") {
               window.invalidateStudioRuntimeCache();
             }
-            this.pendingTimelineRender = true;
             if (typeof window.syncGeminiDialogueTrackWithRuntime === "function") {
               try {
                 window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
               } catch (_) {}
             }
-          }
+          }, 0);
         }
-      }, { once: true });
-
-      try { audio.load(); } catch (_) { }
-    }
-    return audio;
-  }
-
-  prepareDialogueRowInBackground(session = null, rowId = "", clip = null, sourceKey = "") {
-    const key = String(rowId || "").trim();
-    if (!key || !sourceKey || !clip) return;
-    const preparationKey = `${key}|${sourceKey}`;
-    if (this.dialoguePreparationPromises.has(preparationKey)) return;
-
-    const promise = (async () => {
-      const rawSource = await this.resolveAudioSource(clip);
-      if (!rawSource) throw new Error(`No se pudo resolver el audio Gemini de ${key}.`);
-      let audioSrc = this.getBlobUrlSync(rawSource);
-      if (!audioSrc) {
-        audioSrc = await this.getBlobUrl(rawSource, {
-          persistent: this.resolveActiveMediaLoadMode(rawSource) === "blob"
-        });
       }
-      if (!audioSrc) audioSrc = rawSource;
+    }, { once: true });
 
-      const player = this.getOrCreateDialoguePlayer(key, audioSrc, sourceKey, session);
-      player.preload = "auto";
-      return { ready: true, rowId: key, player, sourceKey };
-    })().catch((error) => {
-      this.dialoguePreparationPromises.delete(preparationKey);
-      this.emitMediaTelemetry?.("dialogue-audio-prepare-error", {
-        rowId: key,
-        sourceKey,
-        message: String(error?.message || error)
-      });
-      throw error;
-    });
-    this.dialoguePreparationPromises.set(preparationKey, promise);
+    try { audio.load(); } catch (_) { }
+    return audio;
   }
 
   // --- Audio ---
@@ -2254,7 +2987,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     let segments = audioTrack.segments || [];
     if (!segments.length) {
-      segments = entries.map(entry => {
+      segments = entries.map((entry) => {
         const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, entry.rowId);
         const audioDurationMs = Math.max(0, Math.round(Number(audioClip?.durationSec || 0) * 1000));
         const durationMs = audioDurationMs > 0 ? audioDurationMs : entry.effectiveDurationMs;
@@ -2267,34 +3000,110 @@ export class PodcasterPlaybackController extends EventEmitter {
         };
       });
     }
+    segments = this.normalizeRuntimeDialogueSegments(segments, entries);
     const currentTimelineRowIds = this.collectDialogueRowIds(session, entries, segments);
-    const segmentLookupToleranceMs = this.getTimelineLookupToleranceMs();
-    const matchingSegments = segments.filter((segment) => {
+    const audioCarryToleranceMs = Math.max(0, Number(DIALOGUE_AUDIO_CARRYOVER_TOLERANCE_MS) || 260);
+    const activeTimelineToleranceMs = Math.max(this.getTimelineLookupToleranceMs(), audioCarryToleranceMs);
+
+    const timelineSegments = segments.map((segment) => {
       const rowId = String(segment?.rowId || "").trim();
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const visibleDurationMs = this.resolveSegmentTimelineDurationMs(segment, clipPlaybackRate);
       const segmentStartMs = Math.max(0, Number(segment?.startMs || 0));
       const segmentEndMs = segmentStartMs + Math.max(1, visibleDurationMs);
-      return this.isTimelineMsInRange(currentMs, segmentStartMs, segmentEndMs, { toleranceMs: segmentLookupToleranceMs });
+      return {
+        ...segment,
+        rowId,
+        __timelineStartMs: segmentStartMs,
+        __timelineEndMs: segmentEndMs,
+        __timelinePlaybackRate: this.clampPlaybackRate(clipPlaybackRate, 0.5, 10)
+      };
     });
-    // Gemini es una pista de diálogo monofónica: en un borde con tolerancia o clips solapados
-    // solo la escena más reciente puede conservar la voz activa.
+
+    const segmentWindowByRow = new Map();
+
+    const playerTimelineDurations = new Map();
+    Object.entries(this.dialoguePlayers).forEach(([rowId, audio]) => {
+      const key = String(rowId || "").trim();
+      const playbackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, key) || 1;
+      const normalizedRate = this.clampPlaybackRate(playbackRate, 0.5, 10);
+      const timelineDurationMs = Number(audio?.duration || 0) > 0
+        ? Number(audio.duration || 0) * 1000 / Math.max(0.5, normalizedRate)
+        : 0;
+      if (timelineDurationMs > 0) {
+        playerTimelineDurations.set(key, Math.max(500, timelineDurationMs));
+      }
+    });
+
+    timelineSegments.forEach((segment) => {
+      const rowId = String(segment?.rowId || "").trim();
+      if (!rowId) return;
+      const playerDurationMs = playerTimelineDurations.get(rowId);
+      if (!playerDurationMs) return;
+      const segmentStartMs = Number(segment.__timelineStartMs || 0);
+      const adjustedEndMs = segmentStartMs + playerDurationMs;
+      if (Number(segment.__timelineEndMs || 0) < adjustedEndMs) {
+        segment.__timelineEndMs = adjustedEndMs;
+      }
+    });
+
+    timelineSegments.forEach((segment) => {
+      const rowId = String(segment?.rowId || "").trim();
+      if (!rowId) return;
+      const existing = segmentWindowByRow.get(rowId);
+      if (!existing || segment.__timelineEndMs > existing.endMs) {
+        segmentWindowByRow.set(rowId, {
+          startMs: segment.__timelineStartMs,
+          endMs: segment.__timelineEndMs,
+          timelineDurationMs: Math.max(1, Number(segment.__timelineEndMs || 0) - Number(segment.__timelineStartMs || 0)),
+          trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
+          playbackRate: segment.__timelinePlaybackRate || 1
+        });
+      }
+    });
+
+    const matchingSegments = timelineSegments.filter((segment) => {
+      const segmentStartMs = Number(segment.__timelineStartMs || 0);
+      const segmentEndMs = Number(segment.__timelineEndMs || segmentStartMs + 1);
+      return this.isTimelineMsInRange(currentMs, segmentStartMs, segmentEndMs, { toleranceMs: activeTimelineToleranceMs });
+    });
+
     const activeSegments = matchingSegments
       .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0))
       .slice(0, 1);
-    // Upcoming pre-load (look ahead 5 seconds)
+
+    const primaryActiveSegment = activeSegments[0] || null;
+    const primaryActiveRowId = String(primaryActiveSegment?.rowId || "").trim();
+    if (primaryActiveRowId) {
+      const prepareSignature = `${primaryActiveRowId}|${Number(primaryActiveSegment.startMs || 0)}|${primaryActiveRowId}`;
+      const shouldRefreshPrepareState = this.state.isPlaying === true
+        && (this.dialogueAudioActivePrepareSignature !== prepareSignature
+          || (currentMs - Number(this.dialogueAudioActivePrepareAtMs || 0)) > DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS * 2);
+      if (shouldRefreshPrepareState) {
+        this.dialogueAudioActivePrepareSignature = prepareSignature;
+        this.dialogueAudioActivePrepareAtMs = currentMs;
+        const preparePromise = this.prepareDialogueRow(session, primaryActiveRowId, {
+          skipWait: false,
+          timeoutMs: DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS
+        });
+        await Promise.race([
+          preparePromise,
+          new Promise((resolve) => setTimeout(resolve, DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS))
+        ]).catch(() => { });
+      }
+    }
+
     const upcoming = segments.filter((segment) => {
       const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
-      return segmentStartMs > currentMs && (segmentStartMs - currentMs) < 5000;
+      return segmentStartMs > currentMs && (segmentStartMs - currentMs) < DIALOGUE_AUDIO_UPCOMING_LOOKAHEAD_MS;
     });
 
-    // Cleanup players for removed rows only. Keep previously loaded rows loaded to avoid
-    // tearing audio buffers during drag/seek jitter.
-    Object.keys(this.dialoguePlayers).forEach(rowId => {
+    Object.keys(this.dialoguePlayers).forEach((rowId) => {
       if (currentTimelineRowIds.has(rowId)) return;
       const audio = this.dialoguePlayers[rowId];
       if (audio) {
         if (!audio.paused) try { audio.pause(); } catch (_) { }
+        try { audio.remove(); } catch (_) { }
         audio.src = "";
         try { audio.load(); } catch (_) { }
         delete this.dialoguePlayers[rowId];
@@ -2303,47 +3112,83 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     });
 
-    // Run preload loop to pre-create and buffer upcoming audio elements
-    upcoming.forEach(async (s) => {
-      const rowId = s.rowId;
+    upcoming.forEach((segment) => {
+      const rowId = segment?.rowId;
       if (!rowId) return;
-      const clip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
-      const sourceKey = this.resolveAudioSourceKey(clip);
-      if (!sourceKey) return;
-      if (this.dialoguePlayers[rowId] && String(this.dialogueAudioSourceKeys[rowId] || "") === sourceKey) return;
-
-      const audioSrc = await this.resolveAudioSource(clip);
-      if (!audioSrc) return;
-
-      this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
+      this.prepareDialogueRow(session, rowId, {
+        skipWait: false,
+        timeoutMs: DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS
+      }).catch(() => { });
     });
 
     const activeDialogueRowIds = new Set(activeSegments.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean));
+    const activeDialogueVoiceRowIds = new Set(activeDialogueRowIds);
+
     Object.entries(this.dialoguePlayers).forEach(([rowId, audio]) => {
-      if (activeDialogueRowIds.has(String(rowId || "").trim())) return;
+      const isActive = activeDialogueRowIds.has(String(rowId || "").trim());
+      const rowKey = String(rowId || "").trim();
+      const carryInfo = segmentWindowByRow.get(rowKey);
+      const wasActive = audio?.dataset?.wasActive === "true";
+
+      if (isActive) {
+        audio.dataset.wasActive = "true";
+        return;
+      }
+
+      if (carryInfo && wasActive) {
+        const carryStartMs = Number(carryInfo.startMs || 0);
+        const playbackRate = Number(carryInfo.playbackRate || audio?.playbackRate || 1) || 1;
+        const measuredDurationMs = Number(audio?.duration || 0) > 0
+          ? Number(audio.duration || 0) * 1000 / Math.max(0.5, playbackRate)
+          : Number(carryInfo.timelineDurationMs || 0);
+        const carryEndMs = Math.max(
+          Number(carryInfo.endMs || 0),
+          carryStartMs + Math.max(0, measuredDurationMs)
+        );
+
+        if (currentMs <= carryEndMs + audioCarryToleranceMs) {
+          activeDialogueVoiceRowIds.add(rowKey);
+          audio.dataset.wasActive = "true";
+          if (
+            this.state.isPlaying
+            && audio?.paused
+            && Number(audio.readyState || 0) >= (typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_CURRENT_DATA : 2)
+          ) {
+            const carryOffsetMs = Math.max(0, Number(currentMs || 0) - carryStartMs);
+            const carryOffsetSec = (carryInfo.trimInMs + carryOffsetMs * playbackRate) / 1000;
+            this.seekTo(audio, carryOffsetSec);
+            audio.play().catch(() => { });
+          }
+          return;
+        }
+      }
+
+      audio.dataset.wasActive = "";
       audio.dataset.playIntent = "";
       audio.dataset.pendingPlayIntent = "";
+      audio.dataset.playPending = "";
       if (!audio.paused) {
         try { audio.pause(); } catch (_) { }
       }
     });
 
-    // Duck the background music whenever we're within any Gemini dialogue segment
-    // (regardless of whether the audio blob has loaded), to prevent per-word volume flutter.
-    let hasVoice = activeSegments.length > 0;
+    let hasVoice = activeDialogueVoiceRowIds.size > 0;
 
     for (const segment of activeSegments) {
       const rowId = segment.rowId;
       const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
       if (!audioClip) continue;
       const sourceKey = this.resolveAudioSourceKey(audioClip);
-      if (!sourceKey) continue;
+      const activeSegmentSignature = `${String(rowId || "").trim()}|${Number(segment?.startMs || 0)}`;
 
       let audio = this.dialoguePlayers[rowId];
-      if (!audio || String(this.dialogueAudioSourceKeys[rowId] || "") !== sourceKey) {
-        this.prepareDialogueRowInBackground(session, rowId, audioClip, sourceKey);
-        continue;
+      if (!audio || String(this.dialogueAudioSourceKeys[rowId] || "") !== String(sourceKey || "").trim()) {
+        const audioSrc = await this.resolveDialoguePlaybackAudioSource(audioClip);
+        if (!audioSrc) continue;
+        audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, sourceKey, session);
       }
+
+      if (!audio) continue;
 
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const effectiveRate = this.clampPlaybackRate(speed * clipPlaybackRate);
@@ -2352,7 +3197,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         audio.playbackRate = effectiveRate;
         audio.defaultPlaybackRate = effectiveRate;
       }
-      
+
       const mix = this.deps?.resolveTimelineClipMix?.(session, rowId) || { voiceVolume: 1 };
       const sessionConfig = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
       const masterVolumeFactor = this.clamp01(this.toFiniteNumber(sessionConfig?.masterVolume, 100) / 100);
@@ -2362,22 +3207,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       const offsetSec = this.resolveSegmentSourceOffsetSec(currentMs, segment.startMs, segmentTrimInMs, clipPlaybackRate);
 
       const drift = Math.abs(audio.currentTime - offsetSec);
+      const isNewSegment = audio.dataset.activeSegmentSignature !== activeSegmentSignature;
       const isFirstSync = audio.dataset.initialized === "false";
       const isPaused = audio.paused === true || this.state.isPlaying !== true;
-      // En Studio, re-seekear la voz Gemini con una tolerancia muy baja en cada tick
-      // provoca microcortes audibles. Mientras está sonando, solo corregimos cuando el
-      // desfase ya es claramente perceptible o después de un seek/arranque inicial.
-      const driftToleranceSec = isFirstSync
-        ? 0.01
-        : (isPaused ? 0.08 : 0.35);
-      
       const hasPendingStart = Boolean(String(audio.dataset.pendingPlayIntent || "").trim());
-      
-      // FIX C: Skip seek when offset is near 0 on first sync to avoid buffer flush cut-off.
-      // Guard against seeking while the player is already seeking or waiting for startup data.
-      const needsSeek = !audio.seeking && !hasPendingStart && (isFirstSync
-        ? (offsetSec > 0.05) // Si el offset es básicamente 0, no buscar — evita flush audible
-        : (drift > driftToleranceSec));
+      const driftToleranceSec = isFirstSync || isNewSegment ? 0.05 : (isPaused ? 0.15 : 0.35);
+      const needsSeekWithoutPendingStart = drift > driftToleranceSec;
+      const needsSeek = hasPendingStart ? false : (needsSeekWithoutPendingStart || isNewSegment);
 
       if (needsSeek) {
         this.seekTo(audio, offsetSec);
@@ -2386,44 +3222,69 @@ export class PodcasterPlaybackController extends EventEmitter {
         audio.dataset.initialized = "true";
       }
 
-      if (this.state.isPlaying && audio.paused) {
-        // FIX C: Wait for canplay before playing to avoid cut-off from insufficient buffer
+      audio.dataset.activeSegmentSignature = activeSegmentSignature;
+
+      const isPlayPending = audio.dataset.playPending === "true";
+      if (this.state.isPlaying && audio.paused && !isPlayPending) {
         const playIntent = `${rowId}:${sourceKey}:${Math.round(Number(segment.startMs || 0) || 0)}`;
         const startPlayback = () => {
-          if (this.state.isPlaying !== true || audio.dataset.playIntent !== playIntent) return;
+          if (this.state.isPlaying !== true || audio.dataset.playIntent !== playIntent) {
+            audio.dataset.playPending = "";
+            return;
+          }
           audio.dataset.pendingPlayIntent = "";
+          audio.dataset.playPending = "true";
+
+          audio.volume = this.clamp01((mix.voiceVolume ?? 1) * masterVolumeFactor);
+          audio.muted = false;
+
           audio.play().then(() => {
+            audio.dataset.playPending = "";
             if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
               audio.playbackRate = effectiveRate;
             }
-          }).catch(() => { });
+          }).catch(() => {
+            audio.dataset.playPending = "";
+          });
         };
         audio.dataset.playIntent = playIntent;
-        if (audio.readyState >= (typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_FUTURE_DATA : 3)) {
+        audio.dataset.playPending = "true";
+
+        const HAVE_METADATA = typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_METADATA : 1;
+        const HAVE_CURRENT_DATA = typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_CURRENT_DATA : 2;
+        const canStartOnMetadata = audio.readyState >= HAVE_METADATA && Number(audio.duration || 0) > 0;
+
+        if (audio.readyState >= HAVE_CURRENT_DATA || canStartOnMetadata) {
           startPlayback();
         } else if (audio.dataset.pendingPlayIntent !== playIntent) {
           audio.dataset.pendingPlayIntent = playIntent;
-          // Esperar a que haya datos suficientes para reproducir sin corte
-          const onCanPlay = () => {
-            audio.removeEventListener("canplay", onCanPlay);
-            clearTimeout(fallbackTimer);
-            startPlayback();
+          const onCanReady = () => {
+            audio.removeEventListener("canplay", onCanReady);
+            audio.removeEventListener("error", onCanError);
+            if (audio.dataset.playIntent === playIntent) startPlayback();
+            else audio.dataset.playPending = "";
           };
-          audio.addEventListener("canplay", onCanPlay, { once: true });
-          // Fallback: si no llega canplay en 1.5s, forzar play de todos modos
-          const fallbackTimer = setTimeout(() => {
-            audio.removeEventListener("canplay", onCanPlay);
-            startPlayback();
-          }, 1500);
+          const onCanError = () => {
+            audio.removeEventListener("canplay", onCanReady);
+            audio.removeEventListener("error", onCanError);
+            audio.dataset.pendingPlayIntent = "";
+            audio.dataset.playPending = "";
+          };
+          audio.addEventListener("canplay", onCanReady, { once: true });
+          audio.addEventListener("error", onCanError, { once: true });
+          if (audio.readyState === 0) {
+            try { audio.load(); } catch (_) { }
+          }
+        } else {
+          audio.dataset.playPending = "";
         }
       } else if (!audio.paused && Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
-        // Asegurar que la velocidad se mantenga sincronizada incluso si ya está sonando
         audio.playbackRate = effectiveRate;
       }
     }
+
     await this.syncBackgroundMusic(currentMs, speed, hasVoice);
   }
-
   async syncBackgroundMusic(currentMs, speed, hasVoice = false) {
     const session = this.state.session || this.deps?.getActiveSession?.();
     const panelCfg = this.deps?.getPanelMontageMusicConfig?.(session);
@@ -2457,26 +3318,63 @@ export class PodcasterPlaybackController extends EventEmitter {
         return matches
           .sort((a, b) => Number(b.segment.startOffsetMs || 0) - Number(a.segment.startOffsetMs || 0))[0];
       };
-      if (useContinuousSource) {
+    if (useContinuousSource) {
         const matchingItem = findMatchingSourceItem();
         if (matchingItem) return matchingItem;
         const orderedItems = sourceItems
           .slice()
           .sort((a, b) => Number(a.startOffsetMs || 0) - Number(b.startOffsetMs || 0));
         const firstSegment = orderedItems[0] || null;
+        const fallbackSourceItem = firstSegment || {
+          sourceUrl: String(panelCfg.sourceUrl || "").trim(),
+          localDataUrl: String(panelCfg.localDataUrl || "").trim(),
+          localMediaCacheKey: String(panelCfg.localMediaCacheKey || "").trim(),
+          downloadUrl: String(panelCfg.downloadUrl || "").trim(),
+          storagePath: String(panelCfg.storagePath || "").trim(),
+          trimInMs: Math.max(0, Number(panelCfg.trimInMs || 0) || 0),
+          trimOutMs: Math.max(0, Number(panelCfg.trimOutMs || 0) || 0),
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          loop: loopEnabled
+        };
+        if (!fallbackSourceItem.sourceUrl && !fallbackSourceItem.localDataUrl && !fallbackSourceItem.localMediaCacheKey && !fallbackSourceItem.downloadUrl && !fallbackSourceItem.storagePath) {
+          return null;
+        }
         const lastSegment = orderedItems.slice().sort((a, b) => Number(b.endOffsetMs || 0) - Number(a.endOffsetMs || 0))[0] || firstSegment;
         const trackStartMs = Math.max(0, Number(firstSegment?.startOffsetMs || panelCfg.startOffsetMs || 0) || 0);
-        const trackEndMs = Math.max(
-          trackStartMs,
-          Number(lastSegment?.endOffsetMs || panelCfg.trimOutMs || trackStartMs) || trackStartMs
+        const configuredTrimInMs = Math.max(
+          0,
+          Number(panelCfg.trimInMs || firstSegment?.trimInMs || 0) || 0
         );
-        if (!firstSegment || !this.isTimelineMsInRange(currentMs, trackStartMs, trackEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
+        const configuredTrimOutMs = Math.max(
+          configuredTrimInMs + 1,
+          Number(panelCfg.trimOutMs || 0) || configuredTrimInMs + 1
+        );
+        const configuredDurationMs = Math.max(
+          0,
+          Math.round(Number(panelCfg.durationSec || 0) * 1000)
+        );
+        const fallbackTotalMs = Math.max(
+          0,
+          Number(this.deps?.getTimelineTotalDurationMs?.(session) || 0) || 0
+        );
+        const resolvedEndCandidates = [
+          Number(lastSegment?.endOffsetMs || 0),
+          configuredTrimOutMs,
+          configuredTrimInMs + configuredDurationMs,
+          fallbackTotalMs
+        ];
+        const trackEndMs = Math.max(
+          trackStartMs + 1,
+          ...resolvedEndCandidates.filter((candidate) => Number.isFinite(candidate) && candidate > 0)
+        );
+        if (!this.isTimelineMsInRange(currentMs, trackStartMs, trackEndMs, { toleranceMs: backgroundLookupToleranceMs })) {
           return null;
         }
         return {
           segmentIndex: 0,
           segment: {
-            ...(firstSegment || {}),
+            ...(fallbackSourceItem || {}),
             sourceUrl: firstSegment?.sourceUrl || panelCfg.sourceUrl || "",
             volume: panelCfg.volume,
             loop: loopEnabled,
@@ -2487,7 +3385,7 @@ export class PodcasterPlaybackController extends EventEmitter {
               Math.max(0, Number(panelCfg.trimInMs || firstSegment?.trimInMs || 0) || 0) + 1,
               Number(panelCfg.trimOutMs || lastSegment?.trimOutMs || trackEndMs) || trackEndMs
             ),
-            fadeInMs: Math.max(0, Number(firstSegment?.fadeInMs || 0) || 0),
+            fadeInMs: Math.max(0, Number((firstSegment || fallbackSourceItem).fadeInMs || 0) || 0),
             fadeOutMs: Math.max(0, Number(lastSegment?.fadeOutMs || 0) || 0)
           }
         };
@@ -2496,6 +3394,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     })();
 
     if (!activeSegmentLookup || !activeSegmentLookup.segment) {
+      this.backgroundFadeSegmentSignature = "";
       if (this.state.isPlaying && this.backgroundAudio && !this.backgroundAudio.paused && this.backgroundSourceKey) {
         const nowMs = performance.now();
         if (!this.backgroundSegmentGapStartMs) this.backgroundSegmentGapStartMs = nowMs;
@@ -2521,17 +3420,30 @@ export class PodcasterPlaybackController extends EventEmitter {
     const rawSegmentIndex = Number(activeSegmentLookup.segmentIndex);
     const activeSegmentIndex = Number.isFinite(rawSegmentIndex) ? Math.floor(rawSegmentIndex) : -1;
     const activeSegmentSourceKey = this.resolveAudioSourceKey(activeSegment);
+    const stableSegmentSourceKey = (() => {
+      if (activeSegmentSourceKey) return activeSegmentSourceKey;
+      const sourceCandidates = [
+        String(activeSegment.sourceUrl || "").trim(),
+        String(activeSegment.localDataUrl || "").trim(),
+        String(activeSegment.localMediaCacheKey || "").trim(),
+        String(activeSegment.downloadUrl || "").trim(),
+        String(activeSegment.storagePath || "").trim()
+      ].filter(Boolean);
+      if (sourceCandidates.length) return sourceCandidates.join("|");
+      return "";
+    })();
     const activeSegmentStartMs = Math.max(0, Number(activeSegment.startOffsetMs || 0) || 0);
     const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
     const fadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
     const fadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
     const trimOutMs = Math.max(0, Number(activeSegment.trimOutMs || 0));
-    const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${fadeInMs}|${fadeOutMs}|${trimInMs}|${trimOutMs}`;
-    const sourceHasNotChanged = this.backgroundSourceKey === activeSegmentSourceKey;
+    const activeSegmentIdentity = `${activeSegment.loop !== false ? "1" : "0"}|${trimInMs}|${trimOutMs}|${fadeInMs}|${fadeOutMs}`;
+    const sourceHasNotChanged = this.backgroundSourceKey === stableSegmentSourceKey;
     const sourceIsContinuous = useContinuousSource === true;
     const previousBackgroundSegmentIndex = this.backgroundSegmentIndex;
     const previousBackgroundSegmentIdentity = this.backgroundSegmentIdentity;
     const isActiveSegmentIdentityChanged = previousBackgroundSegmentIdentity !== activeSegmentIdentity;
+    const activeBackgroundSegmentSignature = `${stableSegmentSourceKey}|${activeSegmentIndex}|${activeSegmentIdentity}`;
 
     if (!sourceHasNotChanged) {
       this.backgroundSegmentSkewMs = null;
@@ -2541,8 +3453,6 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.backgroundSyncLastTimelineMs = null;
       if (this.backgroundAudio) {
         try { this.backgroundAudio.pause(); } catch (_) { }
-        try { this.backgroundAudio.currentTime = 0; } catch (_) { }
-        try { this.backgroundAudio.src = ""; } catch (_) { }
       }
       // A MediaElementSource is permanently associated with its media element.
       // Preserve that node across URL changes and reconnect it downstream instead
@@ -2556,11 +3466,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.backgroundFinalLimiter = null;
       this.backgroundStabilizeEnabled = null;
       this.backgroundLimiterEnabled = null;
-      this.backgroundSourceKey = activeSegmentSourceKey;
+      this.backgroundSourceKey = stableSegmentSourceKey;
       this.backgroundSegmentIdentity = activeSegmentIdentity;
       this.backgroundSrc = String(activeSegment.sourceUrl || "").trim();
       try {
-        const resolvedSource = await this.resolveAudioSource({
+        const playableSource = await this.resolveDialoguePlaybackAudioSource({
           ...activeSegment,
           localDataUrl: String(activeSegment.localDataUrl || "").trim(),
           localMediaCacheKey: String(activeSegment.localMediaCacheKey || "").trim(),
@@ -2568,7 +3478,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           downloadUrl: String(activeSegment.downloadUrl || "").trim(),
           storagePath: String(activeSegment.storagePath || "").trim()
         });
-        const blobSrc = this.getBlobUrlSync(resolvedSource) || await this.getBlobUrl(resolvedSource);
+        const blobSrc = playableSource;
         if (!blobSrc) {
           this.backgroundSrc = "";
           this.backgroundResolvedSource = "";
@@ -2576,10 +3486,10 @@ export class PodcasterPlaybackController extends EventEmitter {
           return;
         }
         this.backgroundAudio = this.getOrCreateBackgroundAudioElement();
-        this.backgroundResolvedSource = String(resolvedSource || "").trim();
+        this.backgroundResolvedSource = String(blobSrc || "").trim();
         this.backgroundAudio.src = blobSrc;
         this.backgroundAudio.dataset.originalSrc = this.backgroundResolvedSource;
-        this.backgroundAudio.dataset.sourceKey = activeSegmentSourceKey;
+        this.backgroundAudio.dataset.sourceKey = stableSegmentSourceKey;
         this.backgroundAudio.dataset.initialized = "false";
         this.backgroundAudio.dataset.playbackStarted = "false";
         try { this.backgroundAudio.load(); } catch (_) { }
@@ -2590,6 +3500,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundResolvedSource = "";
         this.backgroundSourceKey = "";
         this.backgroundSegmentIdentity = "";
+        this.backgroundFadeSegmentSignature = "";
         return;
       }
     } else if (this.backgroundAudio) {
@@ -2611,11 +3522,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     const segmentDurationMs = Math.max(1, Number(activeSegment.endOffsetMs || 0) - Number(activeSegment.startOffsetMs || 0));
     const elapsedMs = Math.max(0, currentMs - Number(activeSegment.startOffsetMs || 0));
     const remainingMs = Math.max(0, segmentDurationMs - elapsedMs);
-    const segmentFadeInMs = Math.max(0, Number(activeSegment.fadeInMs || 0));
+    const segmentFadeInMs = Math.min(Math.max(0, Number(fadeInMs || 0)), segmentDurationMs);
     const fadeInFactor = segmentFadeInMs > 0 && segmentDurationMs > 0
       ? (elapsedMs < segmentFadeInMs ? Math.max(0, Math.min(1, elapsedMs / segmentFadeInMs)) : 1.0)
       : 1.0;
-    const segmentFadeOutMs = Math.max(0, Number(activeSegment.fadeOutMs || 0));
+    const segmentFadeOutMs = Math.min(Math.max(0, Number(fadeOutMs || 0)), segmentDurationMs);
     const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0
       ? (remainingMs <= segmentFadeOutMs ? Math.max(0, Math.min(1, remainingMs / segmentFadeOutMs)) : 1.0)
       : 1.0;
@@ -2635,6 +3546,12 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
     const finalVolume = (baseVolume / 100) * this.backgroundDuckFactor * sceneBackgroundFactor * fadeInFactor * fadeOutFactor;
+    const isNewBackgroundSegment = !sourceHasNotChanged
+      || previousBackgroundSegmentIndex !== activeSegmentIndex
+      || isActiveSegmentIdentityChanged
+      || this.backgroundFadeSegmentSignature !== activeBackgroundSegmentSignature;
+
+    this.backgroundFadeSegmentSignature = activeBackgroundSegmentSignature;
 
     const sessionConfig = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
     const masterVolumeFactor = this.clamp01(this.toFiniteNumber(sessionConfig?.masterVolume, 100) / 100);
@@ -2642,18 +3559,30 @@ export class PodcasterPlaybackController extends EventEmitter {
       ? activeSegment.stabilize === true
       : panelCfg.stabilize === true);
     const limiterEnabled = sessionConfig?.audioMasterLimiterEnabled === true || panelCfg.limiterEnabled === true;
+    const clampedFinalVolume = this.clamp01(finalVolume * masterVolumeFactor);
+    if (this.backgroundAudio && Number.isFinite(this.backgroundAudio.volume)) {
+      this.backgroundAudio.volume = 1;
+    }
 
     if (this.audioCtx) {
       this.ensureBackgroundChain(stabilizeEnabled, limiterEnabled);
       if (this.backgroundGain) {
-        // Use a slightly longer time constant (0.15s) for ducking transitions to avoid abrupt jumps
+        const now = this.audioCtx.currentTime;
         const smoothingConstant = 0.15;
-        this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume * masterVolumeFactor), this.audioCtx.currentTime, smoothingConstant);
+        try { this.backgroundGain.gain.cancelScheduledValues(now); } catch (_) { }
+        // Use a slightly longer time constant (0.15s) for ducking transitions to avoid abrupt jumps
+        if (isNewBackgroundSegment) {
+          try { this.backgroundGain.gain.setValueAtTime(0, now); } catch (_) { }
+        } else {
+          const currentGain = Number(this.backgroundGain.gain.value || 0);
+          try { this.backgroundGain.gain.setValueAtTime(currentGain, now); } catch (_) { }
+        }
+        this.backgroundGain.gain.setTargetAtTime(clampedFinalVolume, now, isNewBackgroundSegment ? 0.08 : smoothingConstant);
       } else {
-        this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
+        this.backgroundAudio.volume = clampedFinalVolume;
       }
     } else {
-      this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
+      this.backgroundAudio.volume = clampedFinalVolume;
     }
 
     this.backgroundAudio.playbackRate = speed;
@@ -2795,15 +3724,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (this.backgroundAudio) { 
       try { 
         this.backgroundAudio.pause(); 
-        this.backgroundAudio.currentTime = 0;
-        this.backgroundAudio.src = "";
       } catch (_) { } 
     }
     this.backgroundSegmentGapStartMs = 0;
     this.backgroundSrc = "";
     this.backgroundResolvedSource = "";
-    this.backgroundSourceKey = "";
     this.backgroundSegmentIdentity = "";
+    this.backgroundFadeSegmentSignature = "";
     this.backgroundSegmentSkewMs = null;
     this.backgroundSegmentIndex = -1;
     this.backgroundSyncAnchorMs = null;
@@ -2830,43 +3757,38 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (this.state.useMse) return;
     const entry = this.getEntryAtMs(currentMs);
 
-    // Pre-load upcoming
+    // Pre-load upcoming. The list is stable for most of a scene; resolving the
+    // same eight URLs on every animation tick created thousands of redundant
+    // promises and competed with decoding on longer timelines.
     const entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
-    const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 45000).slice(0, 8);
-    let hydratedUpcomingCount = 0;
-    const hydratedUpcomingLimit = 3;
-    upcoming.forEach(e => {
-      if (!this.hasStageVisualSurface(e) || this.isColorSceneEntry(e)) {
-        return;
-      }
-      if (this.isImageStageEntry(e)) {
-        this.preloadImageSrc(e.videoSrc).catch(() => { });
-      } else {
-        if (hydratedUpcomingCount < hydratedUpcomingLimit) {
-          hydratedUpcomingCount += 1;
-          this.getBlobUrl(e.videoSrc, { persistent: true }).catch(() => { });
+    const upcoming = entries
+      .filter(e => e.startMs > currentMs && (e.startMs - currentMs) < SYNC_VIDEO_UPCOMING_LOOKAHEAD_MS)
+      .slice(0, SYNC_VIDEO_UPCOMING_MAX_ENTRIES);
+    const lookAheadKey = upcoming
+      .map((item) => this.normalizeTimelineSourceKey?.(String(item?.videoSrc || "").trim()) || String(item?.videoSrc || "").trim())
+      .filter(Boolean)
+      .join("|");
+    if (lookAheadKey !== this.videoLookAheadKey) {
+      this.videoLookAheadKey = lookAheadKey;
+      upcoming.forEach(e => {
+        if (!this.hasStageVisualSurface(e) || this.isColorSceneEntry(e)) {
           return;
         }
-        this.getBlobUrl(e.videoSrc);
-      }
-    });
-    const overlapPair = typeof this.deps?.resolveTimelineRuntimeOverlapPairAtMs === "function"
-      ? this.deps.resolveTimelineRuntimeOverlapPairAtMs(this.state.session, currentMs, entries)
-      : null;
-    if (overlapPair?.isOverlapActive && overlapPair?.backEntry && overlapPair?.frontEntry) {
-      const transition = this.deps?.getTransitionForEdge?.(this.state.session, overlapPair.backEntry.rowId, overlapPair.frontEntry.rowId) || { type: "cut", durationMs: 0 };
-      if (String(transition?.type || "cut").trim().toLowerCase() !== "cut") {
-        await this.syncOverlapPair(overlapPair, currentMs, transition);
-        return;
-      }
+        if (this.isImageStageEntry(e)) {
+          this.preloadEntryStopMotion(e);
+          this.preloadImageSrc(e.videoSrc).catch(() => { });
+        } else {
+          const source = String(e?.videoSrc || "").trim();
+          this.getBlobUrl(source, {
+            persistent: true
+          }).catch(() => { });
+        }
+      });
     }
     if (this.overlapState?.key) {
-      if (this.deps?.setActiveStageVideoSlot) {
-        this.deps.setActiveStageVideoSlot(this.overlapState.frontSlot);
-      }
       this.overlapState.key = "";
     }
-    this.preloadUpcomingStageSlot(entry, upcoming);
+    // Single-load strategy: preload is handled by the main stage media pipeline.
     this.preloadUpcomingStylizedText(entry, upcoming);
 
     if (entry) {
@@ -2899,191 +3821,31 @@ export class PodcasterPlaybackController extends EventEmitter {
     };
   }
 
-  async syncOverlapPair(overlapPair = null, currentMs = 0, transition = { type: "crossfade", durationMs: 320 }) {
-    const backEntry = overlapPair?.backEntry || null;
-    const frontEntry = overlapPair?.frontEntry || null;
-    if (!backEntry || !frontEntry) return;
-    const primary = this.els?.podcastActiveSpeakerVideo;
-    const alt = this.els?.podcastActiveSpeakerVideoAlt;
-    const primaryImage = this.els?.podcastActiveSpeakerImage;
-    const altImage = this.els?.podcastActiveSpeakerImageAlt;
-    const backIsImage = this.isImageStageEntry(backEntry);
-    const frontIsImage = this.isImageStageEntry(frontEntry);
-    const backHasSurface = this.hasStageVisualSurface(backEntry);
-    const frontHasSurface = this.hasStageVisualSurface(frontEntry);
-
-    if (!backHasSurface || !frontHasSurface) {
-      await this.syncStageSwitching(frontEntry, currentMs);
-      this.overlapState.key = "";
-      return;
-    }
-
-    const needsVideoSurface = !backIsImage || !frontIsImage;
-    const needsImageSurface = backIsImage || frontIsImage;
-    if ((needsVideoSurface && (!primary || !alt || !this.deps?.setPodcastStageVideoSourceForElement))
-      || (needsImageSurface && (!primaryImage || !altImage))) {
-      await this.syncStageSwitching(frontEntry, currentMs);
-      return;
-    }
-    const overlapKey = `${String(backEntry.rowId || "").trim()}__${String(frontEntry.rowId || "").trim()}`;
-    const primarySrc = String(primary.dataset?.src || "").trim();
-    const altSrc = String(alt.dataset?.src || "").trim();
-    const activeSlot = Number(this.deps?.podcastVideoState?.stageVideoSlot || 0) === 1 ? 1 : 0;
-    if (this.overlapState.key !== overlapKey) {
-      let backSlot = activeSlot;
-      if (primarySrc === backEntry.videoSrc && altSrc !== frontEntry.videoSrc) {
-        backSlot = 0;
-      } else if (altSrc === backEntry.videoSrc && primarySrc !== frontEntry.videoSrc) {
-        backSlot = 1;
-      }
-      this.overlapState = {
-        key: overlapKey,
-        backSlot,
-        frontSlot: backSlot === 1 ? 0 : 1
-      };
-    }
-    const backVideoEl = this.overlapState.backSlot === 1 ? alt : primary;
-    const frontVideoEl = this.overlapState.frontSlot === 1 ? alt : primary;
-    const backImageEl = this.overlapState.backSlot === 1 ? altImage : primaryImage;
-    const frontImageEl = this.overlapState.frontSlot === 1 ? altImage : primaryImage;
-    const pairState = { progress: Math.max(0, Math.min(1, Number(overlapPair?.progress || 0))) };
-    const backInfo = this.resolveEntryTargetOffsetSec(backEntry, currentMs);
-    const frontInfo = this.resolveEntryTargetOffsetSec(frontEntry, currentMs);
-    const resetSurface = (el) => {
-      if (!el) return;
-      this.resetEntryVisualStateOnSurface(el);
-      el.style.transition = "none";
-      el.style.opacity = "";
-      el.style.transform = "";
-      el.style.filter = "";
-      el.style.visibility = "hidden";
-      el.hidden = true;
-      if (typeof el.pause === "function") {
-        try { el.pause(); } catch (_) { }
-      }
-    };
-    const imageBaseClass = (imageEl) => imageEl?.id === "podcastActiveSpeakerImageAlt" || imageEl?.id === "montageExportPreviewImageAlt"
-      ? "podcast-active-speaker-image podcast-active-speaker-image-alt"
-      : "podcast-active-speaker-image";
-    const loadEntry = async (videoEl, imageEl, entry, targetOffsetSec, isHoldActive = false, playbackRate = 1) => {
-      if (this.isImageStageEntry(entry)) {
-        const src = String(entry?.videoSrc || "").trim();
-        if (!src || !imageEl) return null;
-        resetSurface(videoEl);
-        await this.preloadImageSrc(src).catch(() => { });
-        await this.ensureStageImageReady(imageEl, src);
-        imageEl.className = `${imageBaseClass(imageEl)} is-visible`;
-        this.applyEntryVisualStateToSurface(entry, imageEl);
-        imageEl.style.animationPlayState = this.state.isPlaying ? "running" : "paused";
-        this.syncStageMediaMotionPlaybackState(this.state.isPlaying === true);
-        imageEl.hidden = false;
-        imageEl.style.visibility = "visible";
-        imageEl.style.transition = "none";
-        return imageEl;
-      }
-      if (!videoEl || !entry?.videoSrc) return null;
-      resetSurface(imageEl);
-      this.applyEntryVisualStateToSurface(entry, videoEl);
-      if (videoEl.dataset.src !== entry.videoSrc) {
-        const ready = await this.deps.setPodcastStageVideoSourceForElement(videoEl, entry.videoSrc, { keepHidden: false });
-        if (ready !== true) return false;
-      }
-      if (Math.abs((Number(videoEl.currentTime) || 0) - targetOffsetSec) > 0.2) {
-        this.seekTo(videoEl, targetOffsetSec);
-      }
-      videoEl.hidden = false;
-      videoEl.style.visibility = "visible";
-      videoEl.style.transition = "none";
-      videoEl.playbackRate = this.clampPlaybackRate(playbackRate, 0.25, 4);
-      if (isHoldActive) {
-        try { videoEl.pause(); } catch (_) { }
-      } else if (this.state.isPlaying && videoEl.paused) {
-        videoEl.play().catch(() => { });
-      }
-      return videoEl;
-    };
-    const backSurfaceEl = await loadEntry(backVideoEl, backImageEl, backEntry, backInfo.targetOffsetSec, backInfo.isHoldActive, backInfo.playbackRate);
-    const frontSurfaceEl = await loadEntry(frontVideoEl, frontImageEl, frontEntry, frontInfo.targetOffsetSec, frontInfo.isHoldActive, frontInfo.playbackRate);
-    if (!backSurfaceEl || !frontSurfaceEl) return;
-
-    const type = String(transition?.type || "crossfade").trim().toLowerCase();
-    const progress = Math.max(0, Math.min(1, pairState.progress));
-    const eased = progress * progress * (3 - (2 * progress));
-    backSurfaceEl.style.zIndex = "1";
-    frontSurfaceEl.style.zIndex = "2";
-    backSurfaceEl.style.opacity = String(1 - eased);
-    frontSurfaceEl.style.opacity = String(eased);
-    backSurfaceEl.style.transform = "";
-    frontSurfaceEl.style.transform = "";
-    backSurfaceEl.style.filter = "";
-    frontSurfaceEl.style.filter = "";
-    if (type === "slide-left") {
-      backSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.opacity = "1";
-      backSurfaceEl.style.transform = `translateX(${(-24 * eased).toFixed(2)}%)`;
-      frontSurfaceEl.style.transform = `translateX(${(100 * (1 - eased)).toFixed(2)}%)`;
-    } else if (type === "slide-right") {
-      backSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.opacity = "1";
-      backSurfaceEl.style.transform = `translateX(${(24 * eased).toFixed(2)}%)`;
-      frontSurfaceEl.style.transform = `translateX(${(-100 * (1 - eased)).toFixed(2)}%)`;
-    } else if (type === "slide-up") {
-      backSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.opacity = "1";
-      backSurfaceEl.style.transform = `translateY(${(-20 * eased).toFixed(2)}%)`;
-      frontSurfaceEl.style.transform = `translateY(${(100 * (1 - eased)).toFixed(2)}%)`;
-    } else if (type === "slide-down") {
-      backSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.opacity = "1";
-      backSurfaceEl.style.transform = `translateY(${(20 * eased).toFixed(2)}%)`;
-      frontSurfaceEl.style.transform = `translateY(${(-100 * (1 - eased)).toFixed(2)}%)`;
-    } else if (type === "zoom-in") {
-      backSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.transform = `scale(${(0.72 + (eased * 0.28)).toFixed(3)})`;
-    } else if (type === "zoom-out") {
-      backSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.opacity = "1";
-      frontSurfaceEl.style.transform = `scale(${(1.22 - (eased * 0.22)).toFixed(3)})`;
-    } else if (type === "dip-black") {
-      const dip = Math.sin(eased * Math.PI);
-      backSurfaceEl.style.filter = `brightness(${(1 - dip).toFixed(3)})`;
-      frontSurfaceEl.style.filter = `brightness(${(1 - dip).toFixed(3)})`;
-    } else if (type === "flash-white") {
-      const flash = Math.sin(eased * Math.PI);
-      backSurfaceEl.style.filter = `brightness(${(1 + flash * 1.8).toFixed(3)}) saturate(${(1 - flash * 0.45).toFixed(3)})`;
-      frontSurfaceEl.style.filter = `brightness(${(1 + flash * 1.8).toFixed(3)}) saturate(${(1 - flash * 0.45).toFixed(3)})`;
-    } else if (type === "blur") {
-      backSurfaceEl.style.filter = `blur(${(eased * 12).toFixed(2)}px)`;
-      frontSurfaceEl.style.filter = `blur(${((1 - eased) * 12).toFixed(2)}px)`;
-    }
+  async syncOverlapPair(overlapPair = null, currentMs = 0, transition = { type: "crossfade", durationMs: OVERLAP_TRANSITION_DEFAULT_DURATION_MS }) {
+    const frontEntry = overlapPair?.frontEntry || overlapPair?.backEntry || null;
+    if (!frontEntry) return;
+    await this.syncStageSwitching(frontEntry, currentMs);
+    this.overlapState.key = "";
   }
 
   preloadUpcomingStageSlot(currentEntry, upcomingEntries = []) {
-    const primary = this.els?.podcastActiveSpeakerVideo;
-    const alt = this.els?.podcastActiveSpeakerVideoAlt;
-    const activeSlot = Number(this.deps?.podcastVideoState?.stageVideoSlot || 0);
-    const activeEl = activeSlot === 1 ? alt : primary;
-    const inactiveEl = activeSlot === 1 ? primary : alt;
-    if (!inactiveEl || !Array.isArray(upcomingEntries) || !upcomingEntries.length) return;
+    const activeEl = this.getActiveStageVideoEl();
+    if (!activeEl || !Array.isArray(upcomingEntries) || !upcomingEntries.length) return;
 
     const activeSrc = String(activeEl?.dataset?.src || currentEntry?.videoSrc || "").trim();
-    const inactiveSrc = String(inactiveEl?.dataset?.src || "").trim();
     const nextEntry = upcomingEntries.find((item) => {
       const src = String(item?.videoSrc || "").trim();
       return src && src !== activeSrc && this.isImageStageEntry(item) !== true;
     });
     const nextSrc = String(nextEntry?.videoSrc || "").trim();
     if (!nextSrc) return;
-    if (inactiveSrc === nextSrc && inactiveEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
     if (this.stageMachine.loadingSrc === nextSrc || this.stageMachine.preloadingSrc === nextSrc) return;
-    if (!this.deps?.setPodcastStageVideoSourceForElement) return;
 
     this.stageMachine.preloadingSrc = nextSrc;
     this.stageMachine.preloadingPromise = (async () => {
-      await this.getBlobUrl(nextSrc, { persistent: true });
+      await this.primeStageVideoSource(nextSrc);
       if (this.stageMachine.preloadingSrc !== nextSrc) return false;
-      return this.deps.setPodcastStageVideoSourceForElement(inactiveEl, nextSrc, { keepHidden: true });
+      return this.stageMachine.preloadingSrc === nextSrc;
     })().catch(() => false).finally(() => {
       if (this.stageMachine.preloadingSrc === nextSrc) {
         this.stageMachine.preloadingSrc = '';
@@ -3227,6 +3989,75 @@ export class PodcasterPlaybackController extends EventEmitter {
     editor.prewarmStylizedText(nextEntry.rowId, session);
   }
 
+  resolveEntryStopMotion(entry = null) {
+    const api = window.PodcasterStopMotion;
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    const rowId = String(entry?.rowId || "").trim();
+    if (!rowId || typeof api?.normalizeStopMotion !== "function") return null;
+    const dialogueVideoMaps = [
+      session?.dialogueVideoMap,
+      session?.session?.dialogueVideoMap,
+      session?.podcastStudioUiState?.dialogueVideosByRowId,
+      session?.script?.dialogueVideoMap
+    ];
+    const persistedClip = dialogueVideoMaps
+      .map((map) => map?.[rowId] || null)
+      .find(Boolean);
+    const rawStopMotion = entry?.video?.stopMotion
+      || entry?.stopMotion
+      || entry?.clip?.stopMotion
+      || persistedClip?.stopMotion
+      || null;
+    return api.normalizeStopMotion(rawStopMotion);
+  }
+
+  resolveStopMotionEntryAtMs(entry = null, currentMs = 0) {
+    const api = window.PodcasterStopMotion;
+    const stopMotion = this.resolveEntryStopMotion(entry);
+    if (!stopMotion || typeof api?.resolveStopMotionFrame !== "function") return entry;
+    const durationMs = Math.max(
+      1,
+      Number(entry?.effectiveDurationMs || 0)
+        || (Number(entry?.endMs || 0) - Number(entry?.startMs || 0))
+        || 1
+    );
+    const localMs = Math.max(0, Number(currentMs || 0) - Number(entry?.startMs || 0));
+    const frame = api.resolveStopMotionFrame(stopMotion, localMs, durationMs);
+    if (!frame) return entry;
+    const resolveStorageUrl = this.deps?.resolveStorageVideoUrl || window.resolveStorageVideoUrl;
+    const source = typeof resolveStorageUrl === "function"
+      ? resolveStorageUrl(frame.downloadUrl || "", frame.storagePath || "", {
+          type: "image",
+          mimeType: frame.mimeType || "image/jpeg"
+        })
+      : api.resolveFrameSource?.(frame);
+    if (!source) return entry;
+    return {
+      ...entry,
+      videoSrc: source,
+      stopMotionFrame: frame,
+      stopMotionFrameIndex: frame.index,
+      stopMotionFrameCount: stopMotion.frames.length
+    };
+  }
+
+  preloadEntryStopMotion(entry = null) {
+    const api = window.PodcasterStopMotion;
+    const stopMotion = this.resolveEntryStopMotion(entry);
+    if (!stopMotion || typeof api?.preloadStopMotionFrame !== "function") return;
+    const resolveStorageUrl = this.deps?.resolveStorageVideoUrl || window.resolveStorageVideoUrl;
+    stopMotion.frames.forEach((frame) => {
+      const source = typeof resolveStorageUrl === "function"
+        ? resolveStorageUrl(frame.downloadUrl || "", frame.storagePath || "", {
+            type: "image",
+            mimeType: frame.mimeType || "image/jpeg"
+          })
+        : api.resolveFrameSource?.(frame);
+      if (!source) return;
+      api.preloadStopMotionFrame({ ...frame, downloadUrl: source }).catch(() => { });
+    });
+  }
+
   requestImageStageSwap(entry = null) {
     const imageEl = this.els?.podcastActiveSpeakerImage;
     const cleanSrc = String(entry?.videoSrc || "").trim();
@@ -3245,6 +4076,22 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       const session = this.state.session || this.deps?.getActiveSession?.();
       const effects = session?.visualEffectsMap?.[entry.rowId];
+      const kenBurnsAnimationKey = JSON.stringify({
+        rowId: String(entry?.rowId || ""),
+        durationMs: Number(entry?.effectiveDurationMs || entry?.durationMs || 0) || 0,
+        effects: effects || null
+      });
+      const shouldRestartKenBurns = imageEl.dataset.sceneMediaKenBurnsAnimationKey !== kenBurnsAnimationKey;
+      const visualStateKey = JSON.stringify({
+        rowId: String(entry?.rowId || ""),
+        src: cleanSrc,
+        durationMs: Number(entry?.effectiveDurationMs || entry?.durationMs || 0) || 0,
+        effects: effects || null
+      });
+      if (imageEl.dataset.sceneMediaVisualStateKey !== visualStateKey) {
+        this.applyEntryVisualStateToSurface(entry, imageEl);
+        imageEl.dataset.sceneMediaVisualStateKey = visualStateKey;
+      }
       let className = "podcast-active-speaker-image is-visible";
       if (effects && effects.effects?.length) {
         const speedClass = `speed-${effects.speed || 5}`;
@@ -3253,7 +4100,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       if (imageEl.className !== className) {
         imageEl.className = className;
+      } else if (shouldRestartKenBurns && effects?.effects?.length) {
+        imageEl.style.animation = "none";
+        void imageEl.offsetWidth;
+        imageEl.style.removeProperty("animation");
       }
+      imageEl.dataset.sceneMediaKenBurnsAnimationKey = kenBurnsAnimationKey;
       imageEl.style.animationPlayState = this.state.isPlaying ? 'running' : 'paused';
       this.syncStageMediaMotionPlaybackState(this.state.isPlaying === true);
     };
@@ -3263,9 +4115,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       return;
     }
 
+    const preserveVisibleFrame = Boolean(entry?.stopMotionFrame) && !imageEl.hidden;
     imageEl.hidden = false;
     imageEl.style.visibility = "visible";
-    imageEl.style.opacity = "0";
+    if (!preserveVisibleFrame) imageEl.style.opacity = "0";
 
     const existingToken = Number(this.stageMachine.imageSwapToken || 0) + 1;
     this.stageMachine.imageSwapToken = existingToken;
@@ -3299,15 +4152,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     const switchToken = ++this.stageSwitchSeq;
     const sourceState = this.resolveEntryTargetOffsetSec(entry, currentMs);
     const offsetSec = sourceState.targetOffsetSec;
-
-    const activeSlot = Number(this.deps?.podcastVideoState?.stageVideoSlot || 0);
-    const primary = this.els?.podcastActiveSpeakerVideo;
-    const alt = this.els?.podcastActiveSpeakerVideoAlt;
-
-    const activeEl = activeSlot === 1 ? alt : primary;
-    const inactiveEl = activeSlot === 1 ? primary : alt;
+    const activeEl = this.getActiveStageVideoEl();
     const imageEl = this.els?.podcastActiveSpeakerImage;
-    
+
     if (!activeEl) return;
 
     const isImage = this.isImageStageEntry(entry);
@@ -3315,7 +4162,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.applySceneMediaScale(entry);
 
     if (isImage) {
-        this.requestImageStageSwap(entry);
+        const imageEntry = this.resolveStopMotionEntryAtMs(entry, currentMs);
+        this.preloadEntryStopMotion(entry);
+        this.requestImageStageSwap(imageEntry);
         return;
     } else {
         this.hideAllImages();
@@ -3325,17 +4174,19 @@ export class PodcasterPlaybackController extends EventEmitter {
     let targetOffsetSec = offsetSec;
     const resolvedDuration = activeEl && activeEl.dataset.src === entry.videoSrc && Number.isFinite(activeEl.duration) && activeEl.duration > 0
       ? activeEl.duration
-      : (inactiveEl && inactiveEl.dataset.src === entry.videoSrc && Number.isFinite(inactiveEl.duration) && inactiveEl.duration > 0
-        ? inactiveEl.duration
-        : 0);
+      : 0;
 
     if (resolvedDuration > 0 && offsetSec >= resolvedDuration) {
       targetOffsetSec = offsetSec % resolvedDuration;
     }
 
-    // Use current element if it matches source
-    if (activeEl.dataset.src === entry.videoSrc) {
-      if (Math.abs(activeEl.currentTime - targetOffsetSec) > 0.2) {
+    const isSameSource = activeEl.dataset.src === entry.videoSrc;
+    // Use current element if it matches source.
+    if (isSameSource) {
+      if (this.shouldResyncStageVideo(activeEl, targetOffsetSec, {
+        isHoldActive: sourceState.isHoldActive,
+        toleranceSec: STAGE_VIDEO_RESYNC_TOLERANCE_DEFAULT_SEC
+      })) {
         this.seekTo(activeEl, targetOffsetSec);
       }
       if (sourceState.isHoldActive) {
@@ -3369,14 +4220,9 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       activeEl.volume = this.clamp01(masterClipVolume * masterVolumeFactor * effectiveVideoVolume);
       activeEl.muted = activeEl.volume <= 0.0001;
-      
-      this.syncBackdrop(entry, activeSlot, targetOffsetSec);
 
-      if (inactiveEl && inactiveEl.dataset.src !== entry.videoSrc) {
-        inactiveEl.style.opacity = "0";
-        inactiveEl.pause();
-        this.hideInactiveBackdrop(activeSlot);
-      }
+      this.syncBackdrop(entry, 0, targetOffsetSec);
+      this.hideInactiveBackdrop(0);
     } else {
       // Switching needed
       if (!entry.videoSrc) {
@@ -3395,87 +4241,47 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.stageMachine.loadingSrc = entry.videoSrc;
 
       try {
-        if (!this.getBlobUrlSync(entry.videoSrc)) {
-          await this.getBlobUrl(entry.videoSrc);
-          if (switchToken !== this.stageSwitchSeq) return;
+        const sourceLoadResult = await this.setStageVideoSourceForElement(activeEl, entry.videoSrc, {
+          noWait: false,
+          keepHidden: false,
+          forcePersistent: true
+        });
+        if (!sourceLoadResult || switchToken !== this.stageSwitchSeq) return;
+        if (activeEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+          await this.waitForMediaReady(activeEl, VIDEO_MEDIA_READY_TIMEOUT_MS);
+          if (!this.isVideoSurfaceReady(activeEl, entry.videoSrc) || switchToken !== this.stageSwitchSeq) return;
         }
 
-        if (!inactiveEl) {
-          if (activeEl.dataset.src !== entry.videoSrc) {
-            const activeReady = await this.deps?.setPodcastStageVideoSourceForElement?.(activeEl, entry.videoSrc);
-            if (switchToken !== this.stageSwitchSeq) return;
-            if (activeReady !== true) return;
-          }
-          this.seekTo(activeEl, targetOffsetSec);
-          if (sourceState.isHoldActive) {
-            try { activeEl.pause(); } catch (_) { }
-          } else if (this.state.isPlaying) {
-            activeEl.play().then(() => {
-              const masterSpeed = this.deps?.getPlaybackSpeed?.() || 1;
-              activeEl.playbackRate = masterSpeed * sourceState.playbackRate;
-            }).catch(() => { });
-          }
-          return;
-        }
-
-        // Compatibility comments to satisfy test-podcaster-stage-swap-without-black-cut.mjs:
-        // const activeReady = await this.deps?.setPodcastStageVideoSourceForElement?.(activeEl, entry.videoSrc); if (activeReady !== true) return;
-        // const inactiveReady = await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, entry.videoSrc, { keepHidden: true }); if (inactiveReady !== true) return;
-        // if (this.stageMachine.preloadingSrc === entry.videoSrc && this.stageMachine.preloadingPromise) { const preloaded = await this.stageMachine.preloadingPromise; if (preloaded !== true) return;
-
-        // Seamless swap
-        if (inactiveEl.dataset.src !== entry.videoSrc) {
-          const inactiveReady = await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, entry.videoSrc, { keepHidden: true });
-          if (switchToken !== this.stageSwitchSeq) return;
-          if (inactiveReady !== true) return;
-        } else if (inactiveEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-          if (this.stageMachine.preloadingSrc === entry.videoSrc && this.stageMachine.preloadingPromise) {
-            const preloaded = await this.stageMachine.preloadingPromise;
-            if (switchToken !== this.stageSwitchSeq) return;
-            if (preloaded !== true) return;
-          } else {
-            const inactiveReady = await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, entry.videoSrc, { keepHidden: true });
-            if (switchToken !== this.stageSwitchSeq) return;
-            if (inactiveReady !== true) return;
-          }
-        }
-
-        if (switchToken !== this.stageSwitchSeq) return;
-        this.seekTo(inactiveEl, targetOffsetSec);
-        
-        // Final Swap
-        inactiveEl.style.zIndex = "2";
-        inactiveEl.style.opacity = "1";
-        inactiveEl.style.visibility = "visible";
-        inactiveEl.hidden = false;
-
-        if (sourceState.isHoldActive) {
-          try { inactiveEl.pause(); } catch (_) { }
-        } else if (this.state.isPlaying) {
-          inactiveEl.play().then(() => {
-            const masterSpeed = this.deps?.getPlaybackSpeed?.() || 1;
-            inactiveEl.playbackRate = masterSpeed * sourceState.playbackRate;
-          }).catch(() => { });
-        }
-
-        activeEl.style.zIndex = "1";
-        activeEl.style.opacity = "0";
-        activeEl.style.visibility = "hidden";
-        activeEl.hidden = true;
-        activeEl.pause();
-
-        this.syncBackdrop(entry, activeSlot === 1 ? 0 : 1, targetOffsetSec);
-        this.hideInactiveBackdrop(activeSlot === 1 ? 0 : 1);
+        activeEl.style.zIndex = "2";
+        activeEl.style.opacity = "1";
+        activeEl.style.visibility = "visible";
+        activeEl.hidden = false;
 
         const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
         const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
         const masterVolumeFactor = this.clamp01(this.toFiniteNumber(config?.masterVolume, 100) / 100);
         const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
         
-        inactiveEl.volume = this.clamp01(masterClipVolume * masterVolumeFactor * (mix.videoVolume ?? 1.0));
-        inactiveEl.muted = inactiveEl.volume <= 0.0001;
+        let effectiveVideoVolume = mix.videoVolume ?? 1.0;
+        const hasGeminiAudio = this.state.audioTrack?.segments?.some(s => String(s.rowId || "").trim() === String(entry.rowId || "").trim());
+        if (hasGeminiAudio && !Number.isFinite(entry.clip?.veoVolumeOverridePct)) {
+          effectiveVideoVolume = 0;
+        }
+        activeEl.volume = this.clamp01(masterClipVolume * masterVolumeFactor * effectiveVideoVolume);
+        activeEl.muted = activeEl.volume <= 0.0001;
 
-        this.deps?.setActiveStageVideoSlot?.(activeSlot === 1 ? 0 : 1);
+        this.seekTo(activeEl, targetOffsetSec);
+        if (sourceState.isHoldActive) {
+          try { activeEl.pause(); } catch (_) { }
+        } else if (this.state.isPlaying && activeEl.paused) {
+          activeEl.play().then(() => {
+            const masterSpeed = this.deps?.getPlaybackSpeed?.() || 1;
+            activeEl.playbackRate = masterSpeed * sourceState.playbackRate;
+          }).catch(() => { });
+        }
+
+        this.syncBackdrop(entry, 0, targetOffsetSec);
+        this.hideInactiveBackdrop(0);
       } catch (e) {
         void e;
       } finally {
@@ -3505,7 +4311,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         targetSeekSec = offsetSec % backdropDuration;
       }
 
-      if (Math.abs(backdrop.currentTime - targetSeekSec) > 0.3) {
+      if (this.shouldResyncStageVideo(backdrop, targetSeekSec, { toleranceSec: STAGE_VIDEO_BACKDROP_RESYNC_TOLERANCE_SEC })) {
         this.seekTo(backdrop, targetSeekSec);
       }
       backdrop.style.opacity = "1";
@@ -3861,27 +4667,21 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   getStageVideoBundle(slot = 0) {
-    const resolvedSlot = Number(slot || 0) === 1 ? 1 : 0;
-    if (resolvedSlot === 1) {
-      return {
-        slot: 1,
-        backdrop: this.els?.podcastActiveSpeakerBackdropVideoAlt || null,
-        foreground: this.els?.podcastActiveSpeakerVideoAlt || null
-      };
-    }
     return {
-      slot: 0,
       backdrop: this.els?.podcastActiveSpeakerBackdropVideo || null,
       foreground: this.els?.podcastActiveSpeakerVideo || null
     };
   }
 
   getActiveStageVideoBundle() {
-    return this.getStageVideoBundle(Number(this.deps?.podcastVideoState?.stageVideoSlot || 0));
+    return this.getStageVideoBundle(0);
   }
 
   getInactiveStageVideoBundle() {
-    return this.getStageVideoBundle(Number(this.deps?.podcastVideoState?.stageVideoSlot || 0) === 1 ? 0 : 1);
+    return {
+      backdrop: null,
+      foreground: null
+    };
   }
 
   applyStageVideoBundleLayout(bundle = null, layoutMode = "default") {
@@ -3910,37 +4710,35 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   getActiveStageVideoEl() {
-    const primary = this.els?.podcastActiveSpeakerVideo;
-    const alt = this.els?.podcastActiveSpeakerVideoAlt;
-    if (!alt) return primary;
-    return Number(this.deps?.podcastVideoState?.stageVideoSlot || 0) === 1 ? alt : primary;
+    return this.els?.podcastActiveSpeakerVideo || null;
   }
 
   getInactiveStageVideoEl() {
-    const primary = this.els?.podcastActiveSpeakerVideo;
-    const alt = this.els?.podcastActiveSpeakerVideoAlt;
-    if (!alt) return null;
-    return Number(this.deps?.podcastVideoState?.stageVideoSlot || 0) === 1 ? primary : alt;
+    return null;
   }
 
   setActiveStageVideoSlot(slot = 0) {
     if (this.deps?.podcastVideoState) {
-      this.deps.podcastVideoState.stageVideoSlot = Number(slot || 0) === 1 ? 1 : 0;
-    }
-    if (typeof window.setActiveStageVideoSlot === "function") {
-      try { window.setActiveStageVideoSlot(slot); } catch (_) { }
+      this.deps.podcastVideoState.stageVideoSlot = 0;
     }
   }
 
   assignStageVideoElementSource(videoEl = null, source = "", options = {}) {
-    if (!videoEl) return;
+    if (!videoEl) return false;
     const logicalSrc = String(options.logicalSrc || source || "").trim();
     const cleanSource = String(source || "").trim();
-    if (!cleanSource || !logicalSrc) return;
+    if (!cleanSource || !logicalSrc) return false;
     const mode = String(options.mode || "").trim() || "direct";
     const cacheKey = String(options.cacheKey || "").trim();
     const rowId = String(options.rowId || "").trim();
+    const currentLogicalSrc = String(videoEl.dataset?.src || "").trim();
+    const currentAssignedSrc = String(videoEl.getAttribute?.("src") || "").trim();
+    if (currentLogicalSrc === logicalSrc && currentAssignedSrc === cleanSource) {
+      if (rowId) videoEl.dataset.rowId = rowId;
+      return false;
+    }
     this.releaseTransientStageVideoObjectUrl(videoEl);
+    delete videoEl.dataset.presentedSrc;
     videoEl.src = cleanSource;
     videoEl.dataset.src = logicalSrc;
     if (rowId) videoEl.dataset.rowId = rowId;
@@ -4034,6 +4832,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       applyAspect();
       videoEl.addEventListener("loadedmetadata", applyAspect, { once: true });
     }
+    return true;
   }
 
   async primeStageVideoSource(src = "") {
@@ -4064,7 +4863,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         const onReady = () => done();
         this.podcastStageVideoPreloader.addEventListener("loadeddata", onReady, { once: true });
         this.podcastStageVideoPreloader.addEventListener("canplay", onReady, { once: true });
-        setTimeout(done, 1200);
+        setTimeout(done, STAGE_PRELOADER_TIMEOUT_MS);
       });
     }
     // FIX A: Release the preloader's streaming connection now that the browser
@@ -4075,9 +4874,6 @@ export class PodcasterPlaybackController extends EventEmitter {
     } catch (_) { }
     this.podcastStageVideoPreloadSrc = "";
 
-    if (!cachedObjectUrl) {
-      this.getBlobUrl(cleanSrc).catch(() => { });
-    }
     return true;
   }
 
@@ -4088,105 +4884,50 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!cleanSrc) return false;
     const setPortrait = this.deps?.setPodcastVideoPortraitFallback || window.setPodcastVideoPortraitFallback;
     setPortrait?.(false);
-    
-    if (!this.podcastStageVideoLoadTokenSeq) this.podcastStageVideoLoadTokenSeq = 0;
-    if (!this.podcastStageVideoLoadTokensByEl) this.podcastStageVideoLoadTokensByEl = new WeakMap();
 
     const loadToken = ++this.podcastStageVideoLoadTokenSeq;
     this.podcastStageVideoLoadTokensByEl.set(video, loadToken);
     if (String(video.dataset.src || "").trim() === cleanSrc && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       return true;
     }
-    const cachedObjectUrl = this.getBlobUrlSync(cleanSrc);
-    if (!cachedObjectUrl) {
-      this.primeStageVideoSource(cleanSrc).catch(() => { });
+
+    const isCurrentLoad = () => (
+      this.podcastStageVideoLoadTokensByEl.get(video) === loadToken
+    );
+
+    const requestedPersistent = options.forcePersistent === true
+      || (options.persistent === true && this.shouldPersistStageVideoSource(cleanSrc));
+    const cachedSource = this.getBlobUrlSync(cleanSrc);
+    const assignedSource = String(cachedSource || await this.getBlobUrl(cleanSrc, {
+      persistent: requestedPersistent
+    }) || cleanSrc).trim();
+    if (!assignedSource || !isCurrentLoad()) return false;
+    if (!isCurrentLoad()) return false;
+
+    if (this.isSameOriginMediaUrl(assignedSource)) {
+      video.removeAttribute("crossorigin");
+    } else {
+      video.crossOrigin = "anonymous";
     }
-    const assignedSource = cachedObjectUrl || cleanSrc;
-    video.removeAttribute("crossorigin");
-    this.assignStageVideoElementSource(video, assignedSource, {
+    const sourceChanged = this.assignStageVideoElementSource(video, assignedSource, {
       logicalSrc: cleanSrc,
-      mode: cachedObjectUrl ? "cache" : "direct",
+      mode: cachedSource ? "cache" : "direct",
       cacheKey: cleanSrc
     });
     video.hidden = options.keepHidden === true ? true : false;
     video.preload = "auto";
-    try { video.load(); } catch (_) { }
-    if (options.noWait === true) return true;
-    const waitForVideoReadiness = async (timeoutMs = 1800) => {
-      return new Promise((resolve) => {
-        let settled = false;
-        const done = (ok = false) => {
-          if (settled) return;
-          settled = true;
-          video.removeEventListener("loadeddata", onReady);
-          video.removeEventListener("canplay", onReady);
-          video.removeEventListener("error", onError);
-          const stillExpected = (
-            this.podcastStageVideoLoadTokensByEl.get(video) === loadToken
-            && String(video.dataset.src || "").trim() === cleanSrc
-          );
-          const hasData = video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-          resolve(Boolean(ok) && stillExpected && hasData);
-        };
-        const onReady = () => done(true);
-        const onError = () => done(false);
-        video.addEventListener("loadeddata", onReady, { once: true });
-        video.addEventListener("canplay", onReady, { once: true });
-        video.addEventListener("error", onError, { once: true });
-        setTimeout(() => done(true), timeoutMs);
-      });
-    };
-
-    let ready = await waitForVideoReadiness();
-    if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
-    if (ready) return true;
-
-    const hydratedObjectUrl = await this.getBlobUrl(cleanSrc, { persistent: options.persistent === true });
-    if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
-    if (hydratedObjectUrl && hydratedObjectUrl !== assignedSource) {
-      this.assignStageVideoElementSource(video, hydratedObjectUrl, {
-        logicalSrc: cleanSrc,
-        mode: "cache",
-        cacheKey: cleanSrc
-      });
-      ready = await waitForVideoReadiness(2200);
-      if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
-      if (ready) return true;
+    if (sourceChanged) {
+      try { video.load(); } catch (_) { }
+    } else if (Number(video.readyState || 0) < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      try { video.load(); } catch (_) { }
     }
 
-    try {
-      if (/^https?:\/\//i.test(cleanSrc)) {
-        // No descargar videos de streaming proxy o Firebase Storage completos por fetch, ya que causa timeout/sobrecarga en Render
-        const isProxy = cleanSrc.includes('/api/assets/proxy-media') || cleanSrc.includes('firebasestorage.googleapis.com');
-        if (isProxy) {
-          return false;
-        }
-        const response = await fetch(cleanSrc, {
-          method: "GET",
-          mode: this.isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors"
-        });
-        if (!response.ok) {
-          if (Number(response.status || 0) === 404) {
-            const markStale = this.deps?.markStaleProxyMediaUrl || window.markStaleProxyMediaUrl;
-            markStale?.(cleanSrc, "proxy-media-404", { kind: "video-direct-fetch" });
-          }
-          return false;
-        }
-        const blob = await response.blob();
-        if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
-        const blobUrl = URL.createObjectURL(blob);
-        this.assignStageVideoElementSource(video, blobUrl, {
-          logicalSrc: cleanSrc,
-          mode: "transient"
-        });
-        ready = await waitForVideoReadiness(2200);
-        if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
-        return ready;
-      }
-    } catch (_) {
-      // noop
+    if (options.noWait === true) {
+      return isCurrentLoad();
     }
-    return false;
+    await this.waitForMediaReady(video, VIDEO_MEDIA_READY_TIMEOUT_MS).catch(() => false);
+    if (!isCurrentLoad()) return false;
+    return this.isVideoSurfaceReady(video, cleanSrc);
   }
 
   clearStageVideoCache() {
@@ -4197,11 +4938,70 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.blobCache.clear();
   }
 
+  async purgeAllMediaCaches() {
+    this.stop();
+    this.prepareSequence += 1;
+    this.stageSwitchSeq += 1;
+
+    this.getStageVideoElements().forEach((videoEl) => {
+      try { videoEl.pause(); } catch (_) { }
+      this.releaseTransientStageVideoObjectUrl(videoEl);
+      try { videoEl.removeAttribute("src"); } catch (_) { videoEl.src = ""; }
+      delete videoEl.dataset.src;
+      delete videoEl.dataset.presentedSrc;
+      delete videoEl.dataset.rowId;
+      try { videoEl.load(); } catch (_) { }
+    });
+    this.clearAllStageVisualSurfaces();
+
+    Object.values(this.dialoguePlayers || {}).forEach((audioEl) => {
+      try { audioEl.pause(); } catch (_) { }
+      try { audioEl.removeAttribute("src"); } catch (_) { audioEl.src = ""; }
+      try { audioEl.load(); } catch (_) { }
+    });
+    this.dialoguePlayers = {};
+    this.audioCache = {};
+    this.dialogueAudioSourceKeys = {};
+    this.stopBackgroundMusic();
+
+    const objectUrls = new Set(
+      [...this.blobCache.values()]
+        .map((value) => String(value || "").trim())
+        .filter((value) => value.startsWith("blob:"))
+    );
+    objectUrls.forEach((objectUrl) => {
+      try { URL.revokeObjectURL(objectUrl); } catch (_) { }
+    });
+
+    this.blobCache.clear();
+    this.fetchPromises.clear();
+    this.cachedTickEntries = null;
+    this.cachedTickEntriesTime = 0;
+    this.videoPrewarmKey = "";
+    this.videoPrewarmPromise = null;
+    this.videoLookAheadKey = "";
+    this.podcastStageVideoPreloadSrc = "";
+    this.stageMachine.imagePreloadCache?.clear?.();
+    this.stageMachine.imageLoadingSrc = "";
+    this.stageMachine.imageLoadingPromise = null;
+    this.stageMachine.preloadingSrc = "";
+    this.stageMachine.preloadingPromise = null;
+    window.PodcasterStopMotion?.clearPreloadCache?.();
+
+    const purgeTasks = [
+      clearPodcasterLocalMediaCache().catch(() => false)
+    ];
+    if (typeof caches !== "undefined") {
+      purgeTasks.push(caches.delete(this.mediaCacheName).catch(() => false));
+    }
+    await Promise.allSettled(purgeTasks);
+    return true;
+  }
+
   dumpStageVideoState() {
     const primary = this.els?.podcastActiveSpeakerVideo || null;
-    const alt = this.els?.podcastActiveSpeakerVideoAlt || null;
     const active = this.getActiveStageVideoEl() || primary;
-    const inactive = this.getInactiveStageVideoEl() || (alt && active === primary ? alt : null);
+    const inactive = this.getInactiveStageVideoEl();
     const pack = (video) => {
       if (!video) return null;
       return {
@@ -4246,6 +5046,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const editorPreviewMode = (this.deps?.podcastVideoState || window.podcastVideoState)?.montageActive !== true;
     const activeBundle = this.getActiveStageVideoBundle();
     const inactiveBundle = this.getInactiveStageVideoBundle();
+    const playbackActive = this.state?.isPlaying === true;
 
     const setPortrait = this.deps?.setPodcastVideoPortraitFallback || window.setPodcastVideoPortraitFallback;
     const updateUi = this.deps?.updatePodcastVideoTransportUi || window.updatePodcastVideoTransportUi;
@@ -4297,12 +5098,14 @@ export class PodcasterPlaybackController extends EventEmitter {
     const clipCfg = clipMap[key] || null;
     const hasCustomBg = clipCfg && clipCfg.backgroundColor && clipCfg.backgroundColor !== "";
 
-    const playbackActive = this.state.isPlaying === true;
-    const isSpeaking = (this.deps?.podcastVideoState || window.podcastVideoState)?.speaking === true;
+    const normalizedStageSrc = this.normalizeTimelineSourceKey(src);
     const mediaSignature = [
-      String(src || "").trim(),
+      String(normalizedStageSrc || "").trim(),
       String(firstSegment?.storagePath || clip?.storagePath || "").trim(),
-      String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
+      String(
+        this.normalizeTimelineSourceKey?.(String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim())
+          || String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim()
+      ),
       String(firstSegment?.type || clip?.type || "").trim().toLowerCase(),
       String(clipCfg?.backgroundColor || "").trim(),
       String(clipCfg?.visualLayoutMode || "").trim().toLowerCase(),
@@ -4311,7 +5114,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       String(clipCfg?.mediaOffsetYPct ?? "").trim(),
       String(clipCfg?.mediaMotionPreset || "").trim().toLowerCase()
     ].join("|");
-    const stateKey = `${sessionId}_${key}_${isSpeaking}_${playbackActive}_${(this.deps?.podcastVideoState || window.podcastVideoState)?.montageActive}_${mediaSignature}`;
+    const stateKey = `${sessionId}_${key}_${mediaSignature}`;
     
     const vState = this.deps?.podcastVideoState || window.podcastVideoState;
     if (!opts.force && vState && vState.lastSyncedStageKey === stateKey) return;
@@ -4401,14 +5204,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (opts.force || currentSrc !== src) {
         const cachedObjectUrl = this.getBlobUrlSync(src);
         const preferredSource = cachedObjectUrl || src;
-        this.assignStageVideoElementSource(stageVideo, preferredSource, {
+        const sourceChanged = this.assignStageVideoElementSource(stageVideo, preferredSource, {
           logicalSrc: src,
           mode: cachedObjectUrl ? "cache" : "direct",
           cacheKey: src,
           rowId: key
         });
-        if (!cachedObjectUrl) {
-          this.getBlobUrl(src).catch(() => { });
+        if (sourceChanged) {
+          try { stageVideo.load(); } catch (_) { }
         }
         if (this.isSameOriginMediaUrl(src)) {
           stageVideo.removeAttribute("crossorigin");
@@ -4424,12 +5227,15 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (visualLayoutMode === "blur-backdrop" && currentBackdropSrc !== src) {
           const cachedBackdropObjectUrl = this.getBlobUrlSync(src);
           const preferredBackdropSource = cachedBackdropObjectUrl || src;
-          this.assignStageVideoElementSource(stageBackdrop, preferredBackdropSource, {
+          const backdropSourceChanged = this.assignStageVideoElementSource(stageBackdrop, preferredBackdropSource, {
             logicalSrc: src,
             mode: cachedBackdropObjectUrl ? "cache" : "direct",
             cacheKey: src,
             rowId: key
           });
+          if (backdropSourceChanged) {
+            try { stageBackdrop.load(); } catch (_) { }
+          }
         }
         stageBackdrop.hidden = visualLayoutMode !== "blur-backdrop";
         if (visualLayoutMode === "blur-backdrop") {
@@ -4440,7 +5246,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         stageBackdrop.muted = true;
         stageBackdrop.volume = 0;
         stageBackdrop.playbackRate = Math.max(0.5, Math.min(1.8, Number(this.els?.podcastVideoSpeedSelect?.value || window.els?.podcastVideoSpeedSelect?.value || 1)));
-        if (playbackActive || isSpeaking) {
+        if (playbackActive) {
           const backdropPlayPromise = stageBackdrop.play();
           if (backdropPlayPromise && typeof backdropPlayPromise.catch === "function") {
             backdropPlayPromise.catch(() => { });
@@ -4491,7 +5297,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       });
 
       stageVideo.playbackRate = Math.max(0.5, Math.min(1.8, Number(this.els?.podcastVideoSpeedSelect?.value || window.els?.podcastVideoSpeedSelect?.value || 1)));
-      if (playbackActive || isSpeaking) {
+      if (playbackActive) {
         const playPromise = stageVideo.play();
         if (playPromise && typeof playPromise.catch === "function") {
           playPromise.catch(() => { });

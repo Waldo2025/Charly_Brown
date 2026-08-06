@@ -2124,8 +2124,8 @@ function validateCreativeVideoScriptOutput(script = {}, options = {}) {
     if (headlineText && (headlineText.length > 48 || countWords(headlineText) < 2 || countWords(headlineText) > 6)) {
       throw buildCreativeVideoValidationError(stage, "el titular debe tener 2–6 palabras y máximo 48 caracteres.", index);
     }
-    if (inSceneText && (inSceneText.length > 48 || countWords(inSceneText) > 6)) {
-      throw buildCreativeVideoValidationError(stage, "el texto natural dentro de escena debe tener máximo 6 palabras y 48 caracteres.", index);
+    if (inSceneText && (inSceneText.length > 280 || countWords(inSceneText) > 40 || String(inSceneText).split(/\r?\n/).filter((line) => line.trim()).length > 4)) {
+      throw buildCreativeVideoValidationError(stage, "el texto natural dentro de escena debe tener hasta 4 líneas, 40 palabras y 280 caracteres.", index);
     }
   });
   return script;
