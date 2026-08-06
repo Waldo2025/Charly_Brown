@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { parseClientMessage, forwardClientMessage } = require("../protocol.js");
+const { isAllowedLiveOrigin } = require("../origins.js");
 
 test("live protocol accepts bounded PCM audio", () => {
   const message = parseClientMessage(JSON.stringify({
@@ -40,4 +41,11 @@ test("live proxy consumes the one-use ticket before accepting the websocket", ()
     upgradeHandler.indexOf("await consumeTicket(ticket)") < upgradeHandler.indexOf("wss.handleUpgrade"),
     "El ticket debe validarse y consumirse antes del handshake WebSocket."
   );
+});
+
+test("live proxy accepts production, Firebase previews and localhost only", () => {
+  assert.equal(isAllowedLiveOrigin("https://charly-brown.web.app"), true);
+  assert.equal(isAllowedLiveOrigin("https://charly-brown--google-cloud-phase4-mucp5w2o.web.app"), true);
+  assert.equal(isAllowedLiveOrigin("http://127.0.0.1:5010"), true);
+  assert.equal(isAllowedLiveOrigin("https://evil.example"), false);
 });

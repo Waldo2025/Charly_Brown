@@ -167,11 +167,14 @@ function registerMontageRoutes(app) {
   }));
 
   app.get("/api/podcaster/montage/export-status", asyncRoute(async (req, res) => {
+    const authContext = await resolveAuthContext(req);
     const jobId = cleanId(req.query?.jobId || "");
     const { db } = getAdminServices();
     const snapshot = await db.collection(JOB_COLLECTION).doc(jobId).get();
     if (!snapshot.exists) throw Object.assign(new Error("job_not_found"), { status: 404 });
-    res.status(200).json(publicJob(snapshot.data() || {}));
+    const job = snapshot.data() || {};
+    if (String(job.ownerId || "") !== authContext.uid) throw Object.assign(new Error("job_forbidden"), { status: 403 });
+    res.status(200).json(publicJob(job));
   }));
 
   app.post("/api/podcaster/montage/export-cancel", asyncRoute(async (req, res) => {

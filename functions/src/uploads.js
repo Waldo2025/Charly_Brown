@@ -3,7 +3,8 @@ const crypto = require("node:crypto");
 const {
   getAdminServices,
   resolveAuthContext,
-  asyncRoute
+  asyncRoute,
+  isPrivilegedRole
 } = require("./common.js");
 
 const MAX_UPLOAD_BYTES = Object.freeze({

@@ -1,5 +1,6 @@
 const express = require("express");
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const {
   REGION,
   resolveAuthContext,
@@ -18,6 +19,7 @@ const { registerMontageRoutes } = require("./montage-routes.js");
 const { createLiveTicket } = require("./live-tickets.js");
 const { dispatchMontageToCloudRun } = require("./montage-dispatch.js");
 const { registerVeoRoutes, registerGeminiJobRoutes, registerAiJobStatusRoute, dispatchAiJob } = require("./ai-jobs.js");
+const { monitorStalePodcasterJobs } = require("./stale-job-monitor.js");
 
 function createApp(service, health = {}) {
   const app = express();
@@ -159,3 +161,12 @@ exports.dispatchVeoTask = onRequest({
   concurrency: 1,
   invoker: "private"
 }, veoTaskApp);
+
+exports.monitorStalePodcasterJobs = onSchedule({
+  schedule: "every 5 minutes",
+  region: REGION,
+  serviceAccount: "charly-functions-core@charly-brown.iam.gserviceaccount.com",
+  memory: "256MiB",
+  timeoutSeconds: 60,
+  retryCount: 0
+}, async () => monitorStalePodcasterJobs());

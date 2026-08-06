@@ -32,8 +32,14 @@ const {
 } = require("../src/live-tickets.js");
 const { safeSession, normalizeLibraryItem } = require("../src/podcaster-data.js");
 const { sanitizePersistedValue } = require("../src/montage-routes.js");
-const { compactInput, publicAiJob } = require("../src/ai-jobs.js");
+const {
+  compactInput,
+  publicAiJob,
+  extractInteractionAudio,
+  buildLyriaInteractionRequest
+} = require("../src/ai-jobs.js");
 const { isAllowedBrowserOrigin } = require("../src/common.js");
+const { staleJobAge } = require("../src/stale-job-monitor.js");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -173,6 +179,25 @@ test("AI jobs are asynchronous, owner-scoped and never persist inline references
   assert.equal(payload.statusUrl, "/api/podcaster/jobs/job-42");
 });
 
+test("Lyria 3 uses the global Interactions API and accepts nested audio output", () => {
+  const request = buildLyriaInteractionRequest({ model: "lyria-3-clip-preview", prompt: "warm ambient" });
+  assert.match(request.url, /\/locations\/global\/interactions$/);
+  assert.equal(request.method, "POST");
+  assert.deepEqual(request.data, {
+    model: "lyria-3-clip-preview",
+    input: [{ type: "text", text: "warm ambient" }]
+  });
+  assert.deepEqual(extractInteractionAudio({
+    outputs: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/mpeg", data: "YWJj" }] }]
+  }), [{ data: "YWJj", mimeType: "audio/mpeg" }]);
+});
+
+test("Gemini TTS requests audio-only output", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/ai-jobs.js"), "utf8");
+  assert.match(source, /responseModalities:\s*\["AUDIO"\]/);
+  assert.doesNotMatch(source, /responseModalities:\s*\["AUDIO",\s*"TEXT"\]/);
+});
+
 test("Functions allow production, preview and localhost browser origins", () => {
   assert.equal(isAllowedBrowserOrigin("https://charly-brown.web.app"), true);
   assert.equal(isAllowedBrowserOrigin("https://charly-brown--google-preview-abc123.web.app"), true);
@@ -184,4 +209,27 @@ test("Firebase ID token verification works with least-privilege runtime IAM", ()
   const commonSource = fs.readFileSync(path.join(__dirname, "../src/common.js"), "utf8");
   assert.match(commonSource, /verifyIdToken\(token\)/);
   assert.doesNotMatch(commonSource, /verifyIdToken\(token,\s*true\)/);
+});
+
+test("resumable upload authorization includes privileged shared-session roles", () => {
+  const uploadSource = fs.readFileSync(path.join(__dirname, "../src/uploads.js"), "utf8");
+  assert.match(uploadSource, /isPrivilegedRole/);
+  assert.match(uploadSource, /isPrivilegedRole\(authContext\.role\)/);
+});
+
+test("montage status is authenticated and owner-scoped", () => {
+  const montageSource = fs.readFileSync(path.join(__dirname, "../src/montage-routes.js"), "utf8");
+  const statusRoute = montageSource.match(/app\.get\("\/api\/podcaster\/montage\/export-status"[\s\S]*?\n\s*\}\)\);/)?.[0] || "";
+  assert.match(statusRoute, /resolveAuthContext\(req\)/);
+  assert.match(statusRoute, /job\.ownerId/);
+  assert.match(statusRoute, /job_forbidden/);
+});
+
+test("stale job monitoring uses the most recent heartbeat", () => {
+  const now = Date.parse("2026-08-06T18:00:00.000Z");
+  assert.equal(staleJobAge({
+    createdAt: "2026-08-06T17:00:00.000Z",
+    updatedAt: "2026-08-06T17:30:00.000Z",
+    heartbeatAt: { toMillis: () => Date.parse("2026-08-06T17:55:00.000Z") }
+  }, now), 5 * 60 * 1000);
 });

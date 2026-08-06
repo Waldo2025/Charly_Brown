@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { GoogleAuth } = require("google-auth-library");
 const {
   PROJECT_ID,
   REGION,
@@ -236,6 +237,40 @@ function extractAudioParts(response) {
   return parts;
 }
 
+function extractInteractionAudio(value, parts = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) extractInteractionAudio(item, parts);
+    return parts;
+  }
+  if (!value || typeof value !== "object") return parts;
+  const data = String(value.data || "").trim();
+  const mimeType = String(value.mime_type || value.mimeType || "").trim();
+  if (data && (String(value.type || "").toLowerCase() === "audio" || mimeType.toLowerCase().startsWith("audio/"))) {
+    parts.push({ data, mimeType: mimeType || "audio/mpeg" });
+    return parts;
+  }
+  for (const child of Object.values(value)) extractInteractionAudio(child, parts);
+  return parts;
+}
+
+function buildLyriaInteractionRequest({ model, prompt }) {
+  return {
+    url: `https://aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/global/interactions`,
+    method: "POST",
+    data: {
+      model: String(model || "lyria-3-clip-preview"),
+      input: [{ type: "text", text: String(prompt || "") }]
+    }
+  };
+}
+
+async function generateLyriaMusic({ model, prompt }) {
+  const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  const client = await auth.getClient();
+  const response = await client.request(buildLyriaInteractionRequest({ model, prompt }));
+  return extractInteractionAudio(response?.data);
+}
+
 function pcm16ToWav(buffer, sampleRate = 24000) {
   const header = Buffer.alloc(44);
   header.write("RIFF", 0);
@@ -258,21 +293,29 @@ async function processAudioJob(job, ref) {
   const { bucket, admin } = getAdminServices();
   const input = job.input || {};
   const isMusic = job.type === "music";
-  const client = createVertexClient({ location: "global" });
   const voiceName = String(input.voiceName || "Aoede").trim() || "Aoede";
   const prompt = isMusic
     ? `Create a polished, loop-friendly instrumental podcast music clip. No speech or lyrics. Direction: ${String(input.prompt || input.preset || "warm ambient editorial underscore").slice(0, 3000)}`
     : `Read the following podcast dialogue naturally and clearly as ${String(input.speakerName || input.speakerLabel || "the speaker")}. Preserve the exact wording and do not add commentary. Dialogue: ${String(input.text || input.targetSpeechLine || "").slice(0, 8000)}`;
   if (!isMusic && !String(input.text || input.targetSpeechLine || "").trim()) throw Object.assign(new Error("dialogue_text_required"), { status: 400 });
-  const response = await client.models.generateContent({
-    model: String(job.model),
-    contents: prompt,
-    config: {
-      responseModalities: ["AUDIO", "TEXT"],
-      ...(!isMusic ? { speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } } : {})
-    }
-  });
-  const audioParts = extractAudioParts(response);
+  let audioParts;
+  if (isMusic) {
+    audioParts = await generateLyriaMusic({ model: job.model, prompt });
+  } else {
+    const client = createVertexClient({ location: "global" });
+    const response = await client.models.generateContent({
+      model: String(job.model),
+      contents: prompt,
+      config: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          languageCode: String(input.languageCode || "es-MX"),
+          voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+        }
+      }
+    });
+    audioParts = extractAudioParts(response);
+  }
   if (!audioParts.length) throw new Error("vertex_audio_empty");
   const firstMime = audioParts[0].mimeType || "audio/L16;rate=24000";
   const raw = Buffer.concat(audioParts.map((part) => Buffer.from(part.data, "base64")));
@@ -388,6 +431,8 @@ module.exports = {
   VEO_DISPATCH_URL,
   compactInput,
   publicAiJob,
+  extractInteractionAudio,
+  buildLyriaInteractionRequest,
   registerVeoRoutes,
   registerGeminiJobRoutes,
   registerAiJobStatusRoute,

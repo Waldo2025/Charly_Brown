@@ -8,7 +8,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY server.js protocol.js ./
+COPY server.js protocol.js origins.js ./
 
 USER node
 EXPOSE 8080

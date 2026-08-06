@@ -7,16 +7,12 @@ const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { GoogleGenAI } = require("@google/genai");
 const { parseClientMessage, forwardClientMessage } = require("./protocol.js");
+const { isAllowedLiveOrigin } = require("./origins.js");
 
 const PORT = Math.max(1, Number(process.env.PORT || 8080) || 8080);
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "charly-brown";
 const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || "global";
-const ALLOWED_ORIGINS = new Set(
-  String(process.env.ALLOWED_ORIGINS || "https://charly-brown.web.app,https://charly-brown.firebaseapp.com")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-);
+const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "");
 
 if (!getApps().length) initializeApp({ projectId: PROJECT_ID });
 const db = getFirestore();
@@ -63,7 +59,7 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 3 * 1024 * 1024 })
 server.on("upgrade", async (req, socket, head) => {
   const origin = String(req.headers.origin || "").trim();
   const parsed = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  if (parsed.pathname !== "/live" || !ALLOWED_ORIGINS.has(origin)) {
+  if (parsed.pathname !== "/live" || !isAllowedLiveOrigin(origin, ALLOWED_ORIGINS)) {
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     return socket.destroy();
   }
