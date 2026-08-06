@@ -17290,12 +17290,10 @@ function attachEvents() {
     setScriptSetupOpen(true);
   });
 
-  if (els.demoPromptBtn) {
-    els.demoPromptBtn.addEventListener("click", () => {
-      setPromptInputContent(demoPrompt);
-      autoResizePrompt();
-    });
-  }
+  els.demoPromptBtn.addEventListener("click", () => {
+    setPromptInputContent(demoPrompt);
+    autoResizePrompt();
+  });
 
   // Lógica de colapso y revelación del chat composer
   if (els.toggleComposerCollapseBtn && els.revealComposerBtn && els.composerShell) {
