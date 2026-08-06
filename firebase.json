@@ -106,80 +106,70 @@
         "source": "/api/assets/**",
         "function": {
           "functionId": "assetApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/speaker-portraits/**",
         "function": {
           "functionId": "veoApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/scenario-images/**",
         "function": {
           "functionId": "veoApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/dialogue-videos/**",
         "function": {
           "functionId": "veoApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/dialogue-audio/**",
         "function": {
           "functionId": "geminiApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/dialogue-audios/**",
         "function": {
           "functionId": "geminiApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/music/generate",
         "function": {
           "functionId": "geminiApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/gemini/**",
         "function": {
           "functionId": "geminiApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/podcaster/**",
         "function": {
           "functionId": "podcasterApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {
         "source": "/api/**",
         "function": {
           "functionId": "geminiApi",
-          "region": "us-central1",
-          "pinTag": true
+          "region": "us-central1"
         }
       },
       {

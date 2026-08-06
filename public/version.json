@@ -1,8 +1,11 @@
 {
-  "version": "1.0.10.540",
-  "build": "2026-1.0.10.540",
+  "version": "1.0.10.542",
+  "build": "2026-1.0.10.542",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Las Functions validan firma, audiencia y expiración de Firebase ID tokens sin requerir permisos administrativos de revocación incompatibles con las cuentas de servicio de mínimo privilegio.",
+    "Corregido: Los medios privados de sesiones se autentican primero y luego se reproducen mediante una URL firmada temporal de Google Cloud Storage, sin enviar tokens Firebase dentro del src de video o imagen.",
+    "Corregido: En localhost Podcaster espera la configuración remota, usa el canal Firebase preview y reproduce URLs tokenizadas de Storage directamente sin construir proxy-media en el puerto estático.",
     "Migrado: Podcaster y video-player usan rutas Firebase/Google Cloud, subidas resumibles directas a Storage y trabajos asincrónicos, conservando los temas oscuro, medio y claro sin dependencias del navegador hacia Render.",
     "Corregido: Los chips de audio Gemini usan el inicio efectivo de la escena Veo como límite automático, evitando que datos persistidos de una geometría anterior se dibujen antes del video.",
     "Corregido: Home reutiliza la instancia existente de Firestore y evita una segunda inicialización con opciones distintas.",

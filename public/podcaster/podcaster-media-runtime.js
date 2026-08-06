@@ -239,31 +239,37 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
 
   function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media", options = {}) {
     const clean = String(rawUrl || "").trim();
-    const cleanStoragePath = String(storagePath || "").trim();
-    const proxyStoragePath = normalizeStoragePathForProxy(cleanStoragePath);
+    let cleanStoragePath = String(storagePath || "").trim();
     const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
     const timestamp = options.updatedAt || options.timestamp || "";
     const noRange = options.noRange === true;
     if (clean) {
       if (clean.includes("/api/assets/proxy-image") || clean.includes("/api/assets/proxy-media")) {
-        return clean;
+        try {
+          const legacyProxy = new URL(clean, window.location.origin);
+          const nestedUrl = String(legacyProxy.searchParams.get("url") || "").trim();
+          if (nestedUrl && !isUnsafeDirectFirebaseMediaUrl(nestedUrl)) return nestedUrl;
+          const nestedStorage = deriveStoragePathFromMediaSource(nestedUrl, legacyProxy.searchParams.get("storagePath") || "");
+          if (nestedStorage) cleanStoragePath = nestedStorage;
+        } catch (_) {
+          // Continue with the normalized storage-path proxy below.
+        }
       }
       try {
         const parsed = new URL(clean, window.location.origin);
         const host = String(parsed.hostname || "").toLowerCase();
         const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
         if (isFirebaseStorageUrl) {
-          if (kind === "image") {
-            const hasToken = clean.includes("token=") || clean.includes("downloadToken=");
-            if (hasToken) {
-              let directUrl = clean;
-              if (timestamp && !directUrl.includes("u=")) {
-                const separator = directUrl.includes("?") ? "&" : "?";
-                directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
-              }
-              return directUrl;
+          const hasToken = clean.includes("token=") || clean.includes("downloadToken=");
+          if (hasToken) {
+            let directUrl = clean;
+            if (timestamp && !directUrl.includes("u=")) {
+              const separator = directUrl.includes("?") ? "&" : "?";
+              directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
             }
+            return directUrl;
           }
+          if (!cleanStoragePath) cleanStoragePath = deriveStoragePathFromMediaSource(clean, "");
         }
       } catch (_) {
         // keep proxy fallback for non-URL media refs
@@ -271,16 +277,17 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     }
     let finalUrl = "";
     if (cleanStoragePath) {
-      const proxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(proxyStoragePath)}${noRange ? "&noRange=1" : ""}`);
+      const normalizedProxyStoragePath = normalizeStoragePathForProxy(cleanStoragePath);
+      const proxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(normalizedProxyStoragePath)}${noRange ? "&noRange=1" : ""}`);
       const isStale = isMarkedStaleProxyMediaUrl(proxyUrl);
       finalUrl = isStale ? "" : proxyUrl;
     }
     if (!finalUrl && clean) {
       try {
         const parsed = new URL(clean, window.location.origin);
-        const proxyUrl = buildMediaProxyUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}${noRange ? "&noRange=1" : ""}`);
-        const isStale = isMarkedStaleProxyMediaUrl(proxyUrl);
-        finalUrl = isStale ? "" : proxyUrl;
+        const host = String(parsed.hostname || "").toLowerCase();
+        const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+        finalUrl = isFirebaseStorageUrl ? "" : parsed.toString();
       } catch (_) {
         finalUrl = clean;
       }

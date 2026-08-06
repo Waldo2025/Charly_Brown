@@ -2,12 +2,14 @@
   if (window.__cbCacheVersionLoaderInit) return;
   window.__cbCacheVersionLoaderInit = true;
 
-  const fallbackVersion = "2026-1.0.10.540";
+  const fallbackVersion = "2026-1.0.10.542";
 
   function resolveCacheVersion() {
     return fetch("version.json?ts=" + encodeURIComponent(String(Date.now())), { cache: "no-store" })
       .then((response) => response.ok ? response.json() : {})
-      .then((data) => String(data?.cache_version || data?.build || data?.version || fallbackVersion).trim() || fallbackVersion)
+      // El query del propio loader identifica la release activa. version.json se
+      // consulta para el banner, pero una copia stale nunca debe revivir módulos viejos.
+      .then(() => fallbackVersion)
       .catch(() => fallbackVersion);
   }
 

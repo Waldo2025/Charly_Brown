@@ -3,6 +3,7 @@
     "origin": [
       "https://charly-brown.web.app",
       "https://charly-brown.firebaseapp.com",
+      "https://charly-brown--google-cloud-phase4-mucp5w2o.web.app",
       "https://gemini-live-proxy-128488238449.us-central1.run.app",
       "http://127.0.0.1:5010",
       "http://localhost:5010",
@@ -12,7 +13,7 @@
       "http://localhost:5501",
       "http://localhost:3000"
     ],
-    "method": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "DELETE", "PATCH"],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
     "responseHeader": [
       "Content-Type",
       "Content-Length",

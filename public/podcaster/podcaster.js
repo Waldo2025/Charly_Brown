@@ -7396,6 +7396,18 @@ async function resolveFirebaseStorageUrl(gsUrl = "") {
   }
 }
 
+async function resolveAuthorizedAssetUrl(proxyUrl = "") {
+  const clean = String(proxyUrl || "").trim();
+  if (!clean) return "";
+  const parsed = new URL(clean, window.location.origin);
+  const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
+  if (!storagePath) return clean;
+  const data = await authFetchJson(`/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`);
+  const signedUrl = String(data?.url || "").trim();
+  if (!signedUrl) throw new Error("signed_asset_url_missing");
+  return signedUrl;
+}
+
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
@@ -14564,6 +14576,7 @@ playbackController.init(els, {
   buildOnScreenTextBubbleInlineStyle,
   escapeHtml,
   resolveFirebaseStorageUrl,
+  resolveAuthorizedAssetUrl,
   renderPodcastVideoTimeline,
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -14680,6 +14693,7 @@ exportPreviewController.init(exportPreviewEls, {
   buildOnScreenTextBubbleInlineStyle,
   escapeHtml,
   resolveFirebaseStorageUrl,
+  resolveAuthorizedAssetUrl,
   renderPodcastVideoTimeline: () => { },
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -23659,6 +23673,9 @@ function initPremiumLoaderAnimations() {
 initPremiumLoaderAnimations();
 
 async function bootstrapPodcasterApp() {
+  if (window.__CHARLY_RUNTIME_CONFIG_READY__?.then) {
+    await window.__CHARLY_RUNTIME_CONFIG_READY__;
+  }
   const cacheVersion = String(window.__CHARLY_CACHE_VERSION__ || "").trim();
   const versionQuery = cacheVersion ? `?v=${encodeURIComponent(cacheVersion)}` : "";
 

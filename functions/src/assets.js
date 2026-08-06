@@ -34,22 +34,33 @@ async function assertAssetAccess({ req, storagePath, db }) {
   return authContext;
 }
 
+async function createSignedAssetUrl(req) {
+  const storagePath = normalizeStoragePath(req.query?.storagePath || "");
+  const { db, bucket } = getAdminServices();
+  await assertAssetAccess({ req, storagePath, db });
+  const file = bucket.file(storagePath);
+  const [exists] = await file.exists();
+  if (!exists) throw Object.assign(new Error("asset_not_found"), { status: 404 });
+  const expiresAt = Date.now() + SIGNED_URL_TTL_MS;
+  const [url] = await file.getSignedUrl({
+    version: "v4",
+    action: "read",
+    expires: expiresAt
+  });
+  return { storagePath, url, expiresAt };
+}
+
 function registerAssetRoutes(app) {
   const handler = asyncRoute(async (req, res) => {
-    const storagePath = normalizeStoragePath(req.query?.storagePath || "");
-    const { db, bucket } = getAdminServices();
-    await assertAssetAccess({ req, storagePath, db });
-    const file = bucket.file(storagePath);
-    const [exists] = await file.exists();
-    if (!exists) throw Object.assign(new Error("asset_not_found"), { status: 404 });
-    const [signedUrl] = await file.getSignedUrl({
-      version: "v4",
-      action: "read",
-      expires: Date.now() + SIGNED_URL_TTL_MS
-    });
+    const { url } = await createSignedAssetUrl(req);
     res.setHeader("Cache-Control", "private, no-store");
-    return res.redirect(302, signedUrl);
+    return res.redirect(302, url);
   });
+  app.get("/api/assets/signed-url", asyncRoute(async (req, res) => {
+    const asset = await createSignedAssetUrl(req);
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.status(200).json({ ok: true, ...asset });
+  }));
   app.get("/api/assets/proxy-media", handler);
   app.get("/api/assets/proxy-image", handler);
   app.get("/api/assets/montage-download", handler);
@@ -60,5 +71,6 @@ module.exports = {
   normalizeStoragePath,
   isPublicLibraryPath,
   sessionIdFromStoragePath,
+  createSignedAssetUrl,
   registerAssetRoutes
 };

@@ -201,8 +201,36 @@ export class PodcasterPlaybackController extends EventEmitter {
     return Math.max(1, Math.min(2.5, numeric || 1));
   }
   buildMediaProxyUrl(path = "") {
-    const clean = String(path || "").trim();
+    let clean = String(path || "").trim();
     if (!clean) return "";
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      if (/\/api\/assets\/proxy-(?:media|image)$/i.test(String(parsed.pathname || ""))) {
+        const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
+        if (nestedUrl && this.hasFirebaseDirectAccessToken(nestedUrl)) return nestedUrl;
+        let storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
+        if (!storagePath && nestedUrl) {
+          const nested = new URL(nestedUrl);
+          const encodedObjectPath = String(nested.pathname || "").split("/o/")[1] || "";
+          if (encodedObjectPath) {
+            storagePath = encodedObjectPath;
+            try { storagePath = decodeURIComponent(storagePath); } catch (_) { }
+            if (/%2f|%25/i.test(storagePath)) {
+              try { storagePath = decodeURIComponent(storagePath); } catch (_) { }
+            }
+          }
+        }
+        if (storagePath.startsWith("gs://")) {
+          storagePath = storagePath.replace(/^gs:\/\/[^/]+\//i, "");
+        }
+        if (storagePath) {
+          const kind = String(parsed.pathname || "").toLowerCase().endsWith("proxy-image") ? "image" : "media";
+          clean = `/api/assets/proxy-${kind}?storagePath=${encodeURIComponent(storagePath.replace(/^\/+/, ""))}`;
+        } else if (nestedUrl) {
+          return nestedUrl;
+        }
+      }
+    } catch (_) { }
     if (typeof this.deps?.buildApiUrlPreferRemote === "function") {
       return this.deps.buildApiUrlPreferRemote(clean);
     }
@@ -754,7 +782,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (activeMode === "streaming") {
       if (this.blobCache.has(url)) {
         const cachedStreaming = this.blobCache.get(url);
-        return cachedStreaming === "404" ? "" : cachedStreaming;
+        if (cachedStreaming === "404") return "";
+        if (!this.requiresAuthorizedAssetResolution(cachedStreaming)) return cachedStreaming;
       }
       
       let finalUrl = url;
@@ -768,9 +797,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       
       const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
-      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-')) {
+      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
         finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
       }
+      if (this.requiresAuthorizedAssetResolution(finalUrl)) return null;
       this.blobCache.set(url, finalUrl);
       const cacheKey = this.resolvePersistentMediaCacheKey(url);
       if (cacheKey && cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
@@ -788,6 +818,18 @@ export class PodcasterPlaybackController extends EventEmitter {
       return cached === "404" ? "" : cached;
     }
     return null;
+  }
+
+  requiresAuthorizedAssetResolution(url = "") {
+    const clean = String(url || "").trim();
+    if (!clean || !/\/api\/assets\/proxy-(?:media|image)/i.test(clean)) return false;
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      const storagePath = String(parsed.searchParams.get("storagePath") || "").replace(/^\/+/, "");
+      return storagePath.startsWith("podcaster/sessions/");
+    } catch (_) {
+      return false;
+    }
   }
 
   resolvePersistentMediaCacheKey(url = "") {
@@ -1060,6 +1102,13 @@ export class PodcasterPlaybackController extends EventEmitter {
           const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
           if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
             finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
+          }
+
+          if (this.requiresAuthorizedAssetResolution(finalUrl)) {
+            if (typeof this.deps?.resolveAuthorizedAssetUrl !== "function") {
+              throw new Error("authorized_asset_resolver_unavailable");
+            }
+            finalUrl = await this.deps.resolveAuthorizedAssetUrl(finalUrl);
           }
 
           this.blobCache.set(url, finalUrl);

@@ -32,6 +32,19 @@ function proxyUrl(storagePath, image = false) {
   return `/api/assets/${route}?storagePath=${encodeURIComponent(String(storagePath || ""))}`;
 }
 
+function normalizePodcasterStoragePath(value = "") {
+  let clean = text(value, 900);
+  if (clean.startsWith("gs://")) clean = clean.replace(/^gs:\/\/[^/]+\//i, "");
+  return clean.startsWith("podcaster/") ? clean : "";
+}
+
+function withoutLegacyRenderUrl(value = "") {
+  const clean = text(value, 3000);
+  return /(?:^|\.)onrender\.com(?:\/|$)/i.test((() => {
+    try { return new URL(clean).hostname; } catch (_) { return ""; }
+  })()) ? "" : clean;
+}
+
 function safeSession(source = {}) {
   const clean = JSON.parse(JSON.stringify(source && typeof source === "object" ? source : {}));
   clean.id = text(clean.id || `session_${crypto.randomUUID().slice(0, 12)}`, 180);
@@ -53,8 +66,13 @@ function normalizeLibraryItem(doc) {
   const data = typeof doc?.data === "function" ? doc.data() || {} : doc || {};
   const libraryId = text(doc?.id || data.libraryId || data.id, 180);
   if (!libraryId) return null;
-  const storagePath = text(data.storagePath, 900);
-  const thumbStoragePath = text(data.thumbStoragePath || data.thumbnailStoragePath, 900);
+  const storagePath = normalizePodcasterStoragePath(data.storagePath);
+  const thumbStoragePath = normalizePodcasterStoragePath(data.thumbStoragePath || data.thumbnailStoragePath);
+  const mimeType = text(data.mimeType || "video/mp4", 120, "video/mp4");
+  const downloadUrl = withoutLegacyRenderUrl(data.downloadUrl) || (storagePath ? proxyUrl(storagePath) : "");
+  const thumbUrl = withoutLegacyRenderUrl(data.thumbUrl || data.thumbnailUrl)
+    || (thumbStoragePath ? proxyUrl(thumbStoragePath, true) : "")
+    || (mimeType.startsWith("image/") ? downloadUrl : "");
   return {
     libraryId,
     publicSceneLibraryId: libraryId,
@@ -65,10 +83,10 @@ function normalizeLibraryItem(doc) {
     ownerId: text(data.ownerId, 180),
     ownerEmail: text(data.ownerEmail, 240),
     durationSec: number(data.durationSec, 0, 600),
-    downloadUrl: text(data.downloadUrl, 3000) || (storagePath ? proxyUrl(storagePath) : ""),
+    downloadUrl,
     storagePath,
-    mimeType: text(data.mimeType || "video/mp4", 120, "video/mp4"),
-    thumbUrl: text(data.thumbUrl || data.thumbnailUrl, 3000) || (thumbStoragePath ? proxyUrl(thumbStoragePath, true) : ""),
+    mimeType,
+    thumbUrl,
     thumbStoragePath,
     thumbMimeType: text(data.thumbMimeType || "image/jpeg", 120, "image/jpeg"),
     sceneDescription: text(data.sceneDescription, 1200),
@@ -381,8 +399,8 @@ function registerLibraryRoutes(app) {
     const snapshot = await db.collection("podcaster_music_library").orderBy("updatedAt", "desc").limit(250).get();
     const tracks = snapshot.docs.map((doc) => {
       const data = doc.data() || {};
-      const storagePath = text(data.storagePath, 900);
-      return { libraryId: doc.id, name: text(data.name || "Audio", 180, "Audio"), mimeType: text(data.mimeType || "audio/mpeg", 120, "audio/mpeg"), size: Number(data.size || 0), durationSec: number(data.durationSec, 0, 1800), downloadUrl: text(data.downloadUrl, 3000) || (storagePath ? proxyUrl(storagePath) : ""), storagePath, updatedAt: text(data.updatedAt, 64), ownerId: text(data.ownerId, 180), ownerEmail: text(data.ownerEmail, 240) };
+      const storagePath = normalizePodcasterStoragePath(data.storagePath);
+      return { libraryId: doc.id, name: text(data.name || "Audio", 180, "Audio"), mimeType: text(data.mimeType || "audio/mpeg", 120, "audio/mpeg"), size: Number(data.size || 0), durationSec: number(data.durationSec, 0, 1800), downloadUrl: withoutLegacyRenderUrl(data.downloadUrl) || (storagePath ? proxyUrl(storagePath) : ""), storagePath, updatedAt: text(data.updatedAt, 64), ownerId: text(data.ownerId, 180), ownerEmail: text(data.ownerEmail, 240) };
     });
     res.status(200).json({ ok: true, tracks });
   }));

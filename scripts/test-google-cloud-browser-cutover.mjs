@@ -45,6 +45,11 @@ const podcasterHtml = read("public/podcaster.html");
 const podcasterCss = read("public/podcaster.css");
 const videoPlayerHtml = read("public/video-player.html");
 const podcasterSource = read("public/podcaster/podcaster.js");
+const runtimeConfigSource = read("public/js/runtime-config.js");
+const apiClientSource = read("public/js/api-client.js");
+const mediaRuntimeSource = read("public/podcaster/podcaster-media-runtime.js");
+const playbackControllerSource = read("public/podcaster/podcaster-playback-controller.js");
+const runtimeConfigLoaderSource = read("public/js/runtime-config-loader.js");
 
 assert.match(podcasterHtml, /data-cache-href=["']podcaster\.css/);
 assert.match(podcasterCss, /is-snoopy-editor-light-theme/);
@@ -56,12 +61,39 @@ assert.match(podcasterSource, /createPodcasterLiveProxyAdapter/);
 assert.match(podcasterSource, /tokenJson\?\.websocketUrl/);
 assert.match(podcasterSource, /tokenJson\?\.ticket/);
 assert.doesNotMatch(podcasterSource, /apiKey:\s*liveApiKey|loadGoogleGenAiLiveModule/);
+assert.match(runtimeConfigSource, /const __charlyGoogleApiBase = "https:\/\/charly-brown\.web\.app\/api"/);
+assert.doesNotMatch(runtimeConfigSource, /__charlyIsLocalRuntime\s*\?\s*"http:\/\/127\.0\.0\.1/);
+assert.match(apiClientSource, /return DEFAULT_GOOGLE_API_BASE/);
+assert.match(playbackControllerSource, /!this\.hasFirebaseDirectAccessToken\(finalUrl\)/);
+assert.match(playbackControllerSource, /resolveAuthorizedAssetUrl/);
+assert.match(playbackControllerSource, /requiresAuthorizedAssetResolution/);
+assert.match(podcasterSource, /\/api\/assets\/signed-url\?storagePath=/);
+assert.match(runtimeConfigLoaderSource, /window\.__CHARLY_RUNTIME_CONFIG_READY__ = \(async \(\) =>/);
+assert.match(podcasterSource, /await window\.__CHARLY_RUNTIME_CONFIG_READY__/);
+
+globalThis.window = { location: { origin: "http://127.0.0.1:5010" } };
+const mediaRuntimeModule = await import(`data:text/javascript;base64,${Buffer.from(mediaRuntimeSource).toString("base64")}`);
+const mediaRuntime = mediaRuntimeModule.createPodcasterMediaRuntimeApi({
+  buildApiUrlPreferRemote: (route) => `https://charly-brown.web.app${route}`,
+  buildApiUrl: (route) => `https://charly-brown.web.app${route}`
+});
+const tokenizedMedia = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/podcaster%2Fsessions%2Fsession-1%2Fvideo.mp4?alt=media&token=token-1";
+assert.equal(mediaRuntime.resolveStaleAwareProxyMediaUrl(tokenizedMedia, "", "media"), tokenizedMedia);
+const legacyProxy = `http://127.0.0.1:5010/api/assets/proxy-media?url=${encodeURIComponent(tokenizedMedia)}`;
+assert.equal(mediaRuntime.resolveStaleAwareProxyMediaUrl(legacyProxy, "", "media"), tokenizedMedia);
+const protectedMedia = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/podcaster%2Fsessions%2Fsession-1%2Fprivate.mp4?alt=media";
+const protectedResolved = mediaRuntime.resolveStaleAwareProxyMediaUrl(protectedMedia, "", "media");
+assert.match(protectedResolved, /^https:\/\/charly-brown\.web\.app\/api\/assets\/proxy-media\?storagePath=/);
+assert.doesNotMatch(protectedResolved, /[?&]url=/);
 
 const firebaseConfig = JSON.parse(read("firebase.json"));
 const rewrites = firebaseConfig.hosting.rewrites;
 const functionRewrites = rewrites.filter((rewrite) => rewrite.function);
 assert.ok(functionRewrites.length >= 4, "Hosting debe enrutar las APIs a Functions.");
-assert.ok(functionRewrites.every((rewrite) => rewrite.function.pinTag === true));
+assert.ok(
+  functionRewrites.every((rewrite) => rewrite.function.pinTag === undefined),
+  "Los previews Gen2 deben evitar pinTag: entra en conflicto con minInstances y con actualizaciones concurrentes de Cloud Run."
+);
 assert.ok(functionRewrites.every((rewrite) => rewrite.function.region === "us-central1"));
 
 console.log("Google Cloud browser cutover, assets and themes OK.");

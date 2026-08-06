@@ -1,6 +1,7 @@
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
+const DEFAULT_GOOGLE_API_BASE = "https://charly-brown.web.app/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
 const DEFAULT_GEMINI_API_BASE = "/api";
 const DEFAULT_VEO_API_BASE = "/api";
@@ -63,7 +64,8 @@ function isLocalHostRuntime() {
 }
 
 export function canUseSameOriginApi() {
-  return isLocalHostRuntime() || window.__CHARLY_CONFIG__?.allowSameOriginApi === true;
+  return (!isLocalHostRuntime() && window.__CHARLY_CONFIG__?.allowSameOriginApi === true)
+    || Boolean(getConfiguredApiBase());
 }
 
 function shouldForceSameOriginApiPath(path = "") {
@@ -103,13 +105,12 @@ export function resolveApiBase() {
   const isLocalHost = isLocalHostRuntime();
   
   if (isLocalHost) {
-    // Si estamos en localhost, priorizamos el backend local (8787)
-    // a menos que la URL configurada sea explícitamente local (evita usar Render por error)
-    if (configured && isLoopbackApiBase(configured)) {
+    if (configured && isLoopbackApiBase(configured) && window.__CHARLY_CONFIG__?.useLocalApi === true) {
       return configured.replace(/\/+$/, "");
     }
-    if (port === "8787") return "/api";
-    return DEFAULT_LOCAL_API_BASE;
+    if (configured && !isLoopbackApiBase(configured)) return configured.replace(/\/+$/, "");
+    if (port === "8787" && window.__CHARLY_CONFIG__?.useLocalApi === true) return "/api";
+    return DEFAULT_GOOGLE_API_BASE;
   }
   
   if (configured) {
@@ -140,9 +141,9 @@ export function buildApiUrl(path = "") {
 
 export function buildSameOriginApiUrl(path = "") {
   const input = String(path || "").trim();
-  if (!input) return isLocalHostRuntime() ? DEFAULT_LOCAL_API_BASE : DEFAULT_REMOTE_API_BASE_SAFE;
+  if (!input) return isLocalHostRuntime() ? resolveApiBase() : DEFAULT_REMOTE_API_BASE_SAFE;
   if (/^https?:\/\//i.test(input)) return input;
-  const base = isLocalHostRuntime() ? DEFAULT_LOCAL_API_BASE : DEFAULT_REMOTE_API_BASE_SAFE;
+  const base = isLocalHostRuntime() ? resolveApiBase() : DEFAULT_REMOTE_API_BASE_SAFE;
   if (input.startsWith("/api/")) {
     return base.endsWith("/api") ? `${base}${input.slice(4)}` : `${base}${input}`;
   }

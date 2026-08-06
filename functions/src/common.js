@@ -7,6 +7,18 @@ const { getStorage } = require("firebase-admin/storage");
 const PROJECT_ID = "charly-brown";
 const STORAGE_BUCKET = "charly-brown.firebasestorage.app";
 const REGION = "us-central1";
+const ALLOWED_BROWSER_ORIGINS = new Set([
+  "https://charly-brown.web.app",
+  "https://charly-brown.firebaseapp.com"
+]);
+
+function isAllowedBrowserOrigin(origin = "") {
+  const clean = String(origin || "").trim();
+  if (!clean) return false;
+  if (ALLOWED_BROWSER_ORIGINS.has(clean)) return true;
+  if (/^https:\/\/charly-brown--[a-z0-9-]+\.web\.app$/i.test(clean)) return true;
+  return /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(clean);
+}
 
 function getAdminServices() {
   if (!getApps().length) {
@@ -42,7 +54,10 @@ async function resolveAuthContext(req, { optional = false } = {}) {
   }
   const { auth } = getAdminServices();
   try {
-    const decoded = await auth.verifyIdToken(token, true);
+    // Signature, audience and expiration are verified locally. Revocation checks
+    // require firebaseauth.users.get, which intentionally is not granted to the
+    // least-privilege runtime service accounts.
+    const decoded = await auth.verifyIdToken(token);
     return {
       uid: String(decoded.uid || decoded.sub || "").trim(),
       email: String(decoded.email || "").trim(),
@@ -64,6 +79,15 @@ function asyncRoute(handler) {
 function installCommonMiddleware(app, { service }) {
   app.disable("x-powered-by");
   app.use((req, res, next) => {
+    const origin = String(req.headers.origin || "").trim();
+    if (isAllowedBrowserOrigin(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,PUT,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Request-Id");
+      res.setHeader("Access-Control-Max-Age", "3600");
+    }
+    if (req.method === "OPTIONS") return res.status(204).end();
     const requestId = String(req.headers["x-request-id"] || crypto.randomUUID()).trim();
     req.requestId = requestId;
     res.setHeader("X-Request-Id", requestId);
@@ -105,5 +129,6 @@ module.exports = {
   asyncRoute,
   installCommonMiddleware,
   installErrorHandler,
-  isPrivilegedRole
+  isPrivilegedRole,
+  isAllowedBrowserOrigin
 };

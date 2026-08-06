@@ -30,9 +30,12 @@ const {
 const {
   normalizeVoiceName
 } = require("../src/live-tickets.js");
-const { safeSession } = require("../src/podcaster-data.js");
+const { safeSession, normalizeLibraryItem } = require("../src/podcaster-data.js");
 const { sanitizePersistedValue } = require("../src/montage-routes.js");
 const { compactInput, publicAiJob } = require("../src/ai-jobs.js");
+const { isAllowedBrowserOrigin } = require("../src/common.js");
+const fs = require("node:fs");
+const path = require("node:path");
 
 test("model aliases replace retired Gemini and Veo previews", () => {
   assert.equal(normalizeModel("gemini-2.5-flash"), DEFAULT_TEXT_MODEL);
@@ -137,6 +140,20 @@ test("podcaster sessions keep their established document shape", () => {
   assert.throws(() => safeSession({ id: "large", body: "x".repeat(910 * 1024) }), /podcaster_session_too_large/);
 });
 
+test("public library responses remove historical Render media URLs", () => {
+  const item = normalizeLibraryItem({
+    libraryId: "library-1",
+    mimeType: "image/png",
+    storagePath: "gs://charly-brown.firebasestorage.app/podcaster/library/scenes/library-1/image.png",
+    downloadUrl: "https://legacy.onrender.com/api/assets/proxy-image?storagePath=old",
+    thumbUrl: "https://legacy.onrender.com/api/assets/proxy-image?storagePath=old"
+  });
+  assert.equal(item.storagePath, "podcaster/library/scenes/library-1/image.png");
+  assert.match(item.downloadUrl, /^\/api\/assets\/proxy-media\?storagePath=/);
+  assert.equal(item.thumbUrl, item.downloadUrl);
+  assert.doesNotMatch(JSON.stringify(item), /onrender\.com/);
+});
+
 test("durable jobs strip inline media and legacy Render URLs", () => {
   const sanitized = sanitizePersistedValue({
     sessionId: "session-42",
@@ -154,4 +171,17 @@ test("AI jobs are asynchronous, owner-scoped and never persist inline references
   const payload = publicAiJob({ jobId: "job-42", type: "scenario_image", ownerId: "user-1", status: "queued", stage: "queued" });
   assert.equal(payload.jobId, "job-42");
   assert.equal(payload.statusUrl, "/api/podcaster/jobs/job-42");
+});
+
+test("Functions allow production, preview and localhost browser origins", () => {
+  assert.equal(isAllowedBrowserOrigin("https://charly-brown.web.app"), true);
+  assert.equal(isAllowedBrowserOrigin("https://charly-brown--google-preview-abc123.web.app"), true);
+  assert.equal(isAllowedBrowserOrigin("http://127.0.0.1:5010"), true);
+  assert.equal(isAllowedBrowserOrigin("https://evil.example"), false);
+});
+
+test("Firebase ID token verification works with least-privilege runtime IAM", () => {
+  const commonSource = fs.readFileSync(path.join(__dirname, "../src/common.js"), "utf8");
+  assert.match(commonSource, /verifyIdToken\(token\)/);
+  assert.doesNotMatch(commonSource, /verifyIdToken\(token,\s*true\)/);
 });

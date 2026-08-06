@@ -8,19 +8,23 @@
   const shouldLoadLocalOverride = isLocalHost || window.__CHARLY_ENABLE_RUNTIME_CONFIG__ === true;
 
   function injectConfigScript(src, kind) {
-    const script = document.createElement("script");
-    script.src = src;
-    script.defer = true;
-    script.dataset.runtimeConfig = kind;
-    script.onerror = function () {
-      script.remove();
-    };
-    document.head.appendChild(script);
+    return new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = src;
+      script.async = false;
+      script.dataset.runtimeConfig = kind;
+      script.onload = () => resolve(true);
+      script.onerror = function () {
+        script.remove();
+        resolve(false);
+      };
+      document.head.appendChild(script);
+    });
   }
 
-  injectConfigScript(`js/runtime-config.js?v=${encodeURIComponent(runtimeConfigVersion)}`, "runtime");
-  if (shouldLoadLocalOverride) {
-    (async () => {
+  window.__CHARLY_RUNTIME_CONFIG_READY__ = (async () => {
+    await injectConfigScript(`js/runtime-config.js?v=${encodeURIComponent(runtimeConfigVersion)}`, "runtime");
+    if (shouldLoadLocalOverride) {
       const localCandidates = [
         "js/config.local.js",
         "./config.local.js",
@@ -30,12 +34,13 @@
         try {
           const probe = await fetch(src, { method: "GET", cache: "no-store" });
           if (!probe.ok) continue;
-          injectConfigScript(src, "local");
+          await injectConfigScript(`${src}${src.includes("?") ? "&" : "?"}ts=${Date.now()}`, "local");
           break;
         } catch (_) {
           // try next candidate
         }
       }
-    })();
-  }
+    }
+    return window.__CHARLY_CONFIG__ || {};
+  })();
 })();

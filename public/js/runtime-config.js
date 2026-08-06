@@ -1,23 +1,25 @@
 const __charlyHost = String(window.location.hostname || "").toLowerCase();
 const __charlyIsLocalRuntime = __charlyHost === "127.0.0.1" || __charlyHost === "localhost";
+const __charlyGoogleApiBase = "https://charly-brown.web.app/api";
 
 window.__CHARLY_CONFIG__ = Object.assign(
   {
-    // En localhost prioriza el backend local; en producción usa el proxy same-origin
-    // de Firebase Hosting para evitar CORS contra Render.
+    // El servidor local solo entrega archivos estáticos. Las APIs siempre pasan por
+    // Firebase Hosting/Functions salvo que un config.local explícito active useLocalApi.
     apiBaseUrl: __charlyIsLocalRuntime
-      ? "http://127.0.0.1:8787/api"
+      ? __charlyGoogleApiBase
       : "/api",
     geminiApiBaseUrl: __charlyIsLocalRuntime
-      ? "http://127.0.0.1:8787/api"
+      ? __charlyGoogleApiBase
       : "/api",
     remoteApiBaseUrl: __charlyIsLocalRuntime
-      ? "http://127.0.0.1:8787/api"
+      ? __charlyGoogleApiBase
       : "/api",
     veoApiBaseUrl: __charlyIsLocalRuntime
-      ? "http://127.0.0.1:8787/api"
+      ? __charlyGoogleApiBase
       : "/api",
-    exportApiBaseUrl: __charlyIsLocalRuntime ? "http://127.0.0.1:8787/api" : "/api",
+    exportApiBaseUrl: __charlyIsLocalRuntime ? __charlyGoogleApiBase : "/api",
+    useLocalApi: false,
     allowSameOriginApi: true,
     allowDirectGemini: false,
     forceDirectGemini: false,
@@ -27,7 +29,9 @@ window.__CHARLY_CONFIG__ = Object.assign(
 );
 
 if (__charlyIsLocalRuntime) {
-  window.__CHARLY_CONFIG__.apiBaseUrl = "http://127.0.0.1:8787/api";
+  if (window.__CHARLY_CONFIG__.useLocalApi !== true) {
+    window.__CHARLY_CONFIG__.apiBaseUrl = __charlyGoogleApiBase;
+  }
 } else {
   window.__CHARLY_CONFIG__.apiBaseUrl = "/api";
 }
