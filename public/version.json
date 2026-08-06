@@ -1,9 +1,8 @@
 {
-  "version": "1.0.10.540",
-  "build": "2026-1.0.10.540",
+  "version": "1.0.10.539",
+  "build": "2026-1.0.10.539",
   "branch": "codex-bootstrap",
   "changelog": [
-    "Corregido: Se endurecen los shims de biblioteca pública para podcaster al cargar módulos fuera de orden y se fuerza nuevo cache-buster para evitar que se ejecute un bundle previo con runtime de PodcasterPublicLibraryRuntime faltante.",
     "Corregido: Los chips de audio Gemini usan el inicio efectivo de la escena Veo como límite automático, evitando que datos persistidos de una geometría anterior se dibujen antes del video.",
     "Corregido: Home reutiliza la instancia existente de Firestore y evita una segunda inicialización con opciones distintas.",
     "Corregido: El timeline separa las promesas de streaming y descarga persistente para que la preparación nunca confunda un URL proxy con un blob hidratado antes de reproducir.",
@@ -463,6 +462,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.540",
-  "updated_at": "2026-08-06T00:00:00.000Z"
+  "cache_version": "2026-1.0.10.539",
+  "updated_at": "2026-07-20T00:00:00.000Z"
 }
