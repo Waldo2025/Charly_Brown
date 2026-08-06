@@ -171,15 +171,6 @@ function openSceneVideoSelectorModal(...args) {
 function swapStageToImagePreview(...args) {
   return requirePodcasterMediaReplacementApiFunction("swapStageToImagePreview")(...args);
 }
-function withPodcastSceneLibraryApi(handlerName, ...args) {
-  const handler = window?.[handlerName];
-  if (typeof handler !== "function") return undefined;
-  return handler(...args);
-}
-function withPodcastSceneLibraryPromise(handlerName, ...args) {
-  const result = withPodcastSceneLibraryApi(handlerName, ...args);
-  return result && typeof result.then === "function" ? result : Promise.resolve();
-}
 const resolveOnScreenTextExportCanvasSize = requireOnScreenTextApiFunction("resolveOnScreenTextExportCanvasSize");
 const resolveSharedOnScreenTextRenderSpec = requireOnScreenTextApiFunction("resolveOnScreenTextRenderSpec");
 const wrapSharedOnScreenTextRenderText = requireOnScreenTextApiFunction("wrapOnScreenTextRenderText");
@@ -15538,11 +15529,11 @@ function renderPodcastVideoShell(session = null) {
   renderPodcastVideoTimeline(activeSession, { reason: "shell" });
   renderPodcastTransitionTimeline(activeSession);
   renderPodcastTransitionPicker(activeSession);
-  withPodcastSceneLibraryApi("renderPodcastSceneLibrary", activeSession);
+  renderPodcastSceneLibrary(activeSession);
   if (!podcastSceneLibraryState.loadedAt && !podcastSceneLibraryState.loading) {
-    withPodcastSceneLibraryPromise("fetchPodcastSceneLibrary", { render: false }).then(() => {
+    fetchPodcastSceneLibrary({ render: false }).then(() => {
       if (String(getActiveSession()?.id || "").trim() === String(activeSession.id || "").trim()) {
-        withPodcastSceneLibraryApi("renderPodcastSceneLibrary", getActiveSession());
+        renderPodcastSceneLibrary(getActiveSession());
       }
     }).catch(() => { });
   }
@@ -17299,12 +17290,10 @@ function attachEvents() {
     setScriptSetupOpen(true);
   });
 
-  if (els.demoPromptBtn) {
-    els.demoPromptBtn.addEventListener("click", () => {
+  els.demoPromptBtn.addEventListener("click", () => {
     setPromptInputContent(demoPrompt);
     autoResizePrompt();
-    });
-  }
+  });
 
   // Lógica de colapso y revelación del chat composer
   if (els.toggleComposerCollapseBtn && els.revealComposerBtn && els.composerShell) {
@@ -17697,26 +17686,26 @@ function attachEvents() {
   }
   if (els.refreshPodcastSceneLibraryBtn) {
     els.refreshPodcastSceneLibraryBtn.addEventListener("click", async () => {
-      await withPodcastSceneLibraryPromise("fetchPodcastSceneLibrary", { render: true });
+      await fetchPodcastSceneLibrary({ render: true });
     });
   }
   if (els.podcastSceneLibrarySearchInput) {
     els.podcastSceneLibrarySearchInput.addEventListener("input", () => {
       podcastSceneLibraryState.filters.query = String(els.podcastSceneLibrarySearchInput.value || "");
-      withPodcastSceneLibraryApi("renderPodcastSceneLibrary", getActiveSession());
+      renderPodcastSceneLibrary(getActiveSession());
     });
   }
   if (els.podcastSceneLibraryColorFilterSelect) {
     els.podcastSceneLibraryColorFilterSelect.addEventListener("change", () => {
       podcastSceneLibraryState.filters.tagColor = String(els.podcastSceneLibraryColorFilterSelect.value || "all");
-      withPodcastSceneLibraryApi("renderPodcastSceneLibrary", getActiveSession());
+      renderPodcastSceneLibrary(getActiveSession());
     });
   }
   if (els.podcastSceneLibraryClearFiltersBtn) {
     els.podcastSceneLibraryClearFiltersBtn.addEventListener("click", () => {
       podcastSceneLibraryState.filters.query = "";
       podcastSceneLibraryState.filters.tagColor = "all";
-      withPodcastSceneLibraryApi("renderPodcastSceneLibrary", getActiveSession());
+      renderPodcastSceneLibrary(getActiveSession());
     });
   }
   if (els.uploadLocalPodcastSceneBtn && els.podcastSceneLibraryLocalVideoInput) {

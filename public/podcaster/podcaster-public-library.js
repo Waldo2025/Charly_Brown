@@ -1,22 +1,7 @@
 import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.530";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
-function resolvePodcasterPublicLibraryRuntime() {
-  try {
-    return requirePodcasterPublicLibraryRuntime();
-  } catch {
-    return null;
-  }
-}
-
-const runtime = new Proxy({}, {
-  get(_target, key) {
-    if (typeof key !== "string") return undefined;
-    const runtimeApi = resolvePodcasterPublicLibraryRuntime();
-    if (!runtimeApi) return undefined;
-    return runtimeApi[key];
-  }
-});
+const runtime = requirePodcasterPublicLibraryRuntime();
 
 // --- State ---
 const podcastSceneLibraryState = {
