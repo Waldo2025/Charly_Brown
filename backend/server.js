@@ -1953,7 +1953,10 @@ const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
       || 320
   ) || 320)
 );
-const MONTAGE_IMAGE_MOTION_FRAME_RATE = 60;
+const MONTAGE_IMAGE_MOTION_FRAME_RATE = Math.max(
+  24,
+  Math.round(Number(process.env.MONTAGE_IMAGE_MOTION_FRAME_RATE || 90) || 90)
+);
 const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
 const MONTAGE_TEXT_RETRY_DELAYS_MS = [300, 900, 1800];
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
@@ -12417,7 +12420,7 @@ function buildMontageImageMotionVideoFilter({
     mediaOffsetYPct,
     mediaMotionPreset,
     visualEffects,
-    frameRate: MONTAGE_IMAGE_MOTION_FRAME_RATE,
+    frameRate: mediaMotionPreset === "none" ? 24 : MONTAGE_IMAGE_MOTION_FRAME_RATE,
     mediaKind: "image"
   });
 }
@@ -14535,8 +14538,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const mediaOffsetYPct = normalizeMontageMediaOffset(entry?.mediaOffsetYPct || entry?.clip?.mediaOffsetYPct || 0);
         const mediaMotionPreset = normalizeMontageMediaMotionPreset(entry?.mediaMotionPreset || entry?.clip?.mediaMotionPreset || "none");
         const args = ["-y", "-hide_banner", "-loglevel", "warning"];
+        const sourceFrameRate = isImageAsset
+          ? (mediaMotionPreset === "none" ? 24 : MONTAGE_IMAGE_MOTION_FRAME_RATE)
+          : 24;
         if (isImageAsset) {
-          args.push("-loop", "1", "-framerate", String(isImageAsset ? MONTAGE_IMAGE_MOTION_FRAME_RATE : 24), "-i", inputVisualPath);
+          args.push("-loop", "1", "-framerate", String(sourceFrameRate), "-i", inputVisualPath);
         } else {
           args.push("-i", inputVisualPath);
         }
@@ -14753,7 +14759,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
         args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
-        const imageMotionFrameRate = isImageAsset ? MONTAGE_IMAGE_MOTION_FRAME_RATE : 24;
+        const imageMotionFrameRate = isImageAsset
+          ? (mediaMotionPreset === "none" ? 24 : MONTAGE_IMAGE_MOTION_FRAME_RATE)
+          : 24;
         args.push("-r", String(imageMotionFrameRate), "-c:v", intermediateParams.vCodec);
         args.push(...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", intermediateParams.aCodec, "-ar", "48000", ...intermediateParams.aArgs, intermediatePath);
         const sceneMemoryBeforeFfmpeg = process.memoryUsage();
