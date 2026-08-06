@@ -877,8 +877,8 @@ function resolveMontageReviewCanvasSize(resolution = "source", sourceWidth = 0, 
   }
 
   if (IS_RENDER_RUNTIME) {
-    if (result.width > 1280 || result.height > 720) {
-      result = { width: 1280, height: 720 };
+    if (result.width > 1920 || result.height > 1080) {
+      result = { width: 1920, height: 1080 };
     }
   }
   return result;
@@ -1951,6 +1951,7 @@ const MONTAGE_EXPORT_RENDERED_TEXT_FRAME_LIMIT = Math.max(
       || 320
   ) || 320)
 );
+const MONTAGE_IMAGE_MOTION_FRAME_RATE = 60;
 const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
 const MONTAGE_TEXT_RETRY_DELAYS_MS = [300, 900, 1800];
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
@@ -11982,8 +11983,8 @@ function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolu
   }
 
   if (IS_RENDER_RUNTIME) {
-    const maxDim = 1280;
-    const maxShortDim = 720;
+    const maxDim = 1920;
+    const maxShortDim = 1080;
     const isPortrait = result.width < result.height;
     const maxWidth = isPortrait ? maxShortDim : maxDim;
     const maxHeight = isPortrait ? maxDim : maxShortDim;
@@ -12229,6 +12230,7 @@ function buildSceneMediaPositionCropFilter({
   mediaMotionPreset = "none",
   visualEffects = null,
   mediaKind = "video",
+  frameRate = 24,
   scaleFilter = "",
   cloneTail = false,
   backgroundLabel = "scene_bg",
@@ -12253,6 +12255,7 @@ function buildSceneMediaPositionCropFilter({
   });
   const progressExpr = buildSceneMediaMotionProgressExpr(durationSec);
   const returnToAnchorExpr = `(4*(${progressExpr})*(1-(${progressExpr})))`;
+  const outputFrameRate = Math.max(1, Math.round(Number(frameRate || 24) || 24));
   let xExpr = `${spec.leftPx.toFixed(3)}`;
   let yExpr = `${spec.topPx.toFixed(3)}`;
   if (["pan-left-right", "pan-right-left"].includes(spec.motion.preset)) {
@@ -12274,6 +12277,7 @@ function buildSceneMediaPositionCropFilter({
     const inputChain = [
       `[vfg_src]scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`
     ];
+    if (mediaKind === "image") inputChain.push(`fps=${outputFrameRate}`);
     if (mediaKind === "image" && spec.kenBurns.effect) {
       const panScale = Number(spec.kenBurns.panScale || 1.2);
       const panDistanceXPx = spec.scaledRect.width * Number(spec.kenBurns.panDistancePct || 0.10);
@@ -12329,6 +12333,9 @@ function buildSceneMediaPositionCropFilter({
   const inputChain = [
     `${inputLabel}${cloneTail ? `tpad=stop_mode=clone:stop_duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)},` : ""}scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`
   ];
+  if (mediaKind === "image") {
+    inputChain.push(`fps=${outputFrameRate}`);
+  }
   if (mediaKind === "image" && spec.kenBurns.effect) {
     const panScale = Number(spec.kenBurns.panScale || 1.2);
     const panDistanceXPx = spec.scaledRect.width * Number(spec.kenBurns.panDistancePct || 0.10);
@@ -12373,7 +12380,7 @@ function buildSceneMediaPositionCropFilter({
     inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}`);
   }
   return [
-    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}:r=24[${backgroundLabel}]`,
+    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}:r=${outputFrameRate}[${backgroundLabel}]`,
     `${inputChain.join(",")}[${transformedLabel}]`,
     `[${backgroundLabel}][${transformedLabel}]overlay=x='${xExpr}':y='${yExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
   ].join(";");
@@ -12408,6 +12415,7 @@ function buildMontageImageMotionVideoFilter({
     mediaOffsetYPct,
     mediaMotionPreset,
     visualEffects,
+    frameRate: MONTAGE_IMAGE_MOTION_FRAME_RATE,
     mediaKind: "image"
   });
 }
@@ -12606,7 +12614,8 @@ async function renderMontageOverlapComposition({
   intermediatePaths = [],
   exportedEntries = [],
   emitStage = () => {},
-  force = false
+  force = false,
+  compositionFrameRate = 24
 } = {}) {
   const plan = buildMontageOverlapCompositionPlan(exportedEntries);
   if ((!force && !plan.hasOverlap && !plan.hasGaps) || !plan.entries.length) {
@@ -12623,6 +12632,7 @@ async function renderMontageOverlapComposition({
     input?.resolution || "source",
     input?.reelModeEnabled === true
   );
+  const safeCompositionFrameRate = Math.max(1, Math.round(Number(compositionFrameRate || 24) || 24));
 
   const maxInputs = IS_RENDER_RUNTIME ? 4 : 6;
 
@@ -12678,12 +12688,12 @@ async function renderMontageOverlapComposition({
       const overlayOutLabel = `base${index + 1}`;
       filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto:enable='between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})'[${overlayOutLabel}]`);
       baseLabel = overlayOutLabel;
-      if (transitionType === "dip-black" || transitionType === "flash-white") {
+        if (transitionType === "dip-black" || transitionType === "flash-white") {
         const pulseLabel = `transition_pulse_${index}`;
         const pulseOutLabel = `base${index + 1}_pulse`;
         const color = transitionType === "flash-white" ? "white" : "black";
         const halfTransitionSec = Math.max(0.01, transitionSec / 2);
-        filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24,format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
+        filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=${safeCompositionFrameRate},format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
         filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[${pulseOutLabel}]`);
         baseLabel = pulseOutLabel;
       }
@@ -12715,12 +12725,12 @@ async function renderMontageOverlapComposition({
     await runFfmpegCommand([
       "-y", "-hide_banner", "-loglevel", "warning",
       ...sortedPaths.flatMap((p) => ["-i", p]),
-      "-f", "lavfi", "-i", `color=c=${baseColor}:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
+      "-f", "lavfi", "-i", `color=c=${baseColor}:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=${safeCompositionFrameRate}`,
       "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalSec.toFixed(3)}`,
       "-filter_complex", filters.join(";"),
       "-map", `[${baseLabel}]`,
       "-map", "[aout]",
-      "-r", "24",
+      "-r", String(safeCompositionFrameRate),
       "-c:v", params.vCodec,
       ...params.vArgs,
       "-pix_fmt", "yuv420p",
@@ -13228,7 +13238,7 @@ async function appendMontageSceneOnScreenTextRenderedVideoFilters({
         await runFfmpegCommand([
           "-y", "-hide_banner", "-loglevel", "warning",
           "-f", "concat", "-safe", "0", "-i", concatPath,
-          "-vf", `fps=24,format=rgba,scale=${group.geometry.overlayWidth}:${group.geometry.overlayHeight}:flags=lanczos`,
+          "-vf", `fps=${MONTAGE_IMAGE_MOTION_FRAME_RATE},format=rgba,scale=${group.geometry.overlayWidth}:${group.geometry.overlayHeight}:flags=lanczos`,
           "-an",
           "-c:v", "qtrle",
           "-pix_fmt", "argb",
@@ -13620,7 +13630,7 @@ async function prepareMontageBrowserVisualInput({
     "-i", inputPath,
     "-map", "0:v:0",
     "-an",
-    "-vf", `scale=${width}:${height}:flags=fast_bilinear,setsar=1,fps=24,setpts=PTS-STARTPTS`,
+          "-vf", `scale=${width}:${height}:flags=fast_bilinear,setsar=1,fps=${MONTAGE_IMAGE_MOTION_FRAME_RATE},setpts=PTS-STARTPTS`,
     "-c:v", "libx264",
     "-preset", "ultrafast",
     "-tune", "zerolatency",
@@ -14027,6 +14037,10 @@ async function renderMontageAudioOnlyExport({
       const audio = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
       if (!audio) return null;
       const rowId = clampText(entry?.rowId || "", 140);
+      const configuredPlaybackRate = Math.max(
+        0.5,
+        Math.min(10, Number((input.dialogueAudioMap?.[rowId] && input.dialogueAudioMap[rowId]?.playbackRate) || audio?.playbackRate || 1) || 1)
+      );
       const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
       const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
       const hasSource = Boolean(
@@ -14053,7 +14067,7 @@ async function renderMontageAudioOnlyExport({
         durationMs,
         trimInMs: 0,
         trimOutMs: durationMs,
-        playbackRate: 1,
+        playbackRate: configuredPlaybackRate,
         fadeInMs: 0,
         fadeOutMs: 0,
         volumePct: Math.max(0, Math.min(200, Number(entry?.geminiVolumeOverridePct ?? 100) || 100))
@@ -14205,7 +14219,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     tmpDir = path.join(os.tmpdir(), `cb-montage-export-${randomUUID()}`);
     await fs.promises.mkdir(tmpDir, { recursive: true });
 
-    const deliveryParams = resolveMontageExportVideoParams(input.format, input.qualityPreset, input.bitrateSettings);
+    const deliveryParams = resolveMontageExportVideoParams(input.format, input.qualityPreset, input.bitrateSettings, input?.resolution || "source");
     const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
@@ -14315,6 +14329,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         isImageAsset = true;
       }
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
+      const entryPlaybackRate = Math.max(
+        0.5,
+        Math.min(10, Number((audioAsset?.playbackRate || input?.dialogueAudioMap?.[rowId]?.playbackRate || 1) || 1))
+      );
 
       if (!rowId) {
         const err = new Error(`Entrada inválida (rowId) en índice ${i}.`);
@@ -14449,6 +14467,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           }
         }));
         const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
+        const audioRetimeFilter = Math.abs(entryPlaybackRate - 1) > 0.0001
+          ? buildFfmpegAtempoFilterChain(entryPlaybackRate)
+          : "";
         inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
         const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
         const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
@@ -14513,7 +14534,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const mediaMotionPreset = normalizeMontageMediaMotionPreset(entry?.mediaMotionPreset || entry?.clip?.mediaMotionPreset || "none");
         const args = ["-y", "-hide_banner", "-loglevel", "warning"];
         if (isImageAsset) {
-          args.push("-loop", "1", "-framerate", "24", "-i", inputVisualPath);
+          args.push("-loop", "1", "-framerate", String(isImageAsset ? MONTAGE_IMAGE_MOTION_FRAME_RATE : 24), "-i", inputVisualPath);
         } else {
           args.push("-i", inputVisualPath);
         }
@@ -14534,7 +14555,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         if (forceSilentAudio) {
           audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         } else if (!useNativeVideoAudio && inputAudioPath) {
-          audioFilterGraph = `[2:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
+          audioFilterGraph = [
+            `[2:a]volume=1.0,atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS`,
+            audioRetimeFilter ? `,${audioRetimeFilter}` : "",
+            `,atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`
+          ].join("");
         } else if (useNativeVideoAudio && videoHasAudio) {
           // Preserve the scene-native VEO audio as-is here. When the export also
           // carries Gemini timeline segments, they are mixed later in
@@ -14726,7 +14751,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
         args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
-        args.push("-r", "24", "-c:v", intermediateParams.vCodec);
+        const imageMotionFrameRate = isImageAsset ? MONTAGE_IMAGE_MOTION_FRAME_RATE : 24;
+        args.push("-r", String(imageMotionFrameRate), "-c:v", intermediateParams.vCodec);
         args.push(...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", intermediateParams.aCodec, "-ar", "48000", ...intermediateParams.aArgs, intermediatePath);
         const sceneMemoryBeforeFfmpeg = process.memoryUsage();
         console.info("[backend][montage-export][scene-ffmpeg-preflight]", {
@@ -14835,6 +14861,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
           durationSec: durSec,
           durationMs,
+          frameRate: imageMotionFrameRate || 24,
           mediaScale,
           mediaOffsetXPct,
           mediaOffsetYPct,
@@ -14915,7 +14942,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     // Escenas con fondo sólido/gradiente ya se materializan como clips completos
     // en la fase anterior. No hace falta forzarlas por el compositor overlap,
     // porque eso empeora el rendimiento y puede bloquear el ensamblado final.
-    const requiresSafeTimelineComposition = false;
+    const exportedFrameRates = exportedEntries.map((entry) => Math.max(1, Math.round(Number(entry?.frameRate || 24) || 24)));
+    const uniqueCompositionFrameRates = Array.from(new Set(exportedFrameRates));
+    const requiresSafeTimelineComposition = uniqueCompositionFrameRates.length > 1;
+    const compositionFrameRate = uniqueCompositionFrameRates.length > 0
+      ? Math.max(...uniqueCompositionFrameRates)
+      : 24;
     let concatOutPath = "";
     emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
@@ -14931,7 +14963,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         intermediatePaths,
         exportedEntries,
         emitStage,
-        force: requiresSafeTimelineComposition
+        force: requiresSafeTimelineComposition,
+        compositionFrameRate
       });
     }
     if (!concatOutPath) {
