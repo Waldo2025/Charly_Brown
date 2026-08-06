@@ -655,6 +655,8 @@ function isMontageExportStatusRedirectFailure(error = null) {
     && pointsToRender
     && (status === 0 || status === 502 || status === 503)
     && (
+      message.includes("access to fetch at")
+      || message.includes("access-control-allow-origin")
       message.includes("failed to fetch")
       || message.includes("fetch failed")
       || message.includes("networkerror")

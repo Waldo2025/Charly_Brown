@@ -1076,6 +1076,8 @@ function parseAllowedOrigins() {
     "http://localhost:5010",
     "https://charly-brown.web.app",
     "https://charly-brown.firebaseapp.com",
+    "https://*.web.app",
+    "https://*.firebaseapp.com",
     "https://charly-brown-gemini-backend.onrender.com",
     "https://*.onrender.com"
   ];
