@@ -3,8 +3,7 @@ const crypto = require("node:crypto");
 const {
   getAdminServices,
   resolveAuthContext,
-  asyncRoute,
-  isPrivilegedRole
+  asyncRoute
 } = require("./common.js");
 
 const MAX_UPLOAD_BYTES = Object.freeze({
@@ -13,6 +12,7 @@ const MAX_UPLOAD_BYTES = Object.freeze({
   "dialogue-video": 80 * 1024 * 1024,
   music: 24 * 1024 * 1024,
   "library-video": 80 * 1024 * 1024,
+  "library-image": 10 * 1024 * 1024,
   "library-music": 24 * 1024 * 1024
 });
 
@@ -93,8 +93,8 @@ async function assertSessionAccess({ db, sessionId, authContext }) {
 function buildStoragePath({ uploadId, uid, kind, sessionId, rowId, fileName, contentType }) {
   const ext = extensionForMime(contentType) || path.extname(fileName).replace(/^\./, "") || "bin";
   const safeName = sanitizeSegment(path.basename(fileName, path.extname(fileName)), "asset");
-  if (kind === "library-video" || kind === "library-music") {
-    const family = kind === "library-video" ? "scenes" : "music";
+  if (kind === "library-video" || kind === "library-image" || kind === "library-music") {
+    const family = kind === "library-music" ? "music" : "scenes";
     return `podcaster/library/${family}/pending/${sanitizeSegment(uid, "user")}/${uploadId}-${safeName}.${ext}`;
   }
   const folder = kind === "music" ? "music" : "videos";
@@ -107,14 +107,16 @@ function registerUploadRoutes(app) {
     const authContext = await resolveAuthContext(req);
     const input = validateUploadRequest(req.body || {});
     const { db, bucket, admin } = getAdminServices();
-    if (input.kind.startsWith("library-") && !isPrivilegedRole(authContext.role)) {
-      throw Object.assign(new Error("library_upload_forbidden"), { status: 403 });
-    }
     if (input.sessionId) {
       await assertSessionAccess({ db, sessionId: input.sessionId, authContext });
     }
     const uploadId = crypto.randomUUID();
+    const downloadToken = crypto.randomUUID();
     const storagePath = buildStoragePath({ ...input, uploadId, uid: authContext.uid });
+    const previousStoragePath = String(req.body?.previousStoragePath || "").trim().replace(/^\/+/, "");
+    if (previousStoragePath && (!previousStoragePath.startsWith("podcaster/") || previousStoragePath.includes(".."))) {
+      throw Object.assign(new Error("invalid_previous_storage_path"), { status: 400 });
+    }
     const file = bucket.file(storagePath);
     const [uploadUrl] = await file.createResumableUpload({
       origin: String(req.headers.origin || "").trim() || undefined,
@@ -127,7 +129,8 @@ function registerUploadRoutes(app) {
           rowId: input.rowId,
           kind: input.kind,
           expectedSize: String(input.size),
-          originalFileName: input.fileName
+          originalFileName: input.fileName,
+          firebaseStorageDownloadTokens: downloadToken
         }
       }
     });
@@ -142,6 +145,8 @@ function registerUploadRoutes(app) {
       contentType: input.contentType,
       expectedSize: input.size,
       storagePath,
+      downloadToken,
+      previousStoragePath,
       status: "pending",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       expiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
@@ -195,6 +200,7 @@ function registerUploadRoutes(app) {
       size: actualSize,
       type: String(pending.kind || "").includes("image") ? "image" : (String(pending.kind || "").includes("music") ? "audio" : "video"),
       storagePath: String(pending.storagePath || ""),
+      downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(String(pending.storagePath || ""))}?alt=media&token=${encodeURIComponent(String(pending.downloadToken || metadata?.metadata?.firebaseStorageDownloadTokens || ""))}`,
       updatedAt: new Date().toISOString()
     };
     await ref.set({
@@ -202,6 +208,14 @@ function registerUploadRoutes(app) {
       media,
       finalizedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
+    const previousStoragePath = String(pending.previousStoragePath || "").trim();
+    if (previousStoragePath && previousStoragePath !== pending.storagePath) {
+      const sameSessionPrefix = pending.sessionId && previousStoragePath.startsWith(`podcaster/sessions/${pending.sessionId}/`);
+      const sameLibraryPrefix = String(pending.kind || "").startsWith("library-") && previousStoragePath.startsWith("podcaster/library/");
+      if (sameSessionPrefix || sameLibraryPrefix) {
+        await bucket.file(previousStoragePath).delete({ ignoreNotFound: true }).catch(() => {});
+      }
+    }
     return res.status(200).json({ ok: true, uploadId, media });
   }));
 }

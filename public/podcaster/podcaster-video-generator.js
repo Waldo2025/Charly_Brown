@@ -542,7 +542,7 @@ function buildDialogueVideoBusyHint(source = null, attempt = 0, maxAttempts = 0)
   const detail = extractDialogueVideoBusyDetail(source);
   const attemptLabel = maxAttempts > 0 ? ` (intento ${attempt}/${maxAttempts})` : "";
   if (detail?.fallbackMode === "direct_in_memory" || detail?.reason === "bullmq_queue_unavailable") {
-    return `Backend ocupado con una exportación pesada en Render. Reintentando${attemptLabel}...`;
+    return `Backend ocupado con otra generación pesada. Reintentando${attemptLabel}...`;
   }
   if (detail?.kind === "dialogue_video" || detail?.activeCount > 0) {
     return `Backend ocupado con otra generación de escena. Reintentando${attemptLabel}...`;

@@ -1,7 +1,8 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, doc, updateDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
-import { buildApiUrl, getAuthHeaders, authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
+import { buildApiUrl, authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
+import { uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-08-06.1";
 import { optimizeRasterImage } from "../js/escape-room-image-optimizer.mjs?v=2026-1.0.10.546";
 
 function escapeHtml(unsafe = "") {
@@ -82,6 +83,7 @@ function resolveStableReplacementMediaUrl(downloadUrl = "", storagePath = "") {
 function resolveReplacementPreviewUrl(downloadUrl = "", storagePath = "") {
     const rawUrl = String(downloadUrl || "").trim();
     const cleanStoragePath = String(storagePath || "").trim();
+    if (rawUrl && /firebasestorage\.googleapis\.com/i.test(rawUrl) && /[?&]token=/i.test(rawUrl)) return rawUrl;
     if (cleanStoragePath) {
         return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
     }
@@ -1124,18 +1126,12 @@ function initFilePond() {
                         const uploadFile = await prepareSceneImageForUpload(normalizedInputFile);
                         const uploadSize = Number(uploadFile.size || 0) || 1;
                         progress(true, 0, uploadSize);
-                        const headers = await getAuthHeaders({
-                            "Content-Type": String(uploadFile.type || "application/octet-stream").trim() || "application/octet-stream",
-                            "X-Session-Id": String(sessionId || "").trim(),
-                            "X-Row-Id": String(currentEditingRowId || "").trim(),
-                            "X-File-Name": encodeHttpHeaderValue(uploadFile.name, "scene-media"),
-                            "X-Mime-Type": String(uploadFile.type || "application/octet-stream").trim() || "application/octet-stream"
-                        });
-                        const uploadUrl = buildApiUrl("/api/podcaster/scene-media/upload");
                         const isMovUpload = resolveSceneVideoFileKind(uploadFile) === "mov";
-                        const requestOptions = {
-                            headers,
-                            body: uploadFile,
+                        const uploadResult = await uploadPodcasterAsset(uploadFile, {
+                            kind: String(uploadFile.type || "").startsWith("image/") ? "scene-image" : "scene-video",
+                            sessionId: String(sessionId || "").trim(),
+                            rowId: String(currentEditingRowId || "").trim(),
+                            previousStoragePath: String(uploadedStoragePath || "").trim(),
                             signal: controller.signal,
                             onProgress: (loaded, total) => {
                                 const safeTotal = Math.max(1, Number(total || uploadSize));
@@ -1143,34 +1139,15 @@ function initFilePond() {
                                 const percent = Math.min(100, Math.round((safeLoaded / safeTotal) * 100));
                                 progress(true, safeLoaded, safeTotal);
                                 showSceneMediaUploadStatus(`Subiendo ${uploadFile.name || "archivo"}… ${percent}%`);
-                            },
-                            onUploadComplete: () => {
-                                progress(true, uploadSize, uploadSize);
-                                showSceneMediaUploadStatus(isMovUpload
-                                    ? "Archivo recibido. Convirtiendo MOV a MP4…"
-                                    : "Archivo recibido. Guardando en Storage…");
                             }
-                        };
-                        let response;
-                        try {
-                            response = await uploadSceneMediaRequest(uploadUrl, requestOptions);
-                        } catch (uploadErr) {
-                            // Fallback para desarrollo local (127.0.0.1 vs localhost)
-                            const altUrl = uploadUrl.includes("127.0.0.1") ? uploadUrl.replace("127.0.0.1", "localhost") : uploadUrl.includes("localhost") ? uploadUrl.replace("localhost", "127.0.0.1") : null;
-                            if (altUrl && uploadErr?.name !== "AbortError") {
-                                response = await uploadSceneMediaRequest(altUrl, requestOptions);
-                            } else {
-                                throw uploadErr;
-                            }
-                        }
-                        const data = response.data || {};
-                        if (!response.ok) {
-                            console.error("[MediaReplacement] Scene media upload failed. Status:", response.status, "Error data:", data);
-                            throw new Error(String(data?.error || `Error del servidor (status ${response.status})`));
-                        }
-                        const media = data?.media && typeof data.media === "object" ? data.media : null;
+                        });
+                        progress(true, uploadSize, uploadSize);
+                        showSceneMediaUploadStatus(isMovUpload
+                            ? "Archivo MOV guardado. Se conservará para el render compatible."
+                            : "Archivo guardado en Cloud Storage.");
+                        const media = uploadResult?.media && typeof uploadResult.media === "object" ? uploadResult.media : null;
                         if (!media?.downloadUrl) {
-                            console.error("[MediaReplacement] Scene media upload response missing downloadUrl. Response data:", data);
+                            console.error("[MediaReplacement] Scene media upload response missing downloadUrl.", uploadResult);
                             throw new Error("Upload sin downloadUrl.");
                         }
                         uploadedMediaUrl = String(media.downloadUrl || "").trim();

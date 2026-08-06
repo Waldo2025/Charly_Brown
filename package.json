@@ -20,6 +20,7 @@
     "gemini:all": "node scripts/gemini-model-runner.mjs --smoke --all",
     "gemini:video:smoke": "node scripts/smoke-podcaster-gemini-video.mjs",
     "test:migration:session-compat": "node scripts/test-google-cloud-migration-session-compatibility.mjs",
+    "test:migration:browser-cutover": "node scripts/test-google-cloud-browser-cutover.mjs",
     "test:functions": "npm --prefix functions test && npm --prefix functions run check",
     "test:cloud-run": "npm --prefix cloud-run/live-proxy test && npm --prefix cloud-run/live-proxy run check && node --check backend/workers/podcaster-montage-cloud-run-job.js"
   },

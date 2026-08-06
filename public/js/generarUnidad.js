@@ -678,7 +678,8 @@ async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = 
       headers,
       body: JSON.stringify({
         model: normalizeGeminiModel(modelLive || GEMINI_LIVE_MODEL_DEFAULT),
-        systemInstruction: String(systemInstruction || "").trim()
+        systemInstruction: String(systemInstruction || "").trim(),
+        voiceName: String(charlyTtsVoiceName || "Aoede").trim() || "Aoede"
       })
     });
   } catch (err) {
@@ -702,6 +703,62 @@ async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = 
   }
   clearGeminiBackendUnavailable();
   return data;
+}
+
+function _createGeminiLiveProxyAdapter(tokenJson = {}) {
+  return {
+    live: {
+      connect: ({ callbacks = {} } = {}) => new Promise((resolve, reject) => {
+        const websocketUrl = String(tokenJson?.websocketUrl || "").trim();
+        const ticket = String(tokenJson?.ticket || "").trim();
+        if (!websocketUrl || !ticket) return reject(new Error("El backend Live no devolvió websocketUrl y ticket."));
+        const target = new URL(websocketUrl, window.location.href);
+        target.searchParams.set("ticket", ticket);
+        const socket = new WebSocket(target.toString());
+        let opened = false;
+        let ready = false;
+        const session = {
+          sendClientContent(payload = {}) {
+            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
+            socket.send(JSON.stringify({ type: "clientContent", turns: payload.turns || [], turnComplete: payload.turnComplete !== false }));
+          },
+          sendRealtimeInput(payload = {}) {
+            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
+            socket.send(JSON.stringify({ type: "realtimeInput", audio: payload.audio || {} }));
+          },
+          sendToolResponse(payload = {}) {
+            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
+            socket.send(JSON.stringify({ type: "toolResponse", functionResponses: payload.functionResponses || [] }));
+          },
+          close() {
+            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "close" }));
+            socket.close(1000, "client_close");
+          }
+        };
+        socket.addEventListener("open", () => {
+          opened = true;
+          resolve(session);
+        });
+        socket.addEventListener("message", (event) => {
+          let envelope = null;
+          try { envelope = JSON.parse(String(event.data || "{}")); } catch (_) { return; }
+          if (envelope?.type === "ready") {
+            if (!ready) callbacks.onopen?.();
+            ready = true;
+            return;
+          }
+          if (envelope?.type === "serverContent") callbacks.onmessage?.(envelope.message || {});
+          if (envelope?.type === "error") callbacks.onerror?.(new Error(String(envelope.message || envelope.code || "Live proxy error")));
+        });
+        socket.addEventListener("error", () => {
+          const error = new Error("No se pudo conectar con Gemini Live proxy.");
+          callbacks.onerror?.(error);
+          if (!opened) reject(error);
+        });
+        socket.addEventListener("close", (event) => callbacks.onclose?.(event));
+      })
+    }
+  };
 }
 
 async function requestGeminiLiveTokenDirect(modelLive = "", systemInstruction = "") {
@@ -17395,7 +17452,7 @@ async function iniciarGeminiLiveUnidad(options = {}) {
     geminiLiveInputCircuitOpenUntil = Date.now() + 900;
     geminiLiveLastRealtimeSendAt = 0;
 
-    let liveApiKey = "";
+    let liveConnection = null;
     try {
       if (!_debeIntentarTokenEfimeroUnidad()) {
         geminiLiveDisableEphemeralToken = true;
@@ -17409,18 +17466,14 @@ async function iniciarGeminiLiveUnidad(options = {}) {
         modelLive,
         _buildLiveSystemInstructionActual()
       );
-      liveApiKey = String(tokenJson?.token || "").trim();
-      if (!liveApiKey) throw new Error("Token efímero vacío.");
+      if (!tokenJson?.websocketUrl || !tokenJson?.ticket) throw new Error("Ticket Live vacío.");
+      liveConnection = tokenJson;
     } catch (err) {
       throw new Error(`No se pudo crear token efímero para Live API: ${err?.message || "sin detalle"}`);
     }
 
-    const { GoogleGenAI, Modality } = await _loadGoogleGenAiLiveModule();
-    const ai = new GoogleGenAI({
-      apiKey: liveApiKey,
-      apiVersion: "v1alpha",
-      httpOptions: { apiVersion: "v1alpha" }
-    });
+    const Modality = { AUDIO: "AUDIO" };
+    const ai = _createGeminiLiveProxyAdapter(liveConnection);
 
     geminiLiveSessionUnidad = await ai.live.connect({
       model: modelLive,

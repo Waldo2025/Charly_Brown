@@ -2,29 +2,18 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth
 
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
-const DEFAULT_GEMINI_API_BASE = "https://charly-brown-gemini-backend.onrender.com/api";
-const DEFAULT_VEO_API_BASE = "https://gemini-veo.onrender.com/api";
-const DEFAULT_EXPORT_API_BASE = "https://snoopy-export.onrender.com/api";
+const DEFAULT_GEMINI_API_BASE = "/api";
+const DEFAULT_VEO_API_BASE = "/api";
+const DEFAULT_EXPORT_API_BASE = "/api";
 
 function getAlternateLocalApiUrl(url = "") {
   const finalUrl = String(url || "").trim();
-  const isLocalRuntime = isLocalHostRuntime();
   
   if (finalUrl.startsWith("http://127.0.0.1:8787")) {
     return finalUrl.replace("http://127.0.0.1:8787", "http://localhost:8787");
   }
   if (finalUrl.startsWith("http://localhost:8787")) {
     return finalUrl.replace("http://localhost:8787", "http://127.0.0.1:8787");
-  }
-  
-  // Si estamos en localhost y la URL es remota (Render), intentamos el fallback local
-  if (isLocalRuntime && finalUrl.includes(".onrender.com/api")) {
-    try {
-      const parsed = new URL(finalUrl);
-      return `${DEFAULT_LOCAL_API_BASE}${parsed.pathname.replace(/^\/api/, "")}${parsed.search}`;
-    } catch (_) {
-      return "";
-    }
   }
   
   return "";

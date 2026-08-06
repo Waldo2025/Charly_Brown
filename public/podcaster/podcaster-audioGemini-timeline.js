@@ -1,4 +1,5 @@
 import { authFetchJson } from "../js/api-client-podcaster.js";
+import { waitForPodcasterJob } from "./podcaster-job-polling.js?v=2026-08-06.1";
 
 // --- State ---
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
@@ -166,10 +167,15 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       ttsDirection: row?.ttsDirectionConfig || {}
     };
 
-    const resp = await authFetchJson("/api/podcaster/dialogue-audio/generate", {
+    const accepted = await authFetchJson("/api/podcaster/dialogue-audio/generate", {
       method: "POST",
       body: JSON.stringify(body),
       preferRemote: true
+    });
+    const resp = await waitForPodcasterJob(accepted, {
+      onUpdate: (job) => {
+        if (!silent) window.setGenerationStatus(String(job?.hint || "Generando audio con Vertex AI…"), "is-busy");
+      }
     });
 
     if (!resp?.ok) throw new Error(resp?.error || "Error al generar audio.");

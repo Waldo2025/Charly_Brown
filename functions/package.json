@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/index.js && node --check src/common.js && node --check src/vertex.js && node --check src/uploads.js && node --check src/assets.js && node --check src/tasks.js && node --check src/montage-dispatch.js && node --check src/live-tickets.js"
+    "check": "node --check src/index.js && node --check src/common.js && node --check src/vertex.js && node --check src/uploads.js && node --check src/assets.js && node --check src/tasks.js && node --check src/montage-dispatch.js && node --check src/live-tickets.js && node --check src/podcaster-data.js && node --check src/montage-routes.js && node --check src/ai-jobs.js"
   },
   "dependencies": {
     "@google-cloud/run": "^3.3.0",

@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, resolveApiBase } from "../js/api-client-podcaster.js";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -656,10 +656,7 @@ function isMontageExportStatusRedirectFailure(error = null) {
   ).trim().toLowerCase();
   const status = Number(error?.status || error?.detail?.status || 0) || 0;
   const sameOriginApiBase = String(resolveApiBase() || "").trim() === "/api";
-  const remoteApiBase = String(getRemoteApiBase() || "").trim().toLowerCase();
-  const pointsToRender = remoteApiBase.includes(".onrender.com/api");
   return sameOriginApiBase
-    && pointsToRender
     && (status === 0 || status === 502 || status === 503)
     && (
       message.includes("failed to fetch")
@@ -2279,10 +2276,7 @@ export async function pollMontageExportJob(jobId = "") {
       schedulePreferredFirestorePollRetry(cleanJobId, missCount);
       return;
     }
-    // IMPORTANTE: aquí usamos /api para respetar la configuración activa del runtime.
-    // En Hosting esto hoy termina en un redirect 302 hacia Render, no en un reverse proxy real.
-    // Si Render responde 502/503, el navegador puede terminar mostrando un Failed to fetch por CORS
-    // aunque el job haya arrancado bien en el backend.
+    // La consulta usa siempre /api para conservar same-origin y el token Firebase.
     const exportStatusUrl = buildMontageExportEndpoint(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
     logMontageExportDevtools("poll_request", {
       jobId: cleanJobId,
@@ -2399,8 +2393,8 @@ export async function pollMontageExportJob(jobId = "") {
     const redirectFailure = isMontageExportStatusRedirectFailure(error);
     const transientHint = redirectFailure
       ? (failureCount > 1
-        ? `El job sí arrancó, pero Hosting redirigió export-status a Render y la respuesta 502 quedó bloqueada por CORS. Reintentando… intento ${failureCount}.`
-        : "El job sí arrancó, pero export-status fue redirigido a Render y la respuesta falló por CORS/502. Reintentando…")
+        ? `El job sí arrancó, pero el endpoint de estado no respondió. Reintentando… intento ${failureCount}.`
+        : "El job sí arrancó, pero el endpoint de estado no respondió. Reintentando…")
       : transientNetworkError
         ? (failureCount > 1
           ? `Se perdió la conexión temporalmente. Reintentando el export… intento ${failureCount}.`
@@ -2493,7 +2487,7 @@ export async function continueMontageExportPolling() {
     setMontageExportContinueButton({ visible: false });
     setMontageExportStatus(
       "Backend de exportación desactualizado.",
-      "El job anterior pertenece al probe antiguo. Despliega o reinicia snoopy-export e inicia una exportación nueva.",
+      "El job anterior pertenece a una versión antigua. Inicia una exportación nueva.",
       { tone: "error" }
     );
     return;
@@ -6439,7 +6433,7 @@ export async function runMontageExport() {
       }
     } else if (code === "montage_export_backend_outdated") {
       hintParts.push("El backend de exportación todavía ejecuta una versión anterior.");
-      hintParts.push("Despliega o reinicia snoopy-export antes de volver a intentar.");
+      hintParts.push("Despliega la versión actual de Google Cloud antes de volver a intentar.");
     } else if (status === 503 && code === "montage_export_queue_unavailable") {
       hintParts.push("El backend no pudo iniciar la exportación en este momento.");
       hintParts.push("Intenta de nuevo manualmente.");

@@ -30,6 +30,9 @@ const {
 const {
   normalizeVoiceName
 } = require("../src/live-tickets.js");
+const { safeSession } = require("../src/podcaster-data.js");
+const { sanitizePersistedValue } = require("../src/montage-routes.js");
+const { compactInput, publicAiJob } = require("../src/ai-jobs.js");
 
 test("model aliases replace retired Gemini and Veo previews", () => {
   assert.equal(normalizeModel("gemini-2.5-flash"), DEFAULT_TEXT_MODEL);
@@ -103,6 +106,7 @@ test("Cloud Tasks payload is thin, deterministic and authenticated with OIDC", (
   });
   assert.match(request.task.name, /podcaster-montage\/tasks\/montage-/);
   assert.equal(request.task.httpRequest.oidcToken.audience, "https://dispatch.example.test/");
+  assert.equal(request.task.dispatchDeadline.seconds, 60);
   assert.deepEqual(JSON.parse(request.task.httpRequest.body.toString("utf8")), {
     jobId: "job-42",
     sessionId: "session-42"
@@ -121,5 +125,33 @@ test("Cloud Run override sends only the durable montage job id", () => {
 
 test("Gemini Live only accepts the configured voice catalog", () => {
   assert.equal(normalizeVoiceName("zephyr"), "Zephyr");
+  assert.equal(normalizeVoiceName("Vindemiatrix"), "Vindemiatrix");
   assert.equal(normalizeVoiceName("not-a-voice"), "Aoede");
+});
+
+test("podcaster sessions keep their established document shape", () => {
+  const session = safeSession({ id: "session-42", title: "Tema", script: { rows: [{ id: "row-1", speaker: "Host A" }] }, podcastStudioUiState: { zoom: 1.2 } });
+  assert.equal(session.id, "session-42");
+  assert.equal(session.script.rows[0].speaker, "Host A");
+  assert.equal(session.podcastStudioUiState.zoom, 1.2);
+  assert.throws(() => safeSession({ id: "large", body: "x".repeat(910 * 1024) }), /podcaster_session_too_large/);
+});
+
+test("durable jobs strip inline media and legacy Render URLs", () => {
+  const sanitized = sanitizePersistedValue({
+    sessionId: "session-42",
+    imageDataUrl: "data:image/png;base64,abc",
+    media: { storagePath: "podcaster/sessions/session-42/video.mp4", downloadUrl: "https://legacy.onrender.com/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession-42%2Fvideo.mp4" }
+  });
+  assert.equal(sanitized.imageDataUrl, undefined);
+  assert.match(sanitized.media.downloadUrl, /^https:\/\/charly-brown\.web\.app\/api\/assets\/proxy-media/);
+  assert.doesNotMatch(JSON.stringify(sanitized), /onrender\.com/);
+});
+
+test("AI jobs are asynchronous, owner-scoped and never persist inline references", () => {
+  const input = compactInput({ sessionId: "session-42", prompt: "cinematic", referenceImageDataUrl: "data:image/png;base64,abc" });
+  assert.equal(input.referenceImageDataUrl, undefined);
+  const payload = publicAiJob({ jobId: "job-42", type: "scenario_image", ownerId: "user-1", status: "queued", stage: "queued" });
+  assert.equal(payload.jobId, "job-42");
+  assert.equal(payload.statusUrl, "/api/podcaster/jobs/job-42");
 });

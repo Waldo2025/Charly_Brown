@@ -1,22 +1,28 @@
 const crypto = require("node:crypto");
-const admin = require("firebase-admin");
+const { initializeApp, getApps } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
 
 const PROJECT_ID = "charly-brown";
 const STORAGE_BUCKET = "charly-brown.firebasestorage.app";
 const REGION = "us-central1";
 
 function getAdminServices() {
-  if (!admin.apps.length) {
-    admin.initializeApp({
+  if (!getApps().length) {
+    initializeApp({
       projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || PROJECT_ID,
       storageBucket: process.env.FIREBASE_STORAGE_BUCKET || STORAGE_BUCKET
     });
   }
+  const admin = {
+    firestore: { FieldValue, Timestamp }
+  };
   return {
     admin,
-    auth: admin.auth(),
-    db: admin.firestore(),
-    bucket: admin.storage().bucket()
+    auth: getAuth(),
+    db: getFirestore(),
+    bucket: getStorage().bucket()
   };
 }
 

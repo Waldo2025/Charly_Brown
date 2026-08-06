@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { parseClientMessage, forwardClientMessage } = require("../protocol.js");
 
 test("live protocol accepts bounded PCM audio", () => {
@@ -28,4 +30,14 @@ test("live protocol forwards client content without exposing credentials", async
   });
   assert.equal(received.turns[0].parts[0].text, "Hola");
   assert.equal(received.turnComplete, true);
+});
+
+test("live proxy consumes the one-use ticket before accepting the websocket", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  const upgradeHandler = source.match(/server\.on\("upgrade"[\s\S]*?\n\}\);/)?.[0] || "";
+  assert.match(upgradeHandler, /req\.liveClaim = await consumeTicket\(ticket\)/);
+  assert.ok(
+    upgradeHandler.indexOf("await consumeTicket(ticket)") < upgradeHandler.indexOf("wss.handleUpgrade"),
+    "El ticket debe validarse y consumirse antes del handshake WebSocket."
+  );
 });

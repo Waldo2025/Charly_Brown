@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.539",
-  "build": "2026-1.0.10.539",
+  "version": "1.0.10.540",
+  "build": "2026-1.0.10.540",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Migrado: Podcaster y video-player usan rutas Firebase/Google Cloud, subidas resumibles directas a Storage y trabajos asincrónicos, conservando los temas oscuro, medio y claro sin dependencias del navegador hacia Render.",
     "Corregido: Los chips de audio Gemini usan el inicio efectivo de la escena Veo como límite automático, evitando que datos persistidos de una geometría anterior se dibujen antes del video.",
     "Corregido: Home reutiliza la instancia existente de Firestore y evita una segunda inicialización con opciones distintas.",
     "Corregido: El timeline separa las promesas de streaming y descarga persistente para que la preparación nunca confunda un URL proxy con un blob hidratado antes de reproducir.",

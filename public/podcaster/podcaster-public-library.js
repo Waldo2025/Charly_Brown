@@ -1,5 +1,6 @@
 import { authFetchJson, hasAvailableApiBase } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
 import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
+import { dataUrlToFile, uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-08-06.1";
 
 const runtime = requirePodcasterPublicLibraryRuntime();
 
@@ -1046,24 +1047,31 @@ async function uploadLocalPodcastSceneLibraryVideo(file = null) {
   podcastSceneLibraryState.loading = true;
   renderPodcastSceneLibrary(runtime.getActiveSession());
   try {
-    const [dataUrl, measured] = await Promise.all([
-      runtime.readDataUrlFromFile(file, {
-        maxChars: 40 * 1024 * 1024 * 10,
-        errorMessage: "No se pudo leer el video local."
-      }),
-      runtime.measureVideoFile(file)
-    ]);
-    const response = await authFetchJson("/api/podcaster/scene-library/upload-local", {
+    const measured = await runtime.measureVideoFile(file);
+    const uploaded = await uploadPodcasterAsset(file, {
+      kind: "library-video",
+      fileName: String(file.name || "video-local"),
+      onProgress: (loaded, total) => {
+        const percent = Math.round((Math.max(0, Number(loaded || 0)) / Math.max(1, Number(total || file.size || 1))) * 100);
+        runtime.setGenerationStatus(`Subiendo video a Cloud Storage… ${Math.min(100, percent)}%`, "is-busy");
+      }
+    });
+    let thumbUploadId = "";
+    const thumbDataUrl = String(measured?.thumbDataUrl || "").trim();
+    if (thumbDataUrl) {
+      const thumbFile = dataUrlToFile(thumbDataUrl, `${String(file.name || "video").replace(/\.[^.]+$/, "")}-thumb.jpg`);
+      const thumbUploaded = await uploadPodcasterAsset(thumbFile, { kind: "library-image" });
+      thumbUploadId = String(thumbUploaded?.uploadId || "");
+    }
+    const response = await authFetchJson("/api/podcaster/scene-library/register-upload", {
       method: "POST",
-      body: JSON.stringify({
+      body: {
+        uploadId: String(uploaded?.uploadId || ""),
+        thumbUploadId,
         title: String(file.name || "Video local").replace(/\.[^.]+$/, "").slice(0, 180) || "Video local",
-        videoDataUrl: dataUrl,
-        mimeType: String(file.type || "video/mp4").trim() || "video/mp4",
         durationSec: Math.max(0, Number(measured?.durationSec || 0) || 0),
-        thumbDataUrl: String(measured?.thumbDataUrl || "").trim(),
-        size: Math.max(0, Number(file.size || 0) || 0),
         originalName: String(file.name || "video-local").slice(0, 180)
-      })
+      }
     });
     const item = runtime.normalizePodcastSceneLibraryItem(response?.item || null);
     if (!item) throw new Error("No se recibió el item de librería.");

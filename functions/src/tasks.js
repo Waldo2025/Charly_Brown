@@ -23,7 +23,8 @@ function buildHttpTaskRequest({
   targetUrl,
   serviceAccountEmail,
   payload = {},
-  scheduleDelaySeconds = 0
+  scheduleDelaySeconds = 0,
+  dispatchDeadlineSeconds = 60
 } = {}) {
   if (!queue || !Object.values(QUEUES).includes(queue)) throw new Error("cloud_task_queue_invalid");
   if (!/^https:\/\//i.test(String(targetUrl || ""))) throw new Error("cloud_task_target_url_invalid");
@@ -52,6 +53,7 @@ function buildHttpTaskRequest({
   if (delay > 0) {
     request.task.scheduleTime = { seconds: Math.floor(Date.now() / 1000) + Math.ceil(delay) };
   }
+  request.task.dispatchDeadline = { seconds: Math.max(15, Math.min(1800, Math.round(Number(dispatchDeadlineSeconds) || 60))) };
   return request;
 }
 

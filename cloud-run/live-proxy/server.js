@@ -39,7 +39,8 @@ async function consumeTicket(ticket) {
     return {
       ownerId: String(data.ownerId || ""),
       model: String(data.model || "gemini-live-2.5-flash-native-audio"),
-      voiceName: String(data.voiceName || "Aoede")
+      voiceName: String(data.voiceName || "Aoede"),
+      systemInstruction: String(data.systemInstruction || "").slice(0, 12000)
     };
   });
 }
@@ -59,27 +60,39 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 3 * 1024 * 1024 });
 
-server.on("upgrade", (req, socket, head) => {
+server.on("upgrade", async (req, socket, head) => {
   const origin = String(req.headers.origin || "").trim();
   const parsed = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   if (parsed.pathname !== "/live" || !ALLOWED_ORIGINS.has(origin)) {
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     return socket.destroy();
   }
-  wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req, parsed));
+  try {
+    const ticket = String(parsed.searchParams.get("ticket") || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(ticket)) {
+      throw Object.assign(new Error("invalid_live_ticket"), { status: 401 });
+    }
+    req.liveClaim = await consumeTicket(ticket);
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  } catch (error) {
+    const status = Number(error?.status) === 401 ? 401 : 500;
+    console.warn(JSON.stringify({ severity: "WARNING", event: "live_rejected", code: String(error?.message || error) }));
+    socket.write(`HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Internal Server Error"}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  }
 });
 
-wss.on("connection", async (socket, req, parsedUrl) => {
-  const ticket = String(parsedUrl.searchParams.get("ticket") || "").trim();
+wss.on("connection", async (socket, req) => {
   let session = null;
   try {
-    if (!/^[0-9a-f-]{36}$/i.test(ticket)) throw Object.assign(new Error("invalid_live_ticket"), { status: 401 });
-    const claim = await consumeTicket(ticket);
+    const claim = req.liveClaim;
+    if (!claim) throw new Error("live_ticket_claim_missing");
     session = await ai.live.connect({
       model: claim.model,
       config: {
         responseModalities: ["AUDIO"],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: claim.voiceName } } }
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: claim.voiceName } } },
+        ...(claim.systemInstruction ? { systemInstruction: claim.systemInstruction } : {})
       },
       callbacks: {
         onopen: () => sendJson(socket, { type: "ready", model: claim.model, voiceName: claim.voiceName }),

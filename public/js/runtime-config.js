@@ -10,14 +10,14 @@ window.__CHARLY_CONFIG__ = Object.assign(
       : "/api",
     geminiApiBaseUrl: __charlyIsLocalRuntime
       ? "http://127.0.0.1:8787/api"
-      : "https://charly-brown-gemini-backend.onrender.com/api",
+      : "/api",
     remoteApiBaseUrl: __charlyIsLocalRuntime
       ? "http://127.0.0.1:8787/api"
-      : "https://charly-brown-gemini-backend.onrender.com/api",
+      : "/api",
     veoApiBaseUrl: __charlyIsLocalRuntime
       ? "http://127.0.0.1:8787/api"
-      : "https://gemini-veo.onrender.com/api",
-    exportApiBaseUrl: "https://snoopy-export.onrender.com/api",
+      : "/api",
+    exportApiBaseUrl: __charlyIsLocalRuntime ? "http://127.0.0.1:8787/api" : "/api",
     allowSameOriginApi: true,
     allowDirectGemini: false,
     forceDirectGemini: false,

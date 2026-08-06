@@ -2,6 +2,8 @@ import {
   getPodcasterLocalMediaDataUrl,
   putPodcasterLocalMediaDataUrl
 } from "./podcaster-local-media-cache.js";
+import { dataUrlToFile, uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-08-06.1";
+import { waitForPodcasterJob } from "./podcaster-job-polling.js?v=2026-08-06.1";
 
 export function createPodcasterPanelMusicApi(deps = {}) {
   const panelMusicState = {
@@ -1560,7 +1562,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const previousAiTrack = getPanelMusicTrackByKind("ai");
     let response = null;
     try {
-      response = await authFetchJson("/api/podcaster/music/generate", {
+      const accepted = await authFetchJson("/api/podcaster/music/generate", {
         method: "POST",
         body: {
           sessionId,
@@ -1569,10 +1571,13 @@ export function createPodcasterPanelMusicApi(deps = {}) {
           previousStoragePath: String(previousAiTrack?.storagePath || "").trim()
         }
       });
+      response = await waitForPodcasterJob(accepted, {
+        onUpdate: (job) => setGenerationStatus(String(job?.hint || "Generando música con Vertex AI…"), "is-busy")
+      });
     } catch (error) {
       const detail = String(error?.message || "").trim().toLowerCase();
       if (detail.includes("http 404") || detail.includes("not found")) {
-        throw new Error("El backend activo no expone /api/podcaster/music/generate. Reinicia con npm run dev:local o despliega la versión nueva en Render.");
+        throw new Error("El backend de Google todavía no expone /api/podcaster/music/generate.");
       }
       throw error;
     }
@@ -2194,37 +2199,35 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const localDataUrl = String(currentTrack.localDataUrl || "").trim();
     if (!localDataUrl) throw new Error("No se encontró el archivo local para subir música a Storage.");
     if (!silent) setGenerationStatus("Subiendo música a Firebase Storage...", "is-busy");
-    const upload = await authFetchJson("/api/podcaster/music/upload", {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: String(sessionId || getActiveSession()?.id || "").trim(),
-        fileName: String(currentTrack.name || "podcast-music").trim() || "podcast-music",
-        mimeType: String(currentTrack.mimeType || "audio/mpeg").trim() || "audio/mpeg",
-        durationSec: Math.max(0, Number(currentTrack.durationSec || 0) || 0),
-        audioDataUrl: localDataUrl,
-        previousStoragePath: existingStoragePath
-      })
+    const fileName = String(currentTrack.name || "podcast-music").trim() || "podcast-music";
+    const audioFile = dataUrlToFile(localDataUrl, fileName);
+    const upload = await uploadPodcasterAsset(audioFile, {
+      kind: "music",
+      sessionId: String(sessionId || getActiveSession()?.id || "").trim(),
+      rowId: "background",
+      previousStoragePath: existingStoragePath
     });
+    const uploadedTrack = upload?.media || {};
     setPanelMusicTrack("uploaded", {
       ...currentTrack,
-      durationSec: Math.max(0, Number(upload?.track?.durationSec || currentTrack.durationSec || 0) || 0),
+      durationSec: Math.max(0, Number(currentTrack.durationSec || 0) || 0),
       startOffsetMs: Math.max(0, Number(currentTrack.startOffsetMs || 0) || 0),
       durationMeasuredWith: String(currentTrack.durationMeasuredWith || "").trim().toLowerCase(),
-      downloadUrl: String(upload?.track?.downloadUrl || "").trim(),
-      storagePath: String(upload?.track?.storagePath || "").trim(),
-      updatedAt: String(upload?.track?.updatedAt || nowIso()).trim() || nowIso(),
+      downloadUrl: String(uploadedTrack.downloadUrl || "").trim(),
+      storagePath: String(uploadedTrack.storagePath || "").trim(),
+      updatedAt: String(uploadedTrack.updatedAt || nowIso()).trim() || nowIso(),
       localDataUrl: ""
     }, { select: true });
     const uploadedTracks = getPanelMusicUploadedTracks();
     const selectedIndex = Math.max(0, uploadedTracks.findIndex((item) => String(item.slotLabel || "").trim() === String(currentTrack.slotLabel || "").trim()));
     updateUploadedTrackAt(selectedIndex, {
       ...currentTrack,
-      durationSec: Math.max(0, Number(upload?.track?.durationSec || currentTrack.durationSec || 0) || 0),
+      durationSec: Math.max(0, Number(currentTrack.durationSec || 0) || 0),
       startOffsetMs: Math.max(0, Number(currentTrack.startOffsetMs || 0) || 0),
       durationMeasuredWith: String(currentTrack.durationMeasuredWith || "").trim().toLowerCase(),
-      downloadUrl: String(upload?.track?.downloadUrl || "").trim(),
-      storagePath: String(upload?.track?.storagePath || "").trim(),
-      updatedAt: String(upload?.track?.updatedAt || nowIso()).trim() || nowIso(),
+      downloadUrl: String(uploadedTrack.downloadUrl || "").trim(),
+      storagePath: String(uploadedTrack.storagePath || "").trim(),
+      updatedAt: String(uploadedTrack.updatedAt || nowIso()).trim() || nowIso(),
       localDataUrl: ""
     }, { selectIndex: selectedIndex });
     persistPanelMusicSettings();

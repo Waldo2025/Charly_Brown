@@ -73,6 +73,8 @@ import {
   requirePodcasterScriptEditorRuntime
 } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, requirePodcasterGenerationShared } from "./podcaster-generation-shared.js";
+import { uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-08-06.1";
+import { waitForPodcasterJob } from "./podcaster-job-polling.js?v=2026-08-06.1";
 
 const onScreenTextRenderSpecApi = globalThis.PodcasterOnScreenTextRenderSpec;
 if (!onScreenTextRenderSpecApi || typeof onScreenTextRenderSpecApi !== "object") {
@@ -1307,7 +1309,6 @@ let rowPlaybackTimerState = {
 let rowPlaybackAudioEl = null;
 let studioDialoguePreviewAudioEl = null;
 let studioDialoguePreviewRowId = "";
-let googleGenAiLiveModule = null;
 let podcastStudioInspectorCollapsed = (() => {
   try {
     return window.localStorage.getItem(PODCAST_STUDIO_INSPECTOR_COLLAPSED_KEY) === "1";
@@ -7297,6 +7298,7 @@ function splitDialogueTextIntoSegments(text = "", count = 1) {
 function resolveStorageMediaUrl(rawUrl = "") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
+  if (/firebasestorage\.googleapis\.com/i.test(clean) && /[?&]token=/i.test(clean)) return clean;
   if (!hasAvailableApiBase()) return clean;
   if (clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-image?")) return buildApiUrl(clean);
   try {
@@ -7315,6 +7317,7 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (clean.startsWith("data:")) return clean;
+  if (/firebasestorage\.googleapis\.com/i.test(clean) && /[?&]token=/i.test(clean)) return clean;
   if (!hasAvailableApiBase()) return clean;
 
   const explicitType = String(options.type || options.mediaKind || "").trim().toLowerCase();
@@ -7397,6 +7400,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
+  if (/firebasestorage\.googleapis\.com/i.test(clean) && /[?&]token=/i.test(clean)) return clean;
   if (!hasAvailableApiBase()) return clean;
   try {
     const firebaseGsUrl = (() => {
@@ -9449,27 +9453,62 @@ function clearScheduledGeminiAudio() {
   setPodcastMouthTarget(0, { speaking: false });
 }
 
-async function loadGoogleGenAiLiveModule() {
-  if (googleGenAiLiveModule?.GoogleGenAI && googleGenAiLiveModule?.Modality) return googleGenAiLiveModule;
-  const candidateUrls = [
-    String(window.__RUNTIME_CONFIG__?.googleGenAiBrowserModuleUrl || "").trim(),
-    String(window.cbGoogleGenAiBrowserModuleUrl || "").trim(),
-    "./vendor/google-genai/index.mjs"
-  ].filter(Boolean);
-  let lastError = null;
-  for (const url of candidateUrls) {
-    try {
-      const mod = await import(url);
-      if (mod?.GoogleGenAI && mod?.Modality) {
-        googleGenAiLiveModule = mod;
-        return mod;
-      }
-      lastError = new Error(`Modulo invalido de Gemini Live: ${url}`);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err || "gemini_live_module_load_failed"));
+function createPodcasterLiveProxyAdapter(tokenJson = {}) {
+  return {
+    live: {
+      connect: ({ callbacks = {} } = {}) => new Promise((resolve, reject) => {
+        const websocketUrl = String(tokenJson?.websocketUrl || "").trim();
+        const ticket = String(tokenJson?.ticket || "").trim();
+        if (!websocketUrl || !ticket) return reject(new Error("El backend Live no devolvió websocketUrl y ticket."));
+        const target = new URL(websocketUrl, window.location.href);
+        target.searchParams.set("ticket", ticket);
+        const socket = new WebSocket(target.toString());
+        let opened = false;
+        let ready = false;
+        const session = {
+          sendClientContent(payload = {}) {
+            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
+            socket.send(JSON.stringify({
+              type: "clientContent",
+              turns: payload.turns || [],
+              turnComplete: payload.turnComplete !== false
+            }));
+          },
+          sendRealtimeInput(payload = {}) {
+            if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
+            socket.send(JSON.stringify({ type: "realtimeInput", audio: payload.audio || {} }));
+          },
+          close() {
+            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "close" }));
+            socket.close(1000, "client_close");
+          }
+        };
+        socket.addEventListener("open", () => {
+          opened = true;
+          resolve(session);
+        });
+        socket.addEventListener("message", (event) => {
+          let envelope = null;
+          try { envelope = JSON.parse(String(event.data || "{}")); } catch (_) { return; }
+          if (envelope?.type === "ready") {
+            if (!ready) callbacks.onopen?.();
+            ready = true;
+            return;
+          }
+          if (envelope?.type === "serverContent") callbacks.onmessage?.(envelope.message || {});
+          if (envelope?.type === "error") {
+            callbacks.onerror?.(new Error(String(envelope.message || envelope.code || "Live proxy error")));
+          }
+        });
+        socket.addEventListener("error", () => {
+          const error = new Error("No se pudo conectar con Gemini Live proxy.");
+          callbacks.onerror?.(error);
+          if (!opened) reject(error);
+        });
+        socket.addEventListener("close", (event) => callbacks.onclose?.(event));
+      })
     }
-  }
-  throw lastError || new Error("No se pudo cargar el modulo web de Gemini Live.");
+  };
 }
 
 function handlePodcasterLiveSendError(error, origin = "send_client_content") {
@@ -9653,19 +9692,10 @@ async function ensureGeminiLiveConnected(voiceProfile = null, options = {}) {
         ].join(" ")
       })
     });
-    const liveApiKey = String(tokenJson?.token || "").trim();
-    if (!liveApiKey) throw new Error("Token efimero vacio para Gemini Live.");
-    const backendRequestedVoiceName = String(tokenJson?.requestedVoiceName || "").trim();
+    const websocketUrl = String(tokenJson?.websocketUrl || "").trim();
+    const ticket = String(tokenJson?.ticket || "").trim();
+    if (!websocketUrl || !ticket) throw new Error("Ticket Live vacío.");
     const backendVoiceName = normalizeLiveVoiceName(tokenJson?.voiceName || "");
-    if (
-      requestedVoiceName
-      && backendRequestedVoiceName
-      && backendRequestedVoiceName.toLowerCase() !== requestedVoiceName.toLowerCase()
-    ) {
-      throw new Error(
-        `Backend Live recibió requestedVoiceName=${backendRequestedVoiceName} distinto a ${requestedVoiceName}.`
-      );
-    }
     if (requestedVoiceName && backendVoiceName && backendVoiceName !== requestedVoiceName) {
       throw new Error(`Backend Live devolvió voz ${backendVoiceName} en lugar de ${requestedVoiceName}.`);
     }
@@ -9681,12 +9711,8 @@ async function ensureGeminiLiveConnected(voiceProfile = null, options = {}) {
       model: modelLive
     });
 
-    const { GoogleGenAI, Modality } = await loadGoogleGenAiLiveModule();
-    const ai = new GoogleGenAI({
-      apiKey: liveApiKey,
-      apiVersion: "v1alpha",
-      httpOptions: { apiVersion: "v1alpha" }
-    });
+    const Modality = { AUDIO: "AUDIO" };
+    const ai = createPodcasterLiveProxyAdapter(tokenJson);
 
     geminiLiveSession = await ai.live.connect({
       model: modelLive,
@@ -9787,7 +9813,10 @@ async function ensureGeminiLiveConnected(voiceProfile = null, options = {}) {
       sessionEpoch
     });
 
-    state.liveTokenState = tokenJson;
+    state.liveTokenState = {
+      ...tokenJson,
+      expireTime: tokenJson?.expiresAt || tokenJson?.expireTime || ""
+    };
     return geminiLiveSession;
   })();
 
@@ -11645,7 +11674,7 @@ async function generateGlobalScenarioImage(scenarioId = "", options = {}) {
       };
     }, { render: false });
     renderPodcastPortraitStrip(getActiveSession());
-    const response = await authFetchJson(buildVeoApiUrl("/api/podcaster/scenario-images/generate"), {
+    const accepted = await authFetchJson(buildVeoApiUrl("/api/podcaster/scenario-images/generate"), {
       method: "POST",
       body: JSON.stringify({
         sessionId: session.id,
@@ -11659,6 +11688,9 @@ async function generateGlobalScenarioImage(scenarioId = "", options = {}) {
         model: PODCASTER_IMAGE_MODEL_DEFAULT,
         modelCandidates: buildPortraitImageModelChain()
       })
+    });
+    const response = await waitForPodcasterJob(accepted, {
+      onUpdate: (job) => setGenerationStatus(String(job?.hint || "Generando escenario…"), "is-busy")
     });
     const image = response?.image && typeof response.image === "object" ? response.image : null;
     if (!image?.downloadUrl) {
@@ -16376,7 +16408,7 @@ async function generateSpeakerPortrait(speaker = "", options = {}) {
   }
   setPodcastVideoStatus(`Generando retrato: ${speakerName}...`);
 
-  const response = await authFetchJson(buildVeoApiUrl("/api/podcaster/speaker-portraits/generate"), {
+  const accepted = await authFetchJson(buildVeoApiUrl("/api/podcaster/speaker-portraits/generate"), {
     method: "POST",
     body: JSON.stringify({
       sessionId: session.id,
@@ -16397,6 +16429,9 @@ async function generateSpeakerPortrait(speaker = "", options = {}) {
       regenerate,
       previousStoragePath
     })
+  });
+  const response = await waitForPodcasterJob(accepted, {
+    onUpdate: (job) => setPodcastVideoStatus(String(job?.hint || `Generando retrato: ${speakerName}...`))
   });
 
   const portrait = response?.portrait && typeof response.portrait === "object" ? response.portrait : null;
@@ -19291,23 +19326,22 @@ function attachEvents() {
       const file = els.panelMusicFileInput.files?.[0] || null;
       if (!file) return;
       try {
-        const reader = new FileReader();
-        const dataUrl = await new Promise((resolve, reject) => {
-          reader.onload = () => resolve(String(reader.result || ""));
-          reader.onerror = () => reject(new Error("No se pudo leer la canción seleccionada."));
-          reader.readAsDataURL(file);
-        });
-        if (!dataUrl) throw new Error("No se pudo obtener audio en formato Data URL.");
         const durationInfo = await measureAudioDurationInfoFromFile(file);
         const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
-        const upload = await authFetchJson("/api/podcaster/music/library/upload", {
+        const uploaded = await uploadPodcasterAsset(file, {
+          kind: "library-music",
+          onProgress: (loaded, total) => {
+            const percent = Math.round((Math.max(0, Number(loaded || 0)) / Math.max(1, Number(total || file.size || 1))) * 100);
+            setGenerationStatus(`Subiendo audio a Cloud Storage… ${Math.min(100, percent)}%`, "is-busy");
+          }
+        });
+        const upload = await authFetchJson("/api/podcaster/music/library/register-upload", {
           method: "POST",
-          body: JSON.stringify({
+          body: {
+            uploadId: String(uploaded?.uploadId || ""),
             fileName: String(file.name || "Audio").trim() || "Audio",
-            mimeType: String(file.type || "audio/mpeg").trim() || "audio/mpeg",
-            durationSec,
-            audioDataUrl: dataUrl
-          })
+            durationSec
+          }
         });
         const globalTrack = normalizeGlobalPanelMusicLibraryTrack(upload?.track || null);
         if (!globalTrack) {
