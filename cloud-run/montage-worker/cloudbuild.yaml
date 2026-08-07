@@ -1,0 +1,25 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file
+      - cloud-run/montage-worker/Dockerfile
+      - --tag
+      - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --entrypoint
+      - /bin/sh
+      - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
+      - -c
+      - node backend/scripts/install-playwright-chromium.js --verify-only && ffmpeg -hide_banner -filters 2>&1 | grep -q drawtext && node --check backend/workers/podcaster-montage-cloud-run-job.js
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
+substitutions:
+  _TAG: phase2
+options:
+  machineType: E2_HIGHCPU_8
+timeout: 3600s

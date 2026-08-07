@@ -3964,6 +3964,38 @@ export class PodcasterPlaybackController extends EventEmitter {
     });
   }
 
+  async resolveStageImageSource(src = "") {
+    const cleanSrc = String(src || "").trim();
+    if (!cleanSrc) throw new Error("missing_image_source");
+
+    let resolvedSrc = cleanSrc;
+    if (resolvedSrc.startsWith("gs://") && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
+      resolvedSrc = String(await this.deps.resolveFirebaseStorageUrl(resolvedSrc) || resolvedSrc).trim();
+    }
+
+    const isDirectFirebaseUrl = resolvedSrc.includes("firebasestorage.googleapis.com");
+    if (isDirectFirebaseUrl
+      && !resolvedSrc.includes("/api/assets/proxy-")
+      && !this.hasFirebaseDirectAccessToken(resolvedSrc)) {
+      let storagePath = "";
+      try {
+        const encodedObjectPath = String(new URL(resolvedSrc).pathname || "").split("/o/")[1] || "";
+        storagePath = encodedObjectPath ? decodeURIComponent(encodedObjectPath) : "";
+      } catch (_) { }
+      resolvedSrc = this.toFirebaseStorageProxyUrl(resolvedSrc, storagePath, { kind: "image" });
+    }
+
+    if (this.requiresAuthorizedAssetResolution(resolvedSrc)) {
+      if (typeof this.deps?.resolveAuthorizedAssetUrl !== "function") {
+        throw new Error("authorized_asset_resolver_unavailable");
+      }
+      resolvedSrc = String(await this.deps.resolveAuthorizedAssetUrl(resolvedSrc) || "").trim();
+    }
+
+    if (!resolvedSrc) throw new Error("image_source_resolution_failed");
+    return resolvedSrc;
+  }
+
   preloadImageSrc(src = "") {
     const cleanSrc = String(src || "").trim();
     if (!cleanSrc) return Promise.reject(new Error("missing_image_source"));
@@ -3973,24 +4005,28 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (this.stageMachine.imagePreloadCache.has(cleanSrc)) {
       return this.stageMachine.imagePreloadCache.get(cleanSrc);
     }
-    const task = new Promise((resolve, reject) => {
+    const task = this.resolveStageImageSource(cleanSrc).then((resolvedSrc) => new Promise((resolve, reject) => {
       const probe = new Image();
       try { probe.crossOrigin = "anonymous"; } catch (_) { }
       probe.decoding = "async";
       try { probe.fetchPriority = "high"; } catch (_) { }
-      probe.onload = () => resolve(cleanSrc);
+      probe.onload = () => resolve(resolvedSrc);
       probe.onerror = () => {
         this.stageMachine.imagePreloadCache.delete(cleanSrc);
         reject(new Error("image_preload_failed"));
       };
-      probe.src = cleanSrc;
+      probe.src = resolvedSrc;
+    })).catch((error) => {
+      this.stageMachine.imagePreloadCache.delete(cleanSrc);
+      throw error;
     });
     this.stageMachine.imagePreloadCache.set(cleanSrc, task);
     return task;
   }
 
-  async ensureStageImageReady(imageEl, src = "") {
+  async ensureStageImageReady(imageEl, src = "", options = {}) {
     const cleanSrc = String(src || "").trim();
+    const sourceKey = String(options?.sourceKey || cleanSrc).trim();
     if (!imageEl || !cleanSrc) throw new Error("missing_stage_image");
     try { imageEl.crossOrigin = "anonymous"; } catch (_) { }
     imageEl.decoding = "async";
@@ -4000,7 +4036,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (currentSrc !== cleanSrc) {
       imageEl.src = cleanSrc;
     }
-    imageEl.dataset.src = cleanSrc;
+    imageEl.dataset.src = sourceKey;
     if (imageEl.complete && Number(imageEl.naturalWidth || 0) > 0 && Number(imageEl.naturalHeight || 0) > 0) {
       return cleanSrc;
     }
@@ -4183,7 +4219,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.stageMachine.imageLoadingSrc = cleanSrc;
     this.stageMachine.imageLoadingPromise = Promise.resolve()
       .then(() => this.preloadImageSrc(cleanSrc))
-      .then(() => this.ensureStageImageReady(imageEl, cleanSrc))
+      .then((resolvedSrc) => this.ensureStageImageReady(imageEl, resolvedSrc, { sourceKey: cleanSrc }))
       .then(() => {
         if (this.stageMachine.imageSwapToken !== existingToken) return;
         revealImage();

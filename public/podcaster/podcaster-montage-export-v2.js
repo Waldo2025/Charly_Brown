@@ -160,8 +160,8 @@ export async function runMontageExportV2() {
     setMontageExportDownloadButton({ visible: false });
     setMontageExportContinueButton({ visible: false });
     setMontageExportStatus(
-      "Preparando exportación FFmpeg v2…",
-      "Usando el runtime del preview: escenas, holds, velocidades, transiciones, texto y audio.",
+      "Preparando tu video…",
+      "Reuniendo escenas, transiciones, texto y audio del timeline.",
       { tone: "neutral" }
     );
 
@@ -256,7 +256,7 @@ export async function runMontageExportV2() {
     activeJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
     window.montageExportJobState = activeJobState;
     setMontageExportProgress(activeJobState.lastProgress);
-    setMontageExportStatus("Exportación FFmpeg v2 iniciada…", activeJobState.lastHint || "Renderizando con la ruta nueva.", { tone: "neutral" });
+    setMontageExportStatus("Tu exportación fue recibida.", activeJobState.lastHint || "Enseguida comenzaremos a preparar las escenas.", { tone: "neutral" });
     pollMontageExportJob(jobId).catch(() => {});
   } catch (error) {
     console.error("[podcaster][montage-export-v2] failed", error);
@@ -273,7 +273,7 @@ export async function runMontageExportV2() {
       }).join("; ") + (issues.length > 3 ? ` y ${issues.length - 3} más` : "")
       : "";
     setMontageExportStatus(
-      "No pudimos exportar tu video con FFmpeg v2.",
+      "No pudimos crear tu video.",
       issueHint || String(error?.message || error || "Revisa el timeline y vuelve a intentar.").trim(),
       { tone: "error" }
     );

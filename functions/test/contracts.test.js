@@ -25,7 +25,8 @@ const {
   buildHttpTaskRequest
 } = require("../src/tasks.js");
 const {
-  buildRunJobRequest
+  buildRunJobRequest,
+  shouldRetainMontageLease
 } = require("../src/montage-dispatch.js");
 const {
   normalizeVoiceName
@@ -130,6 +131,16 @@ test("Cloud Run override sends only the durable montage job id", () => {
   assert.equal(env.BACKEND_SERVICE_ROLE, "export");
   assert.equal(request.overrides.taskCount, 1);
   assert.equal(request.overrides.timeout.seconds, 1800);
+});
+
+test("montage capacity ignores missing and terminal lease owners", () => {
+  const now = Date.now();
+  const lease = { leaseUntilMs: now + 60_000 };
+  assert.equal(shouldRetainMontageLease(lease, { status: "running" }, now), true);
+  assert.equal(shouldRetainMontageLease(lease, { status: "ready" }, now), false);
+  assert.equal(shouldRetainMontageLease(lease, { status: "cancelled" }, now), false);
+  assert.equal(shouldRetainMontageLease(lease, null, now), false);
+  assert.equal(shouldRetainMontageLease({ leaseUntilMs: now - 1 }, { status: "running" }, now), false);
 });
 
 test("Gemini Live only accepts the configured voice catalog", () => {

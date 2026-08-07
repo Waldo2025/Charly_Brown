@@ -6,6 +6,13 @@ const DISPATCH_LEASE_MS = 40 * 60 * 1000;
 const MAX_ACTIVE_MONTAGE_JOBS = 2;
 const RUNTIME_COLLECTION = "podcaster_runtime";
 const MONTAGE_SEMAPHORE_ID = "montage_dispatch";
+const ACTIVE_MONTAGE_STATUSES = new Set(["dispatching", "running"]);
+
+function shouldRetainMontageLease(lease = {}, job = null, now = Date.now()) {
+  const activeLeaseMs = lease?.leaseUntil?.toMillis?.() || Number(lease?.leaseUntilMs || 0) || 0;
+  const status = String(job?.status || "").trim().toLowerCase();
+  return activeLeaseMs > now && Boolean(job) && ACTIVE_MONTAGE_STATUSES.has(status);
+}
 
 function buildRunJobRequest({
   projectId = PROJECT_ID,
@@ -53,10 +60,22 @@ async function claimMontageDispatch({ db, admin, jobId, taskName = "" }) {
     const storedActive = semaphoreSnapshot.exists && semaphoreSnapshot.data()?.active && typeof semaphoreSnapshot.data().active === "object"
       ? semaphoreSnapshot.data().active
       : {};
+    const candidates = Object.entries(storedActive)
+      .filter(([activeJobId]) => activeJobId !== jobId);
+    const candidateSnapshots = await Promise.all(candidates.map(([activeJobId]) => (
+      transaction.get(db.collection("podcaster_export_jobs").doc(activeJobId))
+    )));
     const active = {};
-    for (const [activeJobId, lease] of Object.entries(storedActive)) {
-      const activeLeaseMs = lease?.leaseUntil?.toMillis?.() || Number(lease?.leaseUntilMs || 0) || 0;
-      if (activeLeaseMs > Date.now() && activeJobId !== jobId) active[activeJobId] = lease;
+    candidates.forEach(([activeJobId, lease], index) => {
+      const activeJobSnapshot = candidateSnapshots[index];
+      const activeJob = activeJobSnapshot?.exists ? activeJobSnapshot.data() : null;
+      if (shouldRetainMontageLease(lease, activeJob)) active[activeJobId] = lease;
+    });
+    if (Object.keys(active).length !== candidates.length) {
+      console.warn("[montage-dispatch] pruned stale capacity leases", {
+        previousCount: candidates.length,
+        activeCount: Object.keys(active).length
+      });
     }
     if (Object.keys(active).length >= MAX_ACTIVE_MONTAGE_JOBS) {
       throw Object.assign(new Error("montage_capacity_busy"), { status: 429 });
@@ -72,7 +91,7 @@ async function claimMontageDispatch({ db, admin, jobId, taskName = "" }) {
     transaction.set(ref, {
       status: "dispatching",
       stage: "dispatch_cloud_run",
-      hint: "Asignando exportación al worker.",
+      hint: "Reservando los recursos necesarios para crear tu video.",
       dispatchAttempt: attempt,
       dispatchTaskName: String(taskName || ""),
       dispatchLeaseUntil: leaseUntil,
@@ -102,7 +121,21 @@ async function releaseMontageSlot({ db, admin, jobId }) {
 
 async function dispatchMontageToCloudRun({ jobId, taskName = "", jobsClient = new v2.JobsClient() } = {}) {
   const { db, admin } = getAdminServices();
-  const claim = await claimMontageDispatch({ db, admin, jobId, taskName });
+  let claim;
+  try {
+    claim = await claimMontageDispatch({ db, admin, jobId, taskName });
+  } catch (error) {
+    if (String(error?.message || "") === "montage_capacity_busy") {
+      await db.collection("podcaster_export_jobs").doc(jobId).set({
+        status: "queued",
+        stage: "waiting_capacity",
+        hint: "Hay otras exportaciones en curso. La tuya comenzará automáticamente en cuanto haya un turno disponible.",
+        heartbeatAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    }
+    throw error;
+  }
   if (!claim.claimed) return claim;
   const request = buildRunJobRequest({ jobId });
   try {
@@ -111,7 +144,7 @@ async function dispatchMontageToCloudRun({ jobId, taskName = "", jobsClient = ne
     await db.collection("podcaster_export_jobs").doc(jobId).set({
       status: "running",
       stage: "worker_starting",
-      hint: "Worker de exportación iniciando.",
+      hint: "El motor de exportación está arrancando y enseguida comenzará con las escenas.",
       executionName,
       heartbeatAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -122,7 +155,7 @@ async function dispatchMontageToCloudRun({ jobId, taskName = "", jobsClient = ne
     await db.collection("podcaster_export_jobs").doc(jobId).set({
       status: "retrying",
       stage: "dispatch_retry",
-      hint: "No se pudo iniciar el worker; Cloud Tasks reintentará.",
+      hint: "No pudimos iniciar el motor todavía. Volveremos a intentarlo automáticamente.",
       dispatchError: String(error?.message || error).slice(0, 500),
       dispatchLeaseUntil: admin.firestore.Timestamp.fromMillis(Date.now()),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -135,6 +168,7 @@ module.exports = {
   MONTAGE_JOB_NAME,
   DISPATCH_LEASE_MS,
   MAX_ACTIVE_MONTAGE_JOBS,
+  shouldRetainMontageLease,
   buildRunJobRequest,
   claimMontageDispatch,
   releaseMontageSlot,

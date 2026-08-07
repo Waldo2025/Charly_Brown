@@ -51,6 +51,7 @@ const mediaRuntimeSource = read("public/podcaster/podcaster-media-runtime.js");
 const playbackControllerSource = read("public/podcaster/podcaster-playback-controller.js");
 const runtimeConfigLoaderSource = read("public/js/runtime-config-loader.js");
 const montageExportSource = read("public/podcaster/podcaster-montage-export.js");
+const montageExportV2Source = read("public/podcaster/podcaster-montage-export-v2.js");
 
 assert.match(podcasterHtml, /data-cache-href=["']podcaster\.css/);
 assert.match(podcasterCss, /is-snoopy-editor-light-theme/);
@@ -68,6 +69,17 @@ assert.match(apiClientSource, /return DEFAULT_GOOGLE_API_BASE/);
 assert.match(playbackControllerSource, /!this\.hasFirebaseDirectAccessToken\(finalUrl\)/);
 assert.match(playbackControllerSource, /resolveAuthorizedAssetUrl/);
 assert.match(playbackControllerSource, /requiresAuthorizedAssetResolution/);
+assert.match(playbackControllerSource, /async resolveStageImageSource\(src = ""\)/);
+assert.match(
+  playbackControllerSource,
+  /preloadImageSrc\(src = ""\)[\s\S]*resolveStageImageSource\(cleanSrc\)[\s\S]*probe\.src = resolvedSrc/,
+  "Las imágenes privadas deben resolverse a una URL firmada antes de precargarse."
+);
+assert.match(
+  playbackControllerSource,
+  /ensureStageImageReady\(imageEl, resolvedSrc, \{ sourceKey: cleanSrc \}\)/,
+  "El stage debe cargar la URL firmada conservando la fuente lógica de la escena."
+);
 assert.match(podcasterSource, /\/api\/assets\/signed-url\?storagePath=/);
 assert.match(runtimeConfigLoaderSource, /window\.__CHARLY_RUNTIME_CONFIG_READY__ = \(async \(\) =>/);
 assert.match(podcasterSource, /await window\.__CHARLY_RUNTIME_CONFIG_READY__/);
@@ -76,6 +88,12 @@ assert.match(
   /authFetchJson\(exportStatusUrl,\s*\{\s*auth:\s*true,\s*preferRemote:\s*false/s,
   "El polling privado de export-status debe conservar el Firebase ID token."
 );
+assert.match(montageExportSource, /waiting_capacity: "Esperando un turno disponible/);
+assert.match(montageExportSource, /worker_starting: "Iniciando el motor de exportación/);
+assert.match(montageExportSource, /if \(String\(level \|\| ""\)\.trim\(\) === "debug"\) return null/);
+assert.doesNotMatch(montageExportV2Source, /setMontageExportStatus\([^)]*FFmpeg v2/s);
+assert.match(montageExportSource, /function describeMontageExportLogSummary/);
+assert.match(montageExportSource, /summary: summarizeMontageExportLogPayload\(payload\) \|\| describeMontageExportLogSummary\(event, payload\)/);
 
 globalThis.window = { location: { origin: "http://127.0.0.1:5010" } };
 const mediaRuntimeModule = await import(`data:text/javascript;base64,${Buffer.from(mediaRuntimeSource).toString("base64")}`);

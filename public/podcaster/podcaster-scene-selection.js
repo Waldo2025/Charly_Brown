@@ -73,6 +73,10 @@ export function createPodcasterSceneSelectionApi(deps = {}) {
   function selectTimelineSceneRow(rowId = "", options = {}) {
     const key = String(rowId || "").trim();
     if (!key) return;
+    // A click on a clip is observed by both pointerdown (drag support) and
+    // click (button accessibility). The pointer event already selected it;
+    // avoid doing the full inspector/session work a second time.
+    if (key === String(podcastVideoState.activeRowId || "").trim() && options.force !== true) return;
     const session = getActiveSession();
     const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
     setPodcastVideoRow(key, {

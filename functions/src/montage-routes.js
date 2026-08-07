@@ -7,6 +7,7 @@ const {
   asyncRoute
 } = require("./common.js");
 const { enqueueHttpTask, QUEUES } = require("./tasks.js");
+const { releaseMontageSlot } = require("./montage-dispatch.js");
 const { sessionAccess } = require("./podcaster-data.js");
 
 const JOB_COLLECTION = "podcaster_export_jobs";
@@ -108,7 +109,7 @@ async function createMontageJob(req) {
     stage: "queued",
     sceneSubstage: "",
     progress: 0,
-    hint: "Export en cola.",
+    hint: "Tu proyecto está en espera y comenzará automáticamente en unos momentos.",
     currentSceneIndex: 0,
     totalScenes: entries.length,
     failedSceneIndex: 0,
@@ -189,6 +190,12 @@ function registerMontageRoutes(app) {
       if (String(job.ownerId || "") !== authContext.uid) throw Object.assign(new Error("job_forbidden"), { status: 403 });
       if (["ready", "completed", "error", "cancelled"].includes(String(job.status || "").toLowerCase())) return;
       transaction.set(ref, { status: "cancelled", stage: "cancelled", hint: "Exportación cancelada.", dispatchLeaseUntil: admin.firestore.Timestamp.fromMillis(Date.now()), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    });
+    await releaseMontageSlot({ db, admin, jobId }).catch((error) => {
+      console.warn("[montage-cancel] could not release dispatch slot", {
+        jobId,
+        message: String(error?.message || error)
+      });
     });
     const snapshot = await ref.get();
     res.status(200).json(publicJob(snapshot.data() || {}));

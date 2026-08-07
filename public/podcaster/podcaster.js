@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.568";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.569";
 import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.537";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.537";
@@ -40,11 +40,11 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-1.0.10.543";
+} from "./podcaster-montage-export.js?v=2026-1.0.10.545";
 import {
   handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick,
   runMontageExportV2 as runMontageExport
-} from "./podcaster-montage-export-v2.js?v=2026-1.0.10.543";
+} from "./podcaster-montage-export-v2.js?v=2026-1.0.10.545";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
@@ -58,7 +58,7 @@ import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
 import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js";
-import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
+import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js?v=2026-1.0.10.544";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
 import { replaceHostTokensWithNames as replaceHostTokensWithNamesShared } from "./podcaster-speaker-text.js";
@@ -1614,16 +1614,14 @@ function upsertPodcastStudioUiState(patch = {}, { autosaveReason = "ui-state" } 
   if (suppressPodcastStudioUiStateSync) return;
   const session = getActiveSession();
   if (!session) return;
-  upsertActiveSession((current) => {
-    const next = normalizePodcastStudioUiState({
-      ...(current.podcastStudioUiState || {}),
-      ...(patch || {})
-    }, current);
-    return {
-      ...current,
-      podcastStudioUiState: next
-    };
-  }, { render: false });
+  // Selection/collapse state is ephemeral. Sending it through
+  // upsertActiveSession normalizes every row, snapshots undo history and
+  // serializes the complete session on every pointer event. Update only the
+  // small UI-state object and let the debounced persistence below save once.
+  session.podcastStudioUiState = normalizePodcastStudioUiState({
+    ...(session.podcastStudioUiState || {}),
+    ...(patch || {})
+  }, session);
   scheduleSessionLocalPersist(autosaveReason);
 }
 let creativeVideoState = {
@@ -12837,7 +12835,17 @@ async function prewarmSessionMediaWithOverlay(session) {
     });
     updateSnoopyEditorMediaLoadingUi({ state: "ready" });
   } catch (error) {
-    console.error("[Studio] Error in prewarmSessionMediaWithOverlay:", error);
+    const failures = Array.isArray(error?.failures)
+      ? error.failures.map((failure) => ({
+          kind: String(failure?.kind || "unknown"),
+          rowId: String(failure?.rowId || ""),
+          message: String(failure?.message || "unknown")
+        }))
+      : [];
+    console.error("[Studio] Error in prewarmSessionMediaWithOverlay:", {
+      message: String(error?.message || error),
+      failures
+    });
     updateSnoopyEditorMediaLoadingUi({ state: "error" });
   }
 }

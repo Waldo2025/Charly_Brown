@@ -14,6 +14,9 @@ const {
 const { createProcessMontageExportJob } = require("../montage-export/worker-runner.js");
 const admin = require("firebase-admin");
 
+const activeJobId = String(process.env.MONTAGE_JOB_ID || process.argv[2] || "").trim();
+let terminationPromise = null;
+
 async function releaseMontageSlot(jobId) {
   const ref = db.collection("podcaster_runtime").doc("montage_dispatch");
   await db.runTransaction(async (transaction) => {
@@ -31,8 +34,42 @@ async function releaseMontageSlot(jobId) {
   });
 }
 
+async function markInterruptedAndExit(signal = "SIGTERM") {
+  if (terminationPromise) return terminationPromise;
+  terminationPromise = (async () => {
+    try {
+      const current = activeJobId ? await montageExportJobStore.getJob(activeJobId).catch(() => null) : null;
+      const status = String(current?.status || "").trim().toLowerCase();
+      if (current && !["ready", "completed", "cancelled", "error"].includes(status)) {
+        await montageExportJobStore.updateJob(activeJobId, {
+          status: "error",
+          stage: "interrupted",
+          progress: Math.max(0, Math.min(0.98, Number(current?.progress || 0) || 0)),
+          hint: "La exportación fue interrumpida por la plataforma. Puedes volver a intentarlo.",
+          interruptedAt: new Date().toISOString(),
+          error: {
+            code: "montage_export_interrupted",
+            message: `Cloud Run detuvo el worker (${signal}).`,
+            retryable: true
+          }
+        });
+      }
+    } finally {
+      await releaseMontageSlot(activeJobId).catch(() => {});
+    }
+  })();
+  await Promise.race([
+    terminationPromise,
+    new Promise((resolve) => setTimeout(resolve, 8000))
+  ]);
+  process.exit(143);
+}
+
+process.once("SIGTERM", () => { void markInterruptedAndExit("SIGTERM"); });
+process.once("SIGINT", () => { void markInterruptedAndExit("SIGINT"); });
+
 async function main() {
-  const jobId = String(process.env.MONTAGE_JOB_ID || process.argv[2] || "").trim();
+  const jobId = activeJobId;
   if (!jobId) throw new Error("montage_job_id_required");
   const storedJob = await montageExportJobStore.getJob(jobId);
   if (!storedJob) throw new Error("montage_job_not_found");
@@ -61,7 +98,15 @@ async function main() {
 }
 
 main().then(async () => {
-  await releaseMontageSlot(String(process.env.MONTAGE_JOB_ID || process.argv[2] || "").trim()).catch(() => {});
+  try {
+    await releaseMontageSlot(activeJobId);
+    console.info("[cloud-run-job][montage-export] capacity slot released", { jobId: activeJobId });
+  } catch (error) {
+    console.error("[cloud-run-job][montage-export] capacity slot release failed", {
+      jobId: activeJobId,
+      message: String(error?.message || error)
+    });
+  }
   process.exit(0);
 }).catch(async (error) => {
   console.error("[cloud-run-job][montage-export] failed", {
@@ -70,6 +115,11 @@ main().then(async () => {
     message: String(error?.message || error),
     stack: String(error?.stack || "")
   });
-  await releaseMontageSlot(String(process.env.MONTAGE_JOB_ID || process.argv[2] || "").trim()).catch(() => {});
+  await releaseMontageSlot(activeJobId).catch((releaseError) => {
+    console.error("[cloud-run-job][montage-export] capacity slot release failed", {
+      jobId: activeJobId,
+      message: String(releaseError?.message || releaseError)
+    });
+  });
   process.exit(1);
 });

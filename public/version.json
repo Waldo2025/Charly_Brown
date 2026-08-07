@@ -1,8 +1,13 @@
 {
   "version": "1.0.10.543",
-  "build": "2026-1.0.10.543",
+  "build": "2026-1.0.10.545",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Mejorado: La exportación muestra etapas claras para el usuario y oculta términos técnicos de FFmpeg, polling, assets y workers en el modal y la tarjeta flotante.",
+    "Corregido: El despachador elimina leases huérfanos de trabajos terminados o inexistentes y la cola conserva reintentos suficientes para comenzar automáticamente cuando se libera capacidad.",
+    "Corregido: La selección de escenas del timeline evita el doble trabajo de pointerdown/click y ya no clona, historiza ni serializa la sesión completa antes de actualizar el inspector.",
+    "Corregido: Las imágenes privadas del editor Snoopy se resuelven a URL firmada antes de precargarse y conservan su identidad lógica durante el cambio de escena.",
+    "Corregido: El worker de exportación marca como interrumpido y reintentable un montaje detenido por Cloud Run, evitando que permanezca indefinidamente en Codificando archivo final.",
     "Corregido: El polling del export FFmpeg v2 vuelve a enviar el Firebase ID token al endpoint privado export-status y fuerza la carga de los módulos de montaje 1.0.10.543, evitando 401 auth_required después de crear el job.",
     "Corregido: Las Functions validan firma, audiencia y expiración de Firebase ID tokens sin requerir permisos administrativos de revocación incompatibles con las cuentas de servicio de mínimo privilegio.",
     "Corregido: Los medios privados de sesiones se autentican primero y luego se reproducen mediante una URL firmada temporal de Google Cloud Storage, sin enviar tokens Firebase dentro del src de video o imagen.",

@@ -448,11 +448,47 @@ function summarizeMontageExportLogPayload(payload = {}) {
   const substage = String(payload.substage || payload.sceneSubstage || "").trim();
   const progress = Number.isFinite(Number(payload.progress)) ? Math.round(Number(payload.progress) * 1000) / 10 : null;
   const hint = String(payload.hint || "").trim();
-  if (stage) parts.push(stage);
-  if (substage) parts.push(substage);
+  if (stage) parts.push(describeMontageExportStage(stage, window.montageExportState?.exportMode));
+  if (substage) parts.push(describeMontageExportSceneSubstage(substage, payload.currentSceneIndex, payload.totalScenes));
   if (progress !== null) parts.push(`${progress}%`);
   if (hint) parts.push(hint);
   return parts.join(" · ");
+}
+
+function describeMontageExportLogEvent(event = "") {
+  const clean = String(event || "").trim();
+  const map = {
+    submit_clicked: "Preparando el proyecto",
+    ffmpeg_preview_runtime_v2_submit: "Proyecto preparado",
+    ffmpeg_preview_runtime_v2_request: "Enviando exportación",
+    ffmpeg_preview_runtime_v2_response: "Exportación recibida",
+    submit_accepted: "Exportación recibida",
+    stage_transition: "Progreso actualizado",
+    export_ready: "Archivo listo",
+    export_error: "La exportación necesita atención",
+    poll_error: "Reconectando con la exportación",
+    poll_failed: "Reconectando con la exportación",
+    poll_job_not_found_retry: "Verificando la exportación"
+  };
+  return map[clean] || "Actualización de la exportación";
+}
+
+function describeMontageExportLogSummary(event = "", payload = {}) {
+  const clean = String(event || "").trim();
+  const sceneCount = Math.max(0, Math.round(Number(payload?.entries || payload?.totalScenes || 0) || 0));
+  const map = {
+    submit_clicked: "Revisando la configuración del video.",
+    ffmpeg_preview_runtime_v2_submit: sceneCount > 0 ? `${sceneCount} escenas listas para procesar.` : "Las escenas están listas para procesarse.",
+    ffmpeg_preview_runtime_v2_request: "Enviando tu proyecto de forma segura.",
+    ffmpeg_preview_runtime_v2_response: "Tu exportación quedó registrada y comenzará automáticamente.",
+    submit_accepted: "Tu exportación quedó registrada y comenzará automáticamente.",
+    export_ready: "Tu archivo está listo para descargar.",
+    export_error: "Revisa el mensaje principal para saber cómo continuar.",
+    poll_error: "Conservamos tu avance mientras restablecemos la conexión.",
+    poll_failed: "Conservamos tu avance mientras restablecemos la conexión.",
+    poll_job_not_found_retry: "Estamos confirmando el estado de tu exportación."
+  };
+  return map[clean] || "Seguimos trabajando en tu exportación.";
 }
 
 function readMontageExportFloatingCardPosition() {
@@ -485,12 +521,13 @@ function ensureMontageExportRecentLogs() {
 }
 
 function pushMontageExportRecentLog(event = "", payload = {}, level = "info") {
+  if (String(level || "").trim() === "debug") return null;
   const logs = ensureMontageExportRecentLogs();
   const entry = {
     at: new Date().toISOString(),
     level: ["info", "warn", "error", "debug"].includes(String(level || "").trim()) ? String(level || "").trim() : "info",
-    event: String(event || "").trim() || "event",
-    summary: summarizeMontageExportLogPayload(payload),
+    event: describeMontageExportLogEvent(event),
+    summary: summarizeMontageExportLogPayload(payload) || describeMontageExportLogSummary(event, payload),
     payload: payload && typeof payload === "object" ? payload : {}
   };
   logs.push(entry);
@@ -506,7 +543,7 @@ function renderMontageExportRecentLogs() {
   if (!logs.length) {
     const empty = document.createElement("div");
     empty.className = "montage-export-floating-log-empty";
-    empty.textContent = "Sin logs todavía.";
+    empty.textContent = "Aquí verás el avance de tu exportación.";
     container.appendChild(empty);
     return;
   }
@@ -2175,15 +2212,20 @@ export function describeMontageExportStage(stage = "", mode = window.montageExpo
   const clean = String(stage || "").trim();
   const review = mode === "review";
   const map = {
-    queued: "Export en cola…",
+    queued: "Esperando un turno para exportar…",
+    waiting_capacity: "Esperando un turno disponible…",
+    dispatch_cloud_run: "Reservando recursos para tu video…",
+    worker_starting: "Iniciando el motor de exportación…",
+    dispatch_retry: "Preparando un nuevo intento…",
     validate_payload: review ? "Validando exportación de revisión…" : "Validando exportación…",
-    download_assets: "Descargando recursos fuente…",
-    render_scene_segments: "Renderizando escenas…",
-    concat_timeline: "Uniendo timeline final…",
-    encode_visual_pass: "Codificando capas visuales finales…",
+    download_assets: "Preparando los archivos de las escenas…",
+    render_scene_segments: "Creando las escenas…",
+    concat_timeline: "Uniendo todas las escenas…",
+    encode_visual_pass: "Aplicando los acabados visuales…",
+    encode_delivery: "Codificando el archivo final…",
     mix_timeline_audio: "Mezclando narración del timeline…",
     mix_background_music: "Mezclando música de fondo…",
-    boot_renderer: "Iniciando renderer fiel al preview…",
+    boot_renderer: "Preparando la vista final…",
     capture_timeline: "Capturando montaje final en navegador…",
     transcode_final: "Empaquetando video final…",
     apply_onscreen_text: "Aplicando texto en pantalla…",
@@ -2202,10 +2244,10 @@ export function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0
     ? `escena ${sceneIndex}${totalScenes > 0 ? ` de ${totalScenes}` : ""}`
     : "escena actual";
   const map = {
-    scene_download_video: `Descargando asset de ${sceneLabel}…`,
-    scene_probe_audio: `Analizando audio de ${sceneLabel}…`,
-    scene_probe_dimensions: `Analizando dimensiones de ${sceneLabel}…`,
-    scene_ffmpeg_render: `Renderizando video de ${sceneLabel}…`,
+    scene_download_video: `Preparando video de ${sceneLabel}…`,
+    scene_probe_audio: `Preparando audio de ${sceneLabel}…`,
+    scene_probe_dimensions: `Ajustando formato de ${sceneLabel}…`,
+    scene_ffmpeg_render: `Creando ${sceneLabel}…`,
     scene_complete: sceneIndex > 0 ? `Escena ${sceneIndex} lista.` : "Escena lista."
   };
   return map[clean] || "";

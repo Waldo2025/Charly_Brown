@@ -19,13 +19,13 @@ if (!/function ensureStageImagePreviewReady\(src = ""\)/.test(replacementSource)
   throw new Error("La ruta PNG del stage debe esperar a que el <img> real del preview esté listo antes de ocultar los videos previos.");
 }
 
-if (!/async ensureStageImageReady\(imageEl, src = ""\)/.test(controllerSource)
-  || !/preloadImageSrc\(cleanSrc\)[\s\S]*ensureStageImageReady\(imageEl,\s*cleanSrc\)[\s\S]*revealImage/.test(controllerSource)
+if (!/async ensureStageImageReady\(imageEl, src = "", options = \{\}\)/.test(controllerSource)
+  || !/preloadImageSrc\(cleanSrc\)[\s\S]*ensureStageImageReady\(imageEl,\s*resolvedSrc,\s*\{ sourceKey: cleanSrc \}\)[\s\S]*revealImage/.test(controllerSource)
   || !/revealImage\s*=\s*\(\)\s*=>\s*\{[\s\S]*hideAllVideos\(\)/.test(controllerSource)) {
   throw new Error("El playback controller debe esperar a que el <img> real esté listo antes de esconder el frame anterior.");
 }
 
-if (!/await playbackController\.stop\(\{ keepStatus: true, keepCursor: true \}\);[\s\S]*setPodcastVideoRow\(rowId, \{ syncStage: true \}\);[\s\S]*await playSceneInStudio\(row, \{ allowGenerateAudio: true \}\);/.test(stageSource)) {
+if (!/await playbackController\.stop\(\{ keepStatus: true, keepCursor: true \}\);[\s\S]*setPodcastVideoRow\(rowId, \{ syncStage: false \}\);[\s\S]*await playSceneInStudio\(row, \{ allowGenerateAudio: true \}\);/.test(stageSource)) {
   throw new Error("El flujo timeline-play-scene-video debe detener la reproducción previa antes de rehidratar la escena nueva.");
 }
 
