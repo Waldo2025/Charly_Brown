@@ -21,6 +21,8 @@ const { dispatchMontageToCloudRun } = require("./montage-dispatch.js");
 const { registerVeoRoutes, registerGeminiJobRoutes, registerAiJobStatusRoute, dispatchAiJob } = require("./ai-jobs.js");
 const { monitorStalePodcasterJobs } = require("./stale-job-monitor.js");
 
+const TASK_INVOKER_EMAIL = "charly-tasks-invoker@charly-brown.iam.gserviceaccount.com";
+
 function createApp(service, health = {}) {
   const app = express();
   installCommonMiddleware(app, { service });
@@ -137,7 +139,7 @@ exports.dispatchMontageTask = onRequest({
   minInstances: 0,
   maxInstances: 4,
   concurrency: 4,
-  invoker: "private"
+  invoker: [TASK_INVOKER_EMAIL]
 }, montageTaskApp);
 
 const veoTaskApp = createApp("veo-dispatch");
@@ -159,7 +161,7 @@ exports.dispatchVeoTask = onRequest({
   minInstances: 0,
   maxInstances: 2,
   concurrency: 1,
-  invoker: "private"
+  invoker: [TASK_INVOKER_EMAIL]
 }, veoTaskApp);
 
 exports.monitorStalePodcasterJobs = onSchedule({

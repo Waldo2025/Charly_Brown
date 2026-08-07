@@ -88,7 +88,7 @@ try {
 }
 
 log("installing-chromium", browserPath);
-const result = spawnSync(process.execPath, [cliPath, "install", "chromium"], {
+const result = spawnSync(process.execPath, [cliPath, "install", "--no-shell", "chromium"], {
   cwd: backendRoot,
   env: {
     ...process.env,

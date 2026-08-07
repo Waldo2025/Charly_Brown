@@ -123,6 +123,12 @@ test("Cloud Tasks payload is thin, deterministic and authenticated with OIDC", (
   });
 });
 
+test("private task functions preserve the Cloud Tasks invoker across deploys", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/index.js"), "utf8");
+  assert.match(source, /const TASK_INVOKER_EMAIL = "charly-tasks-invoker@charly-brown\.iam\.gserviceaccount\.com"/);
+  assert.equal((source.match(/invoker: \[TASK_INVOKER_EMAIL\]/g) || []).length, 2);
+});
+
 test("Cloud Run override sends only the durable montage job id", () => {
   const request = buildRunJobRequest({ jobId: "job-42" });
   assert.match(request.name, /jobs\/podcaster-montage-export$/);
