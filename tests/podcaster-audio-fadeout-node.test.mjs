@@ -45,7 +45,11 @@ test("audio fade nodes start their own drag modes and preserve trim behavior", (
 
 test("background music playback applies fadein and fadeout within the active segment", () => {
   assert.match(playbackControllerSource, /const fadeInMs = Math\.max\(0, Number\(activeSegment\.fadeInMs \|\| 0\)\);/m);
-  assert.match(playbackControllerSource, /const fadeInFactor = fadeInMs > 0 && segmentDurationMs > 0[\s\S]*?elapsedMs < fadeInMs[\s\S]*?elapsedMs \/ fadeInMs[\s\S]*?: 1\.0;/m);
+  assert.match(playbackControllerSource, /const segmentFadeInMs = Math\.min\(Math\.max\(0, Number\(fadeInMs \|\| 0\)\), segmentDurationMs\);/m);
+  assert.match(playbackControllerSource, /const fadeInFactor = segmentFadeInMs > 0 && segmentDurationMs > 0[\s\S]*?elapsedMs < segmentFadeInMs[\s\S]*?elapsedMs \/ segmentFadeInMs[\s\S]*?: 1\.0;/m);
   assert.match(playbackControllerSource, /const fadeOutMs = Math\.max\(0, Number\(activeSegment\.fadeOutMs \|\| 0\)\);/m);
-  assert.match(playbackControllerSource, /const fadeOutFactor = fadeOutMs > 0 && segmentDurationMs > 0[\s\S]*?remainingMs <= fadeOutMs[\s\S]*?remainingMs \/ fadeOutMs[\s\S]*?: 1\.0;/m);
+  assert.match(playbackControllerSource, /const segmentFadeOutMs = Math\.min\(Math\.max\(0, Number\(fadeOutMs \|\| 0\)\), segmentDurationMs\);/m);
+  assert.match(playbackControllerSource, /const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0[\s\S]*?remainingMs <= segmentFadeOutMs[\s\S]*?remainingMs \/ segmentFadeOutMs[\s\S]*?: 1\.0;/m);
+  assert.match(playbackControllerSource, /const hasExplicitBackgroundFade = segmentFadeInMs > 0 \|\| segmentFadeOutMs > 0;/m);
+  assert.match(playbackControllerSource, /if \(hasExplicitBackgroundFade\) \{[\s\S]*?gain\.setValueAtTime\(clampedFinalVolume, now\);/m);
 });

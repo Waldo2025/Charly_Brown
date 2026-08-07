@@ -2504,6 +2504,8 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   pause() {
     this.state.isPlaying = false;
+    this.activeLoopId += 1;
+    this.pendingTimelineSeekTick = null;
     this.stopClock();
 
     Object.values(this.dialoguePlayers).forEach(audio => { 
@@ -2532,28 +2534,20 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   async stop(opts = {}) {
-    const wasPlaying = this.state.isPlaying === true;
-    const stopSourceMs = Math.max(0, Number(this.state.currentMs || 0));
     this.state.isPlaying = false;
+    this.activeLoopId += 1;
+    this.pendingTimelineSeekTick = null;
     this.stopClock();
     
     const shouldReset = opts.keepCursor !== true;
     if (shouldReset) {
-      const activeEntry = this.getEntryAtMs(stopSourceMs);
-      const sceneStartMs = Math.max(0, Number(activeEntry?.startMs || 0));
-      const previousStopTargetMs = Number(this.stopRewindTargetMs);
-      const isAtPreviousStopTarget = Number.isFinite(previousStopTargetMs)
-        && Math.abs(stopSourceMs - previousStopTargetMs) <= this.getTimelineLookupToleranceMs();
-      const shouldReturnToTimelineStart = !wasPlaying && isAtPreviousStopTarget;
-      const stopTargetMs = shouldReturnToTimelineStart ? 0 : sceneStartMs;
-      const targetEntry = stopTargetMs === 0
-        ? this.getEntryAtMs(0)
-        : activeEntry;
+      const stopTargetMs = 0;
+      const targetEntry = this.getEntryAtMs(0);
       const targetRowId = String(targetEntry?.rowId || "").trim();
 
       this.state.currentMs = stopTargetMs;
       this.state.activeRowId = targetRowId;
-      this.stopRewindTargetMs = stopTargetMs > 0 ? stopTargetMs : null;
+      this.stopRewindTargetMs = null;
       if (this.deps?.podcastVideoState) {
         this.deps.podcastVideoState.montageCursorMs = stopTargetMs;
         this.deps.podcastVideoState.activeRowId = targetRowId;
@@ -2593,7 +2587,6 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.deps?.setPodcastVideoStatus?.(shouldReset ? 'Detenido' : 'Pausado');
     this.deps?.updatePodcastVideoTransportUi?.();
 
-    this.state.isTickProcessing = false;
     if (opts.refreshStage === true) {
       await this.tick(this.state.currentMs, { lightweight: !shouldReset });
     } else {
@@ -2723,6 +2716,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         this.state.currentMs = nextMs;
         await this.tick(nextMs);
+        if (!this.state.isPlaying || loopId !== this.activeLoopId) return;
         if (this.clockRebaseRequested) {
           lastTime = performance.now();
           this.clockRebaseRequested = false;
@@ -3588,6 +3582,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const fadeOutFactor = segmentFadeOutMs > 0 && segmentDurationMs > 0
       ? (remainingMs <= segmentFadeOutMs ? Math.max(0, Math.min(1, remainingMs / segmentFadeOutMs)) : 1.0)
       : 1.0;
+    const hasExplicitBackgroundFade = segmentFadeInMs > 0 || segmentFadeOutMs > 0;
     const configuredTrimSpanMs = (() => {
       const configuredTrimOutMs = Number(activeSegment.trimOutMs || 0) || 0;
       const configuredTrimSpan = configuredTrimOutMs > trimInMs ? (configuredTrimOutMs - trimInMs) : 0;
@@ -3627,15 +3622,25 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (this.backgroundGain) {
         const now = this.audioCtx.currentTime;
         const smoothingConstant = 0.15;
-        try { this.backgroundGain.gain.cancelScheduledValues(now); } catch (_) { }
-        // Use a slightly longer time constant (0.15s) for ducking transitions to avoid abrupt jumps
-        if (isNewBackgroundSegment) {
-          try { this.backgroundGain.gain.setValueAtTime(0, now); } catch (_) { }
+        if (hasExplicitBackgroundFade) {
+          // The fade factor is already derived from the exact timeline position on
+          // every tick. Re-starting Web Audio smoothing from zero here prevented a fade
+          // that begins at 0 from ever gaining audible volume.
+          try { this.backgroundGain.gain.cancelScheduledValues(now); } catch (_) { }
+          try { this.backgroundGain.gain.setValueAtTime(clampedFinalVolume, now); } catch (_) {
+            this.backgroundGain.gain.value = clampedFinalVolume;
+          }
         } else {
-          const currentGain = Number(this.backgroundGain.gain.value || 0);
-          try { this.backgroundGain.gain.setValueAtTime(currentGain, now); } catch (_) { }
+          try { this.backgroundGain.gain.cancelScheduledValues(now); } catch (_) { }
+          // Keep smoothing for ducking and ordinary volume changes only.
+          if (isNewBackgroundSegment) {
+            try { this.backgroundGain.gain.setValueAtTime(0, now); } catch (_) { }
+          } else {
+            const currentGain = Number(this.backgroundGain.gain.value || 0);
+            try { this.backgroundGain.gain.setValueAtTime(currentGain, now); } catch (_) { }
+          }
+          this.backgroundGain.gain.setTargetAtTime(clampedFinalVolume, now, isNewBackgroundSegment ? 0.08 : smoothingConstant);
         }
-        this.backgroundGain.gain.setTargetAtTime(clampedFinalVolume, now, isNewBackgroundSegment ? 0.08 : smoothingConstant);
       } else {
         this.backgroundAudio.volume = clampedFinalVolume;
       }

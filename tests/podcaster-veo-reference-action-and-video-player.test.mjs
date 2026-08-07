@@ -71,12 +71,12 @@ assert.match(
 );
 assert.match(
   home,
-  /podcaster-playback-controller\.js\?v=2026-1\.0\.10\.570/,
+  /podcaster-playback-controller\.js\?v=2026-1\.0\.10\.571/,
   "video-player no debe continuar fijado al controlador v536."
 );
 assert.match(
   playerHtml,
-  /cache-version-loader\.js\?v=2026-1\.0\.10\.549/,
+  /cache-version-loader\.js\?v=2026-1\.0\.10\.550/,
   "video-player debe forzar la build vigente."
 );
 assert.match(
