@@ -5895,9 +5895,11 @@ export function buildMontageExportPayload(session = null) {
           id: String(segment?.id || `${rowId}-seg-${idx + 1}`).trim() || `${rowId}-seg-${idx + 1}`,
           rowId,
           sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 0) || 0)),
-          url: effectiveSrc,
+          url: (src && (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("gs://") || src.startsWith("data:")))
+            ? src
+            : (String(storedAudio?.downloadUrl || storedAudio?.url || storedAudio?.storagePath || "").trim() || effectiveSrc),
           storagePath: String(storedAudio?.storagePath || "").trim(),
-          downloadUrl: String(storedAudio?.downloadUrl || "").trim(),
+          downloadUrl: String(storedAudio?.downloadUrl || storedAudio?.url || "").trim(),
           dataUrl: String(storedAudio?.dataUrl || storedAudio?.localDataUrl || "").trim(),
           localDataUrl: String(storedAudio?.localDataUrl || storedAudio?.dataUrl || "").trim(),
           localMediaCacheKey: String(storedAudio?.localMediaCacheKey || "").trim(),
@@ -6022,7 +6024,7 @@ export function buildMontageExportPayload(session = null) {
   if (onlyAudioExport && window.montageExportState) {
     window.montageExportState.onlyAudio = true;
   }
-  const geminiTimelineSegments = montageAudioMode === "gemini-live-per-scene" ? buildGeminiTimelineSegments() : [];
+  const geminiTimelineSegments = buildGeminiTimelineSegments();
   const backgroundAutomationWindows = buildSceneBackgroundAutomationWindows();
   const uploadedBackgroundSegments = buildUploadedBackgroundSegments();
   const trackBackgroundSegments = buildTrackBackgroundSegments();

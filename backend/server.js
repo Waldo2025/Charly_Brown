@@ -13774,19 +13774,27 @@ async function finalizeMontageExportAudioTrack({
   const buildTimelineAudioDownloadAsset = (segment = {}) => {
     const rowId = String(segment?.rowId || "").trim();
     const fallbackClip = rowId ? (input.dialogueAudioMap?.[rowId] || null) : null;
-    const segmentUrl = String(segment?.url || segment?.downloadUrl || "").trim();
+    const isNetworkOrStorageUrl = (val = "") => {
+      const s = String(val || "").trim();
+      return s.startsWith("http://") || s.startsWith("https://") || s.startsWith("gs://") || s.startsWith("data:");
+    };
+    const rawSegmentUrl = String(segment?.url || "").trim();
+    const rawSegmentDownloadUrl = String(segment?.downloadUrl || "").trim();
+    const segmentUrl = isNetworkOrStorageUrl(rawSegmentUrl) ? rawSegmentUrl : "";
+    const segmentDownloadUrl = isNetworkOrStorageUrl(rawSegmentDownloadUrl) ? rawSegmentDownloadUrl : "";
     const fallbackUrl = String(fallbackClip?.downloadUrl || fallbackClip?.url || "").trim();
     const segmentDataUrl = String(segment?.dataUrl || segment?.localDataUrl || "").trim();
     const fallbackDataUrl = String(fallbackClip?.dataUrl || fallbackClip?.localDataUrl || "").trim();
     const segmentStoragePath = clampText(segment?.storagePath || "", 900);
     const fallbackStoragePath = clampText(fallbackClip?.storagePath || "", 900);
+    const resolvedUrl = segmentUrl || segmentDownloadUrl || fallbackUrl || segmentStoragePath || fallbackStoragePath;
     return {
       ...(fallbackClip && typeof fallbackClip === "object" ? fallbackClip : {}),
       ...(segment && typeof segment === "object" ? segment : {}),
       rowId: clampText(rowId || fallbackClip?.rowId || "", 140),
       storagePath: segmentStoragePath || fallbackStoragePath,
-      url: segmentUrl || fallbackUrl,
-      downloadUrl: String(segment?.downloadUrl || "").trim() || fallbackUrl,
+      url: resolvedUrl,
+      downloadUrl: segmentDownloadUrl || resolvedUrl,
       dataUrl: segmentDataUrl || fallbackDataUrl,
       localDataUrl: String(segment?.localDataUrl || "").trim() || fallbackDataUrl,
       localMediaCacheKey: String(segment?.localMediaCacheKey || fallbackClip?.localMediaCacheKey || "").trim(),
@@ -14193,8 +14201,24 @@ async function renderMontageAudioOnlyExport({
   };
 }
 
+function normalizeMontageExportPipelineInput(rawInput = {}) {
+  const source = rawInput && typeof rawInput === "object" ? rawInput : {};
+  const hasRawAudioTimeline = source.audioTimeline && typeof source.audioTimeline === "object";
+  const lacksDerivedAudioState = typeof source.useTimelineAudio !== "boolean"
+    || !Array.isArray(source.timelineAudioSegments)
+    || !Array.isArray(source.normalizedGeminiTimelineSegments);
+
+  // Firebase Functions persists the browser contract as-is. The legacy backend
+  // route normalized that contract before enqueuing it, so Cloud Run otherwise
+  // receives audioTimeline but never derives the arrays consumed by FFmpeg.
+  if (hasRawAudioTimeline && lacksDerivedAudioState) {
+    return normalizeMontageExportRequestBody(source);
+  }
+  return source;
+}
+
 async function executeMontageExportPipeline(rawInput = {}, context = {}) {
-  const input = rawInput && typeof rawInput === "object" ? rawInput : {};
+  const input = normalizeMontageExportPipelineInput(rawInput);
   const uid = String(context?.uid || "").trim();
   const jobId = clampExportId(context?.jobId || "");
   const emitStage = createMontageStageReporter(context?.onStage);
@@ -18096,6 +18120,7 @@ module.exports = {
   storageBucket,
   montageExportJobStore,
   buildBackendHealthPayload,
+  normalizeMontageExportPipelineInput,
   executeMontageExportPipeline,
   buildMontageSceneFailure,
   getBackendPublicBaseUrl,

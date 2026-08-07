@@ -84,13 +84,94 @@ function publicJob(job = {}) {
   return payload;
 }
 
+async function uploadInlineAudioAssetsToStorage(rawBody = {}, jobId = "", bucket = null) {
+  if (!rawBody || typeof rawBody !== "object" || !bucket) return rawBody;
+
+  const processAsset = async (asset, prefix = "audio") => {
+    if (!asset || typeof asset !== "object") return asset;
+    const storagePath = String(asset.storagePath || "").trim();
+    const downloadUrl = String(asset.downloadUrl || asset.url || "").trim();
+    const isNetworkOrStorage = (val) => val.startsWith("http://") || val.startsWith("https://") || val.startsWith("gs://");
+    if (storagePath || isNetworkOrStorage(downloadUrl)) return asset;
+
+    const dataCandidate = String(asset.dataUrl || asset.localDataUrl || asset.url || asset.downloadUrl || "").trim();
+    if (!dataCandidate.startsWith("data:")) return asset;
+
+    const match = dataCandidate.match(/^data:([^;]+);base64,(.+)$/i);
+    if (!match) return asset;
+
+    const contentType = match[1] || "audio/wav";
+    const base64Data = match[2];
+    const buffer = Buffer.from(base64Data, "base64");
+    const ext = contentType.includes("mpeg") || contentType.includes("mp3") ? "mp3" : (contentType.includes("ogg") ? "ogg" : "wav");
+    const rowId = String(asset.rowId || asset.id || crypto.randomUUID()).trim();
+    const destPath = `podcaster/exports/temp_audio/${jobId}/${prefix}_${rowId}.${ext}`;
+    const token = crypto.randomUUID();
+    const file = bucket.file(destPath);
+    await file.save(buffer, {
+      contentType,
+      metadata: {
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+          jobId
+        }
+      }
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
+    return {
+      ...asset,
+      storagePath: destPath,
+      downloadUrl: publicUrl,
+      url: publicUrl
+    };
+  };
+
+  const rawEntries = Array.isArray(rawBody.entries) ? rawBody.entries : [];
+  for (let i = 0; i < rawEntries.length; i += 1) {
+    if (rawEntries[i]?.audio) {
+      rawEntries[i].audio = await processAsset(rawEntries[i].audio, `entry_${i}`);
+    }
+  }
+
+  if (rawBody.dialogueAudioMap && typeof rawBody.dialogueAudioMap === "object") {
+    for (const [rowId, clip] of Object.entries(rawBody.dialogueAudioMap)) {
+      rawBody.dialogueAudioMap[rowId] = await processAsset(clip, `dialogue_${rowId}`);
+    }
+  }
+
+  if (rawBody.audioTimeline && typeof rawBody.audioTimeline === "object") {
+    if (Array.isArray(rawBody.audioTimeline.geminiSegments)) {
+      for (let i = 0; i < rawBody.audioTimeline.geminiSegments.length; i += 1) {
+        rawBody.audioTimeline.geminiSegments[i] = await processAsset(rawBody.audioTimeline.geminiSegments[i], `gemini_${i}`);
+      }
+    }
+    if (Array.isArray(rawBody.audioTimeline.backgroundSegments)) {
+      for (let i = 0; i < rawBody.audioTimeline.backgroundSegments.length; i += 1) {
+        rawBody.audioTimeline.backgroundSegments[i] = await processAsset(rawBody.audioTimeline.backgroundSegments[i], `bg_${i}`);
+      }
+    }
+  }
+
+  if (rawBody.backgroundMusic && typeof rawBody.backgroundMusic === "object") {
+    rawBody.backgroundMusic = await processAsset(rawBody.backgroundMusic, "background_music");
+  }
+
+  return rawBody;
+}
+
 async function createMontageJob(req) {
   const authContext = await resolveAuthContext(req);
-  const input = sanitizePersistedValue(req.body || {});
+  const { db, admin, bucket } = getAdminServices();
+  const jobId = crypto.randomUUID();
+  const rawBody = req.body || {};
+  await uploadInlineAudioAssetsToStorage(rawBody, jobId, bucket).catch((err) => {
+    console.warn("[functions][montage-routes] inline audio upload to storage fallback warning:", String(err?.message || err));
+  });
+  const input = sanitizePersistedValue(rawBody);
   const sessionId = cleanId(input?.sessionId || "");
   const entries = Array.isArray(input?.entries) ? input.entries : [];
   if (!entries.length || entries.length > 240) throw Object.assign(new Error("invalid_montage_entries"), { status: 422 });
-  const { db, admin } = getAdminServices();
   const sessionSnapshot = await db.collection("podcaster_sessions").doc(sessionId).get();
   if (!sessionSnapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
   if (!sessionAccess(sessionSnapshot.data(), authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
@@ -98,7 +179,6 @@ async function createMontageJob(req) {
   if (Buffer.byteLength(JSON.stringify(request), "utf8") > MAX_PERSISTED_REQUEST_BYTES) {
     throw Object.assign(new Error("montage_request_requires_direct_uploads"), { status: 413 });
   }
-  const jobId = crypto.randomUUID();
   const now = new Date();
   const job = {
     jobId,
