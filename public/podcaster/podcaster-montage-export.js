@@ -71,6 +71,7 @@ export function normalizeMontageExportSettings(raw = {}) {
     ? String(source.resolution).trim()
     : "source";
   const filename = String(source.filename || "").trim().slice(0, 120);
+  const filenameSessionId = String(source.filenameSessionId || "").trim().slice(0, 160);
   const includeReviewExcel = source.includeReviewExcel !== false;
   const bitrateMode = ["vbr", "cbr", "custom"].includes(String(source.bitrateMode || "").trim())
     ? String(source.bitrateMode).trim()
@@ -89,6 +90,7 @@ export function normalizeMontageExportSettings(raw = {}) {
     minBitrate,
     renderMode,
     filename,
+    filenameSessionId,
     includeReviewExcel,
     onlyAudio: schemaVersion >= MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION && source.onlyAudio === true,
     includeLogo: source.includeLogo !== false,
@@ -124,6 +126,18 @@ function defaultMontageExportFilename(session = null) {
   if (preferred) return preferred;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `montage-${stamp}`;
+}
+
+export function resolveMontageExportFilenameForSession(settings = {}, session = null) {
+  const normalized = normalizeMontageExportSettings(settings);
+  const sessionId = String(session?.id || "").trim();
+  if (!sessionId) return normalized;
+  if (normalized.filenameSessionId === sessionId && normalized.filename) return normalized;
+  return {
+    ...normalized,
+    filename: defaultMontageExportFilename(session),
+    filenameSessionId: sessionId
+  };
 }
 
 function stripFileExtension(filename = "") {
@@ -298,6 +312,20 @@ function setMontageExportState(nextState = {}) {
   return montageExportState;
 }
 
+export function syncMontageExportFilenameForSession(session = null) {
+  const activeSession = session || window.getActiveSession?.() || null;
+  const nextState = resolveMontageExportFilenameForSession(
+    window.montageExportState || montageExportState,
+    activeSession
+  );
+  setMontageExportState(nextState);
+  if (window.els?.montageExportFilename) {
+    window.els.montageExportFilename.value = nextState.filename || defaultMontageExportFilename(activeSession);
+  }
+  persistMontageExportSettings();
+  return nextState;
+}
+
 function shouldSuspendMontagePreviewActivity() {
   return montageExportPreviewPaused === true;
 }
@@ -416,6 +444,8 @@ export let montageExportJobState = {
   pollTimer: null,
   resumeOnOnlineHandler: null,
   startedAtMs: 0,
+  completedAtMs: 0,
+  elapsedTimerId: null,
   lastStage: "",
   lastSceneSubstage: "",
   lastHint: "",
@@ -437,6 +467,65 @@ export let montageExportJobState = {
   autoDownloadTriggered: false,
   recentLogs: []
 };
+
+export function formatMontageExportElapsedTime(elapsedMs = 0) {
+  const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function updateMontageExportElapsedTime(nowMs = Date.now()) {
+  const el = window.els?.montageExportElapsedTime || null;
+  if (!el) return;
+  const startedAtMs = Math.max(0, Number(window.montageExportJobState?.startedAtMs || 0) || 0);
+  if (!startedAtMs) {
+    el.hidden = true;
+    el.textContent = "00:00:00";
+    return;
+  }
+  const completedAtMs = Math.max(startedAtMs, Number(window.montageExportJobState?.completedAtMs || 0) || Number(nowMs || Date.now()));
+  el.hidden = false;
+  el.textContent = `Tiempo total · ${formatMontageExportElapsedTime(completedAtMs - startedAtMs)}`;
+}
+
+export function startMontageExportElapsedTimer(startedAtMs = Date.now()) {
+  if (window.montageExportJobState?.elapsedTimerId) {
+    window.clearInterval(window.montageExportJobState.elapsedTimerId);
+  }
+  window.montageExportJobState.startedAtMs = Math.max(1, Number(startedAtMs || Date.now()) || Date.now());
+  window.montageExportJobState.completedAtMs = 0;
+  updateMontageExportElapsedTime();
+  window.montageExportJobState.elapsedTimerId = window.setInterval(() => {
+    updateMontageExportElapsedTime();
+  }, 1000);
+}
+
+export function stopMontageExportElapsedTimer(completedAtMs = Date.now()) {
+  if (window.montageExportJobState?.elapsedTimerId) {
+    window.clearInterval(window.montageExportJobState.elapsedTimerId);
+    window.montageExportJobState.elapsedTimerId = null;
+  }
+  if (Number(window.montageExportJobState?.startedAtMs || 0) > 0) {
+    window.montageExportJobState.completedAtMs = Math.max(
+      Number(window.montageExportJobState.startedAtMs),
+      Number(completedAtMs || Date.now()) || Date.now()
+    );
+  }
+  updateMontageExportElapsedTime(completedAtMs);
+}
+
+function clearMontageExportElapsedTimer() {
+  if (window.montageExportJobState?.elapsedTimerId) {
+    window.clearInterval(window.montageExportJobState.elapsedTimerId);
+  }
+  const el = window.els?.montageExportElapsedTime || null;
+  if (el) {
+    el.hidden = true;
+    el.textContent = "00:00:00";
+  }
+}
 
 const MONTAGE_EXPORT_FLOATING_CARD_STORAGE_KEY = "cb_podcast_montage_export_floating_card_v1";
 const MONTAGE_EXPORT_FLOATING_CARD_MAX_LOGS = 14;
@@ -858,6 +947,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     });
   }
   if (String(data?.status || "").trim() === "ready") {
+    stopMontageExportElapsedTimer();
     const readyExport = data?.export && typeof data.export === "object"
       ? data.export
       : (data?.result && typeof data.result === "object" ? data.result : {});
@@ -939,6 +1029,7 @@ async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
     return true;
   }
   if (String(data?.status || "").trim() === "error") {
+    stopMontageExportElapsedTimer();
     const err = data?.error && typeof data.error === "object" ? data.error : null;
     logMontageExportDevtools("export_error", {
       stage,
@@ -1871,6 +1962,7 @@ export function downloadReadyMontageExport(selectionValue = "") {
 }
 
 export function resetMontageExportJobState() {
+  clearMontageExportElapsedTimer();
   clearMontageExportPolling();
   montageExportSubmitLocked = false;
   window.montageExportJobState = {
@@ -1879,6 +1971,8 @@ export function resetMontageExportJobState() {
     pollTimer: null,
     resumeOnOnlineHandler: null,
     startedAtMs: 0,
+    completedAtMs: 0,
+    elapsedTimerId: null,
     lastStage: "",
     lastSceneSubstage: "",
     lastHint: "",
@@ -2128,6 +2222,7 @@ export async function cancelMontageExportFromModal() {
       throw error;
     }
   }
+  stopMontageExportElapsedTimer();
   await closeMontageExportModal({ cancelActiveJob: false });
 }
 
@@ -2408,6 +2503,7 @@ export async function pollMontageExportJob(jobId = "") {
       }
       clearMontageExportPolling();
       persistMontageExportActiveJob("");
+      stopMontageExportElapsedTimer();
       window.montageExportJobState.jobId = "";
       window.montageExportJobState.jobNotFoundCount = 0;
       window.montageExportJobState.recoverySource = "";
@@ -2547,7 +2643,11 @@ export async function continueMontageExportPolling() {
   window.montageExportJobState.preferFirestorePolling = false;
   window.montageExportJobState.firestorePreferredMissCount = 0;
   window.montageExportJobState.firestorePollCount = 0;
-  window.montageExportJobState.startedAtMs = Date.now();
+  startMontageExportElapsedTimer(
+    persistedJob?.startedAtMs
+    || window.montageExportJobState.startedAtMs
+    || Date.now()
+  );
   setMontageExportStatus(
     "Reanudando seguimiento del export…",
     "Consultando estado actual del backend.",
@@ -3029,7 +3129,8 @@ export function openMontageExportModal() {
   if (typeof window.playbackController?.stop === "function") window.playbackController.stop();
   if (typeof window.exportPreviewController?.stop === "function") window.exportPreviewController.stop();
 
-  const state = setMontageExportState(window.montageExportState || montageExportState);
+  const activeSession = window.getActiveSession?.() || null;
+  const state = syncMontageExportFilenameForSession(activeSession);
   if (isLegacyAutoMontageFilename(state.filename)) state.filename = "";
   if (!state.filename) state.filename = defaultMontageExportFilename(window.getActiveSession());
   setMontageExportOpen(true);
@@ -6288,8 +6389,10 @@ export function buildMontageExportPayload(session = null) {
 
 export async function runMontageExport() {
   if (window.montageExportBusy || montageExportSubmitLocked) return;
-  montageExportSubmitLocked = true;
   const previousJobId = String(window.montageExportJobState.jobId || "").trim();
+  resetMontageExportJobState();
+  montageExportSubmitLocked = true;
+  startMontageExportElapsedTimer();
   try {
     setMontageExportBusy(true);
     window.montageExportJobState.submissionInFlight = true;
@@ -6330,6 +6433,7 @@ export async function runMontageExport() {
       setMontageExportProgress(null);
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
       setMontageExportBusy(false);
+      stopMontageExportElapsedTimer();
       return;
     }
     setMontageExportBusy(true);
@@ -6337,7 +6441,6 @@ export async function runMontageExport() {
       window.clearTimeout(window.montageExportPreviewState.debounceTimer);
       window.montageExportPreviewState.debounceTimer = null;
     }
-    resetMontageExportJobState();
     setMontageExportContinueButton({ visible: false });
     setMontageExportProgress(0.08);
     setMontageExportStatus("Preparando exportación…", "Generando capturas PNG del texto en pantalla para FFmpeg.", { tone: "neutral" });
@@ -6391,7 +6494,7 @@ export async function runMontageExport() {
     const jobId = String(data?.jobId || "").trim();
     if (!jobId) throw new Error("montage_export_job_missing");
     window.montageExportJobState.jobId = jobId;
-    persistMontageExportActiveJob(jobId, Date.now());
+    persistMontageExportActiveJob(jobId, window.montageExportJobState.startedAtMs || Date.now());
     window.montageExportJobState.lastStage = String(data?.stage || "").trim();
     window.montageExportJobState.lastHint = String(data?.hint || "").trim();
     window.montageExportJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
@@ -6417,7 +6520,6 @@ export async function runMontageExport() {
       window.montageExportJobState.lastHint,
       { tone: "neutral" }
     );
-    window.montageExportJobState.startedAtMs = Date.now();
     pollMontageExportJob(jobId).catch(() => { });
   } catch (error) {
     window.montageExportJobState.submissionInFlight = false;
@@ -6500,6 +6602,9 @@ export async function runMontageExport() {
     }
     setMontageExportProgress(null);
     setMontageExportStatus("No pudimos exportar tu video.", hintParts.join(" "), { tone: "error" });
+    if (!String(window.montageExportJobState.jobId || "").trim()) {
+      stopMontageExportElapsedTimer();
+    }
     window.setTimelinePreviewsSuspended?.(false);
     setMontageExportPreviewPaused(false);
     setMontageExportBusy(false);
@@ -6522,9 +6627,14 @@ Object.assign(window, {
   sanitizeMontageFilenamePart,
   isLegacyAutoMontageFilename,
   defaultMontageExportFilename,
+  resolveMontageExportFilenameForSession,
+  syncMontageExportFilenameForSession,
   stripFileExtension,
   formatMontageExportClockMs,
   formatMontageExportTimelineLabel,
+  formatMontageExportElapsedTime,
+  startMontageExportElapsedTimer,
+  stopMontageExportElapsedTimer,
   ensureMontageExportXlsx,
   buildMontageReviewExcelRows,
   downloadMontageReviewExcel,

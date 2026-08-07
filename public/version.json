@@ -1,8 +1,10 @@
 {
   "version": "1.0.10.543",
-  "build": "2026-1.0.10.546",
+  "build": "2026-1.0.10.547",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El modal de exportación asocia el nombre del archivo con la sesión activa y lo rehidrata al cambiar de sesión, conservando personalizaciones dentro de la misma sesión.",
+    "Añadido: El estado de exportación muestra un contador de tiempo total desde la preparación hasta que el trabajo termina, falla o se cancela.",
     "Mejorado: La exportación muestra etapas claras para el usuario y oculta términos técnicos de FFmpeg, polling, assets y workers en el modal y la tarjeta flotante.",
     "Corregido: El despachador elimina leases huérfanos de trabajos terminados o inexistentes y la cola conserva reintentos suficientes para comenzar automáticamente cuando se libera capacidad.",
     "Corregido: La selección de escenas del timeline evita el doble trabajo de pointerdown/click y ya no clona, historiza ni serializa la sesión completa antes de actualizar el inspector.",

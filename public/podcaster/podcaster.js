@@ -31,6 +31,7 @@ import {
   scheduleMontageExportPreviewRefresh,
   refreshMontageExportPreviewNow,
   syncMontageExportUi,
+  syncMontageExportFilenameForSession,
   openMontageExportModal,
   closeMontageExportModal,
   cancelMontageExportFromModal,
@@ -40,11 +41,11 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-1.0.10.546";
+} from "./podcaster-montage-export.js?v=2026-1.0.10.547";
 import {
   handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick,
   runMontageExportV2 as runMontageExport
-} from "./podcaster-montage-export-v2.js?v=2026-1.0.10.546";
+} from "./podcaster-montage-export-v2.js?v=2026-1.0.10.547";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
@@ -650,6 +651,7 @@ const els = {
   montageExportMaxBitrate: document.getElementById("montageExportMaxBitrate"),
   montageExportMinBitrate: document.getElementById("montageExportMinBitrate"),
   montageExportFilename: document.getElementById("montageExportFilename"),
+  montageExportElapsedTime: document.getElementById("montageExportElapsedTime"),
   montageExportReviewExcelField: document.getElementById("montageExportReviewExcelField"),
   montageExportIncludeReviewExcel: document.getElementById("montageExportIncludeReviewExcel"),
   montageExportIncludeLogo: document.getElementById("montageExportIncludeLogo"),
@@ -8169,6 +8171,7 @@ async function setActiveSession(sessionId, options = {}) {
   }
 
   activatedSession = getActiveSession() || activatedSession || nextSession;
+  syncMontageExportFilenameForSession(activatedSession);
   resetPodcastStudioSessionUiState(activatedSession);
   // Restaurar estado visual del Studio desde la sesión (Firebase/localStorage fallback).
   try {
@@ -20187,10 +20190,12 @@ function attachEvents() {
   if (els.montageExportFilename) {
     els.montageExportFilename.addEventListener("input", () => {
       montageExportState.filename = String(els.montageExportFilename.value || "").trim().slice(0, 120);
+      montageExportState.filenameSessionId = String(getActiveSession()?.id || "").trim().slice(0, 160);
       persistMontageExportSettings();
     });
     els.montageExportFilename.addEventListener("change", () => {
       montageExportState.filename = String(els.montageExportFilename.value || "").trim().slice(0, 120);
+      montageExportState.filenameSessionId = String(getActiveSession()?.id || "").trim().slice(0, 160);
       persistMontageExportSettings();
     });
   }
