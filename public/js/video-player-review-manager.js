@@ -15,7 +15,8 @@ export function createVideoPlayerReviewManager(context = {}) {
     mutateAllRows,
     loadFullSession,
     syncTransport,
-    notifyActivity
+    notifyActivity,
+    reloadPage
   } = context;
 
   function getCurrentSession() {
@@ -136,10 +137,22 @@ export function createVideoPlayerReviewManager(context = {}) {
 
     try {
       const currentMs = Math.max(0, Number(controller?.state.currentMs || 0));
-      await controller?.purgeAllMediaCaches();
-      await refreshCurrentSession();
+      if (typeof controller?.purgeAllMediaCaches !== "function") {
+        throw new Error("media_cache_controller_unavailable");
+      }
+      await controller.purgeAllMediaCaches();
+      const refreshed = await refreshCurrentSession();
+      if (!refreshed) throw new Error("session_refresh_failed");
       if (controller?.tick) await controller.tick(currentMs);
       if (typeof syncTransport === "function") syncTransport();
+      const performReload = typeof reloadPage === "function"
+        ? reloadPage
+        : () => {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.set("mediaRefresh", String(Date.now()));
+          window.location.replace(nextUrl.toString());
+        };
+      performReload();
     } catch (err) {
       console.error("[Dashboard] Error al refrescar sesión y limpiar caché:", err);
       alert("No se pudo actualizar sitio y recargar medios.");

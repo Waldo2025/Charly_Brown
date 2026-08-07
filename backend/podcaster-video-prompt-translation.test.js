@@ -16,18 +16,29 @@ test("detects Spanish visual direction but ignores already-English direction", (
   assert.equal(hasLikelySpanishVisualDirections({ sceneDescription: "Medium shot with warm studio light." }), false);
 });
 
-test("sanitizes editorial copy before visual translation", () => {
-  const { payload, removedDirectives } = buildTranslationPayload({
+test("overlay copy does not influence visual translation while in-scene copy is canonical", () => {
+  const first = buildTranslationPayload({
     headlineText: "CHARLY PODCAST",
     captionText: "Hola mundo",
-    sceneDescription: "La fachada contiene CHARLY PODCAST.",
-    visualNotes: "El presentador saluda con Hola mundo.",
+    onScreenText: "LEGACY OVERLAY",
+    sceneDescription: "Un presentador camina por una galería.",
+    visualNotes: "El presentador saluda con naturalidad.",
+    inSceneText: "ESTUDIO CHARLY",
+    imagePrompts: ["Un muro dice ESTUDIO CHARLY."]
+  });
+  const second = buildTranslationPayload({
+    headlineText: "OTRO SUBTÍTULO",
+    captionText: "Otra transcripción",
+    onScreenText: "OTRO LEGACY",
+    sceneDescription: "Un presentador camina por una galería.",
+    visualNotes: "El presentador saluda con naturalidad.",
     inSceneText: "ESTUDIO CHARLY",
     imagePrompts: ["Un muro dice ESTUDIO CHARLY."]
   });
 
-  assert.doesNotMatch(JSON.stringify(payload), /CHARLY PODCAST|Hola mundo|ESTUDIO CHARLY/);
-  assert.ok(removedDirectives.length >= 2);
+  assert.deepEqual(first.payload, second.payload);
+  assert.doesNotMatch(JSON.stringify(first.payload), /CHARLY PODCAST|Hola mundo|LEGACY|ESTUDIO CHARLY/);
+  assert.ok(first.removedDirectives.length >= 1);
 });
 
 test("translates sanitized visual fields with the explicit task and current text model", async () => {

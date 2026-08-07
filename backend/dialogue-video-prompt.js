@@ -5,6 +5,7 @@ const { normalizeAspectRatio, normalizeInSceneText, normalizeTextPolicy } = requ
 const PODCASTER_VIDEO_PROMPT_VERSION = "podcaster_video_v2";
 const TEXT_DIRECTIVE_PATTERN = /(?:\b(?:text|texts|title|titles|subtitle|subtitles|caption|captions|label|labels|letter|letters|word|words|logo|logos|watermark|watermarks|sign|signage|typography|typeface|interface|ui)\b|\b(?:texto|textos|t[ií]tulo|t[ií]tulos|subt[ií]tulo|subt[ií]tulos|caption|captions|etiqueta|etiquetas|letra|letras|palabra|palabras|logo|logos|marca de agua|marcas de agua|r[oó]tulo|r[oó]tulos|letrero|letreros|se[nñ]al|se[nñ]alizaci[oó]n|tipograf[ií]a|interfaz)\b|(?:says?|reads?|written|spelled|dice|diga|aparece|aparezcan|escrito|escriba|mostrar|muestra)\s+["“'])/iu;
 const VISIBLE_COPY_CONTEXT_PATTERN = /(?:\b(?:display(?:s|ed|ing)?|show(?:s|ed|ing|n)?|present(?:s|ed|ing)?|contain(?:s|ed|ing)?|feature(?:s|d|ing)?|bear(?:s|ing)?|paint(?:s|ed|ing)?|print(?:s|ed|ing)?|write|writes|written|spell(?:s|ed|ing)?|read(?:s|ing)?|render(?:s|ed|ing)?|inscrib(?:e|es|ed|ing)|etch(?:es|ed|ing)|emblazon(?:s|ed|ing)?|project(?:s|ed|ing)?|screen|monitor|display|board|plaque|poster|banner|billboard|marquee|storefront|facade|façade|wall|panel|surface|neon)\b|\b(?:muestra|mostrar|exhibe|exhibir|presenta|presentar|contiene|contener|lleva|lucir|luce|pinta|pintado|impreso|escribe|escrito|deletrea|inscrito|grabado|proyecta|pantalla|monitor|cartel|placa|pizarra|tablero|p[oó]ster|banderola|marquesina|fachada|pared|muro|panel|superficie|ne[oó]n)\b|\b(?:hold|focus|linger|zoom)\s+(?:on|onto)\b)/iu;
+const VISIBLE_TEXT_ACTION_PATTERN = /(?:\b(?:display(?:s|ed|ing)?|show(?:s|ed|ing|n)?|present(?:s|ed|ing)?|contain(?:s|ed|ing)?|bear(?:s|ing)?|paint(?:s|ed)?|print(?:s|ed|ing)?|writ(?:e|es|ten|ing)|spell(?:s|ed|ing)?|read(?:s|ing)?|render(?:s|ed|ing)?|inscrib(?:e|es|ed|ing)|etch(?:es|ed|ing)|emblazon(?:s|ed|ing)?|project(?:s|ed|ing)?)\b|\b(?:muestra|mostrar|exhibe|exhibir|presenta|presentar|contiene|contener|lleva|lucir|luce|pinta|pintado|impreso|escribe|escrito|deletrea|inscrito|grabado|proyecta)\b|\b(?:board|plaque|poster|banner|billboard|marquee|screen|monitor|panel|surface|wall|facade|fachada|pared|muro|placa|cartel|pantalla|monitor|panel)\s+(?:with|showing|reading|saying|con|mostrando|que dice)\b)/iu;
 
 function clean(value = "") {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -129,7 +130,7 @@ function sanitizeVisualDirective(value = "") {
   const kept = [];
   let removedCount = 0;
   for (const fragment of fragments) {
-    if (TEXT_DIRECTIVE_PATTERN.test(fragment)) {
+    if (TEXT_DIRECTIVE_PATTERN.test(fragment) || VISIBLE_TEXT_ACTION_PATTERN.test(fragment)) {
       removedCount += 1;
     } else {
       kept.push(fragment);
@@ -161,12 +162,10 @@ function sanitizeVisualPromptFields(options = {}) {
   };
   const sanitized = {};
   const removedDirectives = [];
-  const editorialCopies = [
-    options?.headlineText,
-    options?.captionText,
-    options?.onScreenText,
-    options?.inSceneText
-  ].flatMap(editorialCopyVariants);
+  // Overlay copy (headline/captions/onScreenText) belongs to the subtitle
+  // renderer and must not alter the provider prompt in either direction. Only
+  // inSceneText is a Veo-owned visual instruction and may be de-duplicated.
+  const editorialCopies = [options?.inSceneText].flatMap(editorialCopyVariants);
   for (const [field, value] of Object.entries(fields)) {
     const contextualCopyResult = removeEditorialCopyInstructions(value, editorialCopies);
     const exactCopyResult = removeExactEditorialCopy(contextualCopyResult.value, editorialCopies);
@@ -224,16 +223,23 @@ function buildDialogueVideoPromptBundle(options = {}) {
     ? clean(options.imageInputRole).toLowerCase()
     : "none";
   const durationSec = Math.max(4, Math.min(8, Number(options?.inferredTargetDurationSec) || 8));
+  // Keep the editor contract explicit: sceneDescription establishes what the
+  // scene looks like, while visualNotes directs what must happen in the video.
+  // Mixing both into a generic visual paragraph made Veo treat the requested
+  // action as optional descriptive context, especially with a reference image.
   const sceneVisualPrompt = buildUniquePromptSpec([
     sanitized.sceneDescription,
+    sanitized.scenePrompt
+  ], 900);
+  const sceneVisualKeys = new Set(splitDirectiveFragments(sceneVisualPrompt).map(promptFragmentKey).filter(Boolean));
+  const sceneActionPrompt = buildUniquePromptSpec([
     sanitized.visualNotes,
-    sanitized.scenePrompt,
-    sanitized.videoDirective
-  ], 1200);
+    sanitized.videoDirective,
+    sanitized.performanceDirective
+  ].flatMap(splitDirectiveFragments).filter((fragment) => !sceneVisualKeys.has(promptFragmentKey(fragment))), 700);
   const sceneImagePromptList = sanitized.imagePrompts.length
     ? sanitized.imagePrompts
     : (sceneVisualPrompt ? [sceneVisualPrompt] : []);
-  const sceneVisualKeys = new Set(splitDirectiveFragments(sceneVisualPrompt).map(promptFragmentKey).filter(Boolean));
   const referenceIntentPrompts = sanitized.imagePrompts
     .filter((item) => !sceneVisualKeys.has(promptFragmentKey(item)))
     .map((item) => limitPromptText(item, 260))
@@ -264,7 +270,9 @@ function buildDialogueVideoPromptBundle(options = {}) {
     `Timeline 00:00–00:${String(Math.round(durationSec)).padStart(2, "0")}: remain in the same scene and complete the requested action naturally.`,
     "Use one continuous, unbroken shot with no scene cuts.",
     sceneVisualPrompt ? `Subject and setting: ${ensureSentence(sceneVisualPrompt)}` : "Subject and setting: a coherent cinematic scene matching the supplied visual references.",
-    sanitized.performanceDirective ? `Action: ${ensureSentence(limitPromptText(sanitized.performanceDirective, 360))}` : "Action: subtle, physically plausible motion with a clear focal subject.",
+    sceneActionPrompt
+      ? `Required action: ${ensureSentence(sceneActionPrompt)} Perform this action clearly while preserving the referenced subject and scene.`
+      : "Required action: subtle, physically plausible motion with a clear focal subject.",
     sanitized.transition ? `Opening motion: ${ensureSentence(limitPromptText(sanitized.transition, 220))}` : "Opening motion: begin directly on the requested action.",
     sanitized.scenarioPrompt ? `Environment and lighting: ${ensureSentence(limitPromptText(sanitized.scenarioPrompt, 500))}` : "Environment and lighting: realistic, intentional, premium editorial lighting.",
     compactRegenerationInstruction ? `Regeneration guidance: ${compactRegenerationInstruction}` : "",
@@ -276,9 +284,9 @@ function buildDialogueVideoPromptBundle(options = {}) {
       ? `Performance continuity: evolve naturally from ${clean(previousScene.expression)} to ${clean(options?.expression || "neutral")}.`
       : "",
     imageInputRole === "first_frame"
-      ? "Use the supplied first-frame image as the opening frame and preserve its composition and subject identity."
+      ? "Treat the supplied first-frame image as the exact visual source and opening frame. Preserve its subject identity, composition, environment, objects, materials, color palette, lighting, and camera angle; animate that same scene to perform the required action instead of redesigning it."
       : (imageInputRole === "references"
-        ? "Use the supplied reference images in input order without displaying them as still images."
+        ? "Treat the supplied reference images as binding visual evidence. Preserve their subject identity, environment, objects, materials, color palette, lighting, and composition as closely as possible while performing the required action."
         : (imageInputRole === "video_extension"
           ? "Continue the supplied input video naturally without restarting or replacing its final state."
           : "")),
@@ -297,6 +305,7 @@ function buildDialogueVideoPromptBundle(options = {}) {
     excludeScriptFromVideoPrompt,
     dialoguePolicy: excludeScriptFromVideoPrompt ? "ambient_only" : "scripted",
     sceneVisualPrompt,
+    sceneActionPrompt,
     sceneImagePromptList,
     removedDirectives: mergeRemovedDirectiveMetadata(options?.removedTextDirectives, removedDirectives),
     prompt

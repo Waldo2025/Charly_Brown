@@ -10,6 +10,7 @@ const {
 const { createVertexClient, normalizeModel, DEFAULT_IMAGE_MODEL, DEFAULT_VEO_MODEL, DEFAULT_VEO_FAST_MODEL } = require("./vertex.js");
 const { enqueueHttpTask, QUEUES } = require("./tasks.js");
 const { sessionAccess } = require("./podcaster-data.js");
+const { buildDialogueVideoPrompt } = require("./video-prompt.js");
 
 const AI_JOB_COLLECTION = "podcaster_ai_jobs";
 const AI_JOB_TTL_MS = 24 * 60 * 60 * 1000;
@@ -173,23 +174,90 @@ function gsPath(uri = "") {
   return match ? match[1] : "";
 }
 
+function normalizeOwnedReferencePath(value = "", job = {}) {
+  let path = String(value || "").trim();
+  if (!path) return "";
+  if (path.startsWith("gs://")) path = gsPath(path);
+  if (!path || path.includes("..") || path.startsWith("/")) return "";
+  const sessionPrefix = `podcaster/sessions/${job.sessionId}/owners/${job.ownerId}/`;
+  if (path.startsWith(sessionPrefix) || path.startsWith("podcaster/library/")) return path;
+  return "";
+}
+
+async function loadVertexReferenceImage(bucket, value = null, job = {}) {
+  const record = value && typeof value === "object" ? value : {};
+  const storagePath = normalizeOwnedReferencePath(record.storagePath || record.path || "", job);
+  if (!storagePath) return null;
+  const file = bucket.file(storagePath);
+  const [metadata] = await file.getMetadata().catch(() => [null]);
+  const mimeType = String(metadata?.contentType || record.mimeType || "").trim().toLowerCase();
+  const size = Math.max(0, Number(metadata?.size || 0) || 0);
+  if (!mimeType.startsWith("image/") || size > 12 * 1024 * 1024) return null;
+  return {
+    gcsUri: `gs://${bucket.name}/${storagePath}`,
+    mimeType,
+    storagePath
+  };
+}
+
+async function resolveVertexVideoReferences(bucket, input = {}, job = {}) {
+  const sceneRecords = Array.isArray(input.referenceImages) ? input.referenceImages.slice(0, 3) : [];
+  if (input.referenceImage && typeof input.referenceImage === "object") sceneRecords.unshift(input.referenceImage);
+  const sceneImages = [];
+  for (const record of sceneRecords) {
+    const image = await loadVertexReferenceImage(bucket, record, job);
+    if (image && !sceneImages.some((item) => item.storagePath === image.storagePath)) sceneImages.push(image);
+  }
+  const portrait = await loadVertexReferenceImage(bucket, {
+    storagePath: input.portraitStoragePath,
+    mimeType: input.portraitMimeType || "image/png"
+  }, job);
+  const strictIdentity = input.strictIdentity === true && Boolean(portrait);
+  if (sceneImages.length === 1 && !strictIdentity) {
+    return { firstFrame: sceneImages[0], referenceImages: [], mode: "first_frame" };
+  }
+  const references = [
+    ...(strictIdentity && portrait ? [portrait] : []),
+    ...sceneImages
+  ].filter((item, index, list) => list.findIndex((candidate) => candidate.storagePath === item.storagePath) === index).slice(0, 3);
+  return {
+    firstFrame: null,
+    referenceImages: references,
+    mode: references.length ? "references" : "none"
+  };
+}
+
 async function processVideoJob(job, ref) {
   const { bucket, admin } = getAdminServices();
   const client = createVertexClient({ location: REGION });
   const input = job.input || {};
-  const prompt = String(input.prompt || input.videoPrompt || input.scenePrompt || input.visualNotes || input.sceneDescription || "Cinematic podcast scene, natural motion, no visible text or logos.").slice(0, 4000);
+  const references = await resolveVertexVideoReferences(bucket, input, job);
+  const promptSpec = buildDialogueVideoPrompt(input, {
+    hasReferenceImage: Boolean(references.firstFrame || references.referenceImages.length),
+    referenceMode: references.mode
+  });
   const outputPrefix = `podcaster/sessions/${job.sessionId}/owners/${job.ownerId}/generated/dialogue-video/${job.jobId}/`;
+  const config = {
+    numberOfVideos: 1,
+    durationSeconds: promptSpec.durationSeconds,
+    aspectRatio: promptSpec.aspectRatio,
+    resolution: "720p",
+    generateAudio: promptSpec.generateAudio,
+    outputGcsUri: `gs://${bucket.name}/${outputPrefix}`
+  };
+  if (references.referenceImages.length) {
+    config.referenceImages = references.referenceImages.map((image) => ({
+      image: { gcsUri: image.gcsUri, mimeType: image.mimeType },
+      referenceType: "ASSET"
+    }));
+  }
   let operation = await client.models.generateVideos({
     model: normalizeModel(job.model, DEFAULT_VEO_MODEL),
-    prompt,
-    config: {
-      numberOfVideos: 1,
-      durationSeconds: Math.max(4, Math.min(8, Math.round(Number(input.durationSec || input.targetDurationSec || 8) || 8))),
-      aspectRatio: String(input.aspectRatio || "16:9") === "9:16" ? "9:16" : "16:9",
-      resolution: "720p",
-      generateAudio: false,
-      outputGcsUri: `gs://${bucket.name}/${outputPrefix}`
-    }
+    prompt: promptSpec.prompt,
+    ...(references.firstFrame ? {
+      image: { gcsUri: references.firstFrame.gcsUri, mimeType: references.firstFrame.mimeType }
+    } : {}),
+    config
   });
   let polls = 0;
   while (!operation.done && polls < 170) {
@@ -218,8 +286,10 @@ async function processVideoJob(job, ref) {
     downloadUrl: tokenDownloadUrl(bucket.name, storagePath, videoToken),
     storagePath,
     mimeType: String(video?.mimeType || "video/mp4"),
-    durationSec: Math.max(4, Math.min(8, Number(input.durationSec || input.targetDurationSec || 8) || 8)),
+    durationSec: promptSpec.durationSeconds,
     model: normalizeModel(job.model, DEFAULT_VEO_MODEL),
+    promptVersion: promptSpec.promptVersion,
+    referenceMode: references.mode,
     updatedAt: new Date().toISOString()
   };
   await ref.set({ status: "ready", stage: "ready", progress: 1, hint: "Video listo.", result: { dialogueVideo }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
@@ -433,6 +503,8 @@ module.exports = {
   publicAiJob,
   extractInteractionAudio,
   buildLyriaInteractionRequest,
+  normalizeOwnedReferencePath,
+  resolveVertexVideoReferences,
   registerVeoRoutes,
   registerGeminiJobRoutes,
   registerAiJobStatusRoute,

@@ -1913,8 +1913,12 @@ export class PodcasterPlaybackController extends EventEmitter {
         await audio.play();
         audio.dataset.playbackStarted = "true";
         return true;
-      } catch (_) {
+      } catch (error) {
         audio.dataset.playbackStarted = "false";
+        this.emitMediaTelemetry("background-audio-play-failed", {
+          name: String(error?.name || "Error"),
+          message: String(error?.message || "No se pudo iniciar el audio de fondo.")
+        });
         return false;
       }
     };
@@ -3292,8 +3296,13 @@ export class PodcasterPlaybackController extends EventEmitter {
             if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
               audio.playbackRate = effectiveRate;
             }
-          }).catch(() => {
+          }).catch((error) => {
             audio.dataset.playPending = "";
+            this.emitMediaTelemetry("dialogue-audio-play-failed", {
+              rowId,
+              name: String(error?.name || "Error"),
+              message: String(error?.message || "No se pudo iniciar la voz.")
+            });
           });
         };
         audio.dataset.playIntent = playIntent;

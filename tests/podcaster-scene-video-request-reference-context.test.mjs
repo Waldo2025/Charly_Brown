@@ -41,8 +41,8 @@ assert.match(
 
 assert.match(
   source,
-  /text:\s*hasExternalDialogueAudio \? "" : String\(row\?\.text \|\| ""\)\.trim\(\)/,
-  "Si existe audio externo, el diálogo no debe enviarse al generador visual."
+  /text:\s*omitGeneratedDialogue \? "" : String\(row\?\.voiceOverText \|\| row\?\.text \|\| ""\)\.trim\(\)/,
+  "Si existe audio externo o se excluye el guion, la voz en off no debe enviarse al generador visual."
 );
 
 assert.match(

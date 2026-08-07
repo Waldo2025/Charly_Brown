@@ -13,7 +13,7 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.536";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.570";
 import { createPodcasterMediaRuntimeApi } from "../podcaster/podcaster-media-runtime.js?v=2026-1.0.10.539";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
@@ -4980,6 +4980,22 @@ async function abrirReproductorMultimedia(session) {
 
     multimediaPlaybackController.sync(session);
     multimediaPlaybackController.stop();
+
+    // Hydrate the voices for the opening window before the first user gesture.
+    // Safari/iOS and some Chromium privacy modes only allow audio elements that
+    // already exist when Play is pressed; creating them after an awaited media
+    // fetch can leave the timeline running silently.
+    try {
+      const initialDialogueRowIds = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session)
+        .filter((entry) => Math.max(0, Number(entry?.startMs || 0) || 0) < 15000)
+        .map((entry) => String(entry?.rowId || "").trim())
+        .filter(Boolean);
+      multimediaPlaybackController.prewarmDialogueAudioRows(session, initialDialogueRowIds).catch((error) => {
+        console.warn("[Dashboard] No se pudieron precargar todas las voces iniciales:", error);
+      });
+    } catch (error) {
+      console.warn("[Dashboard] No se pudo iniciar la precarga de voces:", error);
+    }
 
     // Asegurar cableado de guardar propuesta (por si se perdió el evento original)
     const btnSave = document.getElementById("btnSaveVisualProposal");

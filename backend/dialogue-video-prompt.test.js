@@ -97,15 +97,16 @@ test("overlay copy never leaks through neutral visual prose and duplicate direct
   assert.match(result.prompt, /Visible text: none\./);
 });
 
-test("individual caption sentences cannot leak when the stored caption has multiple sentences", () => {
+test("stored captions do not erase matching prose supplied independently as visual direction", () => {
   const result = buildDialogueVideoPromptBundle(createFixture({
     captionText: "Primera frase literal. Segunda frase literal.",
-    sceneDescription: "The host gestures while Primera frase literal appears in the visual concept.",
-    visualNotes: "The facade contains Segunda frase literal beside the door.",
+    sceneDescription: "The host gestures while Primera frase literal is discussed.",
+    visualNotes: "The host points to the second object while saying Segunda frase literal.",
     scenePrompt: "",
     videoDirective: ""
   }));
-  assert.doesNotMatch(result.prompt, /Primera frase literal|Segunda frase literal/);
+  assert.match(result.prompt, /Primera frase literal/);
+  assert.match(result.prompt, /Segunda frase literal/);
   assert.match(result.prompt, /Visible text: none\./);
 });
 
@@ -206,6 +207,57 @@ test("reference-only scene excludes the script and explicitly keeps the subject 
   assert.match(result.prompt, /subject remains silent with a closed, relaxed mouth/);
 });
 
+test("visualNotes is the required action while sceneDescription defines the setting", () => {
+  const result = buildDialogueVideoPromptBundle(createFixture({
+    sceneDescription: "A red vintage train waits at a mountain station.",
+    visualNotes: "The train starts moving and releases a short plume of steam.",
+    scenePrompt: "",
+    videoDirective: "",
+    performanceDirective: ""
+  }));
+
+  assert.match(result.prompt, /Subject and setting: A red vintage train waits at a mountain station\./);
+  assert.match(result.prompt, /Required action: The train starts moving and releases a short plume of steam\./);
+  assert.doesNotMatch(
+    result.prompt,
+    /Subject and setting:[^\n]*The train starts moving/,
+    "visualNotes no debe degradarse a descripción opcional del escenario"
+  );
+});
+
+test("overlay subtitle fields do not alter the Veo prompt", () => {
+  const base = createFixture({
+    sceneDescription: "A presenter walks through a modern gallery.",
+    visualNotes: "The presenter points toward a sculpture.",
+    text: "",
+    dialogueAudioStoragePath: "podcaster/audio/scene.wav",
+    headlineText: "SUBTITLE A",
+    captionText: "First editorial caption",
+    onScreenText: "LEGACY A"
+  });
+  const first = buildDialogueVideoPromptBundle(base);
+  const second = buildDialogueVideoPromptBundle({
+    ...base,
+    headlineText: "SUBTITLE B",
+    captionText: "Completely different editorial caption",
+    onScreenText: "LEGACY B"
+  });
+
+  assert.equal(first.prompt, second.prompt);
+  assert.doesNotMatch(first.prompt, /SUBTITLE|editorial caption|LEGACY/);
+});
+
+test("a first-frame reference is binding visual source for the requested action", () => {
+  const result = buildDialogueVideoPromptBundle(createFixture({
+    imageInputRole: "first_frame",
+    visualNotes: "The woman opens the blue umbrella and walks forward."
+  }));
+
+  assert.match(result.prompt, /exact visual source and opening frame/);
+  assert.match(result.prompt, /animate that same scene to perform the required action instead of redesigning it/);
+  assert.match(result.prompt, /Required action: The woman opens the blue umbrella and walks forward/);
+});
+
 test("HQ regeneration guidance is included after analysis and text directives remain sanitized", () => {
   const result = buildDialogueVideoPromptBundle(createFixture({
     regenerationAnalysis: {
@@ -242,11 +294,11 @@ test("scene visual fallback remains metadata without duplicating it in the provi
 
 test("image role guidance matches Omni role tags without generic contradictions", () => {
   const firstFrame = buildDialogueVideoPromptBundle(createFixture({ generator: "omni", imageInputRole: "first_frame" }));
-  assert.match(firstFrame.prompt, /supplied first-frame image as the opening frame/);
+  assert.match(firstFrame.prompt, /supplied first-frame image as the exact visual source and opening frame/);
   assert.doesNotMatch(firstFrame.prompt, /<FIRST_FRAME>|<IMAGE_REF_N>/);
 
   const references = buildDialogueVideoPromptBundle(createFixture({ generator: "omni", imageInputRole: "references" }));
-  assert.match(references.prompt, /reference images in input order/);
+  assert.match(references.prompt, /reference images as binding visual evidence/);
   assert.doesNotMatch(references.prompt, /<FIRST_FRAME>|<IMAGE_REF_N>/);
 });
 

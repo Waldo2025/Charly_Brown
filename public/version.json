@@ -1,8 +1,12 @@
 {
-  "version": "1.0.10.543",
-  "build": "2026-1.0.10.548",
+  "version": "1.0.10.544",
+  "build": "2026-1.0.10.549",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Veo usa una imagen única de escena como fotograma inicial vinculante, conserva composición y apariencia, y ejecuta visualNotes como acción obligatoria sobre la escena definida por sceneDescription.",
+    "Corregido: onScreenText, headlineText y captionText quedan fuera del prompt de video; solo inSceneText solicita texto visible generado por Veo y voiceOverText se omite cuando está activa la exclusión de guion.",
+    "Corregido: video-player precarga las voces iniciales antes del primer Play, carga la revisión vigente del controlador, registra rechazos de audio y el botón Actualizar sitio limpia medios antes de recargar la página.",
+    "Corregido: Los usuarios autenticados pueden leer audit_events de sesiones Podcaster para abrir el reporte sin Missing or insufficient permissions.",
     "Corregido: El contador de tiempo total se inicia en la ruta FFmpeg v2 realmente usada por el modal, desde el primer paso de preparación hasta el resultado final.",
     "Corregido: El modal de exportación asocia el nombre del archivo con la sesión activa y lo rehidrata al cambiar de sesión, conservando personalizaciones dentro de la misma sesión.",
     "Añadido: El estado de exportación muestra un contador de tiempo total desde la preparación hasta que el trabajo termina, falla o se cancela.",
@@ -475,6 +479,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.539",
+  "cache_version": "2026-1.0.10.549",
   "updated_at": "2026-07-20T00:00:00.000Z"
 }

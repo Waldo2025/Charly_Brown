@@ -15,7 +15,7 @@ import {
   startMontageExportElapsedTimer,
   stopMontageExportElapsedTimer,
   stripMontageExportSubmissionPayload
-} from "./podcaster-montage-export.js?v=2026-1.0.10.548";
+} from "./podcaster-montage-export.js?v=2026-1.0.10.549";
 
 let montageExportV2SubmitLocked = false;
 

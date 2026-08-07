@@ -8861,7 +8861,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       console.warn(`[backend][${requestDebugTag}] reject 400 missing speakerLabel`, { sessionId, rowId });
       return res.status(400).json({ error: "Falta speakerLabel." });
     }
-    if (!text && !dialogueAudioStoragePath && !dialogueAudioUrl) {
+    if (!excludeScriptFromVideoPrompt && !text && !dialogueAudioStoragePath && !dialogueAudioUrl) {
       console.warn(`[backend][${requestDebugTag}] reject 400 missing text and audio`, { sessionId, rowId, speakerLabel });
       return res.status(400).json({ error: "Falta texto de diálogo o audio externo." });
     }
@@ -9035,7 +9035,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       referenceType: "asset"
     }));
     const hasSceneReference = sceneReferenceImages.length > 0;
-    const useSceneReferenceAsInitImage = hasSceneReference && !strictIdentity;
+    // A single scene reference without a separate portrait is an image-to-video
+    // source, not merely a loose style reference. Veo follows composition and
+    // appearance much more faithfully when it receives that image as frame 1.
+    const useSceneReferenceAsInitImage = sceneReferenceImages.length === 1
+      && !strictIdentity
+      && !hasPortraitAsset;
     let sceneReferenceVideoFrameBase64 = "";
     let sceneReferenceVideoFrameMimeType = "image/png";
     let sceneReferenceVideoInput = null;
@@ -9222,7 +9227,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       ? "video_extension"
       : (resolvedGenerator === "omni"
         ? (estimatedProviderImageCount === 1 && !strictIdentity ? "first_frame" : (estimatedProviderImageCount > 0 ? "references" : "none"))
-        : ((sceneReferenceVideoFrameBase64 || continuityFrameBase64 || explicitLastFrameRequested)
+        : ((sceneReferenceVideoFrameBase64 || continuityFrameBase64 || explicitLastFrameRequested || useSceneReferenceAsInitImage)
           ? "first_frame"
           : (estimatedProviderImageCount > 0 ? "references" : "none")));
     const timelineScenePromptOptions = {
@@ -9417,7 +9422,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       ? null
       : (sceneReferenceVideoFrameBase64
         ? { data: sceneReferenceVideoFrameBase64, mimeType: sceneReferenceVideoFrameMimeType }
-        : (continuityFrameBase64 ? { data: continuityFrameBase64, mimeType: continuityFrameMimeType } : null));
+        : (continuityFrameBase64
+          ? { data: continuityFrameBase64, mimeType: continuityFrameMimeType }
+          : (useSceneReferenceAsInitImage ? (providerImages[sceneProviderImageStartIndex] || null) : null)));
     if (explicitLastFrame && !firstFrame) {
       firstFrame = providerImages[sceneProviderImageStartIndex] || providerImages[0] || null;
     }
