@@ -1,6 +1,6 @@
 {
   "version": "1.0.10.543",
-  "build": "2026-1.0.10.545",
+  "build": "2026-1.0.10.546",
   "branch": "codex-bootstrap",
   "changelog": [
     "Mejorado: La exportación muestra etapas claras para el usuario y oculta términos técnicos de FFmpeg, polling, assets y workers en el modal y la tarjeta flotante.",
