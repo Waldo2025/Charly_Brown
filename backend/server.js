@@ -1931,6 +1931,10 @@ const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = Math.max(
   60 * 1000,
   Number(process.env.MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS || 6 * 60 * 1000) || 6 * 60 * 1000
 );
+const MONTAGE_EXPORT_FINAL_ENCODE_TIMEOUT_MS = Math.max(
+  MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+  Number(process.env.MONTAGE_EXPORT_FINAL_ENCODE_TIMEOUT_MS || 15 * 60 * 1000) || 15 * 60 * 1000
+);
 const MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS = Math.max(
   5 * 1000,
   Number(process.env.MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS || 15 * 1000) || 15 * 1000
@@ -15353,6 +15357,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         throwIfCancelled("montage_final_visuals");
         await runFfmpegCommand(finalVisualArgs, {
           stage: "montage_final_visuals",
+          timeoutMs: MONTAGE_EXPORT_FINAL_ENCODE_TIMEOUT_MS,
+          timeoutCode: "encode_visual_timeout",
           shouldAbort: () => shouldAbort(),
           registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
@@ -15402,7 +15408,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           deliveryOutPath
         ], {
           stage: "montage_encode_delivery",
-          timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+          timeoutMs: MONTAGE_EXPORT_FINAL_ENCODE_TIMEOUT_MS,
           timeoutCode: "encode_delivery_timeout",
           shouldAbort: () => shouldAbort(),
           registerAbortHandler: context?.registerAbortHandler,
@@ -15467,7 +15473,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         deliveryOutPath
       ], {
         stage: "montage_encode_delivery",
-        timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+        timeoutMs: MONTAGE_EXPORT_FINAL_ENCODE_TIMEOUT_MS,
         timeoutCode: "encode_delivery_timeout",
         shouldAbort: () => shouldAbort(),
         registerAbortHandler: context?.registerAbortHandler,
