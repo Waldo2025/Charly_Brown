@@ -1,8 +1,9 @@
 {
   "version": "1.0.10.543",
-  "build": "2026-1.0.10.547",
+  "build": "2026-1.0.10.548",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El contador de tiempo total se inicia en la ruta FFmpeg v2 realmente usada por el modal, desde el primer paso de preparación hasta el resultado final.",
     "Corregido: El modal de exportación asocia el nombre del archivo con la sesión activa y lo rehidrata al cambiar de sesión, conservando personalizaciones dentro de la misma sesión.",
     "Añadido: El estado de exportación muestra un contador de tiempo total desde la preparación hasta que el trabajo termina, falla o se cancela.",
     "Mejorado: La exportación muestra etapas claras para el usuario y oculta términos técnicos de FFmpeg, polling, assets y workers en el modal y la tarjeta flotante.",

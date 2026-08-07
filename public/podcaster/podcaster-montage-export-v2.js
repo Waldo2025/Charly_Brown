@@ -12,8 +12,10 @@ import {
   setMontageExportDownloadButton,
   setMontageExportProgress,
   setMontageExportStatus,
+  startMontageExportElapsedTimer,
+  stopMontageExportElapsedTimer,
   stripMontageExportSubmissionPayload
-} from "./podcaster-montage-export.js?v=2026-1.0.10.547";
+} from "./podcaster-montage-export.js?v=2026-1.0.10.548";
 
 let montageExportV2SubmitLocked = false;
 
@@ -152,6 +154,7 @@ export async function runMontageExportV2() {
     const builtRuntimeEntries = window.buildTimelineRuntimeEntries?.(session);
     const runtimeEntries = Array.isArray(builtRuntimeEntries) ? builtRuntimeEntries : [];
     resetMontageExportJobState();
+    startMontageExportElapsedTimer();
     clearMontageExportPolling();
     setMontageExportBusy(true, {
       progress: 0.03,
@@ -172,6 +175,7 @@ export async function runMontageExportV2() {
     if (!prepared?.ok || !prepared?.payload) {
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
       setMontageExportBusy(false, { label: "Exportar" });
+      stopMontageExportElapsedTimer();
       return;
     }
     const onlyAudio = prepared.payload?.onlyAudio === true;
@@ -191,6 +195,7 @@ export async function runMontageExportV2() {
         { tone: "error" }
       );
       setMontageExportBusy(false, { label: "Exportar" });
+      stopMontageExportElapsedTimer();
       return;
     }
     const previewRuntime = buildPreviewRuntimeSnapshot(session, runtimeEntries);
@@ -250,7 +255,7 @@ export async function runMontageExportV2() {
     if (!jobId) throw new Error("montage_export_v2_job_missing");
     const activeJobState = window.montageExportJobState || {};
     activeJobState.jobId = jobId;
-    activeJobState.startedAtMs = Date.now();
+    activeJobState.startedAtMs = activeJobState.startedAtMs || Date.now();
     activeJobState.lastStage = String(data?.stage || "").trim();
     activeJobState.lastHint = String(data?.hint || "").trim();
     activeJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
@@ -278,6 +283,9 @@ export async function runMontageExportV2() {
       { tone: "error" }
     );
     setMontageExportBusy(false, { label: "Exportar" });
+    if (!String(window.montageExportJobState?.jobId || "").trim()) {
+      stopMontageExportElapsedTimer();
+    }
   } finally {
     montageExportV2SubmitLocked = false;
   }

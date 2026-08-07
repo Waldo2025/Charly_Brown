@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
+const v2Source = readFileSync(new URL("../public/podcaster/podcaster-montage-export-v2.js", import.meta.url), "utf8");
 
 function extractFunction(name) {
   const signature = `function ${name}`;
@@ -97,4 +98,13 @@ test("export elapsed timer starts, renders and freezes the total duration", () =
   assert.equal(context.window.montageExportJobState.elapsedTimerId, null);
   assert.equal(context.window.montageExportJobState.completedAtMs, 61_000);
   assert.equal(context.window.els.montageExportElapsedTime.textContent, "Tiempo total · 00:01:00");
+});
+
+test("the active FFmpeg v2 export path starts the total-duration timer before preparation", () => {
+  assert.match(v2Source, /startMontageExportElapsedTimer[\s\S]*?export async function runMontageExportV2/);
+  assert.match(
+    v2Source,
+    /resetMontageExportJobState\(\);\s*startMontageExportElapsedTimer\(\);\s*clearMontageExportPolling\(\);/
+  );
+  assert.match(v2Source, /activeJobState\.startedAtMs = activeJobState\.startedAtMs \|\| Date\.now\(\);/);
 });
