@@ -94,10 +94,14 @@ export function createPodcasterTimelineUiApi(deps = {}) {
   let podcastTimelinePreviewSyncPayload = null;
 
   let cachedLaneOffsetPx = null;
+  let cachedLaneOffsetCanvas = null;
+  let cachedLaneTrackLabelWidth = null;
   let lastLaneOffsetCheckTime = 0;
 
   window.addEventListener("resize", () => {
     cachedLaneOffsetPx = null;
+    cachedLaneOffsetCanvas = null;
+    cachedLaneTrackLabelWidth = null;
     lastLaneOffsetCheckTime = 0;
   }, { passive: true });
 
@@ -395,7 +399,11 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     }
     const now = Date.now();
     const playheadDragging = podcastVideoState && podcastVideoState.playheadDragging;
-    if (cachedLaneOffsetPx !== null && (playheadDragging || (now - lastLaneOffsetCheckTime < 250))) {
+    const trackLabelWidth = Number(canvas.dataset.trackLabelWidth || 0);
+    const canReuseCachedOffset = cachedLaneOffsetPx !== null
+      && cachedLaneOffsetCanvas === canvas
+      && cachedLaneTrackLabelWidth === trackLabelWidth;
+    if (canReuseCachedOffset && (playheadDragging || (now - lastLaneOffsetCheckTime < 250))) {
       return cachedLaneOffsetPx;
     }
     const allLanes = Array.from(els.podcastVideoTimeline.querySelectorAll(".podcast-video-track-lane[data-track-id][data-track-index]"));
@@ -408,6 +416,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const laneRect = lane.getBoundingClientRect();
     const offsetPx = Math.max(0, Math.round(laneRect.left - canvasRect.left));
     cachedLaneOffsetPx = offsetPx;
+    cachedLaneOffsetCanvas = canvas;
+    cachedLaneTrackLabelWidth = trackLabelWidth;
     lastLaneOffsetCheckTime = now;
     if (offsetPx > 0) {
       canvas.dataset.playheadOffset = String(offsetPx);

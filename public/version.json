@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.545",
-  "build": "2026-1.0.10.550",
+  "version": "1.0.10.546",
+  "build": "2026-1.0.10.551",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El playhead de la primera escena usa desde el primer render el ancho real persistido de la columna de pistas y queda alineado con 0:00 durante reproducción y Stop.",
     "Corregido: Stop siempre devuelve el cursor y el playhead visual a 0:00; los ticks asíncronos anteriores ya no pueden restaurar una posición obsoleta.",
     "Corregido: El audio de fondo con fade in o fade out aplica la ganancia exacta de la posición del timeline y vuelve a escucharse tanto en podcaster como en video-player.",
     "Corregido: Veo usa una imagen única de escena como fotograma inicial vinculante, conserva composición y apariencia, y ejecuta visualNotes como acción obligatoria sobre la escena definida por sceneDescription.",
@@ -481,6 +482,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.550",
-  "updated_at": "2026-08-07T17:55:00.000Z"
+  "cache_version": "2026-1.0.10.551",
+  "updated_at": "2026-08-07T18:15:00.000Z"
 }

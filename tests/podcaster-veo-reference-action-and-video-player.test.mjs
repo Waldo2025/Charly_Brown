@@ -76,7 +76,7 @@ assert.match(
 );
 assert.match(
   playerHtml,
-  /cache-version-loader\.js\?v=2026-1\.0\.10\.550/,
+  /cache-version-loader\.js\?v=2026-1\.0\.10\.551/,
   "video-player debe forzar la build vigente."
 );
 assert.match(

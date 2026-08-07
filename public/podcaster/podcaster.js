@@ -58,7 +58,7 @@ import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=202
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-1.0.10.546";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js?v=2026-1.0.10.544";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -15201,6 +15201,15 @@ function setPodcastTrackLabelWidth(canvas, widthPx, shouldPersist = false) {
   canvas.style.setProperty("--pod-track-label-width", `${nextWidth}px`);
   canvas.style.setProperty("--pod-timeline-lane-offset", `${nextWidth}px`);
   canvas.dataset.trackLabelWidth = String(nextWidth);
+  // The resize handle is attached asynchronously after the timeline render.
+  // Recalculate immediately so the playhead cannot retain the default column
+  // width while the lanes already use the persisted user width.
+  syncPodcastTimelineLaneOffsetFromDom(getActiveSession());
+  syncPodcastTimelinePlayhead(getActiveSession(), {
+    currentMs: Math.max(0, Number(podcastVideoState.montageCursorMs || 0)),
+    lightweight: true,
+    suppressAutoScroll: true
+  });
   if (!shouldPersist) return;
   try {
     window.localStorage.setItem(PODCAST_TRACK_LABEL_WIDTH_KEY, String(nextWidth));

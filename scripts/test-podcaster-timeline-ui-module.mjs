@@ -6,7 +6,7 @@ const timelineUiModuleSource = fs.existsSync(timelineUiModulePath)
   ? fs.readFileSync(timelineUiModulePath, "utf8")
   : "";
 
-if (!/import\s+\{\s*createPodcasterTimelineUiApi\s*\}\s+from\s+"\.\/podcaster-timeline-ui\.js";/m.test(podcasterSource)) {
+if (!/import\s+\{\s*createPodcasterTimelineUiApi\s*\}\s+from\s+"\.\/podcaster-timeline-ui\.js(?:\?v=[^"]+)?";/m.test(podcasterSource)) {
   throw new Error("podcaster.js debe importar createPodcasterTimelineUiApi desde podcaster-timeline-ui.js.");
 }
 
