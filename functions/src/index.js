@@ -20,13 +20,14 @@ const { createLiveTicket } = require("./live-tickets.js");
 const { dispatchMontageToCloudRun } = require("./montage-dispatch.js");
 const { registerVeoRoutes, registerGeminiJobRoutes, registerAiJobStatusRoute, dispatchAiJob } = require("./ai-jobs.js");
 const { monitorStalePodcasterJobs } = require("./stale-job-monitor.js");
+const { registerAnalizarPdfDataRoutes } = require("./analizar-pdf-data.js");
 
 const TASK_INVOKER_EMAIL = "charly-tasks-invoker@charly-brown.iam.gserviceaccount.com";
 
-function createApp(service, health = {}) {
+function createApp(service, health = {}, options = {}) {
   const app = express();
   installCommonMiddleware(app, { service });
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: options.jsonLimit || "1mb" }));
   app.get("/api/health", (_req, res) => res.status(200).json({ ok: true, service, provider: "google-cloud", ...health }));
   return app;
 }
@@ -79,6 +80,14 @@ const assetApp = createApp("asset-api");
 registerAssetRoutes(assetApp);
 installErrorHandler(assetApp, { service: "asset-api" });
 
+const analizarPdfApp = createApp("analizar-pdf-api", {
+  sessions: true,
+  styleMappings: true,
+  provider: "google-cloud"
+}, { jsonLimit: "20mb" });
+registerAnalizarPdfDataRoutes(analizarPdfApp);
+installErrorHandler(analizarPdfApp, { service: "analizar-pdf-api" });
+
 exports.podcasterApi = onRequest({
   region: REGION,
   serviceAccount: "charly-functions-core@charly-brown.iam.gserviceaccount.com",
@@ -118,6 +127,16 @@ exports.assetApi = onRequest({
   maxInstances: 20,
   concurrency: 80
 }, assetApp);
+
+exports.analizarPdfApi = onRequest({
+  region: REGION,
+  serviceAccount: "charly-functions-core@charly-brown.iam.gserviceaccount.com",
+  memory: "1GiB",
+  timeoutSeconds: 120,
+  minInstances: 0,
+  maxInstances: 10,
+  concurrency: 20
+}, analizarPdfApp);
 
 const montageTaskApp = createApp("montage-dispatch");
 montageTaskApp.post("/", asyncRoute(async (req, res) => {

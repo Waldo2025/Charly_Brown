@@ -84,7 +84,18 @@ function installCommonMiddleware(app, { service }) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,PUT,DELETE,OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Request-Id");
+      res.setHeader("Access-Control-Allow-Headers", [
+        "Authorization",
+        "Content-Type",
+        "X-Request-Id",
+        "X-Session-Id",
+        "X-Revision-Id",
+        "X-File-Id",
+        "X-File-Name",
+        "X-Mapping-Id",
+        "X-Use-Stored-Source",
+        "X-Local-Analysis-Context"
+      ].join(","));
       res.setHeader("Access-Control-Max-Age", "3600");
     }
     if (req.method === "OPTIONS") return res.status(204).end();
