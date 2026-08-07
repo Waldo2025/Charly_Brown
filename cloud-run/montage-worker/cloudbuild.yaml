@@ -15,7 +15,7 @@ steps:
       - /bin/sh
       - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
       - -c
-      - test -f public/podcaster/podcaster-on-screen-text.js && node -e "require('./public/podcaster/podcaster-text-render.js')" && node backend/scripts/install-playwright-chromium.js --verify-only && ffmpeg -hide_banner -filters 2>&1 | grep -q drawtext && node --check backend/workers/podcaster-montage-cloud-run-job.js
+      - test -f public/podcaster/logo.png && test -f public/podcaster/podcaster-on-screen-text.js && node -e "require('./public/podcaster/podcaster-text-render.js')" && node backend/scripts/install-playwright-chromium.js --verify-only && ffmpeg -hide_banner -filters 2>&1 | grep -q drawtext && node --check backend/workers/podcaster-montage-cloud-run-job.js
 images:
   - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/montage-worker:${_TAG}
 substitutions:

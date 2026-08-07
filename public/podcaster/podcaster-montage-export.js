@@ -47,7 +47,7 @@ let montageExportDownloadHistory = [];
 let montageExportDownloadHistorySessionId = "";
 const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   enabled: true,
-  assetPath: "public/podcaster/logo.png",
+  assetPath: "podcaster/logo.png",
   position: "top-right",
   marginPct: 0.025,
   widthPct: 0.05,

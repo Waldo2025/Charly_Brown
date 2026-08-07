@@ -13493,21 +13493,18 @@ function resolveBrandOverlayAssetPath(assetPathRaw = "") {
   }
   const cleanPath = inputPath.replace(/^[/\\]+/g, "");
   if (!cleanPath) return "";
+  const publicRelativePath = cleanPath.replace(/^public[/\\]+/i, "");
   const candidates = [
-    path.resolve(PUBLIC_ROOT, cleanPath),
+    path.resolve(PUBLIC_ROOT, publicRelativePath),
     path.resolve(REPO_ROOT, cleanPath),
     path.resolve(process.cwd(), cleanPath),
-    path.resolve(process.cwd(), "public", cleanPath)
+    path.resolve(process.cwd(), "public", publicRelativePath)
   ];
   for (const cand of candidates) {
     const resolved = path.resolve(cand);
     if (fs.existsSync(resolved) && (resolved === REPO_ROOT || resolved.startsWith(`${REPO_ROOT}${path.sep}`))) {
       return resolved;
     }
-  }
-  const fallback = path.resolve(PUBLIC_ROOT, cleanPath);
-  if (fallback === REPO_ROOT || fallback.startsWith(`${REPO_ROOT}${path.sep}`)) {
-    return fallback;
   }
   return "";
 }
@@ -14263,13 +14260,24 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediatePaths = [];
     const exportedEntries = [];
     let globalCanvas = null;
-    const resolvedInlineBrandOverlayPath = input.brandOverlay?.enabled === true
+    const wantsBrandOverlay = input.exportMode === "normal"
+      && input.onlyAudio !== true
+      && input.brandOverlay?.enabled === true;
+    const resolvedInlineBrandOverlayPath = wantsBrandOverlay
       ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath)
       : "";
+    if (wantsBrandOverlay && (!resolvedInlineBrandOverlayPath || !fs.existsSync(resolvedInlineBrandOverlayPath))) {
+      const err = new Error("brand_overlay_asset_missing");
+      err.code = "brand_overlay_asset_missing";
+      err.status = 422;
+      err.detail = {
+        assetPath: String(input.brandOverlay?.assetPath || "").trim(),
+        resolvedAssetPath: resolvedInlineBrandOverlayPath || ""
+      };
+      throw err;
+    }
     const shouldInlineSceneBrandOverlay = Boolean(
-      input.exportMode === "normal"
-      && resolvedInlineBrandOverlayPath
-      && fs.existsSync(resolvedInlineBrandOverlayPath)
+      wantsBrandOverlay && resolvedInlineBrandOverlayPath
     );
     const emitSceneSubstage = ({
       sceneIndex = 0,
