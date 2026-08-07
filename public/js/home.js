@@ -13,7 +13,7 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.571";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.572";
 import { createPodcasterMediaRuntimeApi } from "../podcaster/podcaster-media-runtime.js?v=2026-1.0.10.539";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
@@ -3114,8 +3114,6 @@ function getVideoPlayerReviewManager() {
 
 const storage = getStorage(app);
 const multimediaPlaybackController = new PodcasterPlaybackController();
-let homeStageVideoLoadTokenSeq = 0;
-const homeStageVideoLoadTokensByEl = new WeakMap();
 const multimediaMediaRuntimeApi = createPodcasterMediaRuntimeApi({
   buildApiUrlPreferRemote,
   buildApiUrl
@@ -3248,6 +3246,22 @@ function resolveStorageAudioUrl(downloadUrl, storagePath) {
   } catch (_) {
     return clean;
   }
+}
+
+async function resolveAuthorizedAssetUrl(proxyUrl = "") {
+  const clean = String(proxyUrl || "").trim();
+  if (!clean) return "";
+
+  const parsed = new URL(clean, window.location.origin);
+  const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
+  if (!storagePath) return clean;
+
+  const data = await authFetchJson(
+    `/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`
+  );
+  const signedUrl = String(data?.url || "").trim();
+  if (!signedUrl) throw new Error("signed_asset_url_missing");
+  return signedUrl;
 }
 
 const HOME_TIMELINE_MIN_CLIP_MS = 500;
@@ -4120,82 +4134,22 @@ const multimediaPlaybackDeps = {
   },
   resolveFirebaseStorageUrl: async (gsPath) => {
     if (!gsPath) return "";
+    const storagePath = String(gsPath || "")
+      .replace(/^gs:\/\/[^/]+\//i, "")
+      .replace(/^\/+/, "")
+      .trim();
+    if (!storagePath) return "";
     try {
-      const proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`);
-      if (proxyUrl) {
-        return proxyUrl;
-      }
-      return gsPath;
-    } catch (e) {
-      return gsPath;
+      return await getDownloadURL(ref(storage, storagePath));
+    } catch (_) {
+      return buildApiUrlPreferRemote(
+        `/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`
+      );
     }
   },
-  setPodcastStageVideoSourceForElement: async (el, url, options = {}) => {
-    if (!el || !url) return false;
-    const cleanUrl = String(url || "").trim();
-    if (!cleanUrl) return false;
-    const loadToken = ++homeStageVideoLoadTokenSeq;
-    homeStageVideoLoadTokensByEl.set(el, loadToken);
-
-    if (String(el.dataset.src || "").trim() === cleanUrl && el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-      el.hidden = options.keepHidden === true;
-      return true;
-    }
-
-    let preferredSource = "";
-    try {
-      preferredSource = multimediaPlaybackController.getBlobUrlSync(cleanUrl) || "";
-      if (!preferredSource) {
-        preferredSource = await multimediaPlaybackController.getBlobUrl(cleanUrl);
-      }
-    } catch (_) {
-      preferredSource = "";
-    }
-    preferredSource = String(preferredSource || cleanUrl).trim();
-
-    try {
-      const sourceUrl = new URL(preferredSource, window.location.origin);
-      if (sourceUrl.origin === window.location.origin) {
-        el.removeAttribute("crossorigin");
-      } else {
-        el.crossOrigin = "anonymous";
-      }
-    } catch (_) {
-      el.removeAttribute("crossorigin");
-    }
-
-    return new Promise((resolve) => {
-      el.dataset.src = cleanUrl;
-      el.src = preferredSource;
-      el.hidden = options.keepHidden === true;
-      el.preload = "auto";
-      try { el.load(); } catch (_) { }
-
-      let hasResolved = false;
-      const cleanup = () => {
-        el.onloadeddata = null;
-        el.oncanplay = null;
-        el.onerror = null;
-      };
-      const onDone = (ready = true) => {
-        if (hasResolved) return;
-        hasResolved = true;
-        cleanup();
-        const stillExpected = (
-          homeStageVideoLoadTokensByEl.get(el) === loadToken
-          && String(el.dataset.src || "").trim() === cleanUrl
-        );
-        const hasData = el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-        resolve(Boolean(ready) && stillExpected && hasData);
-      };
-
-      el.onloadeddata = () => onDone(true);
-      el.oncanplay = () => onDone(true);
-      el.onerror = () => onDone(false);
-
-      setTimeout(() => onDone(true), 3500);
-    });
-  },
+  setPodcastStageVideoSourceForElement: (video, url, options = {}) => (
+    multimediaPlaybackController.setStageVideoSourceForElement(video, url, options)
+  ),
   setActiveStageVideoSlot: (slot) => { homePlaybackState.stageVideoSlot = slot; },
   podcastVideoState: homePlaybackState,
   isDashboard: true,
@@ -4595,6 +4549,7 @@ const multimediaPlaybackDeps = {
   },
   resolveDialogueAudioPlaybackRate: (s, rowId) => resolveDialogueAudioPlaybackRate(s, rowId),
   resolveStorageAudioUrl: (url, path) => resolveStorageAudioUrl(url, path),
+  resolveAuthorizedAssetUrl,
   markStaleProxyMediaUrl,
   ensureTimelineClipsByRowId: (s) => s?.timelineClipMap || s?.podcastStudioUiState?.timelineClipsByRowId || {},
   resolveTimelineClipMix: (s, rowId) => resolveTimelineClipMix(s, rowId),

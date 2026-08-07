@@ -4342,8 +4342,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       try {
         const sourceLoadResult = await this.setStageVideoSourceForElement(activeEl, entry.videoSrc, {
           noWait: false,
-          keepHidden: false,
-          forcePersistent: true
+          keepHidden: false
         });
         if (!sourceLoadResult || switchToken !== this.stageSwitchSeq) return;
         if (activeEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
@@ -4399,9 +4398,13 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     if (mode === "blur-backdrop" && entry.videoSrc) {
       if (backdrop.dataset.src !== entry.videoSrc) {
-        const blobUrl = this.getBlobUrlSync(entry.videoSrc) || entry.videoSrc;
-        backdrop.src = blobUrl;
-        backdrop.dataset.src = entry.videoSrc;
+        const resolvedSource = this.getBlobUrlSync(entry.videoSrc);
+        if (resolvedSource) {
+          void this.setStageVideoSourceForElement(backdrop, entry.videoSrc, {
+            noWait: true,
+            keepHidden: false
+          });
+        }
       }
       
       let targetSeekSec = offsetSec;
@@ -4945,7 +4948,12 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
     this.podcastStageVideoPreloader.removeAttribute("crossorigin");
     const cachedObjectUrl = this.getBlobUrlSync(cleanSrc);
-    const preloadSrc = cachedObjectUrl || cleanSrc;
+    const preloadSrc = String(
+      cachedObjectUrl || await this.getBlobUrl(cleanSrc, {
+        persistent: this.shouldPersistStageVideoSource(cleanSrc)
+      }) || ""
+    ).trim();
+    if (!preloadSrc) return false;
     if (this.podcastStageVideoPreloadSrc !== preloadSrc || this.podcastStageVideoPreloader.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       this.podcastStageVideoPreloadSrc = preloadSrc;
       this.podcastStageVideoPreloader.src = preloadSrc;
@@ -5300,23 +5308,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       setPortrait?.(false);
       const currentSrc = String(stageVideo.dataset.src || "").trim();
-      if (opts.force || currentSrc !== src) {
-        const cachedObjectUrl = this.getBlobUrlSync(src);
-        const preferredSource = cachedObjectUrl || src;
-        const sourceChanged = this.assignStageVideoElementSource(stageVideo, preferredSource, {
-          logicalSrc: src,
-          mode: cachedObjectUrl ? "cache" : "direct",
-          cacheKey: src,
-          rowId: key
+      if ((opts.force || currentSrc !== src) && this.stageMachine.loadingSrc !== src) {
+        this.stageMachine.loadingSrc = src;
+        void this.setStageVideoSourceForElement(stageVideo, src, {
+          noWait: true,
+          keepHidden: false
+        }).finally(() => {
+          if (this.stageMachine.loadingSrc === src) this.stageMachine.loadingSrc = "";
         });
-        if (sourceChanged) {
-          try { stageVideo.load(); } catch (_) { }
-        }
-        if (this.isSameOriginMediaUrl(src)) {
-          stageVideo.removeAttribute("crossorigin");
-        } else {
-          stageVideo.crossOrigin = "anonymous";
-        }
       }
       stageVideo.hidden = false;
       this.applyEntryVisualStateToSurface(stageEntry, stageVideo);
@@ -5325,15 +5324,11 @@ export class PodcasterPlaybackController extends EventEmitter {
         const currentBackdropSrc = String(stageBackdrop.dataset.src || "").trim();
         if (visualLayoutMode === "blur-backdrop" && currentBackdropSrc !== src) {
           const cachedBackdropObjectUrl = this.getBlobUrlSync(src);
-          const preferredBackdropSource = cachedBackdropObjectUrl || src;
-          const backdropSourceChanged = this.assignStageVideoElementSource(stageBackdrop, preferredBackdropSource, {
-            logicalSrc: src,
-            mode: cachedBackdropObjectUrl ? "cache" : "direct",
-            cacheKey: src,
-            rowId: key
-          });
-          if (backdropSourceChanged) {
-            try { stageBackdrop.load(); } catch (_) { }
+          if (cachedBackdropObjectUrl) {
+            void this.setStageVideoSourceForElement(stageBackdrop, src, {
+              noWait: true,
+              keepHidden: false
+            });
           }
         }
         stageBackdrop.hidden = visualLayoutMode !== "blur-backdrop";
