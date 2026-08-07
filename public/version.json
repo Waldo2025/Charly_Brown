@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.542",
-  "build": "2026-1.0.10.542",
+  "version": "1.0.10.543",
+  "build": "2026-1.0.10.543",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El polling del export FFmpeg v2 vuelve a enviar el Firebase ID token al endpoint privado export-status y fuerza la carga de los módulos de montaje 1.0.10.543, evitando 401 auth_required después de crear el job.",
     "Corregido: Las Functions validan firma, audiencia y expiración de Firebase ID tokens sin requerir permisos administrativos de revocación incompatibles con las cuentas de servicio de mínimo privilegio.",
     "Corregido: Los medios privados de sesiones se autentican primero y luego se reproducen mediante una URL firmada temporal de Google Cloud Storage, sin enviar tokens Firebase dentro del src de video o imagen.",
     "Corregido: En localhost Podcaster espera la configuración remota, usa el canal Firebase preview y reproduce URLs tokenizadas de Storage directamente sin construir proxy-media en el puerto estático.",

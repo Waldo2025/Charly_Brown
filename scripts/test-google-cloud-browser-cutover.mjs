@@ -50,6 +50,7 @@ const apiClientSource = read("public/js/api-client.js");
 const mediaRuntimeSource = read("public/podcaster/podcaster-media-runtime.js");
 const playbackControllerSource = read("public/podcaster/podcaster-playback-controller.js");
 const runtimeConfigLoaderSource = read("public/js/runtime-config-loader.js");
+const montageExportSource = read("public/podcaster/podcaster-montage-export.js");
 
 assert.match(podcasterHtml, /data-cache-href=["']podcaster\.css/);
 assert.match(podcasterCss, /is-snoopy-editor-light-theme/);
@@ -70,6 +71,11 @@ assert.match(playbackControllerSource, /requiresAuthorizedAssetResolution/);
 assert.match(podcasterSource, /\/api\/assets\/signed-url\?storagePath=/);
 assert.match(runtimeConfigLoaderSource, /window\.__CHARLY_RUNTIME_CONFIG_READY__ = \(async \(\) =>/);
 assert.match(podcasterSource, /await window\.__CHARLY_RUNTIME_CONFIG_READY__/);
+assert.match(
+  montageExportSource,
+  /authFetchJson\(exportStatusUrl,\s*\{\s*auth:\s*true,\s*preferRemote:\s*false/s,
+  "El polling privado de export-status debe conservar el Firebase ID token."
+);
 
 globalThis.window = { location: { origin: "http://127.0.0.1:5010" } };
 const mediaRuntimeModule = await import(`data:text/javascript;base64,${Buffer.from(mediaRuntimeSource).toString("base64")}`);

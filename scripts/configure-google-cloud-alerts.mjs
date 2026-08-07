@@ -14,6 +14,20 @@ const projectId = "charly-brown";
 const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
 const client = await auth.getClient();
 
+const channelList = await client.request({
+  url: `https://monitoring.googleapis.com/v3/projects/${projectId}/notificationChannels`,
+  params: { pageSize: 1000 }
+});
+const notificationChannels = (channelList.data.notificationChannels || [])
+  .filter((channel) => channel.type === "email" && channel.enabled !== false)
+  .map((channel) => channel.name)
+  .filter(Boolean);
+
+if (!notificationChannels.length) {
+  throw new Error("No hay ningún canal de correo habilitado en Cloud Monitoring.");
+}
+console.log(`[alerts] canales de correo activos: ${notificationChannels.length}`);
+
 const logMetrics = [
   {
     name: "podcaster_heartbeat_expired",
@@ -93,16 +107,29 @@ const policies = [
 ];
 
 const list = await client.request({ url: `https://monitoring.googleapis.com/v3/projects/${projectId}/alertPolicies`, params: { pageSize: 1000 } });
-const existing = new Set((list.data.alertPolicies || []).map((item) => item.displayName));
+const existing = new Map((list.data.alertPolicies || []).map((item) => [item.displayName, item]));
 for (const policy of policies) {
-  if (existing.has(policy.displayName)) {
-    console.log(`[alerts] política existente: ${policy.displayName}`);
+  const currentPolicy = existing.get(policy.displayName);
+  if (currentPolicy) {
+    const currentChannels = new Set(currentPolicy.notificationChannels || []);
+    const missingChannels = notificationChannels.filter((name) => !currentChannels.has(name));
+    if (!missingChannels.length) {
+      console.log(`[alerts] política existente con correo: ${policy.displayName}`);
+      continue;
+    }
+    await client.request({
+      url: `https://monitoring.googleapis.com/v3/${currentPolicy.name}`,
+      method: "PATCH",
+      params: { updateMask: "notification_channels" },
+      data: { ...currentPolicy, notificationChannels }
+    });
+    console.log(`[alerts] correo asociado: ${policy.displayName}`);
     continue;
   }
   await client.request({
     url: `https://monitoring.googleapis.com/v3/projects/${projectId}/alertPolicies`,
     method: "POST",
-    data: { ...policy, combiner: "OR", enabled: true, alertStrategy: { autoClose: "1800s" } }
+    data: { ...policy, combiner: "OR", enabled: true, notificationChannels, alertStrategy: { autoClose: "1800s" } }
   });
   console.log(`[alerts] política creada: ${policy.displayName}`);
 }

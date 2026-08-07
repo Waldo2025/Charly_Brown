@@ -23,6 +23,7 @@ const PREVIEW_BASE = process.env.CHARLY_PHASE5_BASE_URL
   || "https://charly-brown--google-cloud-phase4-mucp5w2o.web.app";
 const runExtendedJobs = process.argv.includes("--extended");
 const jobsOnly = process.argv.includes("--jobs-only");
+const montageOnly = process.argv.includes("--montage-only");
 const firebaseConfigSource = fs.readFileSync(path.join(root, "public/js/firebase-web-config.js"), "utf8");
 const apiKey = firebaseConfigSource.match(/apiKey:\s*["']([^"']+)["']/)?.[1] || "";
 assert.ok(apiKey, "No se encontró Firebase Web API key pública.");
@@ -183,7 +184,7 @@ try {
 
   const health = await api("/api/health", { auth: false });
   assert.equal(health.data.provider, "google-cloud");
-  logCheck("Hosting preview -> Functions");
+  logCheck("Hosting base -> Functions");
 
   const now = new Date().toISOString();
   await api("/api/podcaster/sessions/save", {
@@ -270,34 +271,36 @@ try {
   }
 
   if (runExtendedJobs) {
-    await runAiJob("Imagen de escenario", "/api/podcaster/scenario-images/generate", {
-      sessionId,
-      scenarioId: "phase5",
-      title: "Phase 5 smoke",
-      prompt: "Minimal editorial podcast studio, soft blue gradient, no text, no logos."
-    }, 6 * 60_000);
+    if (!montageOnly) {
+      await runAiJob("Imagen de escenario", "/api/podcaster/scenario-images/generate", {
+        sessionId,
+        scenarioId: "phase5",
+        title: "Phase 5 smoke",
+        prompt: "Minimal editorial podcast studio, soft blue gradient, no text, no logos."
+      }, 6 * 60_000);
 
-    await runAiJob("Gemini TTS", "/api/podcaster/dialogue-audio/generate", {
-      sessionId,
-      rowId: "row-1",
-      speakerLabel: "Smoke",
-      voiceName: "Aoede",
-      text: "Hola.",
-      targetSpeechLine: "Hola."
-    }, 6 * 60_000);
+      await runAiJob("Gemini TTS", "/api/podcaster/dialogue-audio/generate", {
+        sessionId,
+        rowId: "row-1",
+        speakerLabel: "Smoke",
+        voiceName: "Aoede",
+        text: "Hola.",
+        targetSpeechLine: "Hola."
+      }, 6 * 60_000);
 
-    await runAiJob("Lyria", "/api/podcaster/music/generate", {
-      sessionId,
-      prompt: "Very short warm ambient educational podcast sting, instrumental, no lyrics."
-    }, 8 * 60_000);
+      await runAiJob("Lyria", "/api/podcaster/music/generate", {
+        sessionId,
+        prompt: "Very short warm ambient educational podcast sting, instrumental, no lyrics."
+      }, 8 * 60_000);
 
-    await runAiJob("Veo Fast", "/api/podcaster/dialogue-videos/generate", {
-      sessionId,
-      rowId: "row-1",
-      model: "lite",
-      durationSec: 4,
-      prompt: "A blue ball rolls slowly on a plain white table, fixed camera, no text, no logos."
-    }, 14 * 60_000);
+      await runAiJob("Veo Fast", "/api/podcaster/dialogue-videos/generate", {
+        sessionId,
+        rowId: "row-1",
+        model: "lite",
+        durationSec: 4,
+        prompt: "A blue ball rolls slowly on a plain white table, fixed camera, no text, no logos."
+      }, 14 * 60_000);
+    }
 
     const montagePayload = {
       sessionId,

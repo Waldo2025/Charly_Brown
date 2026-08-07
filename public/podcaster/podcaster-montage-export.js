@@ -2281,10 +2281,11 @@ export async function pollMontageExportJob(jobId = "") {
     logMontageExportDevtools("poll_request", {
       jobId: cleanJobId,
       url: exportStatusUrl,
-      auth: false
+      auth: true
     }, "debug");
     const data = await authFetchJson(exportStatusUrl, {
-      auth: false
+      auth: true,
+      preferRemote: false
     });
     logMontageExportDevtools("poll_response", {
       jobId: cleanJobId,

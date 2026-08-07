@@ -7,6 +7,7 @@
 - The isolated smoke creates a temporary Firebase user and session, then removes every temporary Firestore and Storage resource.
 - Baseline: `node scripts/smoke-google-cloud-phase5.mjs --execute`
 - Long jobs: `node scripts/smoke-google-cloud-phase5.mjs --execute --extended --jobs-only`
+- Montage-only regression: `node scripts/smoke-google-cloud-phase5.mjs --execute --extended --jobs-only --montage-only`
 
 The long-job smoke covers scenario image, Gemini TTS, Lyria, Veo Fast, Cloud Tasks, the montage Cloud Run Job and cancellation. The baseline also covers an 80 MiB resumable upload, signed media and HTTP Range.
 
@@ -20,7 +21,7 @@ A `401` is valid only when the request has no Firebase ID token or the token is 
 
 Use `node scripts/reconcile-stale-google-cloud-jobs.mjs` for a dry-run of abandoned legacy montage jobs. Add `--execute` only after reviewing the count; it preserves the documents and marks them as `status=error`, `stage=interrupted` so existing clients treat them as terminal and users can start a fresh export.
 
-Notification channels must be configured separately in Cloud Monitoring. Until a channel exists, incidents appear in the Google Cloud console but do not email or page anyone.
+Cloud Monitoring tiene que conservar al menos un canal de correo habilitado. El script descubre esos canales y los asocia idempotentemente a las cinco políticas; si no encuentra ninguno, termina con error para evitar alertas silenciosas.
 
 ## Production cutover
 
