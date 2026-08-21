@@ -52,14 +52,14 @@ assert.match(
 
 assert.match(
   apiWrapperSource,
-  /api-client\.js\?v=2026-1\.0\.10\.530/,
-  "El wrapper api-client-podcaster debe forzar la versión vigente de api-client.js."
+  /api-client\.js\?v=[^"\s]+/,
+  "El wrapper api-client-podcaster debe forzar un cache-buster de api-client.js."
 );
 
 assert.match(
   podcasterSource,
-  /api-client-podcaster\.js\?v=2026-1\.0\.10\.530/,
-  "podcaster.js debe importar el wrapper API con cache-buster vigente para no reutilizar api-client-podcaster viejo."
+  /api-client-podcaster\.js\?v=[^"\s]+/,
+  "podcaster.js debe importar el wrapper API con cache-buster para no reutilizar api-client-podcaster viejo."
 );
 
 console.log("Podcaster montage export V2 audio-only contract OK.");

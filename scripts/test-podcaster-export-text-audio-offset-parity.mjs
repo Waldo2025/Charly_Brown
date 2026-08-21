@@ -14,7 +14,7 @@ assert.match(
 
 assert.match(
   serverSource,
-  /function remapMontageTimelineSegmentsToExportOffsets\(segments = \[\], exportOffsetsByRowId = new Map\(\)\)[\s\S]*relativeStartMs[\s\S]*startMs: Math\.max\(0, Math\.round\(Number\(exportOffset\?\.startMs/,
+  /function remapMontageTimelineSegmentsToExportOffsets\(segments = \[\], exportOffsetsByRowId = new Map\(\)\)[\s\S]*relativeStartMs[\s\S]*startMs: remappedStartMs/,
   "El backend debe remapear el texto en pantalla al mismo reloj final que usa el audio."
 );
 

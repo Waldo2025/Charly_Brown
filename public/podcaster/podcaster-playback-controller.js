@@ -246,6 +246,22 @@ export class PodcasterPlaybackController extends EventEmitter {
     return clean.includes("token=") || clean.includes("downloadToken=");
   }
 
+  toFirebaseStorageGsUrl(firebaseUrl = "", storagePath = "") {
+    const cleanPath = String(storagePath || "").replace(/^\/+/, "").trim();
+    let bucket = String(window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app").trim();
+    let objectPath = cleanPath;
+    try {
+      const parsed = new URL(String(firebaseUrl || "").trim());
+      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/i);
+      if (match) {
+        bucket = decodeURIComponent(String(match[1] || "").trim()) || bucket;
+        objectPath = decodeURIComponent(String(match[2] || "").trim()) || objectPath;
+      }
+    } catch (_) { }
+    objectPath = String(objectPath || "").replace(/^\/+/, "").trim();
+    return bucket && objectPath ? `gs://${bucket}/${objectPath}` : "";
+  }
+
   toFirebaseStorageProxyUrl(firebaseUrl = "", storagePath = "", options = {}) {
     const cleanUrl = String(firebaseUrl || "").trim();
     const kind = String(options?.kind || "media").trim().toLowerCase() === "image" ? "image" : "media";
@@ -535,13 +551,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     const rowAudioDurationMs = rowId
       ? Math.max(0, Math.round(Number(this.deps?.resolveRowAudioDurationMs?.(rowId, this.state?.session) || 0) || 0))
       : 0;
-    const measuredAudioVisibleMs = rowId && trimmedVisibleMs > 0
-      ? Math.max(0, Math.round(trimmedVisibleMs / safeRate))
-      : (rowId
-        ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / safeRate))
-        : 0);
+    const measuredAudioVisibleMs = rowId && rowAudioDurationMs > 0
+      ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / safeRate))
+      : 0;
+    // La metadata real del archivo es la fuente de verdad. `segmentTimelineMs`
+    // puede seguir conteniendo la duración visual heredada de la escena.
     const durationMs = measuredAudioVisibleMs > 0
-      ? Math.min(segmentTimelineMs, measuredAudioVisibleMs)
+      ? measuredAudioVisibleMs
       : segmentTimelineMs;
     return Math.max(500, durationMs);
   }
@@ -798,6 +814,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       
       const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
       if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
+        if (this.deps?.preferDirectFirebaseStorage === true && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
+          return null;
+        }
         finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
       }
       if (this.requiresAuthorizedAssetResolution(finalUrl)) return null;
@@ -1099,9 +1118,17 @@ export class PodcasterPlaybackController extends EventEmitter {
             }
           }
 
+          if (!finalUrl) throw new Error("firebase_storage_url_unavailable");
+
           const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
           if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
-            finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
+            if (this.deps?.preferDirectFirebaseStorage === true && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
+              const gsUrl = this.toFirebaseStorageGsUrl(finalUrl);
+              finalUrl = gsUrl ? await this.deps.resolveFirebaseStorageUrl(gsUrl) : "";
+              if (!finalUrl) throw new Error("firebase_storage_url_unavailable");
+            } else {
+              finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
+            }
           }
 
           if (this.requiresAuthorizedAssetResolution(finalUrl)) {
@@ -1171,6 +1198,8 @@ export class PodcasterPlaybackController extends EventEmitter {
                   finalUrl = directUrl;
                 } else if (directUrl && directUrl.includes('/api/assets/proxy')) {
                   finalUrl = directUrl;
+                } else if (this.deps?.preferDirectFirebaseStorage === true) {
+                  throw new Error("firebase_storage_url_unavailable");
                 }
               }
             } else if (originalUrl && originalUrl.startsWith('http') && !originalUrl.includes('/api/assets/proxy')) {
@@ -1182,9 +1211,29 @@ export class PodcasterPlaybackController extends EventEmitter {
               !this.hasFirebaseDirectAccessToken(finalUrl) &&
               !finalUrl.includes('/api/assets/proxy-')
             ) {
-              finalUrl = this.toFirebaseStorageProxyUrl(finalUrl, storagePath, { kind: isImageLikeUrl ? "image" : "media" });
+              if (this.deps?.preferDirectFirebaseStorage !== true) {
+                finalUrl = this.toFirebaseStorageProxyUrl(finalUrl, storagePath, { kind: isImageLikeUrl ? "image" : "media" });
+              }
             }
           } catch (e) { }
+        }
+
+        if (this.deps?.preferDirectFirebaseStorage === true) {
+          if (this.requiresAuthorizedAssetResolution(finalUrl)) {
+            if (typeof this.deps?.resolveAuthorizedAssetUrl !== "function") {
+              throw new Error("authorized_asset_resolver_unavailable");
+            }
+            finalUrl = String(await this.deps.resolveAuthorizedAssetUrl(finalUrl) || "").trim();
+          } else if (
+            String(finalUrl || "").includes("firebasestorage.googleapis.com")
+            && !this.hasFirebaseDirectAccessToken(finalUrl)
+          ) {
+            const gsUrl = this.toFirebaseStorageGsUrl(finalUrl);
+            finalUrl = gsUrl && typeof this.deps?.resolveFirebaseStorageUrl === "function"
+              ? String(await this.deps.resolveFirebaseStorageUrl(gsUrl) || "").trim()
+              : "";
+          }
+          if (!finalUrl) throw new Error("firebase_storage_url_unavailable");
         }
 
         if (finalUrl.startsWith("gs://")) {
@@ -1227,7 +1276,9 @@ export class PodcasterPlaybackController extends EventEmitter {
           if (resp.status === 404 && this.deps?.markStaleProxyMediaUrl) {
             this.deps.markStaleProxyMediaUrl(url, 'proxy-media-404-from-controller');
           }
-          throw new Error(`Fetch failed with status ${resp.status}`);
+          const fetchError = new Error(`Fetch failed with status ${resp.status}`);
+          fetchError.status = Number(resp.status || 0);
+          throw fetchError;
         }
 
         try {
@@ -1251,16 +1302,20 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (cacheKey !== url) this.blobCache.set(cacheKey, objectUrl);
         return objectUrl;
       } catch (e) {
-        // Cache the fact that it failed to avoid spamming the backend/storage.
-        // If it was a 404, we mark it specially so we can potentially skip it in the UI.
+        // Solo un 404 HTTP confirmado es permanente. CORS, aborts, timeouts y 5xx
+        // deben poder reintentarse en una preparación posterior.
+        const status = Number(e?.status || 0);
         const msg = String(e?.message || "").toLowerCase();
-        if (msg.includes("status 404")) {
+        if (status === 404 || msg.includes("status 404")) {
           this.blobCache.set(url, "404");
+          if (cacheKey !== url) this.blobCache.set(cacheKey, "404");
           return "";
         } else {
-          this.blobCache.set(url, "404");
+          this.blobCache.delete(url);
+          if (cacheKey !== url) this.blobCache.delete(cacheKey);
           this.emitMediaTelemetry("media-fetch-failed", {
             source: url,
+            status: status || undefined,
             message: String(e?.message || "unknown")
           });
           return "";
@@ -2508,8 +2563,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.pendingTimelineSeekTick = null;
     this.stopClock();
 
-    Object.values(this.dialoguePlayers).forEach(audio => { 
-      try { audio.pause(); } catch (_) { } 
+    Object.values(this.dialoguePlayers).forEach(audio => {
+      if (audio) {
+        audio.dataset.wasActive = "";
+        try { audio.pause(); } catch (_) { }
+      }
     });
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
       if (v) try { v.pause(); } catch (_) { }
@@ -2758,6 +2816,21 @@ export class PodcasterPlaybackController extends EventEmitter {
     const ms = Math.max(0, Math.min(this.state.totalDurationMs || 9999999, Number(targetMs) || 0));
     this.state.currentMs = ms;
     this.sceneMotionSyncRevision = Number(this.sceneMotionSyncRevision || 0) + 1;
+
+    const targetEntry = this.getEntryAtMs(ms);
+    const targetActiveRowId = String(targetEntry?.rowId || "").trim();
+
+    Object.entries(this.dialoguePlayers).forEach(([rowId, audio]) => {
+      if (String(rowId || "").trim() !== targetActiveRowId && audio) {
+        audio.dataset.wasActive = "";
+        audio.dataset.playIntent = "";
+        audio.dataset.pendingPlayIntent = "";
+        audio.dataset.playPending = "";
+        if (!audio.paused) {
+          try { audio.pause(); } catch (_) { }
+        }
+      }
+    });
     const useLightweightSeek = options.lightweight === true || this.deps?.useLightweightSeekDuringPlayback === true;
     const skipAudioSync = options.deferPreview === true;
     if (options.allowConcurrentTick !== false) {
@@ -3088,7 +3161,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       const playerDurationMs = playerTimelineDurations.get(rowId);
       if (!playerDurationMs) return;
       const segmentStartMs = Number(segment.__timelineStartMs || 0);
-      const adjustedEndMs = segmentStartMs + playerDurationMs;
+      const trimInTimelineMs = Math.max(0, Number(segment?.trimInMs || 0) || 0)
+        / Math.max(0.5, Number(segment.__timelinePlaybackRate || 1) || 1);
+      const adjustedEndMs = segmentStartMs + Math.max(0, playerDurationMs - trimInTimelineMs);
       if (Number(segment.__timelineEndMs || 0) < adjustedEndMs) {
         segment.__timelineEndMs = adjustedEndMs;
       }
@@ -3193,7 +3268,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           carryStartMs + Math.max(0, measuredDurationMs)
         );
 
-        if (currentMs <= carryEndMs + audioCarryToleranceMs) {
+        if (currentMs >= carryStartMs && currentMs <= carryEndMs + audioCarryToleranceMs) {
           activeDialogueVoiceRowIds.add(rowKey);
           audio.dataset.wasActive = "true";
           if (
@@ -3996,7 +4071,12 @@ export class PodcasterPlaybackController extends EventEmitter {
         const encodedObjectPath = String(new URL(resolvedSrc).pathname || "").split("/o/")[1] || "";
         storagePath = encodedObjectPath ? decodeURIComponent(encodedObjectPath) : "";
       } catch (_) { }
-      resolvedSrc = this.toFirebaseStorageProxyUrl(resolvedSrc, storagePath, { kind: "image" });
+      if (this.deps?.preferDirectFirebaseStorage === true && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
+        const gsUrl = this.toFirebaseStorageGsUrl(resolvedSrc, storagePath);
+        resolvedSrc = gsUrl ? String(await this.deps.resolveFirebaseStorageUrl(gsUrl) || "").trim() : "";
+      } else {
+        resolvedSrc = this.toFirebaseStorageProxyUrl(resolvedSrc, storagePath, { kind: "image" });
+      }
     }
 
     if (this.requiresAuthorizedAssetResolution(resolvedSrc)) {

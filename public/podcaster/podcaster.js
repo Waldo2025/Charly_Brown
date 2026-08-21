@@ -1,9 +1,9 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.572";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-08-20.2";
 import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.537";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.537";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.538";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -41,24 +41,25 @@ import {
   setMontageExportStatus,
   configureMontageExportRuntime,
   reopenMontageExportModalFromCard
-} from "./podcaster-montage-export.js?v=2026-1.0.10.549";
+} from "./podcaster-montage-export.js?v=2026-08-20.2";
 import {
   handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick,
   runMontageExportV2 as runMontageExport
-} from "./podcaster-montage-export-v2.js?v=2026-1.0.10.549";
+} from "./podcaster-montage-export-v2.js?v=2026-08-20.2";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-1.0.10.537";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.537";
+import { createPodcasterAcademicMetadataApi } from "./podcaster-academic-metadata.js?v=2026-1.0.10.717";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
-import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.716";
+import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.719";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-1.0.10.546";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-08-20.2";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js?v=2026-1.0.10.544";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -396,6 +397,17 @@ const DEFAULT_SPEAKER_NAME_MAP = Object.freeze({
 const firestoreApp = getApps().length ? getApp() : initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 const firestoreDb = getFirestore(firestoreApp);
 const firebaseStorage = getStorage(firestoreApp);
+const academicMetadataApi = createPodcasterAcademicMetadataApi({
+  db: firestoreDb,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
+  nowIso: () => new Date().toISOString(),
+  getCurrentUserUid: () => String(resolveCurrentUid() || "").trim(),
+  getCurrentUserName: () => String(currentUserName || "").trim()
+});
 window.firebaseStorage = firebaseStorage;
 configureMontageExportRuntime({ firestoreDb });
 
@@ -437,6 +449,7 @@ const els = {
   scriptPanelSubtitle: document.getElementById("scriptPanelSubtitle"),
   sessionList: document.getElementById("sessionList"),
   sessionsRailFilter: document.getElementById("sessionsRailFilter"),
+  openSessionFiltersBtn: document.getElementById("openSessionFiltersBtn"),
   toggleArchivedSessionsBtn: document.getElementById("toggleArchivedSessionsBtn"),
   newSessionBtn: document.getElementById("newSessionBtn"),
   saveSessionBtn: document.getElementById("saveSessionBtn"),
@@ -445,6 +458,7 @@ const els = {
   saveSessionFloatingBtn: document.getElementById("saveSessionFloatingBtn"),
   importGeminiDialogueTrackBtn: document.getElementById("importGeminiDialogueTrackBtn"),
   openSidepanelBtn: document.getElementById("openSidepanelBtn"),
+  openSidepanelFromEditorBtn: document.getElementById("openSidepanelFromEditorBtn"),
   sidepanelHeaderToggleBtn: document.getElementById("sidepanelHeaderToggleBtn"),
   sidepanel: document.getElementById("podcasterSidepanel"),
   openMusicConfigBtn: document.getElementById("openMusicConfigBtn"),
@@ -743,6 +757,23 @@ const els = {
   sessionAcademicGradeSelect: document.getElementById("sessionAcademicGradeSelect"),
   sessionAcademicTermSelect: document.getElementById("sessionAcademicTermSelect"),
   sessionAcademicUnitSelect: document.getElementById("sessionAcademicUnitSelect"),
+  sessionAcademicUnitLabel: document.getElementById("sessionAcademicUnitLabel"),
+  sessionAcademicSubjectField: document.getElementById("sessionAcademicSubjectField"),
+  sessionAcademicSubjectLabel: document.getElementById("sessionAcademicSubjectLabel"),
+  sessionAcademicSubjectSelect: document.getElementById("sessionAcademicSubjectSelect"),
+  sessionFiltersModal: document.getElementById("sessionFiltersModal"),
+  closeSessionFiltersBtn: document.getElementById("closeSessionFiltersBtn"),
+  cancelSessionFiltersBtn: document.getElementById("cancelSessionFiltersBtn"),
+  clearSessionFiltersBtn: document.getElementById("clearSessionFiltersBtn"),
+  applySessionFiltersBtn: document.getElementById("applySessionFiltersBtn"),
+  sessionFiltersForm: document.getElementById("sessionFiltersForm"),
+  sessionFilterQueryInput: document.getElementById("sessionFilterQueryInput"),
+  sessionFilterLevelSelect: document.getElementById("sessionFilterLevelSelect"),
+  sessionFilterGradeSelect: document.getElementById("sessionFilterGradeSelect"),
+  sessionFilterTermSelect: document.getElementById("sessionFilterTermSelect"),
+  sessionFilterUnitSelect: document.getElementById("sessionFilterUnitSelect"),
+  sessionFilterUnitLabel: document.getElementById("sessionFilterUnitLabel"),
+  sessionFilterOptionsHint: document.getElementById("sessionFilterOptionsHint"),
   geminiAudioSpeedModal: document.getElementById("geminiAudioSpeedModal"),
   closeGeminiAudioSpeedModalBtn: document.getElementById("closeGeminiAudioSpeedModalBtn"),
   geminiAudioSpeedModalTitle: document.getElementById("geminiAudioSpeedModalTitle"),
@@ -758,6 +789,7 @@ const els = {
   geminiTrackVolumeModalHint: document.getElementById("geminiTrackVolumeModalHint"),
   geminiTrackVolumeRange: document.getElementById("geminiTrackVolumeRange"),
   geminiTrackVolumeNumber: document.getElementById("geminiTrackVolumeNumber"),
+  geminiTrackAlignmentSelect: document.getElementById("geminiTrackAlignmentSelect"),
   geminiTrackSpeedRange: document.getElementById("geminiTrackSpeedRange"),
   geminiTrackSpeedNumber: document.getElementById("geminiTrackSpeedNumber"),
   resetGeminiTrackVolumeBtn: document.getElementById("resetGeminiTrackVolumeBtn"),
@@ -917,6 +949,7 @@ let state = {
   activeSessionId: null,
   expandedSessionIds: [],
   sessionRailFilter: "all",
+  sessionRailAdvancedFilters: null,
   showArchivedSessions: false,
   liveTokenState: null
 };
@@ -1379,7 +1412,8 @@ let geminiAudioSpeedModalState = {
 let geminiTrackVolumeModalState = {
   open: false,
   volumePct: 100,
-  playbackRate: 1
+  playbackRate: 1,
+  alignment: "left"
 };
 let timelineFrameHoldModalState = {
   rowId: "",
@@ -1859,7 +1893,7 @@ const STUDIO_GEMINI_SCENE_DELAY_MS = 0;
 const STUDIO_REORDER_SUBTITLE_INSET_PX = 0;
 const STUDIO_REORDER_SUBTITLE_LEGACY_INSET_PX = 15;
 const STUDIO_GEMINI_LEGACY_DEFAULT_DELAY_MS = 1000;
-const STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX = -15;
+const STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX = 0;
 const STUDIO_REORDER_ONSCREEN_TEXT_WIDTH_PCT = 0.52;
 const STUDIO_REORDER_ONSCREEN_TEXT_HEIGHT_PCT = 0.16;
 const STUDIO_TIMELINE_CHAIN_TOLERANCE_MS = 0;
@@ -3220,7 +3254,7 @@ function buildScenePerformanceDirective(row = {}, extraDirective = "") {
 }
 
 function buildTargetSpeechLine(row = {}, session = null) {
-  const base = stripStageDirectionsFromSpeech(row?.text || "");
+  const base = stripStageDirectionsFromSpeech(String(row?.voiceOverText || row?.text || "").trim());
   if (!base) return "";
   const cfg = getRowDisfluencyConfig(row);
   if (!hasActiveDisfluencyConfig(cfg)) return base;
@@ -3904,7 +3938,11 @@ function resolveScenarioForVideoMode(session = null, host = "", fallback = "") {
 
 function resolvePodcasterSceneAspectRatio(session = null) {
   const activeSession = session || getActiveSession();
-  return activeSession?.podcastVideoConfig?.reelModeEnabled === true ? "9:16" : "16:9";
+  const config = activeSession?.podcastVideoConfig || {};
+  if (config?.aspectRatio && ["16:9", "9:16"].includes(String(config.aspectRatio).trim())) {
+    return String(config.aspectRatio).trim();
+  }
+  return config?.reelModeEnabled === true ? "9:16" : "16:9";
 }
 
 function normalizeVideoScenePrompt(value = "", row = null, session = null) {
@@ -4288,7 +4326,10 @@ function normalizeDialogueAudioMap(raw = {}) {
   Object.entries(raw).forEach(([rowId, clip]) => {
     const key = String(rowId ?? "").trim();
     if (!key || !clip || typeof clip !== "object") return;
-    const mediaRef = normalizePersistedMediaReference(clip.downloadUrl || "", clip.storagePath || "");
+    const mediaRef = normalizePersistedMediaReference(
+      String(clip.downloadUrl || clip.audioUrl || clip.url || clip.audioSrc || "").trim(),
+      String(clip.storagePath || clip.audioStoragePath || clip.path || "").trim()
+    );
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
     const storagePath = String(mediaRef.storagePath || "").trim();
     const dataUrl = String(clip.dataUrl || clip.localDataUrl || "").trim();
@@ -4383,7 +4424,20 @@ function resolveRowAudioDurationMs(rowId = "", session = null) {
   const storedMs = Math.max(0, Number(audioClip?.durationSec || 0) * 1000);
   const actualMs = Math.max(0, Number(podcastVideoState?.montageAudioActualDurationsMs?.[key] || 0));
   const playbackRate = resolveDialogueAudioPlaybackRate(session, key);
-  return Math.round(Math.max(storedMs, actualMs) / Math.max(0.5, playbackRate || 1));
+
+  let rawMs = actualMs > 0 ? actualMs : storedMs;
+  if (rawMs <= 0) {
+    const row = getSessionRows(session).find((item) => String(item?.id || "").trim() === key) || null;
+    const text = String(row?.text || "").trim();
+    if (text) {
+      const words = text.split(/\s+/).filter(Boolean).length;
+      const wps = Number(window.SPEECH_WORDS_PER_SEC || 3.0) || 3.0;
+      const estimatedSec = Math.max(1.2, words / wps);
+      rawMs = Math.round(estimatedSec * 1000);
+    }
+  }
+
+  return Math.round(rawMs / Math.max(0.5, playbackRate || 1));
 }
 
 function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
@@ -5894,9 +5948,12 @@ function normalizeGeminiDialogueTrack(raw = {}) {
       .map((rowId) => String(rowId || "").trim())
       .filter(Boolean)
   ));
+  const alignmentRaw = String(raw?.alignment || "").trim().toLowerCase();
+  const alignment = ["left", "left-center", "center", "center-right", "right"].includes(alignmentRaw) ? alignmentRaw : "left";
   return {
     enabled: raw?.enabled === true && segments.length > 0,
     volumePct: Math.max(0, Math.min(100, Math.round(toFiniteNumber(raw?.volumePct, 100)))),
+    alignment,
     updatedAt: String(raw?.updatedAt || "").trim(),
     segments: segments
       .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.sceneIndex || 0) - Number(b.sceneIndex || 0)),
@@ -6652,12 +6709,27 @@ function buildTimelineRuntimeEntries(session = null) {
   return window.buildTimelineRuntimeEntries(session);
 }
 
-function resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS) {
+function resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS, session = null) {
+  const activeSession = session || getActiveSession();
+  const cfg = getPodcastVideoConfig(activeSession);
+  const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+  const alignment = String(track?.alignment || cfg?.dialogueAlignment || "left").trim().toLowerCase();
   const safeSceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(sceneDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
   const safeDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
   const maxOffsetMs = Math.max(0, safeSceneDurationMs - safeDurationMs);
-  const defaultOffsetMs = 0;
-  return Math.max(0, Math.min(maxOffsetMs, defaultOffsetMs));
+  if (alignment === "left-center" || alignment === "quarter") {
+    return Math.max(0, Math.min(maxOffsetMs, Math.round(maxOffsetMs * 0.25)));
+  }
+  if (alignment === "center" || alignment === "middle") {
+    return Math.max(0, Math.min(maxOffsetMs, Math.round(maxOffsetMs * 0.5)));
+  }
+  if (alignment === "center-right" || alignment === "three-quarters") {
+    return Math.max(0, Math.min(maxOffsetMs, Math.round(maxOffsetMs * 0.75)));
+  }
+  if (alignment === "right" || alignment === "end") {
+    return maxOffsetMs;
+  }
+  return 0;
 }
 
 function clampGeminiSegmentStartToScene(sceneStartMs = 0, sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS, desiredStartMs = 0) {
@@ -6711,12 +6783,12 @@ function resolveGeminiSegmentRelativeOffsetMs(segment = null, sceneStartMs = 0, 
   const safeFallbackOffsetMs = Math.max(0, Math.round(Number(fallbackOffsetMs || 0) || 0));
   if (!segment || typeof segment !== "object") return safeFallbackOffsetMs;
   if (segment.relativeOffsetMs !== undefined && segment.relativeOffsetMs !== null) {
-    return Math.max(0, Math.round(Number(segment.relativeOffsetMs) || 0));
+    return Math.round(Number(segment.relativeOffsetMs) || 0);
   }
   const safeSceneStartMs = Math.max(0, Math.round(Number(sceneStartMs || 0) || 0));
   const anchorStartMs = resolveGeminiSegmentAnchorStartMs(segment, safeSceneStartMs);
-  const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) || 0));
-  return Math.max(0, Math.round(startMs - anchorStartMs));
+  const startMs = Math.round(Number(segment.startMs || 0) || 0);
+  return Math.round(startMs - anchorStartMs);
 }
 
 function hasManualGeminiSegmentOffset(segment = null, fallbackAnchorMs = 0, fallbackOffsetMs = 0, toleranceMs = STUDIO_TIMELINE_SNAP_MS) {
@@ -6739,7 +6811,7 @@ function resolveGeminiSegmentSequencingKey(session = null, runtimeEntry = null) 
   return trackId || "__global__";
 }
 
-function buildGeminiDialogueTimelineTrack(session = null) {
+function buildGeminiDialogueTimelineTrack(session = null, options = {}) {
   const activeSession = session || getActiveSession();
   const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
   const runtimeTotalMs = runtimeEntries.reduce((acc, entry) => Math.max(acc, Math.max(0, Number(entry?.endMs || 0) || 0)), STUDIO_TIMELINE_MIN_CLIP_MS);
@@ -6770,23 +6842,20 @@ function buildGeminiDialogueTimelineTrack(session = null) {
     const trimInMs = existingSegment && existingSegment.trimInMs !== undefined
       ? Math.max(0, Number(existingSegment.trimInMs || 0))
       : 0;
-    const audioDurationMs = Math.max(0, Math.round(Number(entry?.audioDurationMs || 0) || 0));
+    const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, activeSession) || entry?.audioDurationMs || 0) || 0));
     const desiredDurationMs = audioDurationMs > 0
       ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - trimInMs)
       : Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
-    const durationMs = existingSegment && existingSegment.durationMs !== undefined
+    const hasExplicitManualStartMs = existingSegment?.manualStartMs === true || existingSegment?.manualPosition === true;
+    const hasManualStartMs = options?.resetAudioPositions === true ? false : hasExplicitManualStartMs;
+    const durationMs = (existingSegment && existingSegment.durationMs !== undefined && hasManualStartMs)
       ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(existingSegment.durationMs || 0))
-      : resolveGeminiSegmentDurationWithinScene(
-        Number(entry?.effectiveDurationMs || 0),
-        desiredDurationMs
-      );
+      : desiredDurationMs;
     const trimOutMs = trimInMs + durationMs;
     const sceneStartMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
     const sceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
-    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, durationMs);
-    const hasExplicitManualStartMs = existingSegment?.manualStartMs === true || existingSegment?.manualPosition === true;
-    const hasManualStartMs = options?.resetAudioPositions === true ? false : hasExplicitManualStartMs;
-    const relativeOffsetMs = existingSegment && (hasManualStartMs || options?.isTrimStart)
+    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, durationMs, activeSession);
+    const relativeOffsetMs = (existingSegment && hasManualStartMs) || options?.isTrimStart
       ? (options?.isTrimStart
           ? Math.max(0, Math.round((existingSegment.startMs || 0) - sceneStartMs))
           : resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs, automaticOffsetMs)
@@ -6816,8 +6885,11 @@ function buildGeminiDialogueTimelineTrack(session = null) {
     }, timelineIndex);
     return normalizedSegment;
   }).filter(Boolean);
+  const trackAlignment = String(existingTrack?.alignment || cfg?.dialogueAlignment || "left").trim().toLowerCase();
   return normalizeGeminiDialogueTrack({
     enabled: segments.length > 0,
+    volumePct: existingTrack?.volumePct,
+    alignment: trackAlignment,
     segments,
     missingRowIds,
     excludedRowIds: Array.from(excludedRowIds),
@@ -6859,7 +6931,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       Math.round(Number(entry?.clip?.trimOutMs || trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS) || (trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS))
     );
     const clipPlayableMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
-    const audioDurationMs = Math.max(0, Math.round(Number(entry?.audioDurationMs || 0) || 0));
+    const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, activeSession) || entry?.audioDurationMs || 0) || 0));
     const existingDurationMs = existingSegment
       ? Math.max(
         STUDIO_TIMELINE_MIN_CLIP_MS,
@@ -6873,13 +6945,13 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     const audioSuggestedDurationMs = audioDurationMs > 0
       ? Math.round(Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - segmentTrimInMs))
       : 0;
-    const expectedSegmentDuration = audioSuggestedDurationMs > 0
-      ? audioSuggestedDurationMs
-      : (preserveStartMs && existingSegment && existingDurationMs > 0 ? existingDurationMs : clipPlayableMs);
-
-    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, expectedSegmentDuration);
     const hasExplicitManualStartMs = existingSegment?.manualStartMs === true || existingSegment?.manualPosition === true;
     const hasManualStartMs = options?.resetAudioPositions === true ? false : hasExplicitManualStartMs;
+    const expectedSegmentDuration = (hasManualStartMs && preserveStartMs && existingSegment && existingDurationMs > 0)
+      ? existingDurationMs
+      : (audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs);
+
+    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, expectedSegmentDuration);
 
     // Calcular el desplazamiento exacto del inicio de la escena para preservar el offset relativo del audio
     let shiftSceneStartMs = 0;
@@ -6896,7 +6968,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     }
 
     const referenceSceneStartMs = sceneStartMs - shiftSceneStartMs;
-    const relativeOffsetMs = (preserveStartMs && existingSegment && (hasManualStartMs || options?.isTrimStart))
+    const relativeOffsetMs = (preserveStartMs && existingSegment && hasManualStartMs) || options?.isTrimStart
       ? (options?.isTrimStart
           ? Math.max(0, Math.round((existingSegment.startMs || 0) - referenceSceneStartMs))
           : resolveGeminiSegmentRelativeOffsetMs(existingSegment, referenceSceneStartMs, automaticOffsetMs)
@@ -6913,7 +6985,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     // expandimos de forma segura hasta la duración real del audio para evitar cortes al final.
     const baseDurationMs = forceDurationFromAudio && audioSuggestedDurationMs > 0
       ? audioSuggestedDurationMs
-      : preserveStartMs && existingSegment
+      : (preserveStartMs && existingSegment && hasManualStartMs)
         ? Math.max(existingDurationMs, audioSuggestedDurationMs || 0)
         : (audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs);
     const durationMs = Math.max(
@@ -6943,8 +7015,11 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     return normalizedSegment;
   }).filter(Boolean);
 
+  const trackAlignment = String(existing?.alignment || cfg?.dialogueAlignment || "left").trim().toLowerCase();
   const normalizedNext = normalizeGeminiDialogueTrack({
     enabled: nextSegments.length > 0,
+    volumePct: existing?.volumePct,
+    alignment: trackAlignment,
     segments: nextSegments,
     missingRowIds,
     excludedRowIds: Array.from(excludedRowIds),
@@ -7614,19 +7689,11 @@ function normalizeSessionTitle(input = "") {
 }
 
 function normalizeSessionAcademicField(input = "", allowedValues = []) {
-  const raw = String(input || "").trim();
-  if (!raw) return "";
-  return allowedValues.includes(raw) ? raw : "";
+  return academicMetadataApi.normalizeAcademicField(input, allowedValues);
 }
 
 function getSessionAcademicMetadata(session = null) {
-  const source = session && typeof session === "object" ? session : {};
-  return {
-    nivel: normalizeSessionAcademicField(source.nivel, SESSION_ACADEMIC_LEVEL_OPTIONS),
-    grado: normalizeSessionAcademicField(source.grado, SESSION_ACADEMIC_GRADE_OPTIONS),
-    trimestre: normalizeSessionAcademicField(source.trimestre, SESSION_ACADEMIC_TERM_OPTIONS),
-    unidad: normalizeSessionAcademicField(source.unidad, SESSION_ACADEMIC_UNIT_OPTIONS)
-  };
+  return academicMetadataApi.resolveAcademicMetadata(session);
 }
 
 function getActiveSession() {
@@ -8163,6 +8230,19 @@ async function setActiveSession(sessionId, options = {}) {
       } else {
         console.warn("[podcaster][sessions] Firebase no devolvió la sesión solicitada", { sessionId });
         setGenerationStatus("No se encontró el contenido en la nube.", "is-error");
+      }
+
+      if (typeof academicMetadataApi?.loadAcademicMetadata === "function") {
+        try {
+          const storedMetadata = await academicMetadataApi.loadAcademicMetadata(sessionId);
+          const targetForHydration = getActiveSession() || activatedSession || nextSession;
+          if (storedMetadata && targetForHydration) {
+            const hydrated = academicMetadataApi.mergeAcademicMetadataIntoEntity(targetForHydration, storedMetadata);
+            Object.assign(targetForHydration, hydrated);
+          }
+        } catch (error) {
+          console.warn("[podcaster][sessions] No se pudieron rehidratar metadatos académicos para la sesión activa:", error);
+        }
       }
     } catch (error) {
       console.error("[podcaster] Error activando sesión stub:", error);
@@ -11906,6 +11986,9 @@ function syncGeminiTrackVolumeModal(session = null) {
   const cfg = getPodcastVideoConfig(activeSession);
   const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
   const volumePct = Math.max(0, Math.min(100, Math.round(Number(track?.volumePct ?? 100) || 100)));
+  const alignment = ["left", "left-center", "center", "center-right", "right"].includes(String(track?.alignment || cfg?.dialogueAlignment || "").trim().toLowerCase())
+    ? String(track?.alignment || cfg?.dialogueAlignment).trim().toLowerCase()
+    : "left";
   const audioRows = getSessionRows(activeSession).filter((row) => (
     Boolean(resolveDialogueAudioForRow(activeSession, String(row?.id || "").trim()))
   ));
@@ -11917,6 +12000,7 @@ function syncGeminiTrackVolumeModal(session = null) {
     : 1;
   geminiTrackVolumeModalState.volumePct = volumePct;
   geminiTrackVolumeModalState.playbackRate = playbackRate;
+  geminiTrackVolumeModalState.alignment = alignment;
   if (els.geminiTrackVolumeModalTitle) {
     els.geminiTrackVolumeModalTitle.textContent = "Volumen general Gemini";
   }
@@ -11935,6 +12019,9 @@ function syncGeminiTrackVolumeModal(session = null) {
   if (els.geminiTrackSpeedNumber) {
     els.geminiTrackSpeedNumber.value = playbackRate.toFixed(2);
   }
+  if (els.geminiTrackAlignmentSelect) {
+    els.geminiTrackAlignmentSelect.value = alignment;
+  }
 }
 
 function syncGeminiTrackVolumeModalInputs(source = "") {
@@ -11946,6 +12033,9 @@ function syncGeminiTrackVolumeModalInputs(source = "") {
     nextValue = Math.round(Math.max(0, Math.min(100, Number(els.geminiTrackVolumeNumber?.value || 0) || 0)));
   }
   geminiTrackVolumeModalState.volumePct = nextValue;
+  if (els.geminiTrackAlignmentSelect) {
+    geminiTrackVolumeModalState.alignment = String(els.geminiTrackAlignmentSelect.value || "left").trim().toLowerCase();
+  }
   if (els.geminiTrackVolumeRange && source !== "range") {
     els.geminiTrackVolumeRange.value = String(nextValue);
   }
@@ -12206,10 +12296,27 @@ async function applyGeminiTrackVolumeModal(options = {}) {
   const nextVolumePct = Math.round(Math.max(0, Math.min(100, Number(geminiTrackVolumeModalState.volumePct || 0) || 0)));
   const volumeChanged = setGeminiDialogueTrackVolumePct(nextVolumePct);
   const speedChanged = await applyGeminiTrackSpeedToAllScenes(geminiTrackVolumeModalState.playbackRate);
+
+  const nextAlignment = ["left", "left-center", "center", "center-right", "right"].includes(String(geminiTrackVolumeModalState.alignment || "").trim().toLowerCase())
+    ? String(geminiTrackVolumeModalState.alignment).trim().toLowerCase()
+    : "left";
+  const activeSession = getActiveSession();
+  let alignmentChanged = true;
+  upsertPodcastVideoConfig((base) => ({
+    ...base,
+    dialogueAlignment: nextAlignment,
+    geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
+      ...(base?.geminiDialogueTrack || {}),
+      alignment: nextAlignment
+    })
+  }), { autosaveReason: "gemini-track-alignment" });
+  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: false, resetAudioPositions: true });
+  renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+
   if (options.close !== false) {
     setGeminiTrackVolumeModalOpen(false);
   }
-  return volumeChanged || speedChanged;
+  return volumeChanged || speedChanged || alignmentChanged;
 }
 
 function getCurrentTimelineRuntimeEntry(rowId = "", session = null) {
@@ -14054,7 +14161,6 @@ function syncTimelineEphemeralState(session = null) {
     const nextMedia = document.createElement(wantsImage ? "img" : "video");
     nextMedia.dataset.previewSrc = videoSrc;
     if (wantsImage) {
-      nextMedia.src = videoSrc;
       nextMedia.alt = "Preview";
       nextMedia.loading = "lazy";
       nextMedia.style.width = "100%";
@@ -14068,7 +14174,8 @@ function syncTimelineEphemeralState(session = null) {
       nextMedia.poster = "SnoopyPodcastCreator.png";
     }
     preview.insertBefore(nextMedia, loading || preview.firstChild);
-    if (!wantsImage) loadTimelinePreviewVideo(nextMedia, { preferAuto: false });
+    if (wantsImage) podcasterTimelineUiApi.loadTimelinePreviewImage(nextMedia);
+    else loadTimelinePreviewVideo(nextMedia, { preferAuto: false });
   };
 
   const items = Array.from(els.podcastVideoTimeline.querySelectorAll(".podcast-video-timeline-item[data-row-id], .podcast-video-timeline-clip[data-row-id]"));
@@ -17326,27 +17433,50 @@ function refreshSessionMeta() {
   }
 }
 
+function syncSidepanelToggleButton(button, isOpen) {
+  if (!button) return;
+  const scenesPanelLabel = isOpen ? "Ocultar Panel de Escenas" : "Mostrar Panel de Escenas";
+  button.hidden = false;
+  button.style.visibility = "visible";
+  button.style.opacity = "1";
+  button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  button.setAttribute("title", scenesPanelLabel);
+  button.setAttribute("aria-label", scenesPanelLabel);
+  button.classList.toggle("is-open", !!isOpen);
+  const icon = button.querySelector("i");
+  if (icon) icon.className = isOpen ? "fas fa-chevron-right" : "fas fa-chevron-left";
+}
+
 function setSidepanelOpen(isOpen) {
   if (!els.sidepanel) return;
   els.sidepanel.hidden = false;
   els.sidepanel.classList.toggle("is-open", !!isOpen);
   els.podcasterLayout?.classList.toggle("has-sidepanel", !!isOpen);
-  if (els.openSidepanelBtn) {
-    els.openSidepanelBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
-    const scenesPanelLabel = isOpen ? "Ocultar Panel de Escenas" : "Mostrar Panel de Escenas";
-    // els.openSidepanelBtn.setAttribute("title", isOpen ? "Ocultar inspector" : "Mostrar inspector");
-    els.openSidepanelBtn.setAttribute("title", scenesPanelLabel);
-    els.openSidepanelBtn.setAttribute("aria-label", scenesPanelLabel);
-    els.openSidepanelBtn.classList.toggle("is-open", !!isOpen);
-    const icon = els.openSidepanelBtn.querySelector("i");
-    if (icon) {
-      icon.className = isOpen ? "fas fa-chevron-right" : "fas fa-chevron-left";
-    }
-  }
+  syncSidepanelToggleButton(els.openSidepanelBtn, isOpen);
+  syncSidepanelToggleButton(els.openSidepanelFromEditorBtn, isOpen);
   if (els.sidepanelHeaderToggleBtn) {
     els.sidepanelHeaderToggleBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
   }
-  updateChatComposerLayoutOffset();
+  syncPodcasterChatComposerLayout();
+}
+
+function syncPodcasterChatComposerLayout() {
+  if (!els.chatStage) return;
+  if (typeof updateChatComposerOffsetFromComposer === "function") {
+    updateChatComposerOffsetFromComposer();
+  }
+
+  // El botón de abrir/cerrar escenas debe permanecer visible tras el cambio de estado.
+  if (els.openSidepanelBtn) {
+    els.openSidepanelBtn.hidden = false;
+    els.openSidepanelBtn.style.visibility = "visible";
+    els.openSidepanelBtn.style.opacity = "1";
+  }
+  if (els.openSidepanelFromEditorBtn) {
+    els.openSidepanelFromEditorBtn.hidden = false;
+    els.openSidepanelFromEditorBtn.style.visibility = "visible";
+    els.openSidepanelFromEditorBtn.style.opacity = "1";
+  }
 }
 
 function preserveComposerVisibilityState() {
@@ -17359,7 +17489,7 @@ function preserveComposerVisibilityState() {
     if (els.revealComposerBtn) {
       els.revealComposerBtn.classList.toggle("is-visible", wasRevealVisible);
     }
-    updateChatComposerLayoutOffset();
+    syncPodcasterChatComposerLayout();
     scrollChatToEnd();
   };
   return () => {
@@ -17385,7 +17515,6 @@ function setPodcastStudioInspectorCollapsed(isCollapsed) {
   const layout = els.podcastVideoShell?.querySelector(".podcast-studio-layout");
   layout?.classList.toggle("is-inspector-collapsed", podcastStudioInspectorCollapsed);
   if (els.togglePodcastStudioInspectorBtn) {
-    els.togglePodcastStudioInspectorBtn.hidden = podcastStudioInspectorCollapsed;
     els.togglePodcastStudioInspectorBtn.classList.toggle("is-active", !podcastStudioInspectorCollapsed);
     els.togglePodcastStudioInspectorBtn.setAttribute("aria-expanded", podcastStudioInspectorCollapsed ? "false" : "true");
     els.togglePodcastStudioInspectorBtn.setAttribute("aria-pressed", podcastStudioInspectorCollapsed ? "false" : "true");
@@ -17446,7 +17575,7 @@ function setupPodcasterSidepanelResize() {
 function setupComposerShellResize() {
   PodcasterResize.setupComposerShellResize(els, {
     onResize: () => {
-      updateChatComposerLayoutOffset();
+      syncPodcasterChatComposerLayout();
       scrollChatToEnd();
     }
   });
@@ -17645,7 +17774,7 @@ const podcasterPromptComposerApi = createPodcasterPromptComposerApi({
 });
 const {
   autoResize: autoResizePrompt,
-  updateLayoutOffset: updateChatComposerLayoutOffset,
+  updateLayoutOffset: updateChatComposerOffsetFromComposer,
   getPlainText: getPromptInputPlainText,
   getHtml: getPromptInputHtml,
   setContent: setPromptInputContent,
@@ -17768,9 +17897,19 @@ const podcasterSessionRailApi = createPodcasterSessionRailApi({
   SESSION_ACADEMIC_GRADE_OPTIONS,
   SESSION_ACADEMIC_TERM_OPTIONS,
   SESSION_ACADEMIC_UNIT_OPTIONS,
+  saveSessionAcademicMetadata: academicMetadataApi.saveAcademicMetadata,
+  loadSessionAcademicMetadata: academicMetadataApi.loadAcademicMetadata,
+  resolveAcademicUnitLabel: academicMetadataApi.resolveAcademicUnitLabel,
+  resolveAcademicUnitOptions: academicMetadataApi.resolveAcademicUnitOptions,
+  resolveAcademicSubjectOptions: academicMetadataApi.resolveAcademicSubjectOptions,
+  academicMetadataIsEmpty: academicMetadataApi.academicMetadataIsEmpty,
+  mergeAcademicMetadataIntoEntity: academicMetadataApi.mergeAcademicMetadataIntoEntity,
+  matchesAcademicMetadataFilters: academicMetadataApi.matchesAcademicMetadataFilters,
+  buildAcademicMetadataSummary: academicMetadataApi.buildAcademicMetadataSummary,
   upsertSessionById,
   updateDoc,
   doc,
+  getDoc,
   firestoreDb,
   serverTimestamp,
   shareSessionWithUser,
@@ -17790,6 +17929,8 @@ const {
   deleteSession,
   setAcademicDataModalOpen: setSessionAcademicDataModalOpen,
   saveAcademicData: saveSessionAcademicData,
+  syncSessionAcademicUnitUi,
+  syncSessionAcademicSubjectUi,
   expandSession,
   isSessionExpanded,
   getFilterValue: getSessionRailFilterValue
@@ -18718,14 +18859,14 @@ function attachEvents() {
       }
       els.composerShell.classList.add("is-collapsed");
       els.revealComposerBtn.classList.add("is-visible");
-      updateChatComposerLayoutOffset();
+      syncPodcasterChatComposerLayout();
       scrollChatToEnd();
     });
 
     els.revealComposerBtn.addEventListener("click", () => {
       els.composerShell.classList.remove("is-collapsed");
       els.revealComposerBtn.classList.remove("is-visible");
-      updateChatComposerLayoutOffset();
+      syncPodcasterChatComposerLayout();
       scrollChatToEnd();
       if (els.promptInput) {
         els.promptInput.focus();
@@ -18993,6 +19134,15 @@ function attachEvents() {
       setSidepanelOpen(nextState);
     });
   }
+  if (els.openSidepanelFromEditorBtn) {
+    els.openSidepanelFromEditorBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressComposerToggleTemporarily();
+      const nextState = !els.sidepanel?.classList.contains("is-open");
+      setSidepanelOpen(nextState);
+    });
+  }
   if (els.sidepanelHeaderToggleBtn) {
     els.sidepanelHeaderToggleBtn.addEventListener("click", (event) => {
       event.preventDefault();
@@ -19220,6 +19370,12 @@ function attachEvents() {
       setSessionAcademicDataModalOpen("");
     });
   }
+  const openSessionAcademicDataBtn = document.getElementById("openSessionAcademicDataBtn");
+  if (openSessionAcademicDataBtn) {
+    openSessionAcademicDataBtn.addEventListener("click", async () => {
+      await setSessionAcademicDataModalOpen(getActiveSession()?.id || "");
+    });
+  }
   if (els.sessionAcademicDataForm) {
     els.sessionAcademicDataForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -19228,6 +19384,30 @@ function attachEvents() {
       } catch (error) {
         addChatMessage("system", `No se pudieron asignar los datos (${error.message}).`);
       }
+    });
+  }
+  if (els.sessionAcademicLevelSelect) {
+    els.sessionAcademicLevelSelect.addEventListener("change", () => {
+      const currentSession = state.sessions.find((session) => String(session?.id || "").trim() === String(els.sessionAcademicDataModal?.dataset.sessionId || "").trim()) || null;
+      syncSessionAcademicUnitUi({
+        nivel: els.sessionAcademicLevelSelect.value,
+        grado: els.sessionAcademicGradeSelect?.value || "",
+        unidad: els.sessionAcademicUnitSelect?.value || "",
+        materia: els.sessionAcademicSubjectSelect?.value || "",
+        ...(currentSession || {})
+      });
+      syncSessionAcademicSubjectUi({
+        nivel: els.sessionAcademicLevelSelect.value,
+        grado: els.sessionAcademicGradeSelect?.value || ""
+      });
+    });
+  }
+  if (els.sessionAcademicGradeSelect) {
+    els.sessionAcademicGradeSelect.addEventListener("change", () => {
+      syncSessionAcademicSubjectUi({
+        nivel: els.sessionAcademicLevelSelect?.value || "",
+        grado: els.sessionAcademicGradeSelect.value
+      });
     });
   }
   if (els.closeMusicConfigBtn) {
@@ -20632,6 +20812,12 @@ function attachEvents() {
       }));
       updatePodcastPlayerUi();
       try {
+        const currentSessionId = String(session?.id || getActiveSession()?.id || "").trim();
+        if (currentSessionId && typeof saveSessionToCloud === "function") {
+          try {
+            await saveSessionToCloud(currentSessionId, { render: false, silent: true });
+          } catch (_) { }
+        }
         const result = await regenerateAllGeminiDialogueAudios(session);
         window.completeGeminiAudioGenerationAnimation?.(result);
         const refreshed = getActiveSession();
@@ -21443,6 +21629,11 @@ function attachEvents() {
       await applyGeminiTrackVolumeModal();
     });
   }
+  if (els.geminiTrackAlignmentSelect) {
+    els.geminiTrackAlignmentSelect.addEventListener("change", () => {
+      syncGeminiTrackVolumeModalInputs("select");
+    });
+  }
   if (els.geminiTrackVolumeRange) {
     els.geminiTrackVolumeRange.addEventListener("input", () => {
       syncGeminiTrackVolumeModalInputs("range");
@@ -21835,15 +22026,15 @@ function attachEvents() {
   });
   els.promptInput.addEventListener("paste", handlePromptInputPaste);
   bindSessionRailEvents();
-  window.addEventListener("resize", updateChatComposerLayoutOffset);
+  window.addEventListener("resize", syncPodcasterChatComposerLayout);
   if (typeof ResizeObserver === "function" && els.composerShell) {
     const composerResizeObserver = new ResizeObserver(() => {
-      updateChatComposerLayoutOffset();
+      syncPodcasterChatComposerLayout();
       scrollChatToEnd();
     });
     composerResizeObserver.observe(els.composerShell);
   }
-  updateChatComposerLayoutOffset();
+  syncPodcasterChatComposerLayout();
 
   window.addEventListener("storage", (event) => {
     if (event.key !== PODCASTER_VIDEO_IMPORT_STORAGE_KEY || !event.newValue) return;

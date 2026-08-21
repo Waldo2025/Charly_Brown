@@ -339,10 +339,29 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     }
   }
 
+  function loadTimelinePreviewImage(imageEl) {
+    if (!imageEl) return;
+    const logicalSrc = String(imageEl.dataset.previewSrc || "").trim();
+    if (!logicalSrc) return;
+    if (String(imageEl.dataset.resolvedPreviewSrc || "").trim() === logicalSrc && imageEl.getAttribute("src")) return;
+    if (typeof playbackController?.resolveStageImageSource !== "function") return;
+    playbackController.resolveStageImageSource(logicalSrc).then((resolvedSrc) => {
+      if (!resolvedSrc || imageEl.dataset.previewSrc !== logicalSrc) return;
+      imageEl.src = resolvedSrc;
+      imageEl.dataset.resolvedPreviewSrc = logicalSrc;
+    }).catch(() => {
+      // No asignamos el proxy privado crudo: un <img> no puede enviar Authorization.
+    });
+  }
+
   function attachPodcastTimelinePreviewLoading() {
     disconnectPodcastTimelinePreviewObserver();
     if (!els.podcastVideoTimeline) return;
     if (podcastTimelinePreviewsSuspended) return;
+    const previewImages = Array.from(
+      els.podcastVideoTimeline.querySelectorAll(".podcast-video-scene-preview img[data-preview-src], .podcast-video-clip-preview img[data-preview-src]")
+    );
+    previewImages.forEach(loadTimelinePreviewImage);
     const previewVideos = Array.from(
       els.podcastVideoTimeline.querySelectorAll(".podcast-video-scene-preview video[data-preview-src], .podcast-video-clip-preview video[data-preview-src]")
     );
@@ -551,15 +570,13 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       const rowAudioDurationMs = rowId
         ? Math.max(0, Math.round(Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0))
         : 0;
-      const measuredAudioVisibleMs = rowId && trimmedVisibleMs > 0
-        ? Math.max(0, Math.round(trimmedVisibleMs / playbackRate))
-        : (rowId
-          ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / playbackRate))
-          : 0);
-      const cappedDurationMs = measuredAudioVisibleMs > 0
-        ? Math.min(segmentVisibleMs, measuredAudioVisibleMs)
+      const measuredAudioVisibleMs = rowId && rowAudioDurationMs > 0
+        ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / playbackRate))
+        : 0;
+      const effectiveDurationMs = measuredAudioVisibleMs > 0
+        ? measuredAudioVisibleMs
         : segmentVisibleMs;
-      return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, cappedDurationMs);
+      return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, effectiveDurationMs);
     };
 
     const syncMontageAudioSubtrackAlignment = () => {
@@ -585,27 +602,23 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const alignMode = String(chip?.dataset?.audioAlign || "clip").trim().toLowerCase();
         const rowId = String(chip?.dataset?.rowId || "").trim();
         if (!rowId) return;
-        if (alignMode === "segment") {
-          const segment = currentGeminiSegmentByRowId.get(rowId) || null;
-          if (!segment) return;
-          const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
-          const durationMs = resolveGeminiSegmentVisibleDurationMs(segment);
-          const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
-          chip.style.left = `${leftPx}px`;
-          chip.style.width = `${widthPx}px`;
-        } else {
-          const clipEl = clipNodeByRowId.get(rowId) || null;
-          const lane = chip.closest(".podcast-video-track-lane");
-          if (!clipEl || !lane) return;
-          const clipLeft = Number(clipEl.offsetLeft || 0);
-          const clipWidth = Math.max(0, Number(clipEl.offsetWidth || 0));
-          chip.style.left = `${clipLeft}px`;
-          if (clipWidth > 0) {
-            const existingWidth = Math.max(0, Number.parseFloat(String(chip.style.width || "")) || Number(chip.offsetWidth || 0));
-            const nextWidth = existingWidth > 0 ? Math.min(existingWidth, clipWidth) : clipWidth;
-            chip.style.width = `${Math.max(minAudioLoopPx, Math.floor(nextWidth))}px`;
-          }
+        const segment = currentGeminiSegmentByRowId.get(rowId) || null;
+        const timelineClip = ensureTimelineClipsByRowId(activeSession, { persist: false })[rowId] || null;
+        const startMs = (alignMode === "segment" && segment)
+          ? Math.max(0, Number(segment?.startMs || 0) || 0)
+          : Math.max(0, Number(timelineClip?.startMs || 0) || 0);
+
+        const leftPx = Math.max(0, timelineMsToPx(startMs, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+        const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0));
+        let durationMs = audioDurationMs;
+        if (durationMs <= 0 && segment) {
+          durationMs = resolveGeminiSegmentVisibleDurationMs(segment);
+        } else if (durationMs <= 0 && timelineClip) {
+          durationMs = resolveMontageAudioChipDurationMs(timelineClip, 0);
         }
+        const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
+        chip.style.left = `${leftPx}px`;
+        chip.style.width = `${widthPx}px`;
         if (PODCAST_RENDER_DEBUG && sampled < 5) {
           sampled += 1;
           logPodcastRenderDebug("montage-audio-align", {
@@ -715,7 +728,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           if (clipSrc) {
             const isVideo = !isLikelyImageMediaRecord(sceneGeneratedClip || rowClip || clip || {});
             const currentSourceAttr = String(previewWrap?.dataset?.previewSrc || "").trim();
-            const currentImageSrc = String(previewWrap?.querySelector("img")?.getAttribute?.("src") || "").trim();
+            const currentImageSrc = String(previewWrap?.querySelector("img")?.dataset?.previewSrc || "").trim();
             if (isVideo) {
               const existingVideo = previewWrap.querySelector("video[data-preview-src]");
               if (existingVideo && currentSourceAttr === clipSrc && String(existingVideo.dataset?.previewSrc || "").trim() === clipSrc) {
@@ -728,7 +741,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               const img = previewWrap.querySelector("img") || null;
               const isDifferentImage = currentImageSrc !== clipSrc;
               if (!img || isDifferentImage || currentSourceAttr !== clipSrc || previewWrap.dataset.previewMediaType !== "image") {
-                previewWrap.innerHTML = `<img src="${escapeHtml(clipSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`;
+                previewWrap.innerHTML = `<img data-preview-src="${escapeHtml(clipSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`;
                 previewWrap.dataset.previewMediaType = "image";
                 previewWrap.dataset.previewSrc = clipSrc;
               }
@@ -737,6 +750,8 @@ export function createPodcasterTimelineUiApi(deps = {}) {
             if (videoEl) {
               loadTimelinePreviewVideo(videoEl, { preferAuto: false });
             }
+            const imageEl = previewWrap.querySelector("img[data-preview-src]");
+            if (imageEl) loadTimelinePreviewImage(imageEl);
           }
         });
       } catch (_) { }
@@ -981,7 +996,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               <button class="podcast-video-scene-preview${isGenerating ? " is-generating" : ""}" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
                 ${videoSrc
                   ? (isLikelyImageMediaRecord(primarySegment || generatedClip)
-                    ? `<img src="${escapeHtml(videoSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`
+                    ? `<img data-preview-src="${escapeHtml(videoSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`
                     : `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous" poster="${escapeHtml(previewPosterSrc)}"></video>`)
                   : portraitSrc
                     ? `<img src="${escapeHtml(portraitSrc)}" alt="${escapeHtml(`Retrato de ${speakerName}`)}" loading="lazy">`
@@ -1090,7 +1105,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const storedAudioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
         const segmentAudioSrc = resolveStorageAudioUrl(
           String(segment?.downloadUrl || segment?.audioSrc || segment?.url || "").trim(),
-          String(segment?.storagePath || "").trim()
+          String(segment?.storagePath || segment?.audioStoragePath || "").trim()
         );
         const hasStoredAudio = Boolean(storedAudioSrc || segmentAudioSrc);
         if (!hasStoredAudio) return "";
@@ -1105,10 +1120,13 @@ export function createPodcasterTimelineUiApi(deps = {}) {
           1,
           Math.round(Number(timelineSceneIndexByRowId.get(rowId) || 0) || 0) || (Number(rowIndexById.get(rowId) || 0) + 1)
         );
-        const adjustedAudioDurationSec = Math.max(0, Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0) / 1000;
-        const durationMs = alignMode === "segment"
-          ? resolveGeminiSegmentVisibleDurationMs(segment)
-          : resolveMontageAudioChipDurationMs(timelineClip, adjustedAudioDurationSec);
+        const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0));
+        let durationMs = audioDurationMs;
+        if (durationMs <= 0 && segment) {
+          durationMs = resolveGeminiSegmentVisibleDurationMs(segment);
+        } else if (durationMs <= 0 && timelineClip) {
+          durationMs = resolveMontageAudioChipDurationMs(timelineClip, 0);
+        }
         const baseWidthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
         const widthPx = Math.max(minAudioLoopPx, Math.min(baseWidthPx, remainingWidthPx));
         if (widthPx <= 0) return "";
@@ -1411,7 +1429,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                     <button class="podcast-video-clip-preview${isGenerating ? " is-generating" : ""}" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
                       ${videoSrc
                         ? (isLikelyImageMediaRecord(primarySegment || generatedClip)
-                          ? `<img src="${escapeHtml(videoSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`
+                          ? `<img data-preview-src="${escapeHtml(videoSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`
                           : `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous" poster="${escapeHtml(previewPosterSrc)}"></video>`)
                         : timelineClip?.backgroundColor
                           ? `<div style="width: 100%; height: 100%; background: ${escapeHtml(timelineClip.backgroundColor)}; border-radius: 4px; border: 1px dashed rgba(255,255,255,0.25);"></div>`
@@ -1876,32 +1894,28 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         .map((segment) => [String(segment?.rowId || "").trim(), segment])
         .filter(([rowId]) => rowId)
     );
-    els.podcastVideoTimeline.querySelectorAll(".podcast-montage-audio-chip[data-row-id][data-audio-align='segment']").forEach((chip) => {
+    els.podcastVideoTimeline.querySelectorAll(".podcast-montage-audio-chip[data-row-id]").forEach((chip) => {
       const rowId = String(chip?.dataset?.rowId || "").trim();
       if (activeGeminiDragRows && !activeGeminiDragRows.has(rowId)) return;
       const segment = segmentByRowId.get(rowId) || null;
       if (!rowId || !segment) return;
       const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
-      const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
-      const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
-      const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
-      const playbackRate = Math.max(0.5, Number(resolveDialogueAudioPlaybackRate(activeSession, rowId) || 1) || 1);
-      const rawVisibleMs = Math.max(
-        STUDIO_TIMELINE_MIN_CLIP_MS,
-        trimmedVisibleMs
-        || Number(segment?.durationMs || 0)
-        || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
-        || STUDIO_TIMELINE_MIN_CLIP_MS
-      );
-      const segmentVisibleMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(rawVisibleMs / playbackRate));
-      const rowAudioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0));
-      const measuredAudioVisibleMs = trimmedVisibleMs > 0
-        ? Math.max(0, Math.round(trimmedVisibleMs / playbackRate))
-        : Math.max(0, rowAudioDurationMs - Math.round(trimInMs / playbackRate));
-      const visibleDurationMs = Math.max(
-        STUDIO_TIMELINE_MIN_CLIP_MS,
-        Math.min(segmentVisibleMs, measuredAudioVisibleMs)
-      );
+      const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs?.(rowId, activeSession) || 0) || 0));
+      let visibleDurationMs = audioDurationMs;
+      if (visibleDurationMs <= 0) {
+        const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
+        const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
+        const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
+        const playbackRate = Math.max(0.5, Number(resolveDialogueAudioPlaybackRate(activeSession, rowId) || 1) || 1);
+        const rawVisibleMs = Math.max(
+          STUDIO_TIMELINE_MIN_CLIP_MS,
+          trimmedVisibleMs
+          || Number(segment?.durationMs || 0)
+          || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
+          || STUDIO_TIMELINE_MIN_CLIP_MS
+        );
+        visibleDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(rawVisibleMs / playbackRate));
+      }
       const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(visibleDurationMs, activeSession) - 4);
       chip.style.left = `${leftPx.toFixed(3)}px`;
       chip.style.width = `${widthPx.toFixed(3)}px`;
@@ -1972,6 +1986,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     disconnectPodcastTimelinePreviewObserver,
     setTimelinePreviewsSuspended,
     loadTimelinePreviewVideo,
+    loadTimelinePreviewImage,
     attachPodcastTimelinePreviewLoading,
     syncPodcastTimelineLaneOffsetFromDom,
     getPodcastTimelineClipMenuPortal,

@@ -20,7 +20,7 @@ const restartRecoverySource = readSource("../backend/montage-export/restart-reco
 const renderSource = readSource("../render.yaml");
 
 test("podcaster loads the preview-faithful montage export v2 module", () => {
-  assert.match(htmlSource, /data-cache-src="podcaster\/podcaster-montage-export-v2\.js"/);
+  assert.match(htmlSource, /data-cache-src="podcaster\/podcaster\.js"[^>]*data-cache-type="module"/);
   assert.match(podcasterSource, /podcaster-montage-export-v2\.js/);
   assert.match(podcasterSource, /handleMontageExportConfirmClickV2 as handleMontageExportConfirmClick/);
 });
@@ -47,8 +47,8 @@ test("export v2 submits the preview runtime contract to a new FFmpeg route", () 
   assert.match(exportV2Source, /ffmpeg_preview_runtime_v2_response/);
   assert.match(exportV2Source, /renderOnScreenTextFrames:\s*true/);
   assert.match(exportV2Source, /renderedTextFrameCount\s*<\s*1/);
-  assert.match(exportV2Source, /onScreenTextMode:\s*"rendered_png_overlay"/);
-  assert.match(exportV2Source, /const submissionPayload = stripMontageExportSubmissionPayload\(payload\);[\s\S]*body: submissionPayload/);
+  assert.match(exportV2Source, /onScreenTextMode:\s*onlyAudio\s*\?\s*"disabled_audio_only"\s*:\s*"rendered_png_overlay"/);
+  assert.match(exportV2Source, /const submissionPayload = \{[\s\S]*\.\.\.stripMontageExportSubmissionPayload\(payload\)[\s\S]*onlyAudio,[\s\S]*format:[\s\S]*body: submissionPayload/);
   assert.doesNotMatch(exportV2Source, /onScreenTextMode:\s*"ass"/);
 });
 

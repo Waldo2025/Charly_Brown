@@ -36,15 +36,26 @@ assert.match(
   "El timeline debe reducir el ancho visible del chip Gemini según trimOutMs - trimInMs y el playbackRate activo."
 );
 
-assert.match(
-  timelineUiSource,
-  /const measuredAudioVisibleMs = rowId[\s\S]*resolveRowAudioDurationMs\?\.\(rowId, activeSession\)[\s\S]*return Math\.max\(STUDIO_TIMELINE_MIN_CLIP_MS, segmentVisibleMs, measuredAudioVisibleMs\);/,
-  "El ancho del chip Gemini debe usar como mínimo la duración real medida del audio, aunque el segmento guardado siga en 8s."
+const visibleDurationBlock = timelineUiSource.slice(
+  timelineUiSource.indexOf("const resolveGeminiSegmentVisibleDurationMs"),
+  timelineUiSource.indexOf("const syncMontageAudioSubtrackAlignment")
+);
+assert.ok(
+  visibleDurationBlock.includes("resolveRowAudioDurationMs?.(rowId, activeSession)")
+    && visibleDurationBlock.includes("const effectiveDurationMs = measuredAudioVisibleMs > 0")
+    && visibleDurationBlock.includes("? measuredAudioVisibleMs")
+    && visibleDurationBlock.includes(": segmentVisibleMs"),
+  "El ancho del chip Gemini debe usar la duración real medida del audio, aunque el segmento guardado siga en 8s."
 );
 
-assert.match(
-  timelineUiSource,
-  /const measuredAudioVisibleMs = Math\.max\(0, Math\.round\(Number\(resolveRowAudioDurationMs\?\.\(rowId, activeSession\)[\s\S]*const visibleDurationMs = Math\.max\(STUDIO_TIMELINE_MIN_CLIP_MS, segmentVisibleMs, measuredAudioVisibleMs\);/,
+const dragPreviewBlock = timelineUiSource.slice(
+  timelineUiSource.indexOf("function syncTimelineGeminiSegmentDragPreview"),
+  timelineUiSource.indexOf("function seekStudioTimelineByRulerClientX")
+);
+assert.ok(
+  dragPreviewBlock.includes("resolveRowAudioDurationMs?.(rowId, activeSession)")
+    && dragPreviewBlock.includes("let visibleDurationMs = audioDurationMs")
+    && dragPreviewBlock.includes("if (visibleDurationMs <= 0)"),
   "El preview ligero del drag Gemini también debe usar la duración real medida del audio."
 );
 

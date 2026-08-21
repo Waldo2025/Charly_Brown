@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 const exportSource = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
 const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const timingSource = readFileSync(new URL("../public/podcaster/podcaster-montage-audio-timing.js", import.meta.url), "utf8");
 
 if (!/function clampMontageOnScreenTextSegmentsToSceneWindows\(/.test(exportSource)) {
   throw new Error("El export debe recortar texto en pantalla al rango real de su escena.");
@@ -15,12 +16,10 @@ if (!/if \(\(endMs - startMs\) < STUDIO_TIMELINE_MIN_CLIP_MS\) return null;/.tes
   throw new Error("El export no debe re-alargar colas de texto menores al mínimo técnico.");
 }
 
-const exportGeminiDurationBlock = exportSource.match(/const resolveGeminiSegmentTimelineDurationMs = \(segment = null, rowId = "", runtime = null\) => \{[\s\S]*?\n  \};/)?.[0] || "";
-if (!exportGeminiDurationBlock.includes("trimOutMs > trimInMs")
-  || !exportGeminiDurationBlock.includes("window.resolveDialogueAudioPlaybackRate")
-  || !exportGeminiDurationBlock.includes("window.resolveRowAudioDurationMs")
-  || !exportGeminiDurationBlock.includes("measuredAudioVisibleMs")) {
-  throw new Error("La duración Gemini del payload debe respetar trimIn/trimOut, playbackRate y duración real medida.");
+if (!exportSource.includes("resolveGeminiAudioTimelineDurationMs({")
+  || !timingSource.includes("remainingSourceMs")
+  || !timingSource.includes("remainingSourceMs / rate")) {
+  throw new Error("La duración Gemini del payload debe usar la duración real restante y playbackRate.");
 }
 
 const previewGeminiDurationBlock = podcasterSource.match(/function resolveGeminiDialogueSegmentTimelineDurationMs\(segment = null, playbackRate = 1\) \{[\s\S]*?\n\}/)?.[0] || "";

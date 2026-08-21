@@ -20,6 +20,11 @@ import {
   resolveMontageRenderEntryAtTime
 } from "./podcaster-montage-render-surface.js";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
+import {
+  reconcileGeminiAudioSegmentTiming,
+  resolveGeminiAudioTimelineDurationMs,
+  resolveGeminiAudioTrimOutMs
+} from "./podcaster-montage-audio-timing.js?v=2026-08-20.2";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
@@ -4852,6 +4857,118 @@ async function hydrateMontageExportPayloadMedia(payload = {}) {
   return payload;
 }
 
+const montageExportAudioDurationProbePromises = new Map();
+
+async function measureMontageExportAudioSourceDurationMs(asset = {}) {
+  const sourceUrl = String(await resolveMontageSceneMediaSourceUrl(asset, "audio") || "").trim();
+  if (!sourceUrl) return 0;
+  if (montageExportAudioDurationProbePromises.has(sourceUrl)) {
+    return montageExportAudioDurationProbePromises.get(sourceUrl);
+  }
+  const promise = new Promise((resolve) => {
+    const audio = new Audio();
+    let settled = false;
+    const finish = (durationMs = 0) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      audio.removeEventListener("loadedmetadata", onDuration);
+      audio.removeEventListener("durationchange", onDuration);
+      audio.removeEventListener("error", onError);
+      audio.removeAttribute("src");
+      audio.load?.();
+      resolve(Math.max(0, Math.round(Number(durationMs || 0) || 0)));
+    };
+    const onDuration = () => {
+      const durationSec = Number(audio.duration || 0);
+      if (Number.isFinite(durationSec) && durationSec > 0) finish(durationSec * 1000);
+    };
+    const onError = () => finish(0);
+    const timeoutId = window.setTimeout(() => finish(0), 12000);
+    audio.preload = "metadata";
+    audio.addEventListener("loadedmetadata", onDuration);
+    audio.addEventListener("durationchange", onDuration);
+    audio.addEventListener("error", onError);
+    audio.src = sourceUrl;
+    audio.load();
+    onDuration();
+  }).finally(() => {
+    montageExportAudioDurationProbePromises.delete(sourceUrl);
+  });
+  montageExportAudioDurationProbePromises.set(sourceUrl, promise);
+  return promise;
+}
+
+async function reconcileMontageExportGeminiAudioDurations(payload = {}) {
+  const segments = Array.isArray(payload?.audioTimeline?.geminiSegments)
+    ? payload.audioTimeline.geminiSegments
+    : [];
+  if (!segments.length) return payload;
+  const actualDurations = window.podcastVideoState?.montageAudioActualDurationsMs || {};
+  const dialogueAudioMap = payload.dialogueAudioMap && typeof payload.dialogueAudioMap === "object"
+    ? payload.dialogueAudioMap
+    : {};
+  const reconciled = await Promise.all(segments.map(async (segment) => {
+    const rowId = String(segment?.rowId || "").trim();
+    const dialogueAudio = rowId && dialogueAudioMap[rowId] && typeof dialogueAudioMap[rowId] === "object"
+      ? dialogueAudioMap[rowId]
+      : null;
+    const cachedDurationMs = Math.max(0, Math.round(Number(actualDurations?.[rowId] || 0) || 0));
+    const loadedElementDurationMs = rowId
+      ? Array.from(document.querySelectorAll("audio")).reduce((maxDurationMs, audio) => {
+        const sourceKey = String(audio?.dataset?.sourceKey || "");
+        const durationSec = Number(audio?.duration || 0);
+        if (!sourceKey.includes(rowId) || !Number.isFinite(durationSec) || durationSec <= 0) return maxDurationMs;
+        return Math.max(maxDurationMs, Math.round(durationSec * 1000));
+      }, 0)
+      : 0;
+    const measuredDurationMs = loadedElementDurationMs > 0
+      ? loadedElementDurationMs
+      : (cachedDurationMs > 0
+        ? cachedDurationMs
+        : await measureMontageExportAudioSourceDurationMs(dialogueAudio || segment));
+    const storedDurationMs = Math.max(
+      0,
+      Math.round(Number(dialogueAudio?.durationSec || 0) * 1000),
+      Math.round(Number(segment?.sourceDurationMs || 0) || 0)
+    );
+    const sourceDurationMs = measuredDurationMs > 0 ? measuredDurationMs : storedDurationMs;
+    if (sourceDurationMs <= 0) return segment;
+    if (rowId) {
+      if (!window.podcastVideoState.montageAudioActualDurationsMs) {
+        window.podcastVideoState.montageAudioActualDurationsMs = {};
+      }
+      window.podcastVideoState.montageAudioActualDurationsMs[rowId] = sourceDurationMs;
+    }
+    const playbackRate = Math.max(0.5, Math.min(10, Number(
+      segment?.playbackRate || dialogueAudio?.playbackRate || 1
+    ) || 1));
+    return reconcileGeminiAudioSegmentTiming({
+      segment,
+      sourceDurationMs,
+      playbackRate,
+      minDurationMs: STUDIO_TIMELINE_MIN_CLIP_MS
+    });
+  }));
+  payload.audioTimeline = {
+    ...payload.audioTimeline,
+    geminiSegments: reconciled
+  };
+  reconciled.forEach((segment) => {
+    const rowId = String(segment?.rowId || "").trim();
+    if (!rowId) return;
+    const sourceDurationMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
+    if (dialogueAudioMap[rowId] && sourceDurationMs > 0) {
+      dialogueAudioMap[rowId] = {
+        ...dialogueAudioMap[rowId],
+        durationSec: sourceDurationMs / 1000
+      };
+    }
+  });
+  payload.dialogueAudioMap = dialogueAudioMap;
+  return payload;
+}
+
 async function blobToDataUrl(blob = null, mimeType = "application/octet-stream") {
   if (!blob || typeof blob.arrayBuffer !== "function") return "";
   const buffer = await blob.arrayBuffer();
@@ -5817,6 +5934,7 @@ export async function buildMontageExportPayloadForSubmission(session = null, opt
     })
     : [];
   await hydrateMontageExportPayloadMedia(prepared.payload);
+  await reconcileMontageExportGeminiAudioDurations(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
   if (prepared.payload.onlyAudio !== true) {
     await hydrateMontageStylizedTextTimeline(prepared.payload, activeSession);
@@ -5894,37 +6012,29 @@ export function buildMontageExportPayload(session = null) {
   };
 
   const resolveGeminiSegmentTimelineDurationMs = (segment = null, rowId = "", runtime = null, playbackRate = 1) => {
-    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const rawStartMs = Number(segment?.startMs || 0);
+    const startMs = Number.isFinite(rawStartMs) ? Math.round(rawStartMs) : 0;
     const safePlaybackRate = Math.max(0.5, Math.min(10, Number(playbackRate || 1) || 1));
     const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
-    const trimOutMs = Math.max(0, Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0));
-    const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
     const declaredDurationMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS)
-    );
-    const segmentTimelineMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round((trimmedVisibleMs || declaredDurationMs) / safePlaybackRate)
     );
     const audioClip = rowId && typeof window.resolveDialogueAudioForRow === "function"
       ? window.resolveDialogueAudioForRow(activeSession, rowId)
       : null;
     const cachedActualDurationMs = Math.max(0, Number(window.podcastVideoState?.montageAudioActualDurationsMs?.[rowId] || 0) || 0);
     const storedDurationMs = Math.max(0, Math.round(Number(audioClip?.durationSec || 0) * 1000));
-    const sourceDurationMs = Math.max(storedDurationMs, cachedActualDurationMs);
-    const rowAudioDurationMs = rowId
-      ? Math.max(0, Math.round(sourceDurationMs / safePlaybackRate))
-      : 0;
-    const measuredAudioVisibleMs = rowId && trimmedVisibleMs > 0
-      ? Math.max(0, Math.round((trimmedVisibleMs / safePlaybackRate)))
-      : (rowId
-        ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / safePlaybackRate))
-        : 0);
-    const cappedDurationMs = measuredAudioVisibleMs > 0
-      ? Math.min(segmentTimelineMs, measuredAudioVisibleMs)
-      : segmentTimelineMs;
-    return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, cappedDurationMs);
+    const sourceDurationMs = cachedActualDurationMs > 0 ? cachedActualDurationMs : storedDurationMs;
+    return resolveGeminiAudioTimelineDurationMs({
+      sourceDurationMs,
+      trimInMs,
+      persistedDurationMs: declaredDurationMs,
+      persistedEndMs: segment?.endMs,
+      startMs,
+      playbackRate: safePlaybackRate,
+      minDurationMs: STUDIO_TIMELINE_MIN_CLIP_MS
+    });
   };
 
   const buildGeminiTimelineSegments = () => {
@@ -5967,7 +6077,8 @@ export function buildMontageExportPayload(session = null) {
         ).trim();
         const effectiveSrc = src || String(storedAudio?.localMediaCacheKey || "").trim();
         if (!effectiveSrc) return null;
-        const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+        const rawStartMs = Number(segment?.startMs || 0);
+        const startMs = Number.isFinite(rawStartMs) ? Math.round(rawStartMs) : 0;
         const playbackRate = Math.max(
           0.5,
           Math.min(
@@ -5977,13 +6088,18 @@ export function buildMontageExportPayload(session = null) {
         );
         const durationMs = resolveGeminiSegmentTimelineDurationMs(segment, rowId, runtime, playbackRate);
         const trimInMs = Math.max(0, Math.round(Number((segment?.trimInMs ?? runtime?.clip?.trimInMs ?? 0)) || 0));
-        const trimOutMsRaw = Math.round(Number((segment?.trimOutMs ?? runtime?.clip?.trimOutMs ?? 0)) || 0);
-        // En export, el segmento debe durar `durationMs` dentro del timeline.
-        // Si `trimOutMs` es mayor, FFmpeg recortaría demasiado tarde y el audio se encimaría.
-        const trimOutMs = Math.min(
-          Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMsRaw || (trimInMs + durationMs)),
-          trimInMs + durationMs
+        const cachedActualDurationMs = Math.max(
+          0,
+          Math.round(Number(window.podcastVideoState?.montageAudioActualDurationsMs?.[rowId] || 0) || 0)
         );
+        const storedDurationMs = Math.max(0, Math.round(Number(storedAudio?.durationSec || 0) * 1000));
+        const sourceDurationMs = cachedActualDurationMs > 0 ? cachedActualDurationMs : storedDurationMs;
+        const trimOutMs = resolveGeminiAudioTrimOutMs({
+          trimInMs,
+          timelineDurationMs: durationMs,
+          playbackRate,
+          sourceDurationMs
+        });
         const overridePctRaw = runtime?.clip?.geminiVolumeOverridePct == null
           ? Number.NaN
           : window.toFiniteNumber(runtime?.clip?.geminiVolumeOverridePct, Number.NaN);

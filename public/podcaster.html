@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.555"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.838"></script>
   <script data-cache-src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Snoopy Creator</title>
@@ -11,9 +11,9 @@
   <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="local-fonts.css">
-  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" data-cache-href="podcaster.css?v=2026-1.0.10.184">
+  <link rel="stylesheet" data-cache-href="podcaster.css?v=2026-1.0.10.186">
   <link rel="stylesheet" data-cache-href="podcaster/podcaster-sidepanel-studio.css">
   <link rel="stylesheet" data-cache-href="podcaster/podcaster-overlay-card-studio.css">
   <!-- FilePond -->
@@ -697,9 +697,6 @@
   </header>
 
   <div id="sidebar">
-    <button id="menuToggle" aria-label="Abrir menú">
-      <i class="fas fa-bars"></i>
-    </button>
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
     </div>
@@ -721,6 +718,11 @@
           <div class="sessions-rail-header">
             <strong class="sessions-rail-header-title">Sesiones</strong>
             <div class="sessions-rail-actions">
+              <button id="openSessionFiltersBtn" class="panel-icon-btn sessions-advanced-filter-btn" type="button"
+                title="Filtrar sesiones" aria-pressed="false" aria-label="Abrir filtros de sesiones">
+                <i class="fas fa-filter" aria-hidden="true"></i>
+                <span class="sessions-filter-active-dot" aria-hidden="true"></span>
+              </button>
               <button id="toggleArchivedSessionsBtn" class="panel-icon-btn" type="button" title="Ver sesiones archivadas" aria-pressed="false" aria-label="Ver sesiones archivadas">
                 <i class="fas fa-box-archive"></i>
               </button>
@@ -769,6 +771,11 @@
                 class="chat-stage-header-action snoopy-creator-theme-toggle" type="button"
                 title="Activar tema claro" aria-label="Activar tema claro" aria-pressed="false">
                 <i class="fas fa-sun" aria-hidden="true"></i>
+              </button>
+              <button id="openSessionAcademicDataBtn"
+                class="chat-stage-header-action" type="button"
+                title="Asignar datos académicos" aria-label="Asignar datos académicos">
+                <i class="fas fa-graduation-cap" aria-hidden="true"></i>
               </button>
               <details class="creator-mode-menu">
                 <summary class="chat-stage-header-action creator-mode-menu-toggle"
@@ -1156,19 +1163,25 @@
           </select>
         </label>
         <label class="row-field">
-          <span>Unidad</span>
+          <span id="sessionAcademicUnitLabel">Unidad</span>
           <select id="sessionAcademicUnitSelect" aria-label="Unidad">
             <option value="">Selecciona una unidad</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-            <option value="9">9</option>
-            <option value="10">10</option>
+            <option value="1">Unidad 1</option>
+            <option value="2">Unidad 2</option>
+            <option value="3">Unidad 3</option>
+            <option value="4">Unidad 4</option>
+            <option value="5">Unidad 5</option>
+            <option value="6">Unidad 6</option>
+            <option value="7">Unidad 7</option>
+            <option value="8">Unidad 8</option>
+            <option value="9">Unidad 9</option>
+            <option value="10">Unidad 10</option>
+          </select>
+        </label>
+        <label id="sessionAcademicSubjectField" class="row-field academic-subject-field" hidden>
+          <span id="sessionAcademicSubjectLabel">Materia</span>
+          <select id="sessionAcademicSubjectSelect" aria-label="Materia">
+            <option value="">Selecciona una materia</option>
           </select>
         </label>
         <div class="timeline-clip-duration-actions">
@@ -1177,6 +1190,72 @@
             type="button">Cancelar</button>
           <button id="saveSessionAcademicDataBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
             type="submit">Guardar</button>
+        </div>
+      </form>
+    </section>
+  </div>
+  <div id="sessionFiltersModal" class="floating-panel-modal sessions-filter-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-session-filters-modal"
+      aria-label="Cerrar filtros de sesiones"></button>
+    <section class="floating-panel-card session-academic-data-panel sessions-filter-panel" role="dialog" aria-modal="true"
+      aria-labelledby="sessionFiltersModalTitle">
+      <header class="timeline-clip-duration-head">
+        <h3 id="sessionFiltersModalTitle">Filtrar sesiones</h3>
+        <button id="closeSessionFiltersBtn" class="row-icon-btn" type="button" title="Cerrar"
+          aria-label="Cerrar filtros de sesiones">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <form id="sessionFiltersForm" class="session-academic-data-form sessions-filter-form">
+        <label class="row-field sessions-filter-query-field">
+          <span>Título de sesión o video</span>
+          <span class="sessions-filter-search-control">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input id="sessionFilterQueryInput" type="search" autocomplete="off"
+              placeholder="Buscar por título…" aria-label="Título de sesión o video">
+          </span>
+        </label>
+        <div class="sessions-filter-fields">
+          <label class="row-field">
+            <span>Nivel</span>
+            <select id="sessionFilterLevelSelect" aria-label="Filtrar por nivel">
+              <option value="">Todos los niveles</option>
+            </select>
+          </label>
+          <label class="row-field">
+            <span>Grado</span>
+            <select id="sessionFilterGradeSelect" aria-label="Filtrar por grado">
+              <option value="">Todos los grados</option>
+            </select>
+          </label>
+          <label class="row-field">
+            <span>Trimestre</span>
+            <select id="sessionFilterTermSelect" aria-label="Filtrar por trimestre">
+              <option value="">Todos los trimestres</option>
+            </select>
+          </label>
+          <label class="row-field">
+            <span id="sessionFilterUnitLabel">Tema / Unidad</span>
+            <select id="sessionFilterUnitSelect" aria-label="Filtrar por tema o unidad">
+              <option value="">Todos los temas / unidades</option>
+            </select>
+          </label>
+        </div>
+        <p id="sessionFilterOptionsHint" class="sessions-filter-options-hint" aria-live="polite"></p>
+        <div class="timeline-clip-duration-actions sessions-filter-actions">
+          <button id="clearSessionFiltersBtn"
+            class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn" type="button">
+            <i class="fas fa-filter-circle-xmark" aria-hidden="true"></i>
+            <span>Limpiar</span>
+          </button>
+          <button id="cancelSessionFiltersBtn"
+            class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+            type="button">Cancelar</button>
+          <button id="applySessionFiltersBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+            type="submit">
+            <i class="fas fa-check" aria-hidden="true"></i>
+            <span>Aplicar</span>
+          </button>
         </div>
       </form>
     </section>
@@ -1243,7 +1322,17 @@
         <input id="geminiTrackSpeedNumber" type="number" min="0.5" max="10" step="0.01" value="1" inputmode="decimal"
           aria-label="Velocidad de todas las voces Gemini">
       </label>
-      <small class="timeline-clip-duration-hint">La velocidad se aplica a toda la voz Gemini del timeline; 1.00 es normal.</small>
+      <label class="row-field">
+        <span>Alineación de voz en la escena</span>
+        <select id="geminiTrackAlignmentSelect" class="studio-select" aria-label="Alineación de voz en escena" style="background:#1a1d24;color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 10px;width:100%">
+          <option value="left">Inicio (0 ms - Al ras del borde)</option>
+          <option value="left-center">Inicio-Medio (25% de la escena)</option>
+          <option value="center">Centrado en la escena (50%)</option>
+          <option value="center-right">Medio-Final (75% de la escena)</option>
+          <option value="right">Final de la escena (100%)</option>
+        </select>
+      </label>
+      <small class="timeline-clip-duration-hint">Ajusta el volumen, velocidad y alineación inicial de la voz Gemini respecto a cada escena de video.</small>
       <div class="timeline-clip-duration-actions">
         <button id="resetGeminiTrackVolumeBtn"
           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn" type="button">
@@ -1616,6 +1705,11 @@
 
         <div class="floating-panel-head-actions">
           <div class="podcast-header-action-group is-view" role="group" aria-label="Compartir y pantalla completa">
+            <button id="openSidepanelFromEditorBtn" class="row-icon-btn podcast-header-scenes-toggle" type="button"
+              data-sidepanel-toggle aria-controls="podcasterSidepanel" aria-expanded="true"
+              title="Ocultar Panel de Escenas" aria-label="Ocultar Panel de Escenas">
+              <i class="fas fa-chevron-right" aria-hidden="true"></i>
+            </button>
             <div id="podcastSessionShareMenuWrap" class="podcast-session-share-menu-wrap">
               <button id="sharePodcastVideoSessionBtn" class="row-icon-btn" type="button"
                 title="Compartir sesión" aria-label="Compartir sesión" aria-haspopup="menu" aria-expanded="false"
@@ -2982,7 +3076,7 @@
   </div>
 
   <script src="vendor/sortablejs/Sortable.min.js"></script>
-  <script type="module" src="js/chromeLayout.js"></script>
+  <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
   <script data-cache-src="podcaster/podcaster-scene-media-render-spec.js"></script>
   <script data-cache-src="podcaster/podcaster-stop-motion.js"></script>
   <script data-cache-src="podcaster/podcaster-stop-motion-beats.js"></script>
@@ -2999,6 +3093,7 @@
   <script data-cache-src="podcaster/podcaster-script-editor.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster-chat-assistant.js" data-cache-type="module"></script>
   <script data-cache-src="podcaster/podcaster.js" data-cache-type="module" data-cache-role="app"></script>
+  <script src="podcaster/podcaster-scene-jump-shortcut.js"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
   <script data-cache-src="https://unpkg.com/filepond/dist/filepond.min.js" data-cache-role="deferred" data-cache-defer-until="idle"></script>
   <script data-cache-src="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.js" data-cache-role="deferred" data-cache-defer-until="idle"></script>

@@ -2,15 +2,12 @@
   if (window.__cbCacheVersionLoaderInit) return;
   window.__cbCacheVersionLoaderInit = true;
 
-  const fallbackVersion = "2026-1.0.10.555";
+  const fallbackVersion = "2026-1.0.10.838";
 
   function resolveCacheVersion() {
-    return fetch("version.json?ts=" + encodeURIComponent(String(Date.now())), { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : {})
-      // El query del propio loader identifica la release activa. version.json se
-      // consulta para el banner, pero una copia stale nunca debe revivir módulos viejos.
-      .then(() => fallbackVersion)
-      .catch(() => fallbackVersion);
+    // El loader publicado es la fuente autoritativa del cache-buster. El banner
+    // consulta version.json una sola vez y fuera de la ruta crítica.
+    return Promise.resolve(fallbackVersion);
   }
 
   function withVersion(src, version) {
@@ -62,9 +59,7 @@
     window.__CHARLY_CACHE_VERSION__ = version;
     appendStyles(version, document);
     const scripts = Array.from(document.querySelectorAll("script[data-cache-src]:not([data-cache-version-loaded='1'])"));
-    for (const script of scripts) {
-      await loadScript(script, version);
-    }
+    await Promise.all(scripts.map((script) => loadScript(script, version)));
   }
 
   const ready = resolveCacheVersion().then((version) => {

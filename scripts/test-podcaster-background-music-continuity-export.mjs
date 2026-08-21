@@ -19,7 +19,7 @@ if (!/const shouldOffsetByScene = !isBackgroundSegment \|\| Boolean\(String\(seg
   throw new Error("El backend no debe depender de rowId para colocar segmentos continuos de fondo.");
 }
 
-if (!/const adjustedStartMs = shouldOffsetByScene && exportOffset/.test(backendSource)) {
+if (!/resolveMontageTimelineAudioPlacement\(\{[\s\S]*hasExportOffset: Boolean\(shouldOffsetByScene && exportOffset\)/.test(backendSource)) {
   throw new Error("La mezcla timeline debe dejar intacto el startMs de fondo continuo cuando no pertenece a una escena.");
 }
 

@@ -8,7 +8,7 @@ if (!/function timelineHasVisualOverlap\(session = null, runtimeEntries = null\)
   throw new Error("Falta helper para detectar overlap visual en el timeline.");
 }
 
-if (!/els\.podcastVideoPlayBtn\.addEventListener\("click", async \(\) => \{[\s\S]*const startMs = Number\(podcastVideoState\.montageCursorMs \|\| 0\);[\s\S]*playbackController\.play\(startMs\);/m.test(podcasterSource)) {
+if (!/els\.podcastVideoPlayBtn\.addEventListener\("click", async \(\) => \{[\s\S]*const startMs = Number\(podcastVideoState\.montageCursorMs \|\| 0\);[\s\S]*playbackController\.play\(startMs(?:,\s*\{[\s\S]*?\})?\);/m.test(podcasterSource)) {
   throw new Error("El botón Play debe delegar la reproducción del montaje al PodcasterPlaybackController unificado.");
 }
 

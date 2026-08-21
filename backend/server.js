@@ -38,6 +38,9 @@ const {
   reconcileMontageExportAudioIntent
 } = require("./montage-export-audio-intent-reconcile.js");
 const {
+  resolveMontageTimelineAudioPlacement
+} = require("./montage-export/audio-timing.js");
+const {
   createProcessMontageExportJob
 } = require("./montage-export/worker-runner.js");
 const {
@@ -10827,7 +10830,8 @@ function normalizeMontageExportRequestBody(body = {}) {
     const storagePath = clampText(segment?.storagePath || "", 900);
     const dataUrl = clampText(String(segment?.dataUrl || segment?.localDataUrl || "").trim(), 16_000_000);
     const localMediaCacheKey = clampText(String(segment?.localMediaCacheKey || "").trim(), 400);
-    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const rawStartMs = Number(segment?.startMs || 0);
+    const startMs = Number.isFinite(rawStartMs) ? Math.round(rawStartMs) : 0;
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
     const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
     const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
@@ -13770,6 +13774,7 @@ async function finalizeMontageExportAudioTrack({
   tmpDir = "",
   outExt = "mp4",
   exportedDurationSec = 0,
+  baseTimelineDurationSec = 0,
   exportOffsetsByRowId = new Map(),
   emitStage = () => {},
   shouldAbort = () => false,
@@ -13811,6 +13816,11 @@ async function finalizeMontageExportAudioTrack({
   };
 
   let nextOutPath = finalOutPath;
+  const targetExportDurationSec = Math.max(0, Number(exportedDurationSec || 0) || 0);
+  const baseTimelineSec = Math.max(0, Number(baseTimelineDurationSec || 0) || 0);
+  const timelinePadDurationSec = Math.max(0, targetExportDurationSec - baseTimelineSec);
+  const shouldPadTimelineVideo = timelinePadDurationSec > 0.005;
+  const timelinePadLabel = "[montage_video_pad]";
   console.info("[backend][montage-export][final-audio-start]", {
     jobId,
     useTimelineAudio: input.useTimelineAudio === true,
@@ -13876,33 +13886,30 @@ async function finalizeMontageExportAudioTrack({
       const labels = [];
       segmentInputs.forEach((item, idx) => {
         const segment = item.segment || {};
-        const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
-        const durationSec = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
         const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
         const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
-        const fadeInSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
-        const fadeOutSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
         const inputIndex = idx + 1;
         const label = `a${idx}`;
-        labels.push(label);
         const kind = String(segment?.kind || "").trim().toLowerCase();
         const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
         const shouldOffsetByScene = !isBackgroundSegment || Boolean(String(segment?.rowId || "").trim());
         const exportOffset = shouldOffsetByScene ? (exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null) : null;
-        const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
-        const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
-        const adjustedStartMs = shouldOffsetByScene && exportOffset ? Math.max(0, exportOffset.startMs + relativeStartMs) : startMs;
-        let finalAdjustedStartMs = adjustedStartMs;
-        let finalTrimInSec = trimInSec;
-        let finalDurationSec = durationSec;
-
-        if (finalAdjustedStartMs < 0) {
-          const shiftSec = Math.abs(finalAdjustedStartMs) / 1000;
-          finalTrimInSec += shiftSec;
-          finalDurationSec = Math.max(0.1, finalDurationSec - shiftSec);
-          finalAdjustedStartMs = 0;
-        }
+        const placement = resolveMontageTimelineAudioPlacement({
+          segmentStartMs: segment?.startMs,
+          segmentDurationMs: segment?.durationMs,
+          exportStartMs: exportOffset?.startMs,
+          timelineStartMs: exportOffset?.timelineStartMs,
+          hasExportOffset: Boolean(shouldOffsetByScene && exportOffset),
+          playbackRate
+        });
+        if (placement.durationMs <= 0) return;
+        labels.push(label);
+        const finalAdjustedStartMs = placement.startMs;
+        const finalTrimInSec = trimInSec + (placement.sourceLeadingTrimMs / 1000);
+        const finalDurationSec = Math.max(0.001, placement.durationMs / 1000);
+        const fadeInSec = Math.max(0, Math.min(finalDurationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
+        const fadeOutSec = Math.max(0, Math.min(finalDurationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
         const sourceDurationSec = Math.max(0.1, finalDurationSec * playbackRate);
 
         const fadeParts = [volume.toFixed(3)];
@@ -13943,6 +13950,14 @@ async function finalizeMontageExportAudioTrack({
       });
       const videoDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.40));
       const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[mix];[0:a]volume='${videoDuckExprEscaped}':eval=frame[v_ducked];[v_ducked][mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`;
+      const filterParts = [];
+      if (shouldPadTimelineVideo) {
+        filterParts.push(`[0:v]tpad=stop_mode=clone:stop_duration=${timelinePadDurationSec.toFixed(3)}${timelinePadLabel}`);
+      }
+      filters.forEach((item) => filterParts.push(item));
+      filterParts.push(mix);
+      const filterComplex = filterParts.join(";");
+      const videoMap = shouldPadTimelineVideo ? timelinePadLabel : "0:v:0";
       console.info("[backend][montage-export][timeline-audio-mix-start]", {
         jobId,
         timelineMixedOutPath,
@@ -13952,8 +13967,22 @@ async function finalizeMontageExportAudioTrack({
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning", "-i", nextOutPath,
         ...segmentInputs.flatMap((item) => ["-i", item.path]),
-        "-filter_complex", `${filters.join(";")};${mix}`,
-        "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
+        "-filter_complex", filterComplex,
+        "-map", videoMap, "-map", "[outa]",
+        ...(shouldPadTimelineVideo
+          ? [
+            "-c:v", outExt === "webm" ? "libvpx-vp9" : "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", audioCodec,
+            "-ar", "48000",
+            "-b:a", audioBitrate
+          ]
+          : [
+            "-c:v", "copy",
+            "-c:a", audioCodec,
+            "-ar", "48000",
+            "-b:a", audioBitrate
+          ]),
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         timelineMixedOutPath
       ], {
@@ -14047,7 +14076,7 @@ async function renderMontageAudioOnlyExport({
     throw err;
   }
   const entries = Array.isArray(input.entries) ? input.entries : [];
-  const timelineDurationMs = Math.max(
+  const baseTimelineDurationMs = Math.max(
     500,
     Math.round(Number(input.audioTimelineRaw?.durationMs || 0) || 0),
     ...entries.map((entry) => Math.max(0, Math.round(Number(entry?.timelineEndMs || 0) || 0))),
@@ -14103,6 +14132,13 @@ async function renderMontageAudioOnlyExport({
     err.status = 422;
     throw err;
   }
+  const timelineDurationMs = Math.max(
+    baseTimelineDurationMs,
+    ...audioSegments.map((segment) => resolveMontageTimelineAudioPlacement({
+      segmentStartMs: segment?.startMs,
+      segmentDurationMs: segment?.durationMs
+    }).endMs)
+  );
 
   emitStage("mix_audio_only", 0.32, "Mezclando audio del timeline en MP3.");
   console.info("[backend][montage-export][audio-only-start]", {
@@ -14142,13 +14178,20 @@ async function renderMontageAudioOnlyExport({
   const labels = [];
   segmentInputs.forEach((item, idx) => {
     const segment = item.segment || {};
-    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
     const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
-    const duration = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
     const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
+    const placement = resolveMontageTimelineAudioPlacement({
+      segmentStartMs: segment?.startMs,
+      segmentDurationMs: segment?.durationMs,
+      playbackRate
+    });
+    if (placement.durationMs <= 0) return;
+    const finalTrimInSec = trimInSec + (placement.sourceLeadingTrimMs / 1000);
+    const finalDurationSec = Math.max(0.001, placement.durationMs / 1000);
+    const finalStartMs = placement.startMs;
     const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
-    const fadeInSec = Math.max(0, Math.min(duration, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
-    const fadeOutSec = Math.max(0, Math.min(duration, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
+    const fadeInSec = Math.max(0, Math.min(finalDurationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
+    const fadeOutSec = Math.max(0, Math.min(finalDurationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
     const inputIndex = idx + 1;
     const label = `aonly${idx}`;
     labels.push(label);
@@ -14157,8 +14200,9 @@ async function renderMontageAudioOnlyExport({
       fadeParts.push(`if(lt(t,${fadeInSec.toFixed(3)}),t/${fadeInSec.toFixed(3)},1)`);
     }
     if (fadeOutSec > 0.001) {
-      fadeParts.push(`if(gt(t,${Math.max(0, duration - fadeOutSec).toFixed(3)}),(${duration.toFixed(3)}-t)/${fadeOutSec.toFixed(3)},1)`);
+      fadeParts.push(`if(gt(t,${Math.max(0, finalDurationSec - fadeOutSec).toFixed(3)}),(${finalDurationSec.toFixed(3)}-t)/${fadeOutSec.toFixed(3)},1)`);
     }
+
     const retimeFilters = Math.abs(playbackRate - 1) > 0.0001
       ? `,${buildFfmpegAtempoFilterChain(playbackRate)}`
       : "";
@@ -14174,7 +14218,7 @@ async function renderMontageAudioOnlyExport({
     }
     const volumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
     filters.push(
-      `[${inputIndex}:a]atrim=start=${trimInSec.toFixed(3)}:duration=${(duration * playbackRate).toFixed(3)},asetpts=PTS-STARTPTS${retimeFilters},atrim=start=0:duration=${duration.toFixed(3)},asetpts=PTS-STARTPTS,volume='${volumeExpr}':eval=frame,adelay=${startMs}ms|${startMs}ms${suffixes.length ? `,${suffixes.join(",")}` : ""}[${label}]`
+      `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${(finalDurationSec * playbackRate).toFixed(3)},asetpts=PTS-STARTPTS${retimeFilters},atrim=start=0:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${volumeExpr}':eval=frame,adelay=${Math.round(finalStartMs)}ms|${Math.round(finalStartMs)}ms${suffixes.length ? `,${suffixes.join(",")}` : ""}[${label}]`
     );
   });
   const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,atrim=start=0:duration=${durationSec.toFixed(3)},aresample=48000,alimiter=limit=-1.5dB[outa]`;
@@ -15071,10 +15115,24 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const exportOffsetsByRowId = buildMontageExportOffsetsByRowId(overlapAwareEntries, {
       useTimelinePositions: overlapPlan.hasOverlap || overlapPlan.hasGaps
     });
-
-    const exportedDurationSec = (overlapPlan.hasOverlap || overlapPlan.hasGaps)
-      ? Math.max(0.5, overlapPlan.totalDurationMs / 1000)
-      : exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
+    const audioDrivenDurationMs = Array.isArray(input.timelineAudioSegments)
+      ? input.timelineAudioSegments.reduce((maxDurationMs, segment) => {
+        const rowId = String(segment?.rowId || "").trim();
+        const exportOffset = rowId ? (exportOffsetsByRowId.get(rowId) || null) : null;
+        const placement = resolveMontageTimelineAudioPlacement({
+          segmentStartMs: segment?.startMs,
+          segmentDurationMs: segment?.durationMs,
+          exportStartMs: exportOffset?.startMs,
+          timelineStartMs: exportOffset?.timelineStartMs,
+          hasExportOffset: Boolean(exportOffset)
+        });
+        return Math.max(maxDurationMs, placement.endMs);
+      }, 0)
+      : 0;
+    const baseExportedDurationMs = (overlapPlan.hasOverlap || overlapPlan.hasGaps)
+      ? overlapPlan.totalDurationMs
+      : Math.round(exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0) * 1000);
+    const exportedDurationSec = Math.max(0.5, Math.max(baseExportedDurationMs, audioDrivenDurationMs) / 1000);
     let finalOutPath = concatOutPath;
 
     const reviewOnScreenTextEnabled = input.exportMode === "review" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
@@ -15522,6 +15580,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       tmpDir,
       outExt,
       exportedDurationSec,
+      baseTimelineDurationSec: baseExportedDurationMs / 1000,
       exportOffsetsByRowId,
       emitStage,
       shouldAbort,
