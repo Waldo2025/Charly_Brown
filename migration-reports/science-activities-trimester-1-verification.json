@@ -1,0 +1,16 @@
+{
+  "migrationId": "science-activities-trimester-1-2026-08-31",
+  "mode": "dry-run",
+  "projectId": "charly-brown",
+  "startedAt": "2026-08-31T17:03:13.374Z",
+  "completedAt": "2026-08-31T17:03:15.559Z",
+  "stats": {
+    "total": 13,
+    "assigned_trimester_1": 0,
+    "synchronized": 0,
+    "unchanged": 13,
+    "conflict_skipped": 0,
+    "failed": 0
+  },
+  "changes": []
+}

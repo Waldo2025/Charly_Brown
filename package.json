@@ -23,6 +23,8 @@
     "test:migration:session-compat": "node scripts/test-google-cloud-migration-session-compatibility.mjs",
     "test:migration:browser-cutover": "node scripts/test-google-cloud-browser-cutover.mjs",
     "test:science-sessions": "node --test scripts/test-science-activities-sessions.mjs",
+    "test:science-trimester-migration": "node --test scripts/test-science-trimester-migration.mjs",
+    "migrate:science-trimester-1": "node scripts/backfill-science-activities-trimester-1.mjs",
     "test:science-number-line": "node --test scripts/test-science-number-line-export.mjs",
     "test:science-factorization": "node --test scripts/test-science-factorization.mjs && node scripts/test-science-factorization-browser.mjs",
     "test:science-fill-blank": "node --test scripts/test-science-fill-blank-layout.mjs",

@@ -2,10 +2,12 @@ const crypto = require("node:crypto");
 const { getAdminServices, resolveAuthContext, asyncRoute } = require("./common.js");
 
 const COLLECTION = "science_activity_sessions";
+const LAYOUT_COLLECTION = "science_activity_session_layouts";
 const MAX_REQUEST_BYTES = 28 * 1024 * 1024;
 const MAX_ACTIVITY_BYTES = 850 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGES = 20;
+const SCIENCE_TRIMESTERS = Object.freeze(["Trimestre 1", "Trimestre 2", "Trimestre 3"]);
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
@@ -40,12 +42,64 @@ function decodeFirestoreValue(value) {
   return value;
 }
 
+function normalizeScienceTrimester(value, fallback = "") {
+  const compact = String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s._-]+/g, "");
+  const match = compact.match(/^(?:trim|trimestre)?([123])$/);
+  return match ? `Trimestre ${match[1]}` : fallback;
+}
+
+function normalizeSessionLayout(input = {}) {
+  const groups = Array.isArray(input?.groups) ? input.groups : [];
+  if (groups.length > 50) throw Object.assign(new Error("science_session_groups_limit"), { status: 400 });
+  const claimed = new Set();
+  const normalizedGroups = groups.map((group, index) => {
+    const sourceIds = Array.isArray(group?.sessionIds) ? group.sessionIds : [];
+    if (sourceIds.length > 100) throw Object.assign(new Error("science_session_group_members_limit"), { status: 400 });
+    const sessionIds = [...new Set(sourceIds.map((value) => identifier(value, "science_session_group_member")))]
+      .filter((sessionId) => {
+        if (claimed.has(sessionId)) return false;
+        claimed.add(sessionId);
+        return true;
+      });
+    if (!sessionIds.length) return null;
+    const name = String(group?.name || `Grupo ${index + 1}`).trim().slice(0, 80);
+    return {
+      id: identifier(group?.id || `session-group-${index + 1}`, "science_session_group_id"),
+      name: name || `Grupo ${index + 1}`,
+      sessionIds,
+      collapsed: group?.collapsed === true,
+      createdAt: String(group?.createdAt || "").slice(0, 80)
+    };
+  }).filter(Boolean);
+  return {
+    version: 2,
+    updatedAt: String(input?.updatedAt || "").slice(0, 80),
+    groups: normalizedGroups
+  };
+}
+
+function resolveSessionLayoutWrite(existingInput, incomingInput) {
+  const incoming = normalizeSessionLayout(incomingInput || {});
+  const existing = existingInput ? normalizeSessionLayout(existingInput) : null;
+  if (existing && String(existing.updatedAt || "") > String(incoming.updatedAt || "")) {
+    return { applied: false, layout: existing };
+  }
+  return { applied: true, layout: incoming };
+}
+
 function activityMetadata(activity = {}) {
   const gameMode = activity.gameMode === "lab" ? "simulator" : activity.gameMode === "simulator" ? "simulator" : "game";
+  const trimester = normalizeScienceTrimester(activity.trimester);
   return {
     title: String(activity.title || "Sesión sin título").trim().slice(0, 180) || "Sesión sin título",
     subject: String(activity.subject || "").trim().slice(0, 80),
     topic: String(activity.topic || "").trim().slice(0, 180),
+    trimester,
     gameMode
   };
 }
@@ -57,6 +111,7 @@ function sessionMetadata(document) {
     title: data.title || legacyActivity.title,
     subject: data.subject || legacyActivity.subject,
     topic: data.topic || legacyActivity.topic,
+    trimester: normalizeScienceTrimester(data.trimester || legacyActivity.trimester, "Trimestre 1"),
     gameMode: data.gameMode || legacyActivity.gameMode
   });
   return {
@@ -191,14 +246,56 @@ function registerScienceActivitiesRoutes(app) {
     const snapshot = await db.collection(COLLECTION)
       .where("ownerId", "==", authContext.uid)
       .select(
-        "localId", "savedAt", "title", "subject", "topic", "gameMode",
-        "activity.title", "activity.subject", "activity.topic", "activity.gameMode"
+        "localId", "savedAt", "title", "subject", "topic", "trimester", "gameMode",
+        "activity.title", "activity.subject", "activity.topic", "activity.trimester", "activity.gameMode"
       )
       .limit(50)
       .get();
     const sessions = snapshot.docs.map(sessionMetadata)
       .sort((left, right) => String(right.savedAt || "").localeCompare(String(left.savedAt || "")));
     res.status(200).json({ ok: true, sessions, complete: snapshot.size < 50 });
+  }));
+
+  app.get("/api/science-activities/session-layout", asyncRoute(async (req, res) => {
+    const authContext = await resolveAuthContext(req);
+    const { db } = getAdminServices();
+    const snapshot = await db.collection(LAYOUT_COLLECTION).doc(authContext.uid).get();
+    if (!snapshot.exists) {
+      res.status(200).json({ ok: true, layout: null });
+      return;
+    }
+    const data = cloneJson(snapshot.data() || {});
+    res.status(200).json({ ok: true, layout: normalizeSessionLayout(data) });
+  }));
+
+  app.post("/api/science-activities/session-layout", asyncRoute(async (req, res) => {
+    const authContext = await resolveAuthContext(req);
+    if (Buffer.byteLength(JSON.stringify(req.body || {}), "utf8") > 128 * 1024) {
+      throw Object.assign(new Error("science_session_layout_too_large"), { status: 413 });
+    }
+    const layout = normalizeSessionLayout(req.body?.layout || {});
+    if (!layout.updatedAt || !Number.isFinite(Date.parse(layout.updatedAt))) {
+      throw Object.assign(new Error("science_session_layout_updated_at_required"), { status: 400 });
+    }
+    const { db, admin } = getAdminServices();
+    const ref = db.collection(LAYOUT_COLLECTION).doc(authContext.uid);
+    let resolvedLayout = layout;
+    let applied = true;
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const resolution = resolveSessionLayoutWrite(snapshot.exists ? snapshot.data() || {} : null, layout);
+      if (!resolution.applied) {
+        resolvedLayout = resolution.layout;
+        applied = false;
+        return;
+      }
+      transaction.set(ref, {
+        ownerId: authContext.uid,
+        ...layout,
+        serverUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    });
+    res.status(200).json({ ok: true, applied, layout: resolvedLayout });
   }));
 
   app.get("/api/science-activities/session/:firebaseDocId", asyncRoute(async (req, res) => {
@@ -228,6 +325,10 @@ function registerScienceActivitiesRoutes(app) {
     }
     const activity = req.body?.activity && typeof req.body.activity === "object" ? cloneJson(req.body.activity) : null;
     if (!activity) throw Object.assign(new Error("science_activity_required"), { status: 400 });
+    activity.trimester = normalizeScienceTrimester(activity.trimester);
+    if (!SCIENCE_TRIMESTERS.includes(activity.trimester)) {
+      throw Object.assign(new Error("science_activity_trimester_required"), { status: 400 });
+    }
     const firebaseDocId = req.body?.firebaseDocId
       ? identifier(req.body.firebaseDocId, "science_session_id")
       : `science_${crypto.randomUUID()}`;
@@ -338,7 +439,10 @@ module.exports = {
   activityMetadata,
   decodeFirestoreValue,
   encodeFirestoreValue,
+  normalizeScienceTrimester,
+  normalizeSessionLayout,
   registerScienceActivitiesRoutes,
   resolveOwnedSessionSnapshot,
+  resolveSessionLayoutWrite,
   sessionMetadata
 };

@@ -2,7 +2,7 @@ import { authFetchJson, buildApiUrl, buildVeoApiUrl } from "./api-client.js";
 import { createCurriculumRegistry, resolveCurriculumProfile, applyCurriculumProfile, buildCuratedProfileAssessment } from "./science-curriculum-profiles.mjs?v=20260814-factorization-v8";
 import { installScienceActivitiesMotion } from "./science-activities-motion.mjs?v=20260730-micro-missions-v1";
 import { characterPresets, createCharacterSprite } from "./science-character-library.mjs?v=20260728-subject-style-characters";
-import { isHydratableSessionActivity, nextOfflineDatabaseVersion, normalizedSessionMode, orderHydrationCandidates, sessionMetadataFromRecord, sessionsShareIdentity, shouldKeepSessionAfterRemoteList } from "./science-session-records.mjs?v=20260812-session-recovery-v5";
+import { isHydratableSessionActivity, nextOfflineDatabaseVersion, normalizeScienceTrimester, normalizedSessionMode, orderHydrationCandidates, sanitizeScienceSessionGroups, sessionIdentityKeys, sessionMetadataFromRecord, sessionsShareIdentity, shouldKeepSessionAfterRemoteList } from "./science-session-records.mjs?v=20260831-trimester-groups-v1";
 import { despillImageMatte, keepPrimaryImageComponent, removeConnectedImageBackground } from "./science-image-cutout.mjs?v=20260812-despill-matte-v4";
 import { applyScienceActivityContext, buildScienceExperienceIntroduction, deriveScienceActivityContext, meaningfulActivityText } from "./science-activity-context.mjs?v=20260813-experience-context-v1";
 import { ACTIVITY_SCENE_REALISM_CONTRACT, activitySceneStyleFinish, buildActivityLevelSceneSeed, buildRealisticActivityImagePrompt } from "./science-image-prompt-contract.mjs?v=20260813-realistic-scenes-v1";
@@ -18,8 +18,10 @@ const STORAGE_KEY = "scienceActivities.sessions.v2";
 const DRAFT_STORAGE_KEY = "scienceActivities.draft.v2";
 const ACTIVE_SESSION_STORAGE_KEY = "scienceActivities.activeSession.v1";
 const SESSION_GROUPS_STORAGE_KEY = "scienceActivities.sessionGroups.v1";
+const SESSION_GROUPS_LAYOUT_VERSION = 2;
 let projectSaveInFlight = null;
 let pendingProjectSave = null;
+let sessionGroupsSaveTimer = 0;
 const sessionSetupState = { active: false, previous: null, newSessionId: null, trigger: null, formHome: null, footerHome: null };
 let sessionInteractionRevision = 0;
 
@@ -1419,6 +1421,7 @@ const DEFAULT_ACTIVITY = {
   title: "Misión Antideslizante",
   subtitle: "Experimenta con fuerza, masa y superficie",
   subject: "physics",
+  trimester: "",
   grade: "2º secundaria",
   gameMode: "game",
   topic: "Resistencia y fricción",
@@ -1701,6 +1704,8 @@ const state = {
   gameInstance: null,
   sessions: [],
   sessionGroups: [],
+  sessionGroupsUpdatedAt: "",
+  sessionTrimesterFilter: "all",
   selectedSessionIds: new Set(),
   activeSessionId: null,
   generating: false,
@@ -1900,6 +1905,9 @@ function rehydrateLearningGuideImages(activity) {
 
 function normalizeActivity(input) {
   const activity = { ...structuredClone(DEFAULT_ACTIVITY), ...input };
+  activity.trimester = Object.hasOwn(input || {}, "trimester")
+    ? normalizeScienceTrimester(input?.trimester)
+    : "Trimestre 1";
   activity.maxPoints = normalizeActivityMaxPoints(input?.maxPoints);
   activity.expectedLearnings = meaningfulActivityText(input?.expectedLearnings);
   activity.startScreen = {
@@ -7560,6 +7568,7 @@ async function generateWithGemini(options = {}) {
   let generationSucceeded = false;
   let completedAssessmentDraftKey = "";
   const selectedMode = $("#gameModeSelect").value;
+  const selectedTrimester = normalizeScienceTrimester($("#trimesterSelect").value);
   const selectedSubject = $("#subjectSelect").value;
   const selectedTopic = getSelectedTopic();
   const requestedLevelCount = positiveInteger($("#gameLevelCount").value, 1);
@@ -7570,6 +7579,11 @@ async function generateWithGemini(options = {}) {
     ? selectedProfile?.simulatorProfile?.focus || ""
     : $("#experiencePrompt").value.trim();
   const requestedExpectedLearnings = selectedMode === "simulator" ? "" : $("#expectedLearnings").value.trim();
+  if (!selectedTrimester) {
+    showToast("Selecciona el trimestre de la sesión.");
+    $("#trimesterSelect").focus();
+    return;
+  }
   if (selectedMode === "game" && !requestedExperience) {
     showToast("Describe qué deben experimentar los estudiantes.");
     $("#experiencePrompt").focus();
@@ -7608,6 +7622,7 @@ async function generateWithGemini(options = {}) {
     });
     simulatorActivity.simulator = { ...(simulatorActivity.simulator || {}), values: { ...(simulatorActivity.simulator?.values || {}), ...selectedVariableValues } };
     simulatorActivity.gameMode = "simulator";
+    simulatorActivity.trimester = selectedTrimester;
     simulatorActivity.visualStyle = $("#visualStyleSelect").value;
     simulatorActivity.grade = $("#gradeSelect").value || SUBJECT_DEFAULT_GRADES[selectedSubject];
     simulatorActivity.difficulty = $("#difficultySelect").value;
@@ -7654,6 +7669,7 @@ async function generateWithGemini(options = {}) {
     state.activity = buildTopicActivity(selectedSubject, selectedTopic, getSelectedScenario());
   }
   state.activity.subject = selectedSubject;
+  state.activity.trimester = selectedTrimester;
   state.activity.topic = selectedTopic;
   state.activity.experiencePrompt = selectedMode === "simulator" ? "" : requestedExperience;
   state.activity.expectedLearnings = selectedMode === "simulator" ? "" : requestedExpectedLearnings;
@@ -7698,6 +7714,7 @@ async function generateWithGemini(options = {}) {
     const generatedActivity = parseGeneratedJson(extractResponseText(response));
     logScienceGenerationStep("Diseño base recibido y JSON interpretado", { titulo: String(generatedActivity?.title || ""), tema: selectedTopic });
     generatedActivity.subject = selectedSubject;
+    generatedActivity.trimester = selectedTrimester;
     generatedActivity.topic = selectedTopic;
     if (preservedSessionTitle) generatedActivity.title = preservedSessionTitle;
     generatedActivity.grade = $("#gradeSelect").value || SUBJECT_DEFAULT_GRADES[selectedSubject];
@@ -8459,6 +8476,7 @@ function syncActivityToEditor() {
   }
   renderCharacterPreview();
   $("#gameModeSelect").value = activity.gameMode || "game";
+  $("#trimesterSelect").value = normalizeScienceTrimester(activity.trimester);
   $("#difficultySelect").value = activity.difficulty || $("#difficultySelect").value || "balanced";
   $("#gradeSelect").value = activity.grade || SUBJECT_DEFAULT_GRADES[activity.subject] || "2º secundaria";
   $("#gameLevelCount").value = String(activity.levelCount || 3);
@@ -8485,6 +8503,7 @@ function syncEditorToActivity() {
   state.activity.mission = $("#missionInput").value.trim();
   state.activity.scientificPrinciple = $("#principleInput").value.trim();
   state.activity.subject = $("#subjectSelect").value;
+  state.activity.trimester = normalizeScienceTrimester($("#trimesterSelect").value);
   state.activity.grade = $("#gradeSelect").value;
   state.activity.gameMode = $("#gameModeSelect").value;
   state.activity.topic = getSelectedTopic();
@@ -8814,6 +8833,38 @@ async function migrateOfflineSessionIndex() {
   return metadata;
 }
 
+async function migrateOfflineSessionTrimesters() {
+  for (const storeName of [OFFLINE_SESSION_INDEX_STORE, OFFLINE_SESSIONS_STORE, OFFLINE_DRAFTS_STORE]) {
+    let records = [];
+    try { records = await readOfflineStore(storeName); } catch (_) { continue; }
+    const migrated = records.map((record) => {
+      const copy = structuredClone(record);
+      let changed = false;
+      if (storeName === OFFLINE_SESSION_INDEX_STORE && !normalizeScienceTrimester(copy.trimester)) {
+        copy.trimester = "Trimestre 1";
+        changed = true;
+      }
+      if (copy.activity && !normalizeScienceTrimester(copy.activity.trimester)) {
+        copy.activity.trimester = "Trimestre 1";
+        changed = true;
+      }
+      return changed ? copy : null;
+    }).filter(Boolean);
+    if (migrated.length) await writeOfflineRecords(storeName, migrated);
+  }
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    if (Array.isArray(stored) && stored.some((session) => !normalizeScienceTrimester(session.trimester))) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored.map((session) => ({
+        ...session,
+        trimester: normalizeScienceTrimester(session.trimester, "Trimestre 1")
+      }))));
+    }
+  } catch (error) {
+    console.warn("[ScienceActivities] No fue posible migrar los trimestres del índice local:", error);
+  }
+}
+
 async function persistSessionMetadata(sessions) {
   const metadata = (Array.isArray(sessions) ? sessions : [sessions]).map(sessionMetadataFromRecord).filter((session) => session.id);
   if (!metadata.length) return;
@@ -8916,6 +8967,7 @@ async function resolveHydratedSessionActivity(session, { allowRemote = true, sig
 }
 
 async function loadSessions() {
+  await migrateOfflineSessionTrimesters();
   state.sessions = (await migrateOfflineSessionIndex())
     .filter((session) => session.id)
     .sort((left, right) => String(right.savedAt || "").localeCompare(String(left.savedAt || "")));
@@ -8950,6 +9002,7 @@ async function syncRemoteSessionsInBackground({ refreshActive = true, interactio
         title: session.title || activity?.title || "Sesión sin título",
         subject: session.subject || activity?.subject || "",
         topic: session.topic || activity?.topic || "",
+        trimester: normalizeScienceTrimester(session.trimester || activity?.trimester, "Trimestre 1"),
         gameMode: normalizedSessionMode(session.gameMode || activity?.gameMode)
       };
       if (metadata.id && activity) {
@@ -9010,6 +9063,11 @@ async function syncRemoteSessionsInBackground({ refreshActive = true, interactio
     }
     await persistSessionMetadata(state.sessions);
     renderSessions();
+    try {
+      await syncRemoteSessionGroupsInBackground();
+    } catch (error) {
+      console.warn("[ScienceActivities] Las sesiones se sincronizaron, pero no su disposición:", error);
+    }
     const active = state.sessions.find((session) => String(session.id) === String(state.activeSessionId));
     const activeNeedsRemote = active && active.syncState !== "pending"
       && String(active.remoteSavedAt || "") > String(active.bodySavedAt || "");
@@ -9146,42 +9204,97 @@ function flushLocalDraftSave() {
 }
 
 function normalizeSessionGroups(groups = state.sessionGroups) {
-  const knownSessionIds = new Set(state.sessions.map((session) => String(session.id)));
-  const claimedSessionIds = new Set();
-  return (Array.isArray(groups) ? groups : []).reduce((normalized, source, index) => {
-    const sessionIds = [...new Set((Array.isArray(source?.sessionIds) ? source.sessionIds : [])
-      .map(String)
-      .filter((sessionId) => knownSessionIds.has(sessionId) && !claimedSessionIds.has(sessionId)))];
-    if (!sessionIds.length) return normalized;
-    sessionIds.forEach((sessionId) => claimedSessionIds.add(sessionId));
-    normalized.push({
-      id: String(source?.id || `session-group-${index + 1}`),
-      name: String(source?.name || `Grupo ${index + 1}`).trim() || `Grupo ${index + 1}`,
-      sessionIds,
-      collapsed: source?.collapsed === true,
-      createdAt: String(source?.createdAt || "")
-    });
-    return normalized;
-  }, []);
+  return sanitizeScienceSessionGroups(groups);
 }
 
-function persistSessionGroups() {
+function sessionForGroupMember(sessionId) {
+  const requestedId = String(sessionId || "");
+  return state.sessions.find((session) => sessionIdentityKeys(session).includes(requestedId));
+}
+
+function sessionGroupsLayout() {
+  return {
+    version: SESSION_GROUPS_LAYOUT_VERSION,
+    updatedAt: state.sessionGroupsUpdatedAt,
+    groups: normalizeSessionGroups()
+  };
+}
+
+async function saveSessionGroupsRemote() {
+  const auth = await getScienceAuth({ ready: true });
+  if (!auth.currentUser || !state.sessionGroupsUpdatedAt) return false;
+  const response = await authFetchJson("/api/science-activities/session-layout", {
+    sameOrigin: true,
+    method: "POST",
+    body: { layout: sessionGroupsLayout() }
+  });
+  const resolvedLayout = response?.layout;
+  if (resolvedLayout && String(resolvedLayout.updatedAt || "") > state.sessionGroupsUpdatedAt) {
+    state.sessionGroups = normalizeSessionGroups(resolvedLayout.groups);
+    state.sessionGroupsUpdatedAt = String(resolvedLayout.updatedAt || "");
+    persistSessionGroups({ touch: false, sync: false });
+    renderSessions();
+  }
+  return true;
+}
+
+function scheduleSessionGroupsRemoteSave() {
+  window.clearTimeout(sessionGroupsSaveTimer);
+  sessionGroupsSaveTimer = window.setTimeout(() => {
+    void saveSessionGroupsRemote().catch((error) => {
+      console.warn("[ScienceActivities] No fue posible sincronizar los grupos de sesiones:", error);
+    });
+  }, 500);
+}
+
+function persistSessionGroups({ touch = true, sync = true } = {}) {
   state.sessionGroups = normalizeSessionGroups();
+  if (touch) state.sessionGroupsUpdatedAt = new Date().toISOString();
   try {
-    localStorage.setItem(SESSION_GROUPS_STORAGE_KEY, JSON.stringify(state.sessionGroups));
+    localStorage.setItem(SESSION_GROUPS_STORAGE_KEY, JSON.stringify(sessionGroupsLayout()));
   } catch (error) {
     console.warn("[ScienceActivities] No fue posible guardar los grupos de sesiones:", error);
   }
+  if (sync) scheduleSessionGroupsRemoteSave();
 }
 
 function loadSessionGroups() {
   try {
-    state.sessionGroups = normalizeSessionGroups(JSON.parse(localStorage.getItem(SESSION_GROUPS_STORAGE_KEY) || "[]"));
+    const stored = JSON.parse(localStorage.getItem(SESSION_GROUPS_STORAGE_KEY) || "null");
+    const legacyGroups = Array.isArray(stored) ? stored : stored?.groups;
+    state.sessionGroups = normalizeSessionGroups(legacyGroups || []);
+    state.sessionGroupsUpdatedAt = Array.isArray(stored)
+      ? state.sessionGroups.reduce((latest, group) => String(group.createdAt || "") > latest ? String(group.createdAt) : latest, "")
+      : String(stored?.updatedAt || "");
   } catch (error) {
     console.warn("[ScienceActivities] Los grupos de sesiones locales eran inválidos:", error);
     state.sessionGroups = [];
+    state.sessionGroupsUpdatedAt = "";
   }
-  persistSessionGroups();
+  persistSessionGroups({ touch: false, sync: false });
+}
+
+async function syncRemoteSessionGroupsInBackground() {
+  const response = await authFetchJson("/api/science-activities/session-layout", { sameOrigin: true });
+  const remoteLayout = response?.layout;
+  const localLayout = sessionGroupsLayout();
+  if (!remoteLayout) {
+    if (localLayout.groups.length || localLayout.updatedAt) {
+      if (!state.sessionGroupsUpdatedAt) state.sessionGroupsUpdatedAt = new Date().toISOString();
+      persistSessionGroups({ touch: false, sync: false });
+      await saveSessionGroupsRemote();
+    }
+    return;
+  }
+  const remoteUpdatedAt = String(remoteLayout.updatedAt || "");
+  if (String(localLayout.updatedAt || "") > remoteUpdatedAt) {
+    await saveSessionGroupsRemote();
+    return;
+  }
+  state.sessionGroups = normalizeSessionGroups(remoteLayout.groups);
+  state.sessionGroupsUpdatedAt = remoteUpdatedAt;
+  persistSessionGroups({ touch: false, sync: false });
+  renderSessions();
 }
 
 function clearSessionSelection({ render = true } = {}) {
@@ -9250,10 +9363,16 @@ function renderSessions() {
     if (!knownIds.has(sessionId)) state.selectedSessionIds.delete(sessionId);
   });
   state.sessionGroups = normalizeSessionGroups();
-  const groupedIds = new Set(state.sessionGroups.flatMap((group) => group.sessionIds));
+  const filter = state.sessionTrimesterFilter;
+  const visibleSessions = state.sessions.filter((session) => filter === "all"
+    || normalizeScienceTrimester(session.trimester, "Trimestre 1") === filter);
+  const visibleIds = new Set(visibleSessions.map((session) => String(session.id)));
+  const groupedIds = new Set();
   const groupedMarkup = state.sessionGroups.map((group) => {
-    const sessions = group.sessionIds.map((sessionId) =>
-      state.sessions.find((session) => String(session.id) === String(sessionId))).filter(Boolean);
+    const sessions = group.sessionIds.map(sessionForGroupMember)
+      .filter((session, index, values) => session && visibleIds.has(String(session.id)) && values.indexOf(session) === index);
+    sessions.forEach((session) => groupedIds.add(String(session.id)));
+    if (!sessions.length) return "";
     return `<section class="sa-session-group${group.collapsed ? " is-collapsed" : ""}" data-session-group-id="${escapeHtml(group.id)}" role="group" aria-label="${escapeHtml(group.name)}">
       <header class="sa-session-group-heading">
         <button type="button" data-toggle-session-group="${escapeHtml(group.id)}" aria-expanded="${String(!group.collapsed)}" title="${group.collapsed ? "Expandir" : "Contraer"} ${escapeHtml(group.name)}"><i class="fas fa-chevron-down sa-session-group-chevron" aria-hidden="true"></i><i class="fas fa-folder" aria-hidden="true"></i><strong>${escapeHtml(group.name)}</strong><small>${sessions.length}</small></button>
@@ -9265,10 +9384,17 @@ function renderSessions() {
       <div class="sa-session-group-items"${group.collapsed ? " hidden" : ""}>${sessions.map(sessionRailItemMarkup).join("")}</div>
     </section>`;
   }).join("");
-  const ungroupedMarkup = state.sessions.filter((session) => !groupedIds.has(String(session.id))).map(sessionRailItemMarkup).join("");
-  $("#savedProjects").innerHTML = state.sessions.length
+  const ungroupedMarkup = visibleSessions.filter((session) => !groupedIds.has(String(session.id))).map(sessionRailItemMarkup).join("");
+  document.querySelectorAll("[data-session-trimester-filter]").forEach((button) => {
+    const active = button.dataset.sessionTrimesterFilter === filter;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  $("#savedProjects").innerHTML = visibleSessions.length
     ? `${groupedMarkup}${ungroupedMarkup}`
-    : '<p class="sa-session-empty">Crea con IA y guarda aquí tus sesiones.</p>';
+    : state.sessions.length
+      ? '<p class="sa-session-empty">No hay sesiones en este trimestre.</p>'
+      : '<p class="sa-session-empty">Crea con IA y guarda aquí tus sesiones.</p>';
 }
 
 function persistActiveSessionPointer(session, updatedAt = "") {
@@ -9954,6 +10080,7 @@ function persistSessionsWithinQuota(sessions) {
     title: String(session.title || "Sesión sin título"),
     subject: session.subject || "",
     topic: session.topic || "",
+    trimester: normalizeScienceTrimester(session.trimester, "Trimestre 1"),
     gameMode: normalizedSessionMode(session.gameMode)
   }));
   try {
@@ -9968,6 +10095,13 @@ function persistSessionsWithinQuota(sessions) {
 
 async function performProjectSave({ silent = false } = {}) {
   syncEditorToActivity();
+  if (!normalizeScienceTrimester(state.activity.trimester)) {
+    if (!silent) {
+      showToast("Selecciona el trimestre antes de guardar la sesión.");
+      $("#trimesterSelect")?.focus();
+    }
+    return;
+  }
   state.activity.gameProgress = state.activity.gameMode === "game"
     ? structuredClone(state.gameProgress || null)
     : null;
@@ -9986,6 +10120,7 @@ async function performProjectSave({ silent = false } = {}) {
     title: String(activitySnapshot.title || "Sesión sin título"),
     subject: String(activitySnapshot.subject || ""),
     topic: String(activitySnapshot.topic || ""),
+    trimester: normalizeScienceTrimester(activitySnapshot.trimester),
     gameMode: normalizedSessionMode(activitySnapshot.gameMode)
   };
   session.bodySavedAt = session.savedAt;
@@ -10040,6 +10175,7 @@ async function performProjectSave({ silent = false } = {}) {
     session.title = String(savedActivity.title || session.title);
     session.subject = String(savedActivity.subject || session.subject);
     session.topic = String(savedActivity.topic || session.topic);
+    session.trimester = normalizeScienceTrimester(savedActivity.trimester || session.trimester, "Trimestre 1");
     session.gameMode = normalizedSessionMode(savedActivity.gameMode);
     if (String(state.activeSessionId) === String(session.id)) {
       state.activity = savedActivity;
@@ -10833,6 +10969,7 @@ function bindEvents() {
   $("#subjectSelect").addEventListener("change", () => {
     const subject = $("#subjectSelect").value;
     const selectedMode = $("#gameModeSelect").value;
+    const selectedTrimester = normalizeScienceTrimester($("#trimesterSelect").value);
     $("#topicInput").value = TOPICS[subject][0];
     fillTopicSuggestions();
     fillScenarioOptions();
@@ -10840,6 +10977,7 @@ function bindEvents() {
     state.activity.topic = TOPICS[subject][0];
     state.activity = buildTopicActivity(subject, TOPICS[subject][0], getSelectedScenario());
     state.activity.gameMode = selectedMode;
+    state.activity.trimester = selectedTrimester;
     state.activity.assessments = [];
     state.activity.learningGuide = null;
     state.gameProgress = null;
@@ -10907,7 +11045,7 @@ function bindEvents() {
   $("#characterCreatorModal").addEventListener("click", (event) => {
     if (event.target === $("#characterCreatorModal")) closeCharacterModal();
   });
-  ["activityTitle", "missionInput", "principleInput", "topicInput", "customTopicInput", "expectedLearnings", "experiencePrompt", "gameLevelCount", "questionsPerLevel", "difficultySelect", "visualStyleSelect"].forEach((id) => {
+  ["activityTitle", "missionInput", "principleInput", "topicInput", "customTopicInput", "expectedLearnings", "experiencePrompt", "gameLevelCount", "questionsPerLevel", "difficultySelect", "visualStyleSelect", "trimesterSelect"].forEach((id) => {
     $(`#${id}`).addEventListener("input", syncEditorToActivity);
   });
   $("#difficultySelect").addEventListener("change", () => {
@@ -10937,6 +11075,12 @@ function bindEvents() {
   $("#quickNewBtn").addEventListener("click", openInitialSessionSetup);
   $("#cancelNewSessionBtn").addEventListener("click", cancelInitialSessionSetup);
   $("#backToSessionsBtn").addEventListener("click", returnToSessionsFromSetup);
+  $("#sessionTrimesterFilter").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-session-trimester-filter]");
+    if (!button) return;
+    state.sessionTrimesterFilter = button.dataset.sessionTrimesterFilter || "all";
+    renderSessions();
+  });
   document.addEventListener("keydown", (event) => {
     const commandKey = event.metaKey || event.ctrlKey;
     const editableTarget = event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']");
@@ -11054,7 +11198,12 @@ function bindEvents() {
           showToast("No fue posible eliminar toda la sesión. Inténtalo de nuevo.");
           return;
         }
+        const deletedIdentityKeys = new Set(sessionIdentityKeys(session));
         state.sessions.splice(index, 1);
+        state.sessionGroups = state.sessionGroups.map((group) => ({
+          ...group,
+          sessionIds: group.sessionIds.filter((sessionId) => !deletedIdentityKeys.has(String(sessionId)))
+        })).filter((group) => group.sessionIds.length);
         await deleteLocalSession(session.id);
         if (String(session.id) === String(state.activeSessionId)) {
           state.activeSessionId = null;

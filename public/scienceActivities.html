@@ -4,7 +4,7 @@
   <script src="js/cache-version-loader.js"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
-  <link rel="modulepreload" href="js/scienceActivities.bundle.js?v=20260816-micro-concept-fulltext-v220">
+  <link rel="modulepreload" href="js/scienceActivities.bundle.js?v=20260831-trimester-groups-v221">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Science Activities Creator</title>
   <link rel="icon" type="image/png" href="pigpen.png">
@@ -40,6 +40,12 @@
             <span>Nueva sesión</span>
             <i class="fas fa-circle-plus sa-new-session-plus" aria-hidden="true"></i>
           </button>
+          <div id="sessionTrimesterFilter" class="sa-session-filter" role="group" aria-label="Filtrar sesiones por trimestre">
+            <button type="button" data-session-trimester-filter="all" class="is-active" aria-pressed="true">Todos</button>
+            <button type="button" data-session-trimester-filter="Trimestre 1" aria-pressed="false">Trim 1</button>
+            <button type="button" data-session-trimester-filter="Trimestre 2" aria-pressed="false">Trim 2</button>
+            <button type="button" data-session-trimester-filter="Trimestre 3" aria-pressed="false">Trim 3</button>
+          </div>
           <div id="savedProjects" class="sa-session-list" role="list" aria-label="Sesiones guardadas"></div>
         </aside>
 
@@ -102,6 +108,16 @@
                 <select id="gameModeSelect">
                   <option value="game" selected>Videojuego educativo</option>
                   <option value="simulator">Simulador científico</option>
+                </select>
+              </label>
+
+              <label class="sa-field">
+                <span>Trimestre</span>
+                <select id="trimesterSelect" required aria-required="true">
+                  <option value="" selected disabled>Selecciona un trimestre</option>
+                  <option value="Trimestre 1">Trimestre 1</option>
+                  <option value="Trimestre 2">Trimestre 2</option>
+                  <option value="Trimestre 3">Trimestre 3</option>
                 </select>
               </label>
 
@@ -468,7 +484,7 @@
 
   <script type="module" data-cache-src="js/chromeLayout.js"></script>
   <script type="module" data-cache-src="js/sidebar.js"></script>
-  <script type="module" src="js/scienceActivities.bundle.js?v=20260816-micro-concept-fulltext-v220"></script>
+  <script type="module" src="js/scienceActivities.bundle.js?v=20260831-trimester-groups-v221"></script>
   <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

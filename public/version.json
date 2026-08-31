@@ -1,8 +1,11 @@
 {
-  "version": "1.0.10.840",
-  "build": "2026-1.0.10.856",
+  "version": "1.0.10.841",
+  "build": "2026-1.0.10.857",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Añadido: Science Activities clasifica cada sesión por Trimestre 1, 2 o 3, exige seleccionar el dato al crear y permite filtrar el rail sin deshacer grupos.",
+    "Corregido: Los grupos de sesiones dejan de borrarse durante una carga remota parcial y ahora se respaldan por usuario en Firebase conservando la copia offline.",
+    "Migrado: Las sesiones científicas heredadas sin trimestre se clasifican como Trimestre 1 sin sobrescribir clasificaciones existentes.",
     "Corregido: El dock de Retratos se muestra exclusivamente en Podcast con video y permanece oculto en Video activo y podcast sin video.",
     "Añadido: Cmd/Ctrl + Shift + O reordena las escenas entre tracks desde el mismo flujo del botón del footer y aparece como el noveno atajo de la guía de Snoopy.",
     "Corregido: El footer de Snoopy distribuye sus herramientas en una retícula responsive, conserva todas las filas visibles y permanece anclado al borde inferior incluso en viewports de poca altura.",
@@ -551,6 +554,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.856",
-  "updated_at": "2026-08-27T17:50:39-05:00"
+  "cache_version": "2026-1.0.10.857",
+  "updated_at": "2026-08-31T12:00:00-05:00"
 }

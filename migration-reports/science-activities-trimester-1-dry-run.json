@@ -1,0 +1,186 @@
+{
+  "migrationId": "science-activities-trimester-1-2026-08-31",
+  "mode": "dry-run",
+  "projectId": "charly-brown",
+  "startedAt": "2026-08-31T17:02:54.700Z",
+  "completedAt": "2026-08-31T17:02:57.049Z",
+  "stats": {
+    "total": 13,
+    "assigned_trimester_1": 13,
+    "synchronized": 0,
+    "unchanged": 0,
+    "conflict_skipped": 0,
+    "failed": 0
+  },
+  "changes": [
+    {
+      "documentId": "1760b92d-5133-4ee2-8a1a-f3b6b91bd422",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "20211f53-a26c-4c5e-a97d-f506033fdfa1",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "236e6789-2b1f-4496-b656-67529d8740ef",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "3631be9d-d001-47ef-8c02-544ca7216b39",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "3cf04335-08ee-47a5-bb65-b26ee5688925",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "5eceaddd-417e-4cce-b8b6-a209b9c189ab",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "7f707de0-26fa-4e94-ad59-5143a1e6443d",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "8365d6ae-4b72-43a4-9fd6-e7067615cb72",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "997e593b-fcbd-4266-a5e2-735af7e2e1ae",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "9982e5e8-2364-43fb-9ab1-9e7ac494b964",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "ceda81e4-e23f-416a-b808-4c6cf5b8a9ec",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "eb908779-93e6-4249-995e-282a0bf0ee0e",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    },
+    {
+      "documentId": "f6ebd0c6-b7f2-4418-8763-32fb0348a413",
+      "action": "assigned_trimester_1",
+      "trimester": "Trimestre 1",
+      "previous": {
+        "root": null,
+        "activity": null
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "activityNeedsSync": true
+      }
+    }
+  ]
+}

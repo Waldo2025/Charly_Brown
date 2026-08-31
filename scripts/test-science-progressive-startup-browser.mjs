@@ -174,6 +174,13 @@ await suite.test("un editor local queda interactivo antes de Firebase y reutiliz
   });
   await page.goto(`${baseUrl}/scienceActivities?testMode=offline`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.documentElement.dataset.scienceActivitiesInteractive === "true");
+  assert.equal(await page.locator("#trimesterSelect").getAttribute("required"), "");
+  assert.equal(await page.locator("[data-session-trimester-filter]").count(), 4);
+  await page.click("#quickNewBtn");
+  assert.equal(await page.locator("#trimesterSelect").inputValue(), "");
+  await page.click("#formGenerateBtn");
+  assert.equal(await page.locator("#trimesterSelect").evaluate((element) => element.matches(":invalid")), true);
+  assert.equal(await page.locator("#newSessionModal").getAttribute("aria-hidden"), "false");
   const timing = await page.evaluate(() => {
     const navigation = performance.getEntriesByType("navigation")[0];
     const interactive = performance.getEntriesByName("science-activities:editor-interactive")[0];
@@ -231,6 +238,15 @@ await suite.test("una sesión exclusivamente remota se incorpora después del ar
     if (response.status() >= 400) browserErrors.push(`${response.status()} ${response.url()}`);
   });
   await installFirebaseStubs(page, { authenticated: true });
+  await page.addInitScript(() => {
+    localStorage.setItem("scienceActivities.sessionGroups.v1", JSON.stringify([{
+      id: "remote-group",
+      name: "Grupo remoto pendiente",
+      sessionIds: ["remote-session"],
+      collapsed: false,
+      createdAt: "2026-08-13T11:00:00.000Z"
+    }]));
+  });
   await page.goto(`${baseUrl}/scienceActivities?testMode=remote`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.documentElement.dataset.scienceActivitiesInteractive === "true");
   await page.waitForTimeout(3000);
@@ -242,6 +258,14 @@ await suite.test("una sesión exclusivamente remota se incorpora después del ar
   }));
   assert.equal(diagnostics.title, "Sesión remota", JSON.stringify({ diagnostics, apiObservations, browserErrors }));
   assert.equal(await page.evaluate(() => localStorage.getItem("scienceActivities.activeSession.v1")), "remote-session");
+  assert.equal(await page.locator(".sa-session-group").count(), 1, JSON.stringify({ diagnostics, apiObservations, browserErrors }));
+  assert.equal(await page.locator("#trimesterSelect").inputValue(), "Trimestre 1");
+  await page.click('[data-session-trimester-filter="Trimestre 2"]');
+  assert.match(await page.locator("#savedProjects").textContent(), /No hay sesiones/);
+  await page.click('[data-session-trimester-filter="Trimestre 1"]');
+  assert.equal(await page.locator(".sa-session-item").count(), 1);
+  const persistedLayout = await page.evaluate(() => JSON.parse(localStorage.getItem("scienceActivities.sessionGroups.v1") || "null"));
+  assert.equal(persistedLayout.groups?.[0]?.name, "Grupo remoto pendiente");
   await context.close();
 });
 });

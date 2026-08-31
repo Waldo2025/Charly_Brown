@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { isHydratableSessionActivity, nextOfflineDatabaseVersion, normalizedSessionMode, orderHydrationCandidates, sessionMetadataFromRecord, sessionsShareIdentity, shouldKeepSessionAfterRemoteList } from "../public/js/science-session-records.mjs";
+import { isHydratableSessionActivity, nextOfflineDatabaseVersion, normalizeScienceTrimester, normalizedSessionMode, orderHydrationCandidates, sanitizeScienceSessionGroups, sessionMetadataFromRecord, sessionsShareIdentity, shouldKeepSessionAfterRemoteList } from "../public/js/science-session-records.mjs";
 
 test("session metadata is lightweight and preserves simulator mode", () => {
   const metadata = sessionMetadataFromRecord({
@@ -18,8 +18,21 @@ test("session metadata is lightweight and preserves simulator mode", () => {
 
   assert.equal(metadata.gameMode, "simulator");
   assert.equal(metadata.title, "Caída libre");
+  assert.equal(metadata.trimester, "Trimestre 1");
   assert.equal(Object.hasOwn(metadata, "activity"), false);
   assert.equal(normalizedSessionMode("lab"), "simulator");
+});
+
+test("trimester metadata is canonical and preserves existing classifications", () => {
+  assert.equal(normalizeScienceTrimester("Trim2"), "Trimestre 2");
+  assert.equal(sessionMetadataFromRecord({ id: "trim-3", trimester: "3" }).trimester, "Trimestre 3");
+});
+
+test("group sanitation preserves members that have not loaded yet", () => {
+  const groups = sanitizeScienceSessionGroups([
+    { id: "group-a", name: "Grupo A", sessionIds: ["remote-later", "local-now"] }
+  ]);
+  assert.deepEqual(groups[0].sessionIds, ["remote-later", "local-now"]);
 });
 
 test("hydration chooses the newest exact-session payload instead of the most complete game", () => {
@@ -157,6 +170,11 @@ test("the session rail supports command multi-selection and persistent groups", 
   assert.match(source, /data-session-group-action="rename"/);
   assert.match(source, /data-session-group-action="ungroup"/);
   assert.match(source, /loadSessionGroups\(\)/);
+  assert.match(source, /syncRemoteSessionGroupsInBackground/);
+  assert.doesNotMatch(source, /knownSessionIds\.has\(sessionId\)/);
+  assert.match(html, /id="sessionTrimesterFilter"/);
+  assert.match(html, /id="trimesterSelect" required/);
+  assert.match(styles, /\.sa-session-filter/);
   assert.doesNotMatch(source, /sa-session-selection-mark/);
   assert.match(styles, /\.sa-session-item\.is-selected/);
   assert.doesNotMatch(styles, /\.sa-session-selection-mark/);

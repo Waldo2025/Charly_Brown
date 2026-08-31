@@ -4,7 +4,10 @@ const {
   activityMetadata,
   decodeFirestoreValue,
   encodeFirestoreValue,
+  normalizeScienceTrimester,
+  normalizeSessionLayout,
   resolveOwnedSessionSnapshot,
+  resolveSessionLayoutWrite,
   sessionMetadata
 } = require("../src/science-activities.js");
 
@@ -25,6 +28,7 @@ test("science session list metadata omits the activity body", () => {
     title: "Óptica",
     subject: "physics",
     topic: "Refracción",
+    trimester: "Trimestre 1",
     gameMode: "simulator"
   });
   assert.equal(Object.hasOwn(metadata, "activity"), false);
@@ -32,6 +36,31 @@ test("science session list metadata omits the activity body", () => {
 
 test("science activity metadata normalizes legacy lab sessions as simulators", () => {
   assert.equal(activityMetadata({ title: "Laboratorio", gameMode: "lab" }).gameMode, "simulator");
+});
+
+test("science activity metadata exposes canonical trimester values", () => {
+  assert.equal(activityMetadata({ title: "Laboratorio", trimester: "Trim2" }).trimester, "Trimestre 2");
+  assert.equal(normalizeScienceTrimester("trimestre_3"), "Trimestre 3");
+});
+
+test("science session layouts deduplicate membership without trusting owner input", () => {
+  const layout = normalizeSessionLayout({
+    updatedAt: "2026-08-31T18:00:00.000Z",
+    groups: [
+      { id: "group-1", name: "Primero", sessionIds: ["session-1", "session-2"] },
+      { id: "group-2", name: "Segundo", sessionIds: ["session-2", "session-3"], collapsed: true }
+    ]
+  });
+  assert.deepEqual(layout.groups.map((group) => group.sessionIds), [["session-1", "session-2"], ["session-3"]]);
+  assert.equal(layout.groups[1].collapsed, true);
+});
+
+test("an older device cannot overwrite a newer session layout", () => {
+  const newer = { updatedAt: "2026-08-31T19:00:00.000Z", groups: [{ id: "new", sessionIds: ["session-1"] }] };
+  const older = { updatedAt: "2026-08-31T18:00:00.000Z", groups: [{ id: "old", sessionIds: ["session-2"] }] };
+  const resolution = resolveSessionLayoutWrite(newer, older);
+  assert.equal(resolution.applied, false);
+  assert.equal(resolution.layout.groups[0].id, "new");
 });
 
 test("science activity detail preserves nested arrays", () => {

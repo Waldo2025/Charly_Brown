@@ -2,6 +2,19 @@ export function normalizedSessionMode(value) {
   return value === "lab" || value === "simulator" ? "simulator" : "game";
 }
 
+export const SCIENCE_TRIMESTERS = Object.freeze(["Trimestre 1", "Trimestre 2", "Trimestre 3"]);
+
+export function normalizeScienceTrimester(value, fallback = "") {
+  const compact = String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s._-]+/g, "");
+  const match = compact.match(/^(?:trim|trimestre)?([123])$/);
+  return match ? `Trimestre ${match[1]}` : fallback;
+}
+
 export function sessionIdentityKeys(session = {}) {
   return [...new Set([
     session.id,
@@ -35,8 +48,28 @@ export function sessionMetadataFromRecord(record = {}) {
     title: String(record.title || activity.title || "Sesión sin título"),
     subject: String(record.subject || activity.subject || ""),
     topic: String(record.topic || activity.topic || ""),
+    trimester: normalizeScienceTrimester(record.trimester || activity.trimester, "Trimestre 1"),
     gameMode: normalizedSessionMode(record.gameMode || activity.gameMode)
   };
+}
+
+export function sanitizeScienceSessionGroups(groups = []) {
+  const claimedSessionIds = new Set();
+  return (Array.isArray(groups) ? groups : []).reduce((normalized, source, index) => {
+    const sessionIds = [...new Set((Array.isArray(source?.sessionIds) ? source.sessionIds : [])
+      .map((value) => String(value || "").trim())
+      .filter((sessionId) => sessionId && !claimedSessionIds.has(sessionId)))];
+    if (!sessionIds.length) return normalized;
+    sessionIds.forEach((sessionId) => claimedSessionIds.add(sessionId));
+    normalized.push({
+      id: String(source?.id || `session-group-${index + 1}`).trim().slice(0, 160),
+      name: (String(source?.name || `Grupo ${index + 1}`).trim() || `Grupo ${index + 1}`).slice(0, 80),
+      sessionIds,
+      collapsed: source?.collapsed === true,
+      createdAt: String(source?.createdAt || "").slice(0, 80)
+    });
+    return normalized;
+  }, []);
 }
 
 export function orderHydrationCandidates(candidates = []) {

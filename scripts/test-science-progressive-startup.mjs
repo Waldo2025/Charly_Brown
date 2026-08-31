@@ -28,7 +28,7 @@ test("la sesión local se lee antes de esperar configuración remota", async () 
 });
 
 test("Phaser minificado es reproducible y reemplaza al archivo de desarrollo", async () => {
-  const [full, min, entryFull, entryBundle, curriculum, motion, characters, imageCutout, apiClient, gameRuntime, simulatorRuntime, packageJson] = await Promise.all([
+  const [full, min, entryFull, entryBundle, curriculum, motion, characters, imageCutout, apiClient, html2canvas, gameRuntime, simulatorRuntime, packageJson] = await Promise.all([
     stat(new URL("../public/vendor/phaser/phaser.esm.js", import.meta.url)),
     stat(new URL("../public/vendor/phaser/phaser.esm.min.js", import.meta.url)),
     stat(new URL("../public/js/scienceActivities.js", import.meta.url)),
@@ -38,12 +38,13 @@ test("Phaser minificado es reproducible y reemplaza al archivo de desarrollo", a
     stat(new URL("../public/js/science-character-library.mjs", import.meta.url)),
     stat(new URL("../public/js/science-image-cutout.mjs", import.meta.url)),
     stat(new URL("../public/js/api-client.js", import.meta.url)),
+    stat(new URL("../node_modules/html2canvas-pro/dist/html2canvas-pro.esm.js", import.meta.url)),
     read("public/js/science-game-runtime.mjs"),
     read("public/js/science-simulator-runtime.mjs"),
     read("package.json")
   ]);
   assert.ok(min.size < full.size * .25, `Phaser minificado pesa ${min.size} de ${full.size} bytes`);
-  const staticGraphBytes = entryFull.size + curriculum.size + motion.size + characters.size + imageCutout.size + apiClient.size;
+  const staticGraphBytes = entryFull.size + curriculum.size + motion.size + characters.size + imageCutout.size + apiClient.size + html2canvas.size;
   assert.ok(entryBundle.size < staticGraphBytes * .8, `Bundle Science Activities pesa ${entryBundle.size} de ${staticGraphBytes} bytes fuente`);
   assert.match(gameRuntime, /phaser\.esm\.min\.js/);
   assert.match(simulatorRuntime, /phaser\.esm\.min\.js/);
