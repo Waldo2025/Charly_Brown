@@ -10,7 +10,7 @@ import {
 
 test("recognizes the old table headings and the chat's editorial-title alias", () => {
   assert.equal(normalizeVideoTableHeaderKey("Descripción de escena"), "sceneDescription");
-  assert.equal(normalizeVideoTableHeaderKey("Texto en pantalla"), "headlineText");
+  assert.equal(normalizeVideoTableHeaderKey("Texto en pantalla"), "inSceneText");
   assert.equal(normalizeVideoTableHeaderKey("Titular editorial"), "headlineText");
   assert.equal(normalizeVideoTableHeaderKey("Transición"), "transition");
   assert.equal(normalizeVideoTableHeaderKey("Elemento visual"), "visual");
@@ -28,11 +28,12 @@ test("maps a five-column table without Tiempo by headings instead of shifting ce
     time: "00:00-00:08",
     script: "Narración exacta",
     sceneDescription: "Una biblioteca cálida",
-    headlineText: "IDEA CENTRAL",
-    onScreenText: "IDEA CENTRAL",
-    captionText: "",
-    inSceneText: "",
-    overlayMode: "headline",
+    headlineText: "",
+    onScreenText: "Narración exacta",
+    captionText: "Narración exacta",
+    inSceneText: "IDEA CENTRAL",
+    overlayMode: "captions",
+    onScreenTextNoSummarize: true,
     transition: "Disolvencia suave",
     visual: "Libro abierto"
   });
@@ -48,19 +49,33 @@ test("ignores an Escena ordinal column and preserves reordered columns", () => {
   assert.equal(rows[0].script, "Texto hablado");
   assert.equal(rows[0].sceneDescription, "Sala de edición");
   assert.equal(rows[0].headlineText, "NUEVA ETAPA");
-  assert.equal(rows[0].captionText, "");
+  assert.equal(rows[0].captionText, "Texto hablado");
+  assert.equal(rows[0].overlayMode, "both");
   assert.equal(rows[0].transition, "Corte directo");
   assert.equal(rows[0].visual, "Mapa animado");
 });
 
-test("only an explicit subtitle heading populates captionText", () => {
+test("keeps editorial headline, literal caption, and in-scene text as separate contracts", () => {
+  const rows = normalizeEducationalVideoTableRows([
+    ["Guion", "Texto en pantalla", "Titular editorial", "Subtítulos / karaoke", "Descripción", "Elemento visual"],
+    ["Guion autoritativo", "LETRERO DEL SET", "IDEA EDITORIAL", "Texto personalizado ignorado", "Estudio", "Pantalla"]
+  ]);
+
+  assert.equal(rows[0].headlineText, "IDEA EDITORIAL");
+  assert.equal(rows[0].captionText, "Guion autoritativo");
+  assert.equal(rows[0].inSceneText, "LETRERO DEL SET");
+  assert.equal(rows[0].overlayMode, "both");
+  assert.equal(rows[0].onScreenText, "IDEA EDITORIAL\nGuion autoritativo");
+});
+
+test("Guion remains the authoritative caption even with an explicit subtitle heading", () => {
   const rows = normalizeEducationalVideoTableRows([
     ["Guion", "Descripción", "Subtítulos", "Transición", "Elemento visual"],
     ["Hola mundo", "Set nocturno", "Hola mundo", "Fundido", "Luz azul"]
   ]);
 
   assert.equal(rows[0].headlineText, "");
-  assert.equal(rows[0].onScreenText, "");
+  assert.equal(rows[0].onScreenText, "Hola mundo");
   assert.equal(rows[0].captionText, "Hola mundo");
   assert.equal(rows[0].transition, "Fundido");
 });
@@ -72,7 +87,8 @@ test("a table without a text column leaves text empty and never copies transitio
   ]);
 
   assert.equal(rows[0].headlineText, "");
-  assert.equal(rows[0].captionText, "");
+  assert.equal(rows[0].captionText, "Frase");
+  assert.equal(rows[0].overlayMode, "captions");
   assert.equal(rows[0].transition, "Barrido lateral");
 });
 
@@ -85,8 +101,9 @@ test("direct-table validation shares the same mapping", () => {
   assert.equal(result.ok, true);
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].sceneDescription, "Mesa de madera");
-  assert.equal(result.rows[0].headlineText, "CADA SEGUNDO");
-  assert.equal(result.rows[0].captionText, "");
+  assert.equal(result.rows[0].headlineText, "");
+  assert.equal(result.rows[0].inSceneText, "CADA SEGUNDO");
+  assert.equal(result.rows[0].captionText, "El tiempo importa.");
   assert.equal(result.rows[0].transition, "Zoom suave");
 });
 
@@ -111,6 +128,7 @@ test("sequence editors expose only the original five data fields", () => {
     assert.match(source, /data-field="voiceOverText"/);
     assert.match(source, /data-field="sceneDescription"/);
     assert.match(source, /data-field="onScreenText"/);
+    assert.match(source, /data-field="onScreenText"[^>]*readonly[^>]*aria-readonly="true"/);
     assert.match(source, /data-field="transition"/);
     assert.match(source, /data-field="visualNotes"/);
     assert.doesNotMatch(source, /data-field="captionText"/);
@@ -146,7 +164,7 @@ test("panel connection keeps video mode and accepts canonical table rows before 
   );
   assert.match(
     editor,
-    /return \{ \.\.\.row, \.\.\.normalize\(row\) \};/,
+    /return \{ \.\.\.row, \.\.\.normalize\(row, options\) \};/,
     "the text-field normalizer must not discard Guion or scene description"
   );
 
@@ -156,4 +174,45 @@ test("panel connection keeps video mode and accepts canonical table rows before 
   const normalizeRows = Function(`${podcaster.slice(start, end)}; return normalizeRows;`)();
   const canonical = { script: "Guion desde tabla", sceneDescription: "Descripción desde tabla" };
   assert.deepEqual(normalizeRows([canonical]), [canonical]);
+});
+
+test("maps object aliases and legacy positional tables into inSceneText", () => {
+  const objects = normalizeEducationalVideoTableRows([{
+    guion: "Guion literal",
+    descripcionEscena: "Un estudio",
+    textoPantalla: "RÓTULO INTEGRADO",
+    elementoVisual: "Micrófono"
+  }]);
+  assert.equal(objects[0].inSceneText, "RÓTULO INTEGRADO");
+  assert.equal(objects[0].headlineText, "");
+  assert.equal(objects[0].captionText, "Guion literal");
+
+  const positional = normalizeEducationalVideoTableRows([
+    ["La narración heredada explica el tema.", "Biblioteca iluminada", "TEXTO ANTIGUO", "Corte", "Objeto"]
+  ]);
+  assert.equal(positional[0].inSceneText, "TEXTO ANTIGUO");
+  assert.equal(positional[0].captionText, "La narración heredada explica el tema.");
+});
+
+test("panel connection preserves text already present in the inspector", () => {
+  const generator = readFileSync(new URL("../public/podcaster/podcaster-script-generator.js", import.meta.url), "utf8");
+  const start = generator.indexOf("function preserveExistingInspectorText");
+  const end = generator.indexOf("function setButtonLoadingState", start);
+  assert.ok(start >= 0 && end > start);
+  const preserveExistingInspectorText = Function(
+    `${generator.slice(start, end)}; return preserveExistingInspectorText;`
+  )();
+
+  const incoming = { id: "new-row", inSceneText: "Texto recibido desde chat" };
+  const existing = { id: "old-row", inSceneText: "Texto escrito manualmente" };
+  assert.deepEqual(preserveExistingInspectorText(incoming, existing), {
+    id: "new-row",
+    inSceneText: "Texto escrito manualmente",
+    inSceneTextEditedStored: true
+  });
+  assert.deepEqual(
+    preserveExistingInspectorText(incoming, { id: "old-row", inSceneText: "" }),
+    incoming
+  );
+  assert.match(generator, /existingRow = \(incomingId && currentRowsById\.get\(incomingId\)\) \|\| currentRows\[index\]/);
 });

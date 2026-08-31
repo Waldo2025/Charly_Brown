@@ -79,9 +79,10 @@ export function createPodcasterSceneSelectionApi(deps = {}) {
     if (key === String(podcastVideoState.activeRowId || "").trim() && options.force !== true) return;
     const session = getActiveSession();
     const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
+    const preserveMontageCursor = options.preserveMontageCursor !== false;
     setPodcastVideoRow(key, {
       syncStage: options.syncStage === true,
-      preserveMontageCursor: true,
+      preserveMontageCursor,
       lightweightUi: options.syncStage !== true,
       reason: options.syncStage === true ? "playback" : "selection"
     });

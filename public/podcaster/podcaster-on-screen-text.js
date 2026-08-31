@@ -311,7 +311,12 @@
     let captionText = normalizePodcasterTextValue(source.captionText, { preserveLineBreaks: true });
     let textSourceFallback = (headlineText || captionText) ? "manual" : "migrated";
 
-    if (!hasCanonicalOverlayTextFields && legacyText) {
+    if (options?.syncCaptionWithVoiceOver === true) {
+      captionText = voiceOverText;
+      textSourceFallback = "manual";
+    }
+
+    if (options?.syncCaptionWithVoiceOver !== true && !hasCanonicalOverlayTextFields && legacyText) {
       const legacyMatchesDialogue = normalizeComparablePodcasterText(legacyText) !== ""
         && normalizeComparablePodcasterText(legacyText) === normalizeComparablePodcasterText(voiceOverText);
       const migrateAsCaption = source.onScreenTextNoSummarize === true || legacyMatchesDialogue;
@@ -329,7 +334,9 @@
     const inferredMode = headlineText && captionText
       ? "both"
       : (headlineText ? "headline" : (captionText ? "captions" : "none"));
-    const overlayMode = normalizePodcasterOverlayMode(source.overlayMode, inferredMode);
+    const overlayMode = options?.syncCaptionWithVoiceOver === true
+      ? inferredMode
+      : normalizePodcasterOverlayMode(source.overlayMode, inferredMode);
     const textSource = normalizePodcasterTextSource(source.textSource, textSourceFallback);
     const normalized = {
       headlineText,

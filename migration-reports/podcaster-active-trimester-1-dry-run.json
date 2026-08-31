@@ -1,0 +1,636 @@
+{
+  "migrationId": "podcaster-active-trimester-1-2026-08-30",
+  "mode": "dry-run",
+  "projectId": "charly-brown",
+  "startedAt": "2026-08-30T15:18:59.937Z",
+  "completedAt": "2026-08-30T15:19:13.677Z",
+  "stats": {
+    "total": 56,
+    "archived_skipped": 5,
+    "assigned_trimester_1": 27,
+    "synchronized": 2,
+    "unchanged": 22,
+    "failed": 0
+  },
+  "changes": [
+    {
+      "sessionId": "session_0jxk05o8",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_0ufm9i7h",
+      "action": "synchronized",
+      "metadata": {
+        "nivel": "Primaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "unidad": "1",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {
+          "nivel": "Primaria",
+          "grado": "Primero",
+          "trimestre": "1",
+          "unidad": "1"
+        },
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_3vl9kxrt",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_5apyf7m6",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_6f6cx4zs",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_6hbl7o9e",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_6irv4yy0",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_6qh6ny29",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_7c9658gn",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_9ru8pc4e",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_aezpe7se",
+      "action": "synchronized",
+      "metadata": {
+        "nivel": "Secundaria",
+        "grado": "Primero",
+        "trimestre": "1",
+        "unidad": "1",
+        "materia": "",
+        "unitLabel": "Tema"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {
+          "nivel": "Secundaria",
+          "grado": "Primero",
+          "trimestre": "1",
+          "unidad": "1"
+        },
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_b55hwhzm",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_cmmy944e",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_cmrtb1l6",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_dllwe7nw",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_f4vf8d2r",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_g27sgj7n",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_jlyyrcyl",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_jm928nh2",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_jvsww72i",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_lxa33mcb",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_nswuyako",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_omz5q1yf",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_osthssib",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_twwlsy46",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_uwie3u4s",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_ux1brwfw",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_xcfat5xu",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    },
+    {
+      "sessionId": "session_zn8l6xoj",
+      "action": "assigned_trimester_1",
+      "metadata": {
+        "nivel": "",
+        "grado": "",
+        "trimestre": "1",
+        "unidad": "",
+        "materia": "",
+        "unitLabel": "Unidad"
+      },
+      "writes": {
+        "rootNeedsSync": true,
+        "dedicatedNeedsSync": true
+      },
+      "previous": {
+        "root": {},
+        "dedicatedExists": false,
+        "dedicated": null
+      }
+    }
+  ]
+}

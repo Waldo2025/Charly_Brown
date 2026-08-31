@@ -1,32 +1,21 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
-import {
-  initializeApp, getApps, getApp
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import {
-  getFirestore, collection, collectionGroup, query, where, getDocs, doc, 
-  updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+let app = null;
+let auth = null;
+let sidebarAuthPromise = null;
+let firestorePromise = null;
+let sidebarUser = null;
+const loadSidebarFirestore = () => firestorePromise ||= import("https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js");
 
-
-// Configuración de Firebase
-const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
-
-
-
-// Inicializa Firebase solo una vez (evitando error si ya está inicializada por otro script)
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-
-const db = getFirestore(app);
-
-
-// Ahora puedes usar Firebase Auth y otros servicios
-const auth = getAuth(app);
+async function loadSidebarAuth() {
+  sidebarAuthPromise ||= Promise.all([
+    import("https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js"),
+    import("./firebase-default-app.js")
+  ]).then(([authApi, { getDefaultFirebaseApp }]) => {
+    app = getDefaultFirebaseApp();
+    auth = authApi.getAuth(app);
+    return { ...authApi, auth };
+  });
+  return sidebarAuthPromise;
+}
 
 let unsubscribeSidebarUnread = null;
 
@@ -88,7 +77,7 @@ function getMessageTs(message) {
   }
 }
 
-function startSidebarUnreadListener(uid) {
+async function startSidebarUnreadListener(uid) {
   if (typeof unsubscribeSidebarUnread === "function") {
     unsubscribeSidebarUnread();
     unsubscribeSidebarUnread = null;
@@ -98,6 +87,8 @@ function startSidebarUnreadListener(uid) {
     return;
   }
 
+  const { getFirestore, collectionGroup, query, where, onSnapshot } = await loadSidebarFirestore();
+  const db = getFirestore(app);
   const qUnread = query(
     collectionGroup(db, "chat"),
     where("receiverId", "==", uid)
@@ -171,6 +162,152 @@ function applySidebarRoleVisibility(role = "") {
       el.removeAttribute("tabindex");
     }
   });
+  updateSidebarGroupAvailability();
+}
+
+function applySidebarAuthVisibility(user = null) {
+  const hasSession = Boolean(user);
+  const authLinks = document.querySelectorAll("#sidebar .sidebar-link[data-auth-required]");
+  authLinks.forEach((link) => {
+    link.classList.toggle("d-none", !hasSession);
+    link.hidden = !hasSession;
+    if (!hasSession) {
+      link.setAttribute("aria-hidden", "true");
+      link.setAttribute("tabindex", "-1");
+    } else {
+      link.setAttribute("aria-hidden", "false");
+      link.removeAttribute("tabindex");
+    }
+  });
+  updateSidebarGroupAvailability();
+}
+
+function updateSidebarGroupAvailability() {
+  document.querySelectorAll("#sidebar .sidebar-group").forEach((group) => {
+    const hasVisibleLinks = Array.from(group.querySelectorAll(".sidebar-group-link"))
+      .some((link) => !link.hidden && !link.classList.contains("d-none") && link.style.display !== "none");
+    group.hidden = !hasVisibleLinks;
+  });
+}
+
+function setSidebarGroupExpanded(group, expanded) {
+  if (!group) return;
+  const button = group.querySelector(":scope > .sidebar-group-toggle");
+  const panel = group.querySelector(":scope > .sidebar-group-items");
+  if (!button || !panel) return;
+  group.classList.toggle("is-expanded", expanded);
+  button.setAttribute("aria-expanded", String(expanded));
+  panel.hidden = !expanded;
+}
+
+function initializeSidebarGroups(sidebar) {
+  const groups = Array.from(sidebar.querySelectorAll(".sidebar-group"));
+  groups.forEach((group) => {
+    const button = group.querySelector(":scope > .sidebar-group-toggle");
+    if (!button || button.dataset.sidebarGroupBound === "true") return;
+    button.dataset.sidebarGroupBound = "true";
+    button.addEventListener("click", () => {
+      const wasExpanded = button.getAttribute("aria-expanded") === "true";
+      const sidebarWasCollapsed = !sidebar.classList.contains("show");
+      if (!sidebarWasCollapsed && wasExpanded) {
+        groups.forEach((candidate) => setSidebarGroupExpanded(candidate, false));
+        sidebar.classList.remove("show");
+        document.body.classList.add("sidebar-collapsed");
+        return;
+      }
+      if (sidebarWasCollapsed) {
+        sidebar.classList.add("show");
+        document.body.classList.remove("sidebar-collapsed");
+      }
+      const shouldExpand = sidebarWasCollapsed || !wasExpanded;
+      groups.forEach((candidate) => setSidebarGroupExpanded(candidate, candidate === group && shouldExpand));
+    });
+  });
+
+  const activeLink = sidebar.querySelector(".sidebar-link[aria-current='page']");
+  const activeGroup = activeLink?.closest(".sidebar-group") || null;
+  if (activeGroup) {
+    groups.forEach((group) => setSidebarGroupExpanded(group, group === activeGroup));
+  }
+  updateSidebarGroupAvailability();
+}
+
+function normalizeSidebarLinkTargets(sidebar) {
+  sidebar.querySelectorAll("a[href]").forEach((link) => {
+    const href = String(link.getAttribute("href") || "").trim();
+    if (!href || href === "#" || href.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(href)) return;
+    link.setAttribute("href", `/${href.replace(/^\.\//, "")}`);
+  });
+}
+
+function initializeSidebarResizer(sidebar) {
+  const minWidth = 200;
+  const maxWidth = 420;
+  const defaultWidth = 250;
+  const storageKey = "cb_sidebar_expanded_width";
+  const clampWidth = (value) => Math.min(maxWidth, Math.max(minWidth, Number(value) || defaultWidth));
+  const applyWidth = (value, persist = false) => {
+    const width = clampWidth(value);
+    document.documentElement.style.setProperty("--cb-sidebar-expanded-width", `${width}px`);
+    resizer.setAttribute("aria-valuenow", String(Math.round(width)));
+    if (persist) {
+      try { localStorage.setItem(storageKey, String(Math.round(width))); } catch (_) {}
+    }
+    return width;
+  };
+
+  let savedWidth = defaultWidth;
+  try { savedWidth = clampWidth(localStorage.getItem(storageKey)); } catch (_) {}
+
+  const existing = sidebar.querySelector(":scope > .sidebar-resizer");
+  const resizer = existing || document.createElement("div");
+  resizer.className = "sidebar-resizer";
+  resizer.setAttribute("role", "separator");
+  resizer.setAttribute("aria-orientation", "vertical");
+  resizer.setAttribute("aria-label", "Redimensionar menú lateral");
+  resizer.setAttribute("aria-valuemin", String(minWidth));
+  resizer.setAttribute("aria-valuemax", String(maxWidth));
+  resizer.setAttribute("tabindex", "0");
+  resizer.title = "Arrastra para redimensionar. Doble clic para restaurar.";
+  if (!existing) sidebar.appendChild(resizer);
+  applyWidth(savedWidth);
+
+  let startX = 0;
+  let startWidth = savedWidth;
+  const finishResize = (event) => {
+    if (!resizer.hasPointerCapture?.(event.pointerId)) return;
+    resizer.releasePointerCapture(event.pointerId);
+    document.body.classList.remove("sidebar-resizing");
+    applyWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cb-sidebar-expanded-width")), true);
+  };
+
+  resizer.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    if (!sidebar.classList.contains("show")) {
+      sidebar.classList.add("show");
+      document.body.classList.remove("sidebar-collapsed");
+    }
+    startX = event.clientX;
+    startWidth = sidebar.getBoundingClientRect().width;
+    resizer.setPointerCapture(event.pointerId);
+    document.body.classList.add("sidebar-resizing");
+  });
+
+  resizer.addEventListener("pointermove", (event) => {
+    if (!resizer.hasPointerCapture?.(event.pointerId)) return;
+    applyWidth(startWidth + event.clientX - startX);
+  });
+  resizer.addEventListener("pointerup", finishResize);
+  resizer.addEventListener("pointercancel", finishResize);
+  resizer.addEventListener("dblclick", () => applyWidth(defaultWidth, true));
+  resizer.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cb-sidebar-expanded-width")) || defaultWidth;
+    const next = event.key === "Home" ? defaultWidth : current + (event.key === "ArrowRight" ? 10 : -10);
+    applyWidth(next, true);
+  });
 }
 
 function normalizeToken(value = "") {
@@ -211,6 +348,8 @@ function extractUserRole(data = {}) {
 
 async function resolveUserRole(user) {
   if (!user?.uid) return null;
+  const { getFirestore, collection, query, where, getDocs, doc, getDoc } = await loadSidebarFirestore();
+  const db = getFirestore(app);
 
   // 1) Ruta estándar users/{uid}
   const direct = await getDoc(doc(db, "users", user.uid));
@@ -254,77 +393,109 @@ async function resolveRoleFromToken(user) {
   }
 }
 
-function initSidebar() {
-  if (window.__cbSidebarInitialized) return;
-  window.__cbSidebarInitialized = true;
-  setHeaderUserEmail(auth.currentUser?.email || "");
-  applySidebarRoleVisibility("");
+function deferSidebarDataWork(callback) {
+  const isScienceActivities = /(?:^|\/)scienceActivities(?:\.html)?$/i.test(location.pathname);
+  if (!isScienceActivities) {
+    void callback();
+    return;
+  }
+  let started = false;
+  const run = () => {
+    if (started) return;
+    started = true;
+    document.removeEventListener("scienceactivities:interactive", run);
+    if ("requestIdleCallback" in window) window.requestIdleCallback(() => void callback(), { timeout: 1500 });
+    else setTimeout(() => void callback(), 0);
+  };
+  if (document.documentElement.dataset.scienceActivitiesInteractive === "true") run();
+  else {
+    document.addEventListener("scienceactivities:interactive", run, { once: true });
+    setTimeout(run, 2500);
+  }
+}
 
-  // Escucha cambios de autenticación dentro del DOMContentLoaded para asegurar que el DOM está listo
-  onAuthStateChanged(auth, async user => {
+function deferScienceStartupWork(callback) {
+  const isScienceActivities = /(?:^|\/)scienceActivities(?:\.html)?$/i.test(location.pathname);
+  if (!isScienceActivities) {
+    void callback();
+    return;
+  }
+  let started = false;
+  const run = () => {
+    if (started) return;
+    started = true;
+    document.removeEventListener("scienceactivities:interactive", run);
+    if ("requestIdleCallback" in window) window.requestIdleCallback(() => void callback(), { timeout: 1500 });
+    else setTimeout(() => void callback(), 0);
+  };
+  if (document.documentElement.dataset.scienceActivitiesInteractive === "true") run();
+  else document.addEventListener("scienceactivities:interactive", run, { once: true });
+}
+
+async function initializeSidebarAuth() {
+  const { onAuthStateChanged } = await loadSidebarAuth();
+  setHeaderUserEmail(auth.currentUser?.email || "");
+  onAuthStateChanged(auth, user => {
+    sidebarUser = user;
+    applySidebarAuthVisibility(user);
     if (!user) {
       if (typeof unsubscribeSidebarUnread === "function") unsubscribeSidebarUnread();
       unsubscribeSidebarUnread = null;
       updateChatBadge(0);
       setHeaderUserEmail("");
       applySidebarRoleVisibility("");
+      applySidebarAuthVisibility(null);
       return;
     }
     setHeaderUserEmail(user.email || "");
-    
-    let role = null;
-    // 1) priorizar claims/token, igual que el backend de seguridad
-    role = await resolveRoleFromToken(user);
-    
-    if (!role) {
-      try {
-        // 2) fallback a Firestore (compatibilidad con docs legacy)
-        role = await resolveUserRole(user);
-      } catch (_) {
-        role = null;
+    deferSidebarDataWork(async () => {
+      let role = await resolveRoleFromToken(user);
+      if (!role) {
+        try { role = await resolveUserRole(user); } catch (_) { role = null; }
       }
-    }
-    
-    // 2) aplicar visibilidad por rol para enlaces del sidebar
-    // Lo ejecutamos inmediatamente y con un pequeño delay por si chromeLayout.js sigue trabajando
-    applySidebarRoleVisibility(role);
-    setTimeout(() => applySidebarRoleVisibility(role), 100);
-    
-    // 3) compatibilidad legacy por id (si falta data-role-visibility)
-    const analisisLink = document.getElementById("analisisEditorialLink");
-    if (analisisLink && !analisisLink.dataset.roleVisibility) {
-      const permitidos = ["admin","author","editor","developer"];
-      analisisLink.classList.toggle("d-none", !permitidos.includes(canonicalRole(role)));
-    }
-    const gestionUsuariosLink = document.getElementById("gestionUsuariosLink");
-    if (gestionUsuariosLink && !gestionUsuariosLink.dataset.roleVisibility) {
-      gestionUsuariosLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
-    }
-    const lecturasGameLink = document.getElementById("lecturasGameLink");
-    if (lecturasGameLink && !lecturasGameLink.dataset.roleVisibility) {
-      lecturasGameLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
-    }
-
-    startSidebarUnreadListener(user.uid);
+      applySidebarRoleVisibility(role);
+      setTimeout(() => applySidebarRoleVisibility(role), 100);
+      const analisisLink = document.getElementById("analisisEditorialLink");
+      if (analisisLink && !analisisLink.dataset.roleVisibility) {
+        const permitidos = ["admin","author","editor","developer"];
+        analisisLink.classList.toggle("d-none", !permitidos.includes(canonicalRole(role)));
+      }
+      const gestionUsuariosLink = document.getElementById("gestionUsuariosLink");
+      if (gestionUsuariosLink && !gestionUsuariosLink.dataset.roleVisibility) gestionUsuariosLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
+      const lecturasGameLink = document.getElementById("lecturasGameLink");
+      if (lecturasGameLink && !lecturasGameLink.dataset.roleVisibility) lecturasGameLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
+      await startSidebarUnreadListener(user.uid);
+    });
   });
+}
+
+function initSidebar() {
+  const menu = document.querySelector("#sidebar .sidebar-menu");
+  if (menu && !menu.children.length && !window.__cbSidebarWaitingForLayout) {
+    window.__cbSidebarWaitingForLayout = true;
+    const retry = () => {
+      window.__cbSidebarWaitingForLayout = false;
+      initSidebar();
+    };
+    document.addEventListener("charlylayout:ready", retry, { once: true });
+    setTimeout(retry, 1000);
+    return;
+  }
+  if (window.__cbSidebarInitialized) return;
+  window.__cbSidebarInitialized = true;
+  setHeaderUserEmail("");
+  applySidebarRoleVisibility("");
+  applySidebarAuthVisibility(sidebarUser);
+  deferScienceStartupWork(() => initializeSidebarAuth().catch((error) => {
+    console.warn("[sidebar] No fue posible inicializar autenticación:", error);
+  }));
 
   const sidebar = document.getElementById("sidebar");
-  const toggleBtn = document.getElementById("menuToggle");
   if (!sidebar) return;
 
-  const toggleSidebar = () => {
-    sidebar.classList.toggle("show");
-
-    if (sidebar.classList.contains("show")) {
-      document.body.classList.remove("sidebar-collapsed");
-    } else {
-      document.body.classList.add("sidebar-collapsed");
-    }
-  };
-
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", toggleSidebar);
-  }
+  normalizeSidebarLinkTargets(sidebar);
+  initializeSidebarGroups(sidebar);
+  initializeSidebarResizer(sidebar);
 
   // Sidebar colapsado por defecto
   sidebar.classList.remove("show");
@@ -335,21 +506,21 @@ function initSidebar() {
     link.addEventListener("click", async (e) => {
       e.preventDefault();
       const page = link.dataset.page;
-  
+
       try {
         const res = await fetch(page);
         const html = await res.text();
-  
+
         // Guarda en localStorage para navegación offline
         localStorage.setItem(`page:${page}`, html);
-  
+
         // Si quieres cargar lógica JS específica:
         if (page === "unidadHome.html") {
           import("./unidadHome.js");
         } else if (page === "home.html") {
           import("./home.js");
         }
-  
+
       } catch (error) {
         // Cargar desde cache si está disponible
         const cached = localStorage.getItem(`page:${page}`);
@@ -366,10 +537,10 @@ function initSidebar() {
     logoutLink.addEventListener("click", async (e) => {
       e.preventDefault();
       try {
-        const auth = getAuth(); // Obtener instancia de auth
-        await signOut(auth); // Cerrar sesión
+        const authApi = await loadSidebarAuth();
+        await authApi.signOut(authApi.auth);
         localStorage.clear(); // Limpiar todo el almacenamiento local
-        window.location.href = "index.html"; 
+        window.location.href = "index.html";
       } catch (err) {
         alert("Error al cerrar sesión.");
       }

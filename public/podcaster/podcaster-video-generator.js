@@ -3,6 +3,16 @@ import { authFetchJson, buildVeoApiUrl } from "../js/api-client-podcaster.js";
 import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
 import { isReelModeEnabled } from "./podcaster-reels.js";
+import {
+  preserveTimelineTrimAfterVideoGeneration,
+  resolveGeneratedVideoDurationSec,
+  resolveVideoPhysicalDurationMs
+} from "./podcaster-video-generation-timing.js";
+import {
+  AVAILABLE_PODCASTER_VIDEO_MODELS,
+  isVertexVeoModelId,
+  normalizeVertexVeoModelId
+} from "./podcaster-video-model-catalog.js";
 
 const runtime = requirePodcasterGenerationRuntime();
 
@@ -13,23 +23,17 @@ const DIALOGUE_VIDEO_POLL_TIMEOUT_MS = 11 * 60 * 1000;
 const PODCASTER_VIDEO_PROMPT_PROFILE = "podcaster_video_v2";
 const PODCASTER_VIDEO_MODEL_AUTO = "auto";
 const PODCASTER_VIDEO_MODEL_OMNI = "gemini-omni-flash-preview";
-const PODCASTER_VIDEO_MODEL_VEO_STANDARD = "veo-3.1-generate-preview";
-const PODCASTER_VIDEO_MODEL_VEO_FAST = "veo-3.1-fast-generate-preview";
-const PODCASTER_VIDEO_MODEL_VEO_LITE = "veo-3.1-lite-generate-preview";
-const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
-  PODCASTER_VIDEO_MODEL_OMNI,
-  PODCASTER_VIDEO_MODEL_VEO_STANDARD,
-  PODCASTER_VIDEO_MODEL_VEO_FAST,
-  PODCASTER_VIDEO_MODEL_VEO_LITE
-]);
+const PODCASTER_VIDEO_MODEL_VEO_STANDARD = "veo-3.1-generate-001";
+const PODCASTER_VIDEO_MODEL_VEO_FAST = "veo-3.1-fast-generate-001";
+const PODCASTER_VIDEO_MODEL_VEO_LITE = "veo-3.1-lite-generate-001";
 const PODCASTER_VIDEO_MODEL_PREFERENCES = Object.freeze([
   PODCASTER_VIDEO_MODEL_AUTO,
   ...AVAILABLE_PODCASTER_VIDEO_MODELS
 ]);
 const LEGACY_PODCASTER_VIDEO_MODEL_MAP = Object.freeze({
-  "veo-3.0-generate-001": PODCASTER_VIDEO_MODEL_VEO_STANDARD,
-  "veo-3.0-fast-generate-001": PODCASTER_VIDEO_MODEL_VEO_FAST,
-  "veo-2.0-generate-001": PODCASTER_VIDEO_MODEL_VEO_STANDARD
+  "veo-3.1-generate-preview": PODCASTER_VIDEO_MODEL_VEO_STANDARD,
+  "veo-3.1-fast-generate-preview": PODCASTER_VIDEO_MODEL_VEO_FAST,
+  "veo-3.1-lite-generate-preview": PODCASTER_VIDEO_MODEL_VEO_LITE
 });
 const VISIBLE_TEXT_DIRECTIVE_PATTERN = /\b(texto|textos|palabra|palabras|letra|letras|letrero|letreros|r[oó]tulo|r[oó]tulos|subt[ií]tulo|subt[ií]tulos|t[ií]tulo|t[ií]tulos|logo|logos|marca|marcas|caption|captions|headline|headlines|title|titles|sign|signs|label|labels|letter|letters|word|words|typography)\b/i;
 
@@ -354,8 +358,8 @@ async function cancelDialogueVideoForRow(rowId = "") {
 }
 
 function normalizePodcasterVideoModelPreference(value = "") {
-  const requested = String(value || "").trim();
-  if (PODCASTER_VIDEO_MODEL_PREFERENCES.includes(requested)) return requested;
+  const requested = normalizeVertexVeoModelId(value);
+  if (PODCASTER_VIDEO_MODEL_PREFERENCES.includes(requested) || isVertexVeoModelId(requested)) return requested;
   return LEGACY_PODCASTER_VIDEO_MODEL_MAP[requested] || PODCASTER_VIDEO_MODEL_AUTO;
 }
 
@@ -1030,6 +1034,9 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       await runtime.hydrateSessionReferenceMedia(session);
     } catch (_) { }
   }
+  if (typeof window.PodcasterMediaReferenceApi?.waitForRowReferenceUploads === "function") {
+    await window.PodcasterMediaReferenceApi.waitForRowReferenceUploads(key);
+  }
   session = getActiveSession() || session;
   sessionId = String(session?.id || "").trim();
   rows = session?.script?.rows || [];
@@ -1060,6 +1067,17 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const rowReferenceImagesBySession = canonicalRowReferencePayload
     ? canonicalRowReferencePayload.referenceImages
     : rowReferenceImages;
+  const unavailableRowReference = rowReferenceImagesBySession.find((reference) => (
+    !String(reference?.storagePath || reference?.path || "").trim()
+  ));
+  if (unavailableRowReference) {
+    const error = new Error(
+      "La imagen de referencia de esta escena no terminó de subirse. Vuelve a adjuntarla, espera a que se guarde y genera otra vez."
+    );
+    error.code = "reference_image_upload_required";
+    error.retryable = false;
+    throw error;
+  }
   const rowReferenceVideo = canonicalRowReferencePayload
     ? canonicalRowReferencePayload.referenceVideo
     : (getRowReferenceVideoMap(session)[key] || null);
@@ -1278,18 +1296,14 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
     continuityReferenceImageDataUrl,
     inlineReferenceBudget
   });
-      const clip = typeof runtime.ensureTimelineClipsByRowId === "function"
-        ? runtime.ensureTimelineClipsByRowId(session, { persist: false })[key]
-        : null;
-      const durationMs = clip
-        ? (typeof runtime.getTimelineClipEffectiveDurationMs === "function"
-          ? runtime.getTimelineClipEffectiveDurationMs(clip)
-          : (clip.trimOutMs - clip.trimInMs))
-        : (typeof runtime.getRowSourceDurationMs === "function"
-          ? runtime.getRowSourceDurationMs(row, session)
-          : 8000);
-      const requestedDurationSec = Math.max(4, Math.min(8, Math.round(durationMs / 1000) || 8));
-      const aspectRatio = isReel ? "9:16" : "16:9";
+      // Generation duration belongs to the new source media. The edited clip can
+      // remain shorter through trimInMs/trimOutMs without asking Veo for a video
+      // shorter than the provider's supported eight-second source.
+      const requestedDurationSec = resolveGeneratedVideoDurationSec();
+      const configuredAspectRatio = String(session?.podcastVideoConfig?.aspectRatio || "").trim();
+      const aspectRatio = ["16:9", "9:16"].includes(configuredAspectRatio)
+        ? configuredAspectRatio
+        : (isReel ? "9:16" : "16:9");
   const textPolicy = inSceneText && shouldValidateInSceneText ? "in_scene" : "overlay_only";
 
       const body = {
@@ -1531,18 +1545,21 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       const previousClip = resolveDialogueVideoForRow(session, key);
       const rawFinalClip = result?.dialogueVideo;
       if (!rawFinalClip) throw new Error("No se devolvió un clip válido.");
-      const finalClip = {
+      let finalClip = {
         ...rawFinalClip,
         generator: rawFinalClip?.generator || result?.generator || routing.resolvedGeneratorHint || null,
         textPolicy: rawFinalClip?.textPolicy || result?.textPolicy || textPolicy,
         aspectRatio: rawFinalClip?.aspectRatio || result?.aspectRatio || aspectRatio,
         requestedDurationSeconds: rawFinalClip?.requestedDurationSeconds ?? result?.requestedDurationSeconds ?? requestedDurationSec,
         durationSeconds: rawFinalClip?.durationSeconds ?? result?.durationSeconds ?? rawFinalClip?.durationSec ?? null,
+        mediaDurationMs: resolveVideoPhysicalDurationMs(rawFinalClip, result)
+          || Math.round(requestedDurationSec * 1000),
         resolution: rawFinalClip?.resolution || result?.resolution || null,
         interactionId: rawFinalClip?.interactionId || result?.interactionId || null,
         promptHash: rawFinalClip?.promptHash || result?.promptHash || null,
         removedTextDirectives: rawFinalClip?.removedTextDirectives || result?.removedTextDirectives || promptFieldSanitization.removedTextDirectives,
-        promptVersion: rawFinalClip?.promptVersion || result?.promptVersion || PODCASTER_VIDEO_PROMPT_PROFILE
+        promptVersion: rawFinalClip?.promptVersion || result?.promptVersion || PODCASTER_VIDEO_PROMPT_PROFILE,
+        updatedAt: String(rawFinalClip?.updatedAt || result?.updatedAt || new Date().toISOString()).trim()
       };
 
       upsertActiveSession((current) => ({
@@ -1553,6 +1570,20 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         }
       }), { render: !options.deferTimelineRender });
 
+      if (typeof runtime.persistLatestDialogueVideoForRow === "function") {
+        const committedClip = await runtime.persistLatestDialogueVideoForRow(key, finalClip, sessionId);
+        if (committedClip && typeof committedClip === "object") {
+          finalClip = committedClip;
+          upsertActiveSession((current) => ({
+            ...current,
+            dialogueVideoMap: {
+              ...(current.dialogueVideoMap || {}),
+              [key]: committedClip
+            }
+          }), { render: false });
+        }
+      }
+
       if (typeof playbackController?.invalidateRowMediaCache === "function") {
         playbackController.invalidateRowMediaCache(key, getActiveSession(), {
           previousClip,
@@ -1562,25 +1593,17 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         playbackController.invalidateRowAudioCache(key);
       }
 
-      const finalDurationMs = Math.round(Math.max(0, Number(finalClip?.durationSec || 0)) * 1000);
+      const finalDurationMs = resolveVideoPhysicalDurationMs(finalClip, result)
+        || Math.round(requestedDurationSec * 1000);
       if (finalDurationMs > 0 && typeof runtime.updateTimelineClipForRow === "function") {
         runtime.updateTimelineClipForRow(key, (prev) => {
-          const currentDurationMs = Number(prev?.sourceDurationMs || 0);
-          const computedDurationMs = typeof runtime.getRowSourceDurationMs === "function"
-            ? runtime.getRowSourceDurationMs(row, session)
-            : finalDurationMs;
-          // VEO media duration is source metadata, not an instruction to retime the
-          // edited scene. Preserve the existing timeline duration so regenerating
-          // video cannot move or resize the voice-over segment for this row.
-          const targetDurationMs = currentDurationMs > 0
-            ? currentDurationMs
-            : Math.max(computedDurationMs, finalDurationMs);
-          return {
-            ...prev,
-            sourceDurationMs: targetDurationMs,
-            trimInMs: 0,
-            trimOutMs: targetDurationMs
-          };
+          // Update source metadata without retiming the edited scene. In
+          // particular, never reset trimInMs/trimOutMs after regeneration.
+          return preserveTimelineTrimAfterVideoGeneration(
+            prev,
+            finalDurationMs,
+            runtime.STUDIO_TIMELINE_MIN_CLIP_MS
+          );
         }, { persist: true, render: false });
       }
 
@@ -1611,7 +1634,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         traceVisualReferenceScene("request-canceled", {
           sessionId,
           rowId: key,
-          sceneNumber: resolveSceneNumberByRowId(key, session)
+          sceneNumber: resolveSceneNumberByRowId(key, session),
+          traceVisualReference: true
         });
         throw error;
       }
@@ -1620,7 +1644,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
         message: buildGenerationErrorMessage(error, "Error al generar video."),
-        detail: error?.detail || null
+        detail: error?.detail || null,
+        traceVisualReference: true
       });
       console.error("[Podcaster][SceneVideoRef][request-error]", error);
       if (!silent) addChatMessage("system", `Error en escena ${resolveSceneNumberByRowId(key, session)}: ${buildGenerationErrorMessage(error, "Error al generar video.")}`);

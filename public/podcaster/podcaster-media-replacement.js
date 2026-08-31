@@ -90,6 +90,41 @@ function resolveReplacementPreviewUrl(downloadUrl = "", storagePath = "") {
     return rawUrl;
 }
 
+async function resolveAuthorizedReplacementPreviewUrl(previewUrl = "", mediaKind = "image") {
+    const logicalUrl = String(previewUrl || "").trim();
+    if (!logicalUrl || !/\/api\/assets\/proxy-(?:image|media)\?/i.test(logicalUrl)) return logicalUrl;
+    const controller = window.playbackController;
+    if (mediaKind === "image" && typeof controller?.resolveStageImageSource === "function") {
+        return String(await controller.resolveStageImageSource(logicalUrl) || "").trim();
+    }
+    if (typeof controller?.getBlobUrl === "function") {
+        return String(await controller.getBlobUrl(logicalUrl, { persistent: false }) || "").trim();
+    }
+    const parsed = new URL(logicalUrl, window.location.origin);
+    const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
+    if (!storagePath) return logicalUrl;
+    const data = await authFetchJson(`/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`);
+    return String(data?.url || "").trim();
+}
+
+function loadReplacementPreviewElement(element = null, previewUrl = "", mediaKind = "image") {
+    if (!element) return;
+    const logicalUrl = String(previewUrl || "").trim();
+    if (!logicalUrl) {
+        element.removeAttribute("src");
+        return;
+    }
+    element.dataset.previewSrc = logicalUrl;
+    element.removeAttribute("src");
+    resolveAuthorizedReplacementPreviewUrl(logicalUrl, mediaKind).then((resolvedUrl) => {
+        if (!resolvedUrl || element.dataset.previewSrc !== logicalUrl) return;
+        element.src = resolvedUrl;
+        if (mediaKind === "video") prepareSceneReplacementPreview(element);
+    }).catch(() => {
+        if (element.dataset.previewSrc === logicalUrl) element.removeAttribute("src");
+    });
+}
+
 function getSceneReplacementPreviewVideos() {
     return Array.from(els.modal?.querySelectorAll?.(".scene-video-selector-card video") || []);
 }
@@ -559,7 +594,7 @@ function renderStopMotionTray() {
         const statusLabel = frame.status === "uploading" ? "Subiendo…" : frame.status === "error" ? "Error" : `${index + 1}`;
         return `
           <article class="pme-stop-motion-frame${frame.status === "error" ? " is-error" : ""}" role="listitem" data-stop-motion-frame-id="${escapeHtml(frame.id)}">
-            ${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(frame.name || `Imagen ${index + 1}`)}">` : '<div style="height:72px;background:#111827"></div>'}
+            ${previewUrl ? `<img data-preview-src="${escapeHtml(previewUrl)}" alt="${escapeHtml(frame.name || `Imagen ${index + 1}`)}">` : '<div style="height:72px;background:#111827"></div>'}
             <span class="pme-stop-motion-frame-status">${escapeHtml(statusLabel)}</span>
             <div class="pme-stop-motion-frame-meta">
               <span class="pme-stop-motion-frame-name" title="${escapeHtml(frame.name || "")}">${escapeHtml(frame.name || `Imagen ${index + 1}`)}</span>
@@ -579,6 +614,9 @@ function renderStopMotionTray() {
             renderStopMotionTray();
             releaseDetachedObjectUrl(detachedPreviewUrl);
         });
+    });
+    els.stopMotionTray.querySelectorAll("img[data-preview-src]").forEach((imageEl) => {
+        loadReplacementPreviewElement(imageEl, imageEl.dataset.previewSrc, "image");
     });
     updateStopMotionMusicControls();
     updateStopMotionConfirmState();
@@ -659,14 +697,13 @@ function renderExistingSingleMedia(media = existingSingleMedia) {
     const previewUrl = resolveReplacementPreviewUrl(media.downloadUrl, media.storagePath);
     if (els.existingMediaPreview) {
         els.existingMediaPreview.style.display = isImage ? "block" : "none";
-        if (isImage) els.existingMediaPreview.src = previewUrl;
+        if (isImage) loadReplacementPreviewElement(els.existingMediaPreview, previewUrl, "image");
         else els.existingMediaPreview.removeAttribute("src");
     }
     if (els.existingVideoPreview) {
         els.existingVideoPreview.style.display = isVideo ? "block" : "none";
         if (isVideo) {
-            els.existingVideoPreview.src = previewUrl;
-            prepareSceneReplacementPreview(els.existingVideoPreview);
+            loadReplacementPreviewElement(els.existingVideoPreview, previewUrl, "video");
         } else {
             pauseSceneReplacementPreview(els.existingVideoPreview, { keepFrame: false });
             els.existingVideoPreview.removeAttribute("src");
@@ -947,21 +984,21 @@ function ensureStageImagePreviewReady(src = "") {
 function showStageImagePreview(src = "", options = {}) {
     if (!els.podcastActiveSpeakerImage) return false;
     // console.log("[MediaReplacement] showStageImagePreview execution:", { src, currentSrc: els.podcastActiveSpeakerImage.src });
-    
+
     els.podcastActiveSpeakerImage.style.opacity = "1";
     els.podcastActiveSpeakerImage.style.visibility = "visible";
     const cleanSrc = String(src || "").trim();
-    
+
     // We assume getActiveSession and resolveSceneNumberByRowId are available globally or we use fallback
     const activeSession = options.session || (typeof window.getActiveSession === 'function' ? window.getActiveSession() : window.PodcasterState?.activeSession);
     const rowId = String(options.rowId || "").trim();
     const sceneNumber = (rowId && typeof window.resolveSceneNumberByRowId === 'function') ? window.resolveSceneNumberByRowId(rowId, activeSession) : 0;
-    
+
     els.podcastActiveSpeakerImage.dataset.src = cleanSrc;
     els.podcastActiveSpeakerImage.alt = sceneNumber > 0 ? `Escena ${sceneNumber}` : "Escena";
     els.podcastActiveSpeakerImage.dataset.stageMode = "image";
     els.podcastActiveSpeakerImage.hidden = false;
-    
+
     const preview = els.podcastVideoStage?.querySelector?.(".podcast-video-preview");
     if (preview) {
         const applyAspect = () => {
@@ -989,7 +1026,7 @@ function swapStageToImagePreview(src = "", options = {}) {
         requestToken
     });
     const fallbackUrl = String(options.fallbackUrl || "").trim();
-    
+
     preloadStageImageSource(cleanSrc, fallbackUrl).then(() => ensureStageImagePreviewReady(cleanSrc)).then(() => {
         if (requestToken !== stageImagePreviewRequestToken) return;
         if (!showStageImagePreview(cleanSrc, options)) return;
@@ -1193,7 +1230,7 @@ function initFilePond() {
                         });
                         progress(true, uploadSize, uploadSize);
                         showSceneMediaUploadError("");
-                        showSceneMediaUploadStatus(data?.media?.transcoded
+                        showSceneMediaUploadStatus(uploadResult?.media?.transcoded
                             ? "MOV convertido a MP4 y guardado correctamente."
                             : "Archivo guardado correctamente.");
                         load(uploadedMediaUrl);
@@ -1318,7 +1355,7 @@ function setupEventListeners() {
     els.uploadTabBtn.addEventListener('click', () => {
         els.uploadTabBtn.classList.add('is-active');
         els.uploadTabBtn.setAttribute('aria-selected', 'true');
-        
+
         if (els.libraryTabBtn) {
             els.libraryTabBtn.classList.remove('is-active');
             els.libraryTabBtn.setAttribute('aria-selected', 'false');
@@ -1371,7 +1408,7 @@ function setupEventListeners() {
             finalStoragePath
         );
         let mediaType = firstStopMotionFrame ? "image" : (uploadedMediaType || selectedLibrary?.type || 'video');
-        
+
         const isUrlImage = /\.(jpg|jpeg|png|webp|gif)(\?|$|\s)/i.test(mediaUrl);
         if (isUrlImage && mediaType === 'video') {
             // console.log("[MediaReplacement] Correcting mediaType to image based on URL");
@@ -1385,7 +1422,7 @@ function setupEventListeners() {
             uploadedStoragePath,
             uploadedMediaType
         });
-        
+
         if (!mediaUrl || !currentEditingRowId) {
             console.error("[MediaReplacement] Missing mediaUrl or rowId", { mediaUrl, currentEditingRowId });
             return;
@@ -1399,12 +1436,12 @@ function setupEventListeners() {
 
         const effects = getSelectedEffects();
         // console.log("[MediaReplacement] Effects:", effects);
-        
+
         try {
             // console.log("[MediaReplacement] Updating Firestore for session:", session.id);
             const sessionRef = doc(db, 'podcaster_sessions', session.id);
             const persistedRowId = currentEditingRowId;
-            
+
             const snap = await getDoc(sessionRef);
             if (!snap.exists()) {
                 console.error("[MediaReplacement] Session document not found in Firestore");
@@ -1413,7 +1450,7 @@ function setupEventListeners() {
             const docData = snap.data();
             const currentSession = docData.session || {};
             const rawRows = currentSession.script?.rows || [];
-            
+
             let rows = [];
             if (Array.isArray(rawRows)) {
                 rows = [...rawRows];
@@ -1441,6 +1478,8 @@ function setupEventListeners() {
                 storagePath: finalStoragePath,
                 mimeType: firstStopMotionFrame?.mimeType || selectedLibrary?.mimeType || (isImageMedia ? 'image/jpeg' : 'video/mp4'),
                 type: mediaType,
+                sourceType: 'manual-replacement',
+                manuallyReplaced: true,
                 updatedAt: serverTimestamp(),
                 model: mediaType === 'video' ? 'veo' : null,
                 segments: null,
@@ -1471,7 +1510,7 @@ function setupEventListeners() {
                 effects,
                 updatePayloadKeys: Object.keys(updatePayload)
             });
-            
+
             if (isImageMedia) {
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = effects;
                 updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaScale`] = 1;
@@ -1482,7 +1521,7 @@ function setupEventListeners() {
             } else {
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = null;
             }
-            
+
             // 1. Invalidate caches on the playback controller
             if (typeof playbackController?.invalidateRowMediaCache === "function") {
                 playbackController.invalidateRowMediaCache(currentEditingRowId, session, {
@@ -1498,7 +1537,7 @@ function setupEventListeners() {
                 const updatedSession = window.upsertActiveSession((current) => {
                     const next = { ...current };
                     const currentRows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
-                    
+
                     next.dialogueVideoMap = { ...(next.dialogueVideoMap || {}) };
                     next.visualEffectsMap = { ...(next.visualEffectsMap || {}) };
                     next.podcastVideoConfig = { ...(next.podcastVideoConfig || {}) };
@@ -1512,7 +1551,7 @@ function setupEventListeners() {
                         ))
                     };
                     next.updatedAt = now;
-                    
+
                     const localMediaData = { ...mediaData, updatedAt: now };
                     next.dialogueVideoMap[currentEditingRowId] = localMediaData;
                     next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] = {
@@ -1526,13 +1565,13 @@ function setupEventListeners() {
                             visualLayoutMode: "default"
                         } : {})
                     };
-                    
+
                     if (isImageMedia) {
                         next.visualEffectsMap[currentEditingRowId] = effects;
                     } else {
                         next.visualEffectsMap[currentEditingRowId] = null;
                     }
-                    
+
                     return next;
                 }, { render: false });
                 logSceneReplacement("local-sync:done", currentEditingRowId, {
@@ -1662,12 +1701,12 @@ function onLibraryMediaSelected(media = null) {
         isImage,
         media
     });
-    
+
     existingSingleMedia = { ...media, type: isImage ? "image" : "video" };
     setReplacementImageMode(isImage ? "single" : "video");
     renderExistingSingleMedia(existingSingleMedia);
     if (els.movementSettings) els.movementSettings.style.display = isImage ? 'block' : 'none';
-    
+
     if (els.confirmBtn && !isStopMotionMode()) els.confirmBtn.style.display = 'inline-block';
 }
 
@@ -1725,7 +1764,14 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
 
   try {
     const data = await authFetchJson(`/api/podcaster/sessions/list-videos?sessionSlug=${encodeURIComponent(sessionSlug)}`);
-    const allVideos = Array.isArray(data?.videos) ? data.videos : (Array.isArray(data) ? data : []);
+    const rawVideos = Array.isArray(data?.videos) ? data.videos : (Array.isArray(data) ? data : []);
+    const allVideos = rawVideos.filter((v) => {
+      const path = String(v?.storagePath || v?.path || "").toLowerCase();
+      const mime = String(v?.mimeType || v?.type || "").toLowerCase();
+      if (path.includes("/references/") || path.includes("/reference/")) return false;
+      if (mime.startsWith("image/") && !mime.startsWith("video/")) return false;
+      return true;
+    });
 
     const normalizedRowId = key.toLowerCase();
     const hasRowIdInText = (value = "") => String(value || "").trim().toLowerCase().includes(normalizedRowId);
@@ -1748,17 +1794,17 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
     const renderCard = (video) => {
       const card = document.createElement("div");
       card.className = "scene-video-selector-card";
-      
+
       const downloadUrl = String(video.downloadUrl || video.videoDownloadUrl || video.url || video.videoUrl || "").trim();
       const mimeType = String(video.contentType || video.mimeType || "").trim().toLowerCase();
       const storagePath = String(video.storagePath || video.path || "").trim();
       const isImg = mimeType.startsWith("image/") || video.type === 'image' || /\.(jpg|jpeg|png|webp|gif)/i.test(downloadUrl) || /\.(jpg|jpeg|png|webp|gif)$/i.test(storagePath) || /\.(jpg|jpeg|png|webp|gif)$/i.test(String(video.name || "").trim());
       const stableLibraryKey = String(storagePath || downloadUrl || video.id || "").trim();
-      
+
       const previewUrl = resolveReplacementPreviewUrl(downloadUrl, storagePath);
-      const mediaHtml = isImg 
-        ? `<img src="${escapeHtml(previewUrl)}" style="width: 100%; height: 120px; object-fit: cover; background: #000;" loading="lazy">`
-        : `<video src="${escapeHtml(previewUrl)}" preload="metadata" style="width: 100%; height: 120px; object-fit: cover; background: #000;" muted playsinline loop aria-label="Preview sin audio"></video>`;
+      const mediaHtml = isImg
+        ? `<img data-preview-src="${escapeHtml(previewUrl)}" style="width: 100%; height: 120px; object-fit: cover; background: #000;" loading="lazy">`
+        : `<video data-preview-src="${escapeHtml(previewUrl)}" preload="metadata" style="width: 100%; height: 120px; object-fit: cover; background: #000;" muted playsinline loop aria-label="Preview sin audio"></video>`;
 
       card.innerHTML = `
         ${mediaHtml}
@@ -1776,7 +1822,7 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
       }
       const previewVideo = card.querySelector("video");
       if (previewVideo) {
-        prepareSceneReplacementPreview(previewVideo);
+        loadReplacementPreviewElement(previewVideo, previewUrl, "video");
         previewVideo.addEventListener("pointerenter", () => playSceneReplacementPreview(previewVideo));
         previewVideo.addEventListener("pointerleave", () => {
           if (!card.classList.contains("is-selected")) {
@@ -1784,6 +1830,8 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
           }
         });
       }
+      const previewImage = card.querySelector("img[data-preview-src]");
+      if (previewImage) loadReplacementPreviewElement(previewImage, previewUrl, "image");
       card.addEventListener("click", () => {
         stopSceneReplacementPreviews({ keepFrames: true });
         const selectedMedia = {
@@ -1806,13 +1854,13 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
         logSceneReplacement("library-card:clicked", key, {
           selectedMedia: window._selectedLibraryVideo
         });
-        
+
         els.sceneVideoSelectorGeneratedGrid?.querySelectorAll('.scene-video-selector-card').forEach(c => c.classList.remove('is-selected'));
         els.sceneVideoSelectorOthersGrid?.querySelectorAll('.scene-video-selector-card').forEach(c => c.classList.remove('is-selected'));
-        
+
         card.classList.add('is-selected');
         if (previewVideo) playSceneReplacementPreview(previewVideo);
-        
+
         if (typeof window.PodcasterMediaReplacement?.onLibraryMediaSelected === "function") {
           window.PodcasterMediaReplacement.onLibraryMediaSelected(window._selectedLibraryVideo);
         } else if (els.confirmBtn) {

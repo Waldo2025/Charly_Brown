@@ -6,6 +6,7 @@ from collections import Counter
 from PIL import Image
 
 from .colors import find_color_issues
+from .custom_rules import evaluate_custom_rules
 from .document import build_document_summary
 from .gemini_verifier import GeminiVerifier
 from .orthotypography import find_orthotypography_issues
@@ -15,7 +16,8 @@ from .pages import parse_pages, _classify_text_frame_status
 from .redaction import find_redaction_issues
 from .sections import find_section_issues
 from .spelling import find_spelling_issues
-from .stories import AUTO_PAGE_NUMBER_TOKEN, parse_stories
+from .language_profiles import resolve_language
+from .stories import AUTO_PAGE_NUMBER_TOKEN, INLINE_OBJECT_TOKEN, parse_stories
 from .master_spreads import parse_master_spreads
 from .styles import parse_designmap, parse_styles
 from .swatches import parse_swatches
@@ -481,6 +483,101 @@ def _build_swatch_inventory(swatches, limit=None):
     ]
 
 
+def _build_page_swatch_usage(page_reports, swatches):
+    swatch_lookup = {}
+    for swatch in swatches or []:
+        name = str((swatch or {}).get("name") or "").strip()
+        self_ref = _normalize_color_ref((swatch or {}).get("self") or "")
+        for candidate in (name, self_ref):
+            normalized = _normalize_style_name(candidate)
+            if normalized:
+                swatch_lookup[normalized] = swatch
+
+    usage = {}
+
+    def is_excluded(swatch):
+        name = _normalize_style_name((swatch or {}).get("name") or "")
+        compact_name = re.sub(r"[\[\]\s_-]+", "", name)
+        if compact_name in {"black", "negro", "none", "ninguno", "paper", "papel", "registration", "registro"}:
+            return True
+        hex_value = str((swatch or {}).get("hex") or "").strip().lstrip("#")
+        if re.fullmatch(r"[0-9a-fA-F]{3}", hex_value):
+            hex_value = "".join(character * 2 for character in hex_value)
+        if re.fullmatch(r"[0-9a-fA-F]{6}", hex_value):
+            channels = [int(hex_value[index:index + 2], 16) for index in (0, 2, 4)]
+            if max(channels) <= 24:
+                return True
+        return False
+
+    def register(color_ref, page_name, source):
+        normalized_ref = _normalize_style_name(_normalize_color_ref(color_ref))
+        swatch = swatch_lookup.get(normalized_ref)
+        hex_value = str((swatch or {}).get("hex") or "").strip()
+        if not swatch or not re.fullmatch(r"#[0-9a-fA-F]{6}", hex_value) or is_excluded(swatch):
+            return ""
+        name = str(swatch.get("name") or "").strip()
+        key = _normalize_style_name(name)
+        record = usage.setdefault(key, {
+            "name": name,
+            "swatchName": name,
+            "hex": hex_value,
+            "cmyk": str(swatch.get("cmyk") or "").strip(),
+            "usageCount": 0,
+            "pageNames": set(),
+            "sources": set(),
+        })
+        record["usageCount"] += 1
+        if page_name:
+            record["pageNames"].add(str(page_name))
+        if source:
+            record["sources"].add(str(source))
+        return key
+
+    for page in page_reports or []:
+        page_name = str((page or {}).get("pageName") or "").strip()
+        observed_on_page = set()
+        for item in (page or {}).get("pageItems") or []:
+            for color_ref in ((item or {}).get("fillColor"), (item or {}).get("strokeColor")):
+                registered = register(color_ref, page_name, "page-item")
+                if registered:
+                    observed_on_page.add(registered)
+        for story_ref in (page or {}).get("storyRefs") or []:
+            for color_ref in ((story_ref or {}).get("fillColor"), (story_ref or {}).get("strokeColor")):
+                registered = register(color_ref, page_name, "text-frame")
+                if registered:
+                    observed_on_page.add(registered)
+        for source_name in ("content", "masterContent"):
+            for items in ((page or {}).get(source_name) or {}).values():
+                for item in items or []:
+                    for color_ref in (item or {}).get("swatches") or []:
+                        registered = register(color_ref, page_name, "text-style" if source_name == "content" else "master-text-style")
+                        if registered:
+                            observed_on_page.add(registered)
+        for color_ref in (page or {}).get("frameSwatches") or []:
+            normalized_ref = _normalize_style_name(_normalize_color_ref(color_ref))
+            swatch = swatch_lookup.get(normalized_ref)
+            resolved_key = _normalize_style_name((swatch or {}).get("name") or "")
+            if resolved_key and resolved_key not in observed_on_page:
+                register(color_ref, page_name, "page-swatch")
+
+    ranked = sorted(
+        usage.values(),
+        key=lambda entry: (-int(entry["usageCount"]), -len(entry["pageNames"]), _normalize_style_name(entry["name"])),
+    )
+    return [
+        {
+            "name": entry["name"],
+            "swatchName": entry["swatchName"],
+            "hex": entry["hex"],
+            "cmyk": entry["cmyk"],
+            "usageCount": entry["usageCount"],
+            "pageCount": len(entry["pageNames"]),
+            "sources": sorted(entry["sources"]),
+        }
+        for entry in ranked
+    ]
+
+
 def _build_style_lookup(entries):
     return {
         str((entry or {}).get("self") or "").strip(): str((entry or {}).get("name") or "").strip()
@@ -587,6 +684,8 @@ def _append_block_to_page(
         "pageName": page.get("pageName") or "",
         "storyId": story.get("storyId") or "",
         "storyTitle": story.get("storyTitle") or "",
+        "layerId": (story_ref or {}).get("layerId") or "",
+        "layerName": (story_ref or {}).get("layerName") or "",
         "styleName": paragraph_style_name,
         "blockType": kind,
         "blockOrder": int(block.get("blockOrder") or 0),
@@ -1518,6 +1617,8 @@ def _build_semantic_blocks(page_reports):
                         "storyId": "",
                         "storyTitle": entry.get("storyTitle") or "",
                         "storySource": "",
+                        "layerId": entry.get("layerId") or "",
+                        "layerName": entry.get("layerName") or "",
                         "blockType": block_type,
                         "styleName": entry.get("styleName") or "",
                         "text": text,
@@ -1525,12 +1626,15 @@ def _build_semantic_blocks(page_reports):
                         "pageRect": page.get("pageRect") or None,
                     })
                     continue
-                key = (str(page_name).strip(), story_id)
+                layer_id = str(entry.get("layerId") or "").strip()
+                key = (str(page_name).strip(), story_id, layer_id)
                 bucket = grouped.setdefault(key, {
                     "pageName": page_name,
                     "storyId": entry.get("storyId") or "",
                     "storyTitle": entry.get("storyTitle") or "",
                     "storySource": "",
+                    "layerId": layer_id,
+                    "layerName": entry.get("layerName") or "",
                     "blockType": block_type,
                     "styleName": entry.get("styleName") or "",
                     "textParts": [],
@@ -1559,6 +1663,147 @@ def _build_semantic_blocks(page_reports):
         blocks.append(bucket)
     blocks.extend(anonymous_blocks)
     return blocks
+
+
+def _attach_activity_page_context(semantic_blocks, page_reports, max_chars=12000):
+    page_contexts = []
+    for page in page_reports or []:
+        text_parts = []
+        seen = set()
+        for items in ((page or {}).get("content") or {}).values():
+            for item in items or []:
+                text = str((item or {}).get("text") or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                text_parts.append(text)
+        page_contexts.append({
+            "pageName": str((page or {}).get("pageName") or "").strip(),
+            "text": "\n".join(text_parts)[:max_chars],
+        })
+    context_by_page = {}
+    previous_text = ""
+    previous_page_name = ""
+    for page_context in page_contexts:
+        current_text = page_context["text"]
+        page_name = page_context["pageName"]
+        context_by_page[page_name] = {
+            "currentPageText": current_text,
+            "previousPageText": previous_text,
+            "previousPageName": previous_page_name,
+            "hasInlineExerciseObjects": INLINE_OBJECT_TOKEN in current_text,
+        }
+        previous_text = current_text
+        previous_page_name = page_name
+    for block in semantic_blocks or []:
+        page_name = str((block or {}).get("pageName") or "").strip()
+        page_context = context_by_page.get(page_name) or {}
+        if not page_context.get("hasInlineExerciseObjects"):
+            continue
+        block.update(page_context)
+    return semantic_blocks
+
+
+def _build_redaction_page_blocks(page_reports):
+    blocks = []
+    previous_page_name = ""
+    previous_page_text = ""
+    for page in page_reports or []:
+        ordered_items = sorted(
+            list(_iter_page_bucket_items(page, include_master=False)),
+            key=_page_item_sort_key,
+        )
+        text_parts = []
+        seen = set()
+        for item in ordered_items:
+            text = _normalize_page_item_text(page, item)
+            normalized = re.sub(r"[ \t]+", " ", str(text or "")).strip()
+            signature = (
+                str((item or {}).get("storyId") or "").strip(),
+                int((item or {}).get("blockOrder") or 0),
+                normalized,
+            )
+            if not normalized or signature in seen:
+                continue
+            seen.add(signature)
+            text_parts.append(normalized)
+        page_text = "\n".join(text_parts).strip()
+        page_name = str((page or {}).get("pageName") or "").strip()
+        if page_text:
+            blocks.append({
+                "pageName": page_name,
+                "storyId": "",
+                "storyTitle": "Página completa",
+                "storySource": "",
+                "layerId": "",
+                "layerName": "",
+                "blockType": "página completa",
+                "styleName": "Múltiples estilos",
+                "text": page_text,
+                "currentPageText": page_text,
+                "previousPageText": previous_page_text,
+                "previousPageName": previous_page_name,
+                "hasInlineExerciseObjects": INLINE_OBJECT_TOKEN in page_text,
+                "pageAnalysisMode": "full-page-coherence",
+                "pageRect": (page or {}).get("pageRect") or None,
+            })
+        previous_page_name = page_name
+        previous_page_text = page_text
+    return blocks
+
+
+def _build_layer_lookup(designmap=None):
+    return {
+        str((entry or {}).get("id") or "").strip(): str((entry or {}).get("name") or "").strip()
+        for entry in ((designmap or {}).get("layers") or [])
+        if str((entry or {}).get("id") or "").strip()
+    }
+
+
+def _apply_layer_names_to_page_sources(pages=None, master_spreads=None, layer_lookup=None):
+    lookup = layer_lookup or {}
+    for page in pages or []:
+        for entry in [*(page.get("storyRefs") or []), *(page.get("pageItems") or [])]:
+            layer_id = str((entry or {}).get("layerId") or "").strip()
+            entry["layerName"] = lookup.get(layer_id, "")
+    for master in (master_spreads or {}).values():
+        for page in (master or {}).get("pages") or []:
+            for entry in page.get("storyRefs") or []:
+                layer_id = str((entry or {}).get("layerId") or "").strip()
+                entry["layerName"] = lookup.get(layer_id, "")
+
+
+def _attach_layer_metadata_to_issues(issues=None, semantic_blocks=None):
+    by_page_story = {}
+    for block in semantic_blocks or []:
+        key = (
+            str((block or {}).get("pageName") or "").strip(),
+            str((block or {}).get("storyId") or "").strip(),
+        )
+        if key[1]:
+            by_page_story.setdefault(key, []).append(block)
+    for issue in issues or []:
+        if str((issue or {}).get("layerName") or "").strip():
+            continue
+        key = (
+            str((issue or {}).get("pageName") or "").strip(),
+            str((issue or {}).get("storyId") or "").strip(),
+        )
+        candidates = by_page_story.get(key) or []
+        fragment = str(
+            (issue or {}).get("excerpt")
+            or (issue or {}).get("token")
+            or (issue or {}).get("context")
+            or ""
+        ).strip().lower()
+        selected = next(
+            (block for block in candidates if fragment and fragment in str((block or {}).get("text") or "").lower()),
+            candidates[0] if candidates else None,
+        )
+        if selected:
+            issue["layerId"] = str((selected or {}).get("layerId") or "").strip()
+            issue["layerName"] = str((selected or {}).get("layerName") or "").strip()
+    return issues
 
 
 def _find_page_content_entry(page=None, *, story_id="", style_name="", excerpt=""):
@@ -1876,6 +2121,8 @@ def _attach_page_notes(page_reports, stories):
                         "pageName": page.get("pageName") or "",
                         "storyId": story_id,
                         "storyTitle": story.get("storyTitle") or "",
+                        "layerId": str((story_ref or {}).get("layerId") or "").strip(),
+                        "layerName": str((story_ref or {}).get("layerName") or "").strip(),
                         "text": note_text,
                         "userName": str((note or {}).get("userName") or "").strip(),
                         "creationDate": str((note or {}).get("creationDate") or "").strip(),
@@ -1887,6 +2134,8 @@ def _attach_page_notes(page_reports, stories):
                     global_target.append({
                         "pageName": record["pageName"],
                         "storyId": record["storyId"],
+                        "layerId": record["layerId"],
+                        "layerName": record["layerName"],
                         "message": f"Página {record['pageName'] or '?'}: {prefix} - {record['text']}",
                         "text": record["text"],
                         "userName": record["userName"],
@@ -1894,7 +2143,42 @@ def _attach_page_notes(page_reports, stories):
                     })
         page["notes"] = page_notes
         page["noteHistory"] = page_note_history
+    attached_story_ids = {
+        str((story_ref or {}).get("storyId") or "").strip()
+        for page in (page_reports or []) for story_ref in (page.get("storyRefs") or [])
+    }
+    unplaced_notes = []
+    for story_id, story in stories_by_id.items():
+        if story_id in attached_story_ids:
+            continue
+        for note in ((story.get("notes") or {}).get("active") or []):
+            text = " ".join(str((note or {}).get("text") or "").split()).strip()
+            if text:
+                unplaced_notes.append({"pageName": "Sin página", "storyId": story_id, "layerId": "", "layerName": "", "text": text, "message": f"Sin página: nota activa - {text}", "userName": str((note or {}).get("userName") or ""), "changeType": str((note or {}).get("changeType") or "")})
+    global_active_notes.extend(unplaced_notes)
     return global_active_notes, global_note_history, page_reports
+
+
+def _attach_tracked_changes(page_reports, stories):
+    story_locations = {}
+    for page in page_reports or []:
+        page_changes = []
+        for story_ref in page.get("storyRefs") or []:
+            story_id = str((story_ref or {}).get("storyId") or "").strip()
+            if not story_id:
+                continue
+            story_locations.setdefault(story_id, (page, story_ref))
+        page["trackedChanges"] = page_changes
+    all_changes = []
+    for story in stories or []:
+        story_id = str((story or {}).get("storyId") or "").strip()
+        location = story_locations.get(story_id)
+        page, story_ref = location if location else ({"pageName": "Sin página", "trackedChanges": []}, {})
+        for change in story.get("trackedChanges") or []:
+            record = {**change, "pageName": page.get("pageName") or "Sin página", "storyId": story_id, "layerId": str((story_ref or {}).get("layerId") or ""), "layerName": str((story_ref or {}).get("layerName") or ""), "paragraphText": str(change.get("text") or ""), "locationStatus": "placed" if location else "unplaced"}
+            page.setdefault("trackedChanges", []).append(record)
+            all_changes.append(record)
+    return all_changes, page_reports
 
 
 def _attach_page_level_findings(page_reports, pagination_rows, spelling_issues, orthotypography_issues, redaction_issues=None):
@@ -2455,6 +2739,8 @@ def analyze_idml_document(input_path, session):
         )
         pages = parse_pages(archive, designmap.get("spreadSources") or None)
         master_spreads = parse_master_spreads(archive, designmap.get("masterSpreadSources") or None)
+        layer_lookup = _build_layer_lookup(designmap)
+        _apply_layer_names_to_page_sources(pages, master_spreads, layer_lookup)
         stories = parse_stories(archive, designmap.get("storySources") or None)
         story_preview_index = {
             str((story or {}).get("storyId") or "").strip(): story
@@ -2481,8 +2767,29 @@ def analyze_idml_document(input_path, session):
             story_preview_index=story_preview_index,
             gemini_verifier=gemini_verifier,
         )
-        semantic_blocks = _select_semantic_story_blocks(_build_semantic_blocks(page_reports))
-        spelling_issues = find_spelling_issues(semantic_blocks, gemini_verifier=gemini_verifier)
+        semantic_blocks = _build_semantic_blocks(page_reports)
+        semantic_blocks = _attach_activity_page_context(semantic_blocks, page_reports)
+        semantic_blocks = _select_semantic_story_blocks(semantic_blocks)
+        language = resolve_language((session or {}).get("languageCode") or "es-MX", semantic_blocks)
+        structure_text = " ".join(str((block or {}).get("text") or "") for block in semantic_blocks[:12])
+        detected_structure = {"type": "", "label": "", "ordinal": None, "source": ""}
+        for structure_type, pattern in (("chapter", r"(?:cap[ií]tulo|chapter)\s+(\d+)"), ("topic", r"(?:tema|topic)\s+(\d+)"), ("unit", r"(?:unidad|unit)\s+(\d+)"), ("section", r"(?:secci[oó]n|section)\s+(\d+)")):
+            structure_match = re.search(pattern, structure_text, re.IGNORECASE)
+            if structure_match:
+                detected_structure = {"type": structure_type, "label": structure_match.group(0), "ordinal": int(structure_match.group(1)), "source": "analysis"}
+                break
+        for block in semantic_blocks:
+            block["languageCode"] = language["resolvedCode"]
+        spelling_verifier = GeminiVerifier()
+        spelling_issues, dictionary_provider = find_spelling_issues(
+            semantic_blocks,
+            gemini_verifier=spelling_verifier,
+            language_code=language["resolvedCode"],
+        )
+        language["dictionaryProvider"] = dictionary_provider
+        if language["resolvedCode"] != "und" and not dictionary_provider:
+            language["warnings"].append(f"No está disponible el diccionario {language['resolvedCode']}; la ortografía local quedó incompleta.")
+        spelling_issues = _attach_layer_metadata_to_issues(spelling_issues, semantic_blocks)
         spelling_issues = _filter_instruction_icon_orthotypography_issues(
             spelling_issues,
             page_reports=page_reports,
@@ -2490,7 +2797,8 @@ def analyze_idml_document(input_path, session):
             gemini_verifier=gemini_verifier,
             instruction_work_mode_index=instruction_work_mode_index,
         )
-        orthotypography_issues = find_orthotypography_issues(semantic_blocks, gemini_verifier=gemini_verifier)
+        orthotypography_issues = find_orthotypography_issues(semantic_blocks, gemini_verifier=gemini_verifier, language_code=language["resolvedCode"])
+        orthotypography_issues = _attach_layer_metadata_to_issues(orthotypography_issues, semantic_blocks)
         orthotypography_issues = _filter_instruction_icon_orthotypography_issues(
             orthotypography_issues,
             page_reports=page_reports,
@@ -2498,15 +2806,24 @@ def analyze_idml_document(input_path, session):
             gemini_verifier=gemini_verifier,
             instruction_work_mode_index=instruction_work_mode_index,
         )
+        redaction_page_blocks = _build_redaction_page_blocks(page_reports)
+        for block in redaction_page_blocks:
+            block["languageCode"] = language["resolvedCode"]
         redaction_verifier = GeminiVerifier()
-        redaction_verifier.max_requests = max(int(getattr(redaction_verifier, "max_requests", 0) or 0), 16)
-        redaction_issues = find_redaction_issues(
-            semantic_blocks,
-            gemini_verifier=redaction_verifier,
-            max_windows=16,
-            max_issues=30,
-            max_windows_per_story=2,
+        redaction_page_count = len(redaction_page_blocks)
+        redaction_verifier.max_requests = max(int(getattr(redaction_verifier, "max_requests", 0) or 0), redaction_page_count)
+        redaction_verifier.time_budget_sec = max(
+            float(getattr(redaction_verifier, "time_budget_sec", 0) or 0),
+            redaction_page_count * float(getattr(redaction_verifier, "timeout_sec", 6.0) or 6.0),
         )
+        redaction_issues = find_redaction_issues(
+            redaction_page_blocks,
+            gemini_verifier=redaction_verifier,
+            max_windows=max(1, redaction_page_count),
+            max_issues=max(30, redaction_page_count * 8),
+            max_windows_per_story=1,
+        )
+        redaction_issues = _attach_layer_metadata_to_issues(redaction_issues, semantic_blocks)
         page_reports = _attach_page_level_findings(
             page_reports,
             pagination_rows,
@@ -2515,15 +2832,31 @@ def analyze_idml_document(input_path, session):
             redaction_issues,
         )
         note_issues, note_history_issues, page_reports = _attach_page_notes(page_reports, stories)
-        recortable_issues, page_reports = _build_recortable_checks(
+        tracked_change_issues, page_reports = _attach_tracked_changes(page_reports, stories)
+        if str((session or {}).get("workflowFormat") or "en_forma") == "libre":
+            recortable_issues = []
+        else:
+            recortable_issues, page_reports = _build_recortable_checks(
+                page_reports,
+                alias_index=alias_index,
+                session=session,
+                gemini_verifier=gemini_verifier,
+                story_preview_index=story_preview_index,
+            )
+        custom_rule_verifier = GeminiVerifier()
+        custom_rule_verifier.max_requests = max(custom_rule_verifier.max_requests, len(page_reports))
+        custom_rule_verifier.time_budget_sec = max(custom_rule_verifier.time_budget_sec, len(page_reports) * custom_rule_verifier.timeout_sec)
+        custom_rule_issues, analysis_rules = evaluate_custom_rules(
             page_reports,
-            alias_index=alias_index,
-            session=session,
-            gemini_verifier=gemini_verifier,
-            story_preview_index=story_preview_index,
+            session or {},
+            language,
+            gemini_verifier=custom_rule_verifier,
         )
         insights = _build_document_insights(session, pages, swatches, styles, stories)
         insights["pageReports"] = page_reports
+        swatch_usage = _build_page_swatch_usage(page_reports, swatches)
+        insights["swatchUsage"] = swatch_usage
+        insights["dominantPageSwatch"] = swatch_usage[0] if swatch_usage else None
 
         return {
             "paginationIssues": pagination_issues,
@@ -2533,6 +2866,8 @@ def analyze_idml_document(input_path, session):
             "redactionIssues": redaction_issues,
             "noteIssues": note_issues,
             "noteHistoryIssues": note_history_issues,
+            "trackedChangeIssues": tracked_change_issues,
+            "customRuleIssues": custom_rule_issues,
             "colorIssues": color_issues,
             "recortableIssues": recortable_issues,
             "stats": {
@@ -2549,7 +2884,10 @@ def analyze_idml_document(input_path, session):
                 "spreadCount": len(designmap.get("spreadSources", [])),
                 "masterSpreadCount": len(designmap.get("masterSpreadSources", [])),
                 "sourceType": "idml",
+                "language": language,
+                "detectedStructure": detected_structure,
                 "geminiVerifierEnabled": bool(gemini_verifier.enabled),
+                "analysisRules": analysis_rules,
                 **insights,
                 "durationMs": int((perf_counter() - started_at) * 1000),
             },

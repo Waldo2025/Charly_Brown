@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.838"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.856"></script>
   <script data-cache-src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Snoopy Creator</title>
@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" data-cache-href="podcaster.css?v=2026-1.0.10.186">
+  <link rel="stylesheet" data-cache-href="podcaster.css?v=2026-1.0.10.857">
   <link rel="stylesheet" data-cache-href="podcaster/podcaster-sidepanel-studio.css">
   <link rel="stylesheet" data-cache-href="podcaster/podcaster-overlay-card-studio.css">
   <!-- FilePond -->
@@ -279,7 +279,7 @@
     #podcastPreviewMediaLoadingOverlay.is-visible {
       opacity: 1;
       visibility: visible;
-      pointer-events: auto;
+      pointer-events: none;
     }
 
     .podcast-preview-loading-content {
@@ -733,10 +733,18 @@
             <span>Nueva sesión</span>
             <i class="fas fa-circle-plus sessions-new-session-plus" aria-hidden="true"></i>
           </button>
-          <div id="sessionsRailFilter" class="sessions-rail-filter" role="tablist" aria-label="Filtrar sesiones">
-            <button class="sessions-filter-chip is-active" type="button" data-filter="all" aria-pressed="true">Todo</button>
-            <button class="sessions-filter-chip" type="button" data-filter="podcast" aria-pressed="false">Podcast</button>
-            <button class="sessions-filter-chip" type="button" data-filter="video" aria-pressed="false">Video</button>
+          <div id="sessionsRailFilter" class="sessions-rail-filter" aria-label="Filtrar sesiones">
+            <div class="sessions-rail-filter-group" role="group" aria-label="Filtrar por tipo">
+              <button class="sessions-filter-chip is-active" type="button" data-filter="all" aria-pressed="true">Todo</button>
+              <button class="sessions-filter-chip" type="button" data-filter="podcast" aria-pressed="false">Podcast</button>
+              <button class="sessions-filter-chip" type="button" data-filter="video" aria-pressed="false">Video</button>
+            </div>
+            <span class="sessions-rail-filter-divider" aria-hidden="true"></span>
+            <div class="sessions-rail-filter-group is-term" role="group" aria-label="Filtrar por trimestre">
+              <button class="sessions-filter-chip sessions-term-filter-chip" type="button" data-term-filter="1" aria-pressed="false" title="Filtrar por Trimestre 1">Trim1</button>
+              <button class="sessions-filter-chip sessions-term-filter-chip" type="button" data-term-filter="2" aria-pressed="false" title="Filtrar por Trimestre 2">Trim2</button>
+              <button class="sessions-filter-chip sessions-term-filter-chip" type="button" data-term-filter="3" aria-pressed="false" title="Filtrar por Trimestre 3">Trim3</button>
+            </div>
           </div>
 
           <div id="sessionList" class="session-list"></div>
@@ -1395,7 +1403,7 @@
         </button>
       </header>
       <p class="timeline-clip-duration-label">Configura el color de fondo para la escena actual cuando no tiene video.</p>
-      
+
       <div class="row-field">
         <label class="row-checkbox">
           <input id="timelineSceneBgUseGradient" type="checkbox">
@@ -1565,7 +1573,9 @@
   <div id="podcastVideoModal" class="floating-panel-modal snoopy-editor-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-podcast-video-modal"
       aria-label="Cerrar video"></button>
-    <section id="podcastVideoShell" class="podcast-video-shell floating-panel-card" aria-label="Video compuesto">
+    <section id="podcastVideoShell"
+      class="podcast-video-shell floating-panel-card snoopy-editor-workspace-shell"
+      aria-label="Video compuesto">
 
       <div id="podcastVideoLoader" class="podcast-video-loader premium-loader-rich" hidden aria-live="polite"
         aria-label="Abriendo panel de video">
@@ -1680,6 +1690,12 @@
             title="Regenerar audios Gemini (todas las escenas)" aria-label="Regenerar audios Gemini de todas las escenas">
             <i class="fas fa-wave-square" aria-hidden="true"></i>
           </button>
+          <button id="attachAllRowReferenceImagesBtn" class="row-icon-btn" type="button"
+            data-action="attach-all-row-reference-images"
+            title="Adjuntar referencias desde una carpeta" aria-label="Adjuntar una imagen de referencia a todas las escenas"
+            aria-busy="false">
+            <i class="fas fa-paperclip" aria-hidden="true"></i>
+          </button>
           <button class="row-icon-btn open-music-config-trigger" type="button"
             data-action="open-music-config-modal"
             title="Música de fondo" aria-label="Música de fondo">
@@ -1727,6 +1743,12 @@
                 </button>
               </div>
             </div>
+            <button id="podcastShortcutGuideBtn" class="row-icon-btn snoopy-shortcut-guide-trigger"
+              type="button" title="Ver atajos" aria-label="Ver atajos del editor"
+              aria-haspopup="dialog" aria-expanded="false" aria-controls="snoopyShortcutGuide">
+              <i class="fas fa-keyboard" aria-hidden="true"></i>
+              <span class="snoopy-shortcut-guide-trigger-badge" aria-hidden="true">i</span>
+            </button>
             <button id="podcastVideoModalFullscreenBtn" class="row-icon-btn snoopy-editor-fullscreen-toggle"
               type="button" title="Pantalla completa" aria-label="Pantalla completa" aria-pressed="false">
               <i class="fas fa-expand"></i>
@@ -1735,7 +1757,7 @@
         </div>
       </div>
 
-      <div class="podcast-studio-layout">
+      <div class="podcast-studio-layout snoopy-editor-workspace">
         <div class="podcast-studio-main">
           <div id="podcastVideoStage" class="podcast-video-stage">
             <aside class="podcast-video-library" aria-label="Librería pública de escenas">
@@ -1921,14 +1943,29 @@
           <i class="fas fa-chevron-left" aria-hidden="true"></i>
         </button>
       </div>
-      <div class="podcast-video-transport" role="group" aria-label="Controles del montaje">
-        <div class="podcast-video-transport-group is-left is-tools" aria-label="Acciones generales">
+      <div class="podcast-studio-footer snoopy-portrait-dock">
+        <div class="podcast-studio-footer-header">
+          <span class="podcast-studio-footer-title"><i class="fas fa-id-card"></i> Retratos de Escenas y Personajes</span>
+          <button id="togglePodcastStudioFooterBtn" class="podcast-studio-footer-toggle-btn" type="button" aria-expanded="true" title="Colapsar panel" data-tooltip="Colapsar/Expandir panel">
+            <i class="fas fa-chevron-down"></i>
+          </button>
+        </div>
+        <div id="podcastPortraitStrip" class="podcast-portrait-strip" aria-live="polite"></div>
+        <div class="podcast-studio-note">
+          Audio principal del montaje: Gemini Live por escena.
+        </div>
+      </div>
+      <div class="podcast-video-transport snoopy-transport-grid" role="group"
+        aria-label="Controles del montaje">
+        <div class="podcast-video-transport-group is-left is-tools" role="group"
+          aria-label="Acciones generales">
           <div class="podcast-video-transport-bundle is-tools" aria-label="Ordenar y generar">
             <button id="importGeminiDialogueTrackBtn" class="row-icon-btn is-active" type="button"
               aria-label="Ocultar audio del montaje" data-tooltip="Ocultar audio del montaje">
               <i class="fas fa-wave-square"></i>
             </button>
             <button id="reorderTimelineTracksBtn" class="row-icon-btn" type="button"
+              aria-keyshortcuts="Meta+Shift+O Control+Shift+O"
               aria-label="Reordenar escenas entre tracks" data-tooltip="Reordenar escenas entre tracks">
               <i class="fas fa-stream"></i>
             </button>
@@ -1949,7 +1986,7 @@
           </div>
         </div>
 
-        <div class="podcast-video-transport-bundle podcast-timeline-footer-zoom is-zoom"
+        <div class="podcast-video-transport-bundle podcast-timeline-footer-zoom is-zoom" role="group"
           aria-label="Zoom del timeline">
           <i class="fas fa-search-minus" aria-hidden="true"></i>
           <div class="podcast-timeline-ruler-zoom-inner">
@@ -1959,7 +1996,7 @@
           <i class="fas fa-search-plus" aria-hidden="true"></i>
         </div>
 
-        <div class="podcast-video-transport-bundle is-playback" aria-label="Reproducción">
+        <div class="podcast-video-transport-bundle is-playback" role="group" aria-label="Reproducción">
             <button id="podcastVideoPrevBtn" class="row-icon-btn" type="button" data-tooltip="Escena anterior"
               aria-label="Escena anterior"><i class="fas fa-step-backward"></i></button>
             <button id="podcastVideoPlayBtn" class="row-icon-btn is-playing" type="button"
@@ -1976,9 +2013,10 @@
                 aria-live="polite">00:00.0</span>
             </div>
         </div>
-        <div class="podcast-video-transport-bundle is-view-controls" aria-label="Velocidad y zoom">
+        <div class="podcast-video-transport-bundle is-view-controls" role="group"
+          aria-label="Velocidad y zoom">
             <label class="studio-speed-wrap">
-              <select id="podcastVideoSpeedSelect">
+              <select id="podcastVideoSpeedSelect" aria-label="Velocidad de reproducción">
                 <option value="0.75">0.75x</option>
                 <option value="1" selected="">1.00x</option>
                 <option value="1.25">1.25x</option>
@@ -1990,7 +2028,7 @@
               <i class="fas fa-search-plus"></i>
             </button>
         </div>
-        <div class="podcast-studio-track-head-right podcast-timeline-footer-summary is-summary"
+        <div class="podcast-studio-track-head-right podcast-timeline-footer-summary is-summary" role="group"
           aria-label="Estado del timeline">
             <div class="podcast-timeline-view-toggle" role="group" aria-label="Modo de timeline">
               <button id="podcastTimelineNormalModeBtn" class="timeline-mode-btn" type="button"
@@ -2000,7 +2038,7 @@
             </div>
         </div>
 
-        <div class="podcast-video-transport-corner is-output" aria-label="Guardar y exportar">
+        <div class="podcast-video-transport-corner is-output" role="group" aria-label="Guardar y exportar">
           <button id="exportMontageBtn" class="row-icon-btn" type="button" aria-label="Exportar montaje"
             data-tooltip="Exportar montaje">
             <i class="fas fa-file-export"></i>
@@ -2011,21 +2049,10 @@
           </button>
         </div>
       </div>
-      <div class="podcast-studio-footer">
-        <div class="podcast-studio-footer-header">
-          <span class="podcast-studio-footer-title"><i class="fas fa-id-card"></i> Retratos de Escenas y Personajes</span>
-          <button id="togglePodcastStudioFooterBtn" class="podcast-studio-footer-toggle-btn" type="button" aria-expanded="true" title="Colapsar panel" data-tooltip="Colapsar/Expandir panel">
-            <i class="fas fa-chevron-down"></i>
-          </button>
-        </div>
-        <div id="podcastPortraitStrip" class="podcast-portrait-strip" aria-live="polite"></div>
-        <div class="podcast-studio-note">
-          Audio principal del montaje: Gemini Live por escena.
-        </div>
-      </div>
       <input id="speakerReferenceImageInput" type="file" accept="image/*" hidden>
       <input id="scenarioReferenceImageInput" type="file" accept="image/*" hidden>
       <input id="rowReferenceImageInput" type="file" accept="image/*,video/*" multiple hidden>
+      <input id="rowReferenceFolderInput" type="file" accept=".png,image/png" webkitdirectory directory multiple hidden>
       <input id="podcastSceneLibraryLocalVideoInput" type="file" accept="video/*" hidden>
     </section>
   </div>
@@ -2590,13 +2617,16 @@
             <select id="globalCheapVideoMode">
               <option value="auto">Automático — Omni recomendado</option>
               <option value="gemini-omni-flash-preview">Gemini Omni Flash</option>
-              <option value="veo-3.1-generate-preview">Veo 3.1 Standard</option>
-              <option value="veo-3.1-fast-generate-preview">Veo 3.1 Fast</option>
-              <option value="veo-3.1-lite-generate-preview">Veo 3.1 Lite — borrador</option>
+              <option value="veo-3.1-generate-001">Veo 3.1 Standard · GA</option>
+              <option value="veo-3.1-fast-generate-001">Veo 3.1 Fast · GA</option>
+              <option value="veo-3.1-lite-generate-001">Veo 3.1 Lite · Preview</option>
+              <option value="veo-3.0-generate-001">Veo 3.0 Standard · GA</option>
+              <option value="veo-3.0-fast-generate-001">Veo 3.0 Fast · GA</option>
+              <option value="veo-2.0-generate-001">Veo 2.0 Standard · GA</option>
             </select>
           </label>
         </div>
-        <p class="gemini-creativity-hint">Automático usa Omni para escenas generales, imágenes y texto legible; reserva Veo 3.1 para extensión, referencias de video y control del último fotograma. Lite sólo se usa al elegirlo explícitamente.
+        <p class="gemini-creativity-hint">El catálogo se sincroniza con la API de Vertex al abrir este panel. Automático usa Omni para escenas generales; los modelos Veo permanecen disponibles para selección explícita.
         </p>
       </div>
 

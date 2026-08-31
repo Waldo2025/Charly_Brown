@@ -33,8 +33,17 @@ def parse_designmap(archive):
 
     document = next((node for node in root.iter() if local_name(node.tag) == "Document"), None)
     story_list = []
+    layers = []
     if document is not None:
         story_list = [value for value in (document.get("StoryList", "") or "").split() if value]
+        layers = [
+            {
+                "id": str(node.get("Self") or "").strip(),
+                "name": str(node.get("Name") or "").strip(),
+            }
+            for node in document.iter()
+            if local_name(node.tag) == "Layer" and str(node.get("Self") or "").strip()
+        ]
 
     return {
         "storySources": story_sources,
@@ -43,6 +52,7 @@ def parse_designmap(archive):
         "graphicSource": graphic_source,
         "stylesSource": styles_source,
         "storyList": story_list,
+        "layers": layers,
     }
 
 

@@ -2,6 +2,7 @@ import unicodedata
 from time import perf_counter
 
 from .orthotypography import find_orthotypography_issues
+from .language_profiles import resolve_language
 from .package import open_idml
 from .pages import parse_pages
 from .pipeline import (
@@ -135,11 +136,15 @@ def analyze_idml_quick_orthotypography(input_path, session=None):
         page_reports = _build_page_reports(pages, stories, styles, alias_index=alias_index)
         page_reports = _apply_master_content(page_reports, master_spreads, stories, styles, alias_index=alias_index)
     semantic_blocks = _select_semantic_story_blocks(_build_semantic_blocks(page_reports))
+    language = resolve_language((session or {}).get("languageCode") or "es-MX", semantic_blocks)
+    for block in semantic_blocks:
+        block["languageCode"] = language["resolvedCode"]
     orthotypography_issues = find_orthotypography_issues(
         semantic_blocks,
         gemini_verifier=None,
         max_windows=9999,
         max_issues=9999,
+        language_code=language["resolvedCode"],
         max_windows_per_story=9999,
     )
     pages_by_name = {
@@ -170,4 +175,5 @@ def analyze_idml_quick_orthotypography(input_path, session=None):
         "pageCount": len(page_reports),
         "pages": pages_with_errors,
         "durationMs": int((perf_counter() - started_at) * 1000),
+        "language": language,
     }

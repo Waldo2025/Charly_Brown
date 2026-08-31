@@ -195,6 +195,7 @@ def _build_page_item_record(node, item_kind, rect):
     return {
         "itemId": node.get("Self", ""),
         "itemKind": item_kind,
+        "layerId": node.get("ItemLayer", ""),
         "appliedObjectStyle": node.get("AppliedObjectStyle", ""),
         "fillColor": _normalize_color_ref(node.get("FillColor", "")),
         "strokeColor": _normalize_color_ref(node.get("StrokeColor", "")),
@@ -275,6 +276,7 @@ def parse_pages(archive, spread_sources=None):
             story_ref = {
                 "storyId": story_id,
                 "frameId": node.get("Self", ""),
+                "layerId": node.get("ItemLayer", ""),
                 "appliedObjectStyle": node.get("AppliedObjectStyle", ""),
                 "fillColor": _normalize_color_ref(node.get("FillColor", "")),
                 "strokeColor": _normalize_color_ref(node.get("StrokeColor", "")),

@@ -18,6 +18,12 @@ import {
   resolveTimelineEntriesAtMs,
   resolveTimelineIndexAtMs
 } from "./podcaster-timeline-shared.js";
+import {
+  AVAILABLE_PODCASTER_VIDEO_MODELS,
+  isVertexVeoModelId,
+  normalizeVertexVeoModelId
+} from "./podcaster-video-model-catalog.js";
+import { resolveVideoPhysicalDurationMs } from "./podcaster-video-generation-timing.js";
 
 // === INJECTED GLOBALS (For compatibility) ===
 function readRuntimeNumber(name, fallback) {
@@ -35,29 +41,18 @@ const STUDIO_AUDIO_TRACK_MIN_LOOP_PX = readRuntimeNumber("STUDIO_AUDIO_TRACK_MIN
 const STUDIO_GEMINI_SCENE_DELAY_MS = readRuntimeNumber("STUDIO_GEMINI_SCENE_DELAY_MS", 0);
 const VIDEO_SCENE_MAX_SEC = readRuntimeNumber("VIDEO_SCENE_MAX_SEC", 8);
 const STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS = readRuntimeNumber("STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS", 7000);
-const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
-  "auto",
-  "gemini-omni-flash-preview",
-  "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview"
-]);
-
 const PODCASTER_VIDEO_ROUTING_VERSION = 2;
 
 function migrateLegacyPodcasterVideoModel(raw = {}) {
-  const requestedModel = String(raw?.videoModel || "").trim();
+  const requestedModel = normalizeVertexVeoModelId(raw?.videoModel || "");
   const hasModernRouting = Math.max(0, Number(raw?.videoRoutingVersion || 0) || 0) >= PODCASTER_VIDEO_ROUTING_VERSION;
   if (!requestedModel) return "auto";
-  if (AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel)) {
+  if (AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel) || isVertexVeoModelId(requestedModel)) {
     // Lite used to be the implicit default. Only preserve it after a user has
     // saved the modern selector at least once; legacy sessions migrate to auto.
-    if (requestedModel === "veo-3.1-lite-generate-preview" && !hasModernRouting) return "auto";
+    if (/-lite-generate-/.test(requestedModel) && !hasModernRouting) return "auto";
     return requestedModel;
   }
-  if (requestedModel === "veo-3.0-fast-generate-001") return "veo-3.1-fast-generate-preview";
-  if (requestedModel === "veo-3.0-generate-001") return "veo-3.1-generate-preview";
-  if (requestedModel === "veo-2.0-generate-001") return "veo-3.1-generate-preview";
   return "auto";
 }
 
@@ -137,6 +132,12 @@ function resolvePrimaryDialogueVideoSegment(sceneClip = null, options = {}) {
     return generatedVideos[0].video;
   }
   return null;
+}
+
+function resolveDialogueVideoPhysicalDurationMs(sceneClip = null) {
+  if (!sceneClip || typeof sceneClip !== "object") return 0;
+  const primarySegment = resolvePrimaryDialogueVideoSegment(sceneClip);
+  return resolveVideoPhysicalDurationMs(primarySegment, sceneClip);
 }
 
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
@@ -570,9 +571,12 @@ function normalizeGeminiDialogueTrack(raw = {}) {
       .map((rowId) => String(rowId || "").trim())
       .filter(Boolean)
   ));
+  const alignmentRaw = String(raw?.alignment || "").trim().toLowerCase();
+  const alignment = ["left", "left-center", "center", "center-right", "right"].includes(alignmentRaw) ? alignmentRaw : "left";
   return {
     enabled: raw?.enabled === true && segments.length > 0,
     volumePct: Math.max(0, Math.min(100, Math.round(toFiniteNumber(raw?.volumePct, 100)))),
+    alignment,
     updatedAt: String(raw?.updatedAt || "").trim(),
     segments: segments
       .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.sceneIndex || 0) - Number(b.sceneIndex || 0)),
@@ -629,6 +633,10 @@ function normalizeTimelineClipItem(raw = {}, rowId = "") {
     sourceDurationMs = Math.round((toFiniteNumber(raw.end, 0) - toFiniteNumber(raw.start, 0)) * 1000);
   }
   sourceDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, sourceDurationMs);
+  const mediaDurationMs = Math.max(0, resolveVideoPhysicalDurationMs(raw));
+  const durationMode = String(raw?.durationMode || "").trim().toLowerCase() === "auto"
+    ? "auto"
+    : "manual";
 
   let trimInMs = 0;
   if (raw?.trimInMs !== undefined) {
@@ -662,6 +670,8 @@ function normalizeTimelineClipItem(raw = {}, rowId = "") {
     trackId: String(raw?.trackId || "").trim() || `speaker:${String(raw?.speakerKey || "unknown").trim().toLowerCase() || "unknown"}`,
     startMs: Math.max(0, startMs),
     sourceDurationMs,
+    mediaDurationMs,
+    durationMode,
     trimInMs,
     trimOutMs,
     veoVolumeOverridePct,
@@ -949,7 +959,7 @@ function normalizePodcastVideoConfig(raw = {}) {
   if (normalizedVideoGenerator === "auto") normalizedVideoModel = "auto";
   if (normalizedVideoGenerator === "omni") normalizedVideoModel = "gemini-omni-flash-preview";
   if (normalizedVideoGenerator === "veo" && !normalizedVideoModel.startsWith("veo-")) {
-    normalizedVideoModel = "veo-3.1-generate-preview";
+    normalizedVideoModel = "veo-3.1-generate-001";
   }
   return {
     enabled: raw?.enabled === true,
@@ -957,7 +967,7 @@ function normalizePodcastVideoConfig(raw = {}) {
     autoGenerateScenarioImages: raw?.autoGenerateScenarioImages === true,
     autoGeneratePortraits: raw?.autoGeneratePortraits === true,
     allowLivePreviewWithoutStoredAudio: raw?.allowLivePreviewWithoutStoredAudio === true,
-    cheapVideoMode: normalizedVideoModel === "veo-3.1-lite-generate-preview",
+    cheapVideoMode: /-lite-generate-/.test(normalizedVideoModel),
     videoModel: normalizedVideoModel,
     videoGenerator: normalizedVideoGenerator,
     videoRoutingVersion: PODCASTER_VIDEO_ROUTING_VERSION,
@@ -978,7 +988,13 @@ function normalizePodcastVideoConfig(raw = {}) {
     frameHoldsByRowId: normalizeFrameHoldsByRowId(raw?.frameHoldsByRowId || {}),
     speedRangesByRowId: normalizeSpeedRangesByRowId(raw?.speedRangesByRowId || {}),
     onScreenTextTrack: normalizeOnScreenTextTrackSettings(raw?.onScreenTextTrack || {}),
-    geminiDialogueTrack: normalizeGeminiDialogueTrack(raw?.geminiDialogueTrack || {}),
+    dialogueAlignment: ["left", "left-center", "center", "center-right", "right"].includes(String(raw?.dialogueAlignment || raw?.geminiDialogueTrack?.alignment || "").trim().toLowerCase())
+      ? String(raw?.dialogueAlignment || raw?.geminiDialogueTrack?.alignment).trim().toLowerCase()
+      : "left",
+    geminiDialogueTrack: normalizeGeminiDialogueTrack({
+      alignment: String(raw?.dialogueAlignment || raw?.geminiDialogueTrack?.alignment || "left").trim().toLowerCase(),
+      ...(raw?.geminiDialogueTrack || {})
+    }),
     geminiDialogueTrackIndex,
     audioMode: normalizedAudioMode,
     masterVolume,
@@ -1000,7 +1016,7 @@ function getRowSourceDurationMs(row = null, session = null) {
   if (!row) return 8000;
   const rowId = String(row?.id || "").trim();
   const videoClip = rowId ? resolveDialogueVideoForRow(session, rowId) : null;
-  const videoMs = Math.max(0, Number(videoClip?.durationSec) || 0) * 1000;
+  const videoMs = resolveDialogueVideoPhysicalDurationMs(videoClip);
   const audioMs = resolveRowAudioDurationMs(rowId, session);
   const rowMs = Math.max(0, Number(row?.durationSec) || 0) * 1000;
   const isVideoEducational = isEducationalVideoMode(session);
@@ -1009,7 +1025,9 @@ function getRowSourceDurationMs(row = null, session = null) {
   const candidate = isVideoEducational
     ? (videoMs > 0 ? videoMs : (rowMs > 0 ? rowMs : (audioMs > 0 ? audioMs : VIDEO_SCENE_MAX_SEC * 1000)))
     : (isVideoEditor
-      ? (videoMs > 0 ? videoMs : (isPodcast && audioMs > 0 ? audioMs : (rowMs > 0 ? rowMs : (audioMs > 0 ? audioMs : 8000))))
+      // A new Veo scene owns an eight-second visual source by default. Audio
+      // length belongs to the dialogue track and must not inflate its video.
+      ? (videoMs > 0 ? videoMs : VIDEO_SCENE_MAX_SEC * 1000)
       : (audioMs > 0
         ? audioMs
         : rowMs > 0
@@ -1033,12 +1051,17 @@ function buildDefaultTimelineClipsByRowId(session = null) {
     if (!rowId) return;
     const speakerKey = String(row?.speaker || "").trim();
     const sourceDurationMs = getRowSourceDurationMs(row, activeSession);
+    const mediaDurationMs = resolveDialogueVideoPhysicalDurationMs(
+      resolveDialogueVideoForRow(activeSession, rowId)
+    );
     const clip = normalizeTimelineClipItem({
       rowId,
       speakerKey,
       trackId: resolveTimelineDefaultTrackIdForSpeaker(speakerKey),
       startMs: cursorMs,
       sourceDurationMs,
+      mediaDurationMs,
+      durationMode: "auto",
       trimInMs: 0,
       trimOutMs: sourceDurationMs,
       zIndex: index + 1
@@ -1186,10 +1209,20 @@ function ensureTimelineClipsByRowId(session = null, options = {}) {
       Number(existingClip?.sourceDurationMs || base?.sourceDurationMs || rowSourceDurationMs)
     );
 
-    // Auto-expand if the underlying media is longer than what's stored
-    // (We don't auto-shrink to prevent UI jumps during media loading/generation states)
-    if (rowSourceDurationMs > existingSourceDurationMs) {
-      existingSourceDurationMs = rowSourceDurationMs;
+    const durationMode = String(base?.durationMode || "manual").trim().toLowerCase() === "auto"
+      ? "auto"
+      : "manual";
+    const mediaDurationMs = resolveDialogueVideoPhysicalDurationMs(
+      resolveDialogueVideoForRow(activeSession, rowId)
+    ) || Math.max(0, Number(base?.mediaDurationMs || 0));
+
+    // Untouched automatic clips follow the physical video in both directions.
+    // Any resize/trim has already converted the clip to manual, and all legacy
+    // clips normalize to manual, so prior edits remain immutable.
+    if (durationMode === "auto") {
+      existingSourceDurationMs = mediaDurationMs > 0
+        ? mediaDurationMs
+        : Math.min(rowSourceDurationMs, VIDEO_SCENE_MAX_SEC * 1000);
     }
 
     let existingTrimInMs = Math.max(0, Number(existingClip?.trimInMs ?? base?.trimInMs ?? 0));
@@ -1197,16 +1230,9 @@ function ensureTimelineClipsByRowId(session = null, options = {}) {
       existingTrimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
       Number(existingClip?.trimOutMs ?? base?.trimOutMs ?? existingSourceDurationMs)
     );
-
-    // If the clip was at the minimum fallback, was completely untrimmed, or is stuck at the fallback duration due to a previous bug, expand its out-point
-    const prevSourceDuration = Number(existingClip?.sourceDurationMs || base?.sourceDurationMs || 0);
-    const wasFallback = prevSourceDuration <= STUDIO_TIMELINE_MIN_CLIP_MS;
-    const wasUntrimmed = Number(existingClip?.trimOutMs || base?.trimOutMs || 0) >= prevSourceDuration;
-    const prevTrimOut = Number(existingClip?.trimOutMs || base?.trimOutMs || 0);
-    const wasVictimOfTrimBug = prevTrimOut > 0 && prevTrimOut <= STUDIO_TIMELINE_MIN_CLIP_MS + 50 && rowSourceDurationMs > STUDIO_TIMELINE_MIN_CLIP_MS + 500;
-
-    if ((rowSourceDurationMs > prevSourceDuration && (wasFallback || wasUntrimmed)) || wasVictimOfTrimBug) {
-      existingTrimOutMs = Math.max(existingTrimOutMs, rowSourceDurationMs);
+    if (durationMode === "auto") {
+      existingTrimInMs = 0;
+      existingTrimOutMs = existingSourceDurationMs;
     }
 
     const sourceDurationMs = Math.max(existingSourceDurationMs, existingTrimOutMs);
@@ -1215,6 +1241,8 @@ function ensureTimelineClipsByRowId(session = null, options = {}) {
       speakerKey,
       trackId: selectedTrackId,
       sourceDurationMs,
+      mediaDurationMs,
+      durationMode,
       trimInMs: existingTrimInMs,
       trimOutMs: existingTrimOutMs,
       zIndex: Math.max(1, Number(base.zIndex || index + 1))
@@ -1232,7 +1260,7 @@ function ensureTimelineClipsByRowId(session = null, options = {}) {
       timelineClipsByRowId: next
     }));
   }
-  
+
   if (!persist) {
     videoState.lastTimelineClipsSessionId = sessionId;
     videoState.lastTimelineClipsUpdatedAt = activeSession.updatedAt;
@@ -1600,6 +1628,9 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
       speedRanges: Array.isArray(runtimeEntry?.speedRanges) ? runtimeEntry.speedRanges : [],
       transitionOut: runtimeEntry?.transitionOut || null,
       sourceDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(runtimeEntry?.sourceDurationMs || clip?.sourceDurationMs || 0)),
+      mediaDurationMs: resolveDialogueVideoPhysicalDurationMs(sceneClip)
+        || Math.max(0, Number(clip?.mediaDurationMs || 0)),
+      durationMode: String(clip?.durationMode || "manual").trim().toLowerCase() === "auto" ? "auto" : "manual",
       videoSrc,
       audioSrc,
       audioDurationMs,
@@ -1900,6 +1931,7 @@ Object.assign(window, {
   normalizeTimelineClipMediaScale,
   normalizeTimelineClipMediaOffset,
   normalizeTimelineClipMediaMotionPreset,
+  resolveDialogueVideoPhysicalDurationMs,
   normalizeTimelineClipItem,
   normalizeTimelineClipsByRowId,
   normalizeOverlayCardItem,

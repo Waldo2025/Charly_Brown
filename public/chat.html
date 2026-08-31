@@ -9,7 +9,7 @@
   <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="chat.css">
-  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
   <link rel="stylesheet" href="header.css">
 </head>
 <body>
@@ -21,9 +21,6 @@
   </header>
 
   <div id="sidebar">
-    <button id="menuToggle" aria-label="Abrir menú">
-      <i class="fas fa-bars"></i>
-    </button>
 
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
@@ -40,14 +37,14 @@
             <i class="fas fa-chevron-right"></i>
           </button>
         </div>
-        
+
         <div class="contacts-header">
           <h5>Contactos</h5>
           <input type="text" id="contactSearch" class="form-control" placeholder="Buscar contacto...">
         </div>
         <div id="users-list" class="accordion"></div>
     </div>
-  
+
       <!-- Panel de chat -->
       <div class="col-md-8 col-lg-9" id="chat-panel">
         <div id="chat-header">
@@ -57,7 +54,7 @@
                 </button>
                 <h5 id="chat-user-name">Selecciona un contacto</h5>
             </div>
-            
+
         </div>
         <div id="chat-box">
           <div id="messages">
@@ -69,48 +66,48 @@
             <button id="attachImageBtn" class="btn btn-secondary">
               <i class="fas fa-paperclip"></i>
             </button>
-          
+
             <input type="text" id="message-input" class="form-control" placeholder="Escribe un mensaje...">
-          
+
             <button id="voiceBtn" class="btn btn-secondary">
               <i class="fas fa-microphone"></i>
             </button>
-          
+
             <button id="send-btn" class="btn btn-primary">
               <i class="fas fa-paper-plane"></i>
             </button>
           </div>
-          
+
           <!-- Contenedor de la onda -->
           <canvas id="voiceWaveform" height="30"></canvas>
 
         </div>
 
 
-          
+
           <!-- Panel de Archivos -->
           <div id="file-panel">
-        
+
             <h6>Favoritos</h6>
 
             <div class="file-list">
               <p class="text-muted">Sin archivos todavía...</p>
             </div>
-          
+
             <hr />
-           
+
             <div id="favorite-list"></div>
           </div>
-          
+
 
 
     </div>
   </div>
 
-  
+
   <script type="module" src="js/chat.js"></script>
-  <script type="module" src="js/chromeLayout.js"></script>
-  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
+  <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 <script src="js/update-banner-loader.js" defer></script>
 </body>

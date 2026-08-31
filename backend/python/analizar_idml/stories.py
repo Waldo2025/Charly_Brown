@@ -8,6 +8,8 @@ from .pages import _get_accumulated_transform, _get_text_frame_rect, _normalize_
 from .styles import local_name, parse_xml
 
 AUTO_PAGE_NUMBER_TOKEN = "__AUTO_PAGE_NUMBER__"
+INLINE_OBJECT_TOKEN = "\uFFFC"
+INLINE_OBJECT_TAGS = {"Group", "Polygon", "Rectangle", "Oval", "GraphicLine", "TextFrame"}
 
 
 def _is_decorative_character_style(style_id=""):
@@ -72,12 +74,15 @@ def _is_inside_table(node, parent_map):
     ) is not None
 
 
-def _extract_text_from_node(node, *, stop_nested_paragraph_ranges=True):
+def _extract_text_from_node(node, *, stop_nested_paragraph_ranges=True, preserve_inline_objects=False):
     fragments = []
 
     def walk(current, *, is_root=False, decorative_context=False):
         tag = local_name(current.tag)
         if stop_nested_paragraph_ranges and not is_root and tag == "ParagraphStyleRange":
+            return
+        if preserve_inline_objects and not is_root and tag in INLINE_OBJECT_TAGS:
+            fragments.append(INLINE_OBJECT_TOKEN)
             return
         next_decorative_context = decorative_context
         if tag == "CharacterStyleRange":
@@ -371,14 +376,34 @@ def _extract_story_notes(root):
     for item in notes:
         if not str(item.get("text") or "").strip():
             continue
-        if bool(item.get("inChange")):
-            history.append(item)
-        else:
-            active.append(item)
+        active.append(item)
     return {
         "active": active,
         "history": history,
     }
+
+
+def _extract_story_changes(root):
+    parent_map = {child: parent for parent in root.iter() for child in list(parent)}
+    changes = []
+    for index, node in enumerate(item for item in root.iter() if local_name(item.tag) == "Change"):
+        text_parts = []
+        for descendant in node.iter():
+            if local_name(descendant.tag) != "Content" or not descendant.text:
+                continue
+            if _is_inside_note(descendant, parent_map):
+                continue
+            text_parts.append(descendant.text)
+        text = _normalize_text_fragments(text_parts)
+        changes.append({
+            "id": str(node.get("Self") or f"change_{index + 1}").strip(),
+            "changeType": str(node.get("ChangeType") or "").strip(),
+            "text": text,
+            "userName": str(node.get("UserName") or node.get("AppliedBy") or "").strip(),
+            "date": str(node.get("Date") or node.get("ChangeDate") or "").strip(),
+            "appliedDocumentUser": str(node.get("AppliedDocumentUser") or "").strip(),
+        })
+    return changes
 
 
 def parse_stories(archive, story_sources=None):
@@ -434,7 +459,7 @@ def parse_stories(archive, story_sources=None):
                         style_id = descendant.get("AppliedCharacterStyle", "")
                         if style_id:
                             block_character_styles.append(style_id)
-                paragraph_text = _extract_text_from_node(node)
+                paragraph_text = _extract_text_from_node(node, preserve_inline_objects=True)
                 is_folio_block = any(
                     value in {"CharacterStyle/Z_FOLIOS", "CharacterStyle/Z_FOLIOS RECORTABLES"}
                     for value in block_character_styles
@@ -447,6 +472,7 @@ def parse_stories(archive, story_sources=None):
                         "paragraphStyleId": paragraph_style_id,
                         "characterStyleIds": [value for value in block_character_styles if value],
                         "text": paragraph_text,
+                        "inlineObjectCount": paragraph_text.count(INLINE_OBJECT_TOKEN),
                         "inTable": _is_inside_table(node, parent_map),
                     })
                     paragraph_block_index += 1
@@ -495,6 +521,7 @@ def parse_stories(archive, story_sources=None):
                 "embeddedStoryIds": _extract_embedded_story_ids(root),
                 "embeddedStoryRefs": embedded_story_refs,
                 "notes": _extract_story_notes(root),
+                "trackedChanges": _extract_story_changes(root),
                 "paragraphStyleIds": [value for value in paragraph_style_ids if value],
                 "characterStyleIds": [value for value in character_style_ids if value],
                 "paragraphBlocks": paragraph_blocks,

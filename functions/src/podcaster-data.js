@@ -56,10 +56,114 @@ function safeSession(source = {}) {
   return clean;
 }
 
+function resolveSessionAcademicMetadata(data = {}) {
+  const nested = data?.session && typeof data.session === "object" ? data.session : {};
+  const rootAcademic = data?.academicMetadata && typeof data.academicMetadata === "object" ? data.academicMetadata : {};
+  const nestedAcademic = nested?.academicMetadata && typeof nested.academicMetadata === "object" ? nested.academicMetadata : {};
+  const resolveField = (field) => text(
+    data?.[field] || rootAcademic?.[field] || nested?.[field] || nestedAcademic?.[field] || "",
+    field === "materia" ? 120 : 60
+  );
+  const nivel = resolveField("nivel");
+  return {
+    nivel,
+    grado: resolveField("grado"),
+    trimestre: resolveField("trimestre"),
+    unidad: resolveField("unidad"),
+    materia: resolveField("materia"),
+    unitLabel: text(rootAcademic.unitLabel || nestedAcademic.unitLabel || data.academicMetadataUnitLabel || nested.academicMetadataUnitLabel || (nivel.toLowerCase() === "secundaria" ? "Tema" : "Unidad"), 80)
+  };
+}
+
+function resolveUpdatedAtMs(value = null) {
+  if (value?.toDate && typeof value.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(Number(value?.seconds))) return (Number(value.seconds) * 1000) + (Number(value.nanoseconds || 0) / 1e6);
+  return Date.parse(String(value || ""));
+}
+
+function isManualSceneReplacement(entry = null) {
+  const sourceType = String(entry?.sourceType || entry?.replacementSource || "").trim().toLowerCase();
+  return entry?.manuallyReplaced === true || sourceType === "manual-replacement" || sourceType === "manual";
+}
+
+function mergeMediaMapByEntryUpdatedAt(currentMap = {}, incomingMap = {}) {
+  const current = currentMap && typeof currentMap === "object" ? currentMap : {};
+  const incoming = incomingMap && typeof incomingMap === "object" ? incomingMap : {};
+  const next = {};
+  const keys = new Set([...Object.keys(current), ...Object.keys(incoming)]);
+  keys.forEach((key) => {
+    const currentEntry = current[key];
+    const incomingEntry = incoming[key];
+    if (!currentEntry || typeof currentEntry !== "object") {
+      if (incomingEntry !== undefined) next[key] = incomingEntry;
+      return;
+    }
+    if (!incomingEntry || typeof incomingEntry !== "object") {
+      next[key] = currentEntry;
+      return;
+    }
+    const currentIsManual = isManualSceneReplacement(currentEntry);
+    const incomingIsManual = isManualSceneReplacement(incomingEntry);
+    if (currentIsManual !== incomingIsManual) {
+      next[key] = currentIsManual ? currentEntry : incomingEntry;
+      return;
+    }
+    const currentUpdatedAt = resolveUpdatedAtMs(currentEntry.updatedAt);
+    const incomingUpdatedAt = resolveUpdatedAtMs(incomingEntry.updatedAt);
+    next[key] = Number.isFinite(currentUpdatedAt)
+      && (!Number.isFinite(incomingUpdatedAt) || currentUpdatedAt >= incomingUpdatedAt)
+      ? currentEntry
+      : incomingEntry;
+  });
+  return next;
+}
+
+function reconcileDialogueVideoState(currentSession = {}, incomingSession = {}) {
+  const currentDeleted = currentSession?.dialogueVideoDeletedAtMap && typeof currentSession.dialogueVideoDeletedAtMap === "object" ? currentSession.dialogueVideoDeletedAtMap : {};
+  const incomingDeleted = incomingSession?.dialogueVideoDeletedAtMap && typeof incomingSession.dialogueVideoDeletedAtMap === "object" ? incomingSession.dialogueVideoDeletedAtMap : {};
+  const deletedAtMap = { ...currentDeleted };
+  Object.entries(incomingDeleted).forEach(([rowId, value]) => {
+    const currentMs = resolveUpdatedAtMs(deletedAtMap[rowId]);
+    const incomingMs = resolveUpdatedAtMs(value);
+    if (!Number.isFinite(currentMs) || (Number.isFinite(incomingMs) && incomingMs > currentMs)) deletedAtMap[rowId] = value;
+  });
+  const dialogueVideoMap = mergeMediaMapByEntryUpdatedAt(currentSession?.dialogueVideoMap || {}, incomingSession?.dialogueVideoMap || {});
+  Object.entries(deletedAtMap).forEach(([rowId, deletedAt]) => {
+    const deletedMs = resolveUpdatedAtMs(deletedAt);
+    const mediaMs = resolveUpdatedAtMs(dialogueVideoMap[rowId]?.updatedAt);
+    if (Number.isFinite(deletedMs) && (!Number.isFinite(mediaMs) || deletedMs >= mediaMs)) delete dialogueVideoMap[rowId];
+  });
+  return { dialogueVideoMap, dialogueVideoDeletedAtMap: deletedAtMap };
+}
+
 function sessionAccess(data, authContext) {
   const ownerId = text(data?.ownerId, 180);
   const shared = Array.isArray(data?.sharedWithIds) ? data.sharedWithIds.map(String) : [];
   return ownerId === authContext.uid || shared.includes(authContext.uid) || isPrivilegedRole(authContext.role);
+}
+
+function resolveSessionMediaIdentity(storagePath = "", metadata = {}, rowIdByStoragePath = new Map(), rowIdByGeneratedJobId = new Map()) {
+  const cleanPath = String(storagePath || "").trim();
+  const parts = cleanPath.split("/");
+  const familyIndex = Math.max(parts.indexOf("videos"), parts.indexOf("audio"), parts.indexOf("music"));
+  const generatedIndex = parts.indexOf("dialogue-video");
+  const generatedJobId = generatedIndex >= 0 ? String(parts[generatedIndex + 1] || "") : "";
+  const rawName = parts.at(-1) || cleanPath;
+  const metadataRowId = String(metadata?.metadata?.rowId || "").trim();
+  const resolvedRowId = metadataRowId
+    || String(rowIdByStoragePath.get(cleanPath) || "").trim()
+    || String(rowIdByGeneratedJobId.get(generatedJobId) || "").trim()
+    || (familyIndex >= 0 ? String(parts[familyIndex + 1] || "") : "");
+  const displayName = /^sample_\d+\.[a-z0-9]+$/i.test(rawName) && generatedJobId
+    ? `${generatedJobId}.${rawName.split(".").pop() || "mp4"}`
+    : rawName;
+  return {
+    id: String(metadata?.metadata?.jobId || generatedJobId || cleanPath),
+    name: displayName,
+    originalName: rawName,
+    rowFolder: resolvedRowId,
+    rowId: resolvedRowId
+  };
 }
 
 function normalizeLibraryItem(doc) {
@@ -135,26 +239,33 @@ function registerSessionRoutes(app) {
     const session = safeSession(req.body?.session);
     const { db, admin } = getAdminServices();
     const ref = db.collection("podcaster_sessions").doc(session.id);
+    let committedSession = session;
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       const existing = snapshot.exists ? snapshot.data() || {} : {};
       if (snapshot.exists && text(existing.ownerId, 180) !== authContext.uid) {
         throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
       }
+      const currentSession = existing.session && typeof existing.session === "object" ? existing.session : {};
+      const reconciledVideoState = reconcileDialogueVideoState(currentSession, session);
+      committedSession = {
+        ...session,
+        ...reconciledVideoState
+      };
       transaction.set(ref, {
         ownerId: authContext.uid,
         title: session.title,
         archived: session.archived === true,
         publicar: session.publicar === true,
         sessionUpdatedAt: session.updatedAt,
-        session,
+        session: committedSession,
         sharedWithIds: Array.isArray(existing.sharedWithIds) ? existing.sharedWithIds : [],
         sharedWith: Array.isArray(existing.sharedWith) ? existing.sharedWith : [],
         createdAt: existing.createdAt || admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     });
-    res.status(200).json({ ok: true, sessionId: session.id, ownerId: authContext.uid, savedAt: new Date().toISOString() });
+    res.status(200).json({ ok: true, sessionId: session.id, ownerId: authContext.uid, savedAt: new Date().toISOString(), session: committedSession });
   }));
 
   app.get("/api/podcaster/sessions/list", asyncRoute(async (req, res) => {
@@ -169,12 +280,15 @@ function registerSessionRoutes(app) {
       const data = doc.data() || {};
       const nested = data.session && typeof data.session === "object" ? data.session : {};
       const videoContentType = text(nested?.script?.videoContentType || nested.videoContentType, 80).toLowerCase();
+      const academicMetadata = resolveSessionAcademicMetadata(data);
       merged.set(doc.id, {
         id: doc.id,
         title: text(data.title || nested.title || "Sin título", 240, "Sin título"),
         updatedAt: text(data.sessionUpdatedAt || nested.updatedAt || toIso(data.updatedAt), 64),
         archived: data.archived === true,
         publicar: data.publicar === true,
+        ...academicMetadata,
+        academicMetadata,
         podcastStudioUiState: nested.podcastStudioUiState && typeof nested.podcastStudioUiState === "object" ? nested.podcastStudioUiState : null,
         videoContentType: videoContentType || null,
         isStub: true,
@@ -195,6 +309,7 @@ function registerSessionRoutes(app) {
     const data = snapshot.data() || {};
     if (!sessionAccess(data, authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
     const nested = data.session && typeof data.session === "object" ? data.session : {};
+    const academicMetadata = resolveSessionAcademicMetadata(data);
     res.status(200).json({
       ok: true,
       session: {
@@ -204,6 +319,8 @@ function registerSessionRoutes(app) {
         updatedAt: text(data.sessionUpdatedAt || nested.updatedAt || toIso(data.updatedAt) || new Date().toISOString(), 64),
         archived: data.archived === true,
         publicar: data.publicar === true,
+        ...academicMetadata,
+        academicMetadata,
         isStub: false,
         cloudMeta: { ownerId: text(data.ownerId, 180) || null, savedAt: toIso(data.updatedAt) || null }
       }
@@ -254,22 +371,46 @@ function registerSessionRoutes(app) {
     if (!sessionAccess(sessionSnapshot.data(), authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
     const prefix = `podcaster/sessions/${sessionId}/`;
     const [files] = await bucket.getFiles({ prefix, maxResults: 600 });
+    const sessionData = sessionSnapshot.data()?.session && typeof sessionSnapshot.data().session === "object"
+      ? sessionSnapshot.data().session
+      : sessionSnapshot.data() || {};
+    const rowIdByStoragePath = new Map();
+    Object.entries(sessionData.dialogueVideoMap || {}).forEach(([rowId, clip]) => {
+      const paths = [clip?.storagePath, clip?.videoStoragePath, ...(Array.isArray(clip?.segments) ? clip.segments.map((segment) => segment?.storagePath) : [])];
+      paths.map((value) => String(value || "").trim()).filter(Boolean).forEach((value) => rowIdByStoragePath.set(value, rowId));
+    });
+    const legacyGeneratedJobIds = [...new Set(files.map((file) => {
+      const parts = String(file?.name || "").split("/");
+      const generatedIndex = parts.indexOf("dialogue-video");
+      return generatedIndex >= 0 ? String(parts[generatedIndex + 1] || "").trim() : "";
+    }).filter((jobId) => /^[A-Za-z0-9._-]{1,180}$/.test(jobId)))];
+    const rowIdByGeneratedJobId = new Map();
+    if (legacyGeneratedJobIds.length) {
+      const refs = legacyGeneratedJobIds.slice(0, 500).map((jobId) => db.collection("podcaster_ai_jobs").doc(jobId));
+      const snapshots = await db.getAll(...refs).catch(() => []);
+      snapshots.forEach((snapshot) => {
+        if (!snapshot.exists) return;
+        const job = snapshot.data() || {};
+        if (String(job.sessionId || "") !== sessionId || String(job.type || "") !== "dialogue_video") return;
+        const rowId = String(job?.input?.rowId || "").trim();
+        if (rowId) rowIdByGeneratedJobId.set(snapshot.id, rowId);
+      });
+    }
     const media = [];
     for (const file of files) {
+      const storagePath = String(file.name || "");
+      if (kind === "videos" && (storagePath.toLowerCase().includes("/references/") || storagePath.toLowerCase().includes("/reference/"))) continue;
       const [metadata] = await file.getMetadata().catch(() => [{}]);
       const mimeType = String(metadata?.contentType || "").toLowerCase();
-      const matches = kind === "videos" ? (mimeType.startsWith("video/") || mimeType.startsWith("image/")) : mimeType.startsWith("audio/");
+      const matches = kind === "videos" ? mimeType.startsWith("video/") : mimeType.startsWith("audio/");
       if (!matches) continue;
-      const storagePath = String(file.name || "");
       const token = String(metadata?.metadata?.firebaseStorageDownloadTokens || "");
       const downloadUrl = token
         ? `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${encodeURIComponent(token)}`
         : proxyUrl(storagePath, mimeType.startsWith("image/"));
-      const parts = storagePath.split("/");
-      const familyIndex = Math.max(parts.indexOf("videos"), parts.indexOf("audio"), parts.indexOf("music"));
+      const mediaIdentity = resolveSessionMediaIdentity(storagePath, metadata, rowIdByStoragePath, rowIdByGeneratedJobId);
       media.push({
-        name: parts.at(-1) || storagePath,
-        rowFolder: familyIndex >= 0 ? String(parts[familyIndex + 1] || "") : "",
+        ...mediaIdentity,
         storagePath,
         downloadUrl,
         mimeType,
@@ -439,7 +580,9 @@ function registerPodcasterDataRoutes(app) {
 module.exports = {
   MAX_SESSION_BYTES,
   safeSession,
+  resolveSessionAcademicMetadata,
   sessionAccess,
+  resolveSessionMediaIdentity,
   normalizeLibraryItem,
   registerPodcasterDataRoutes
 };

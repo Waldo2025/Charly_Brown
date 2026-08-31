@@ -1,5 +1,7 @@
 import re
 
+INLINE_OBJECT_TOKEN = "\uFFFC"
+
 
 def _normalize_text(text):
     raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -81,6 +83,10 @@ def _is_valid_issue(text, excerpt, suggestion):
     excerpt_lower = normalized_excerpt.lower()
     if excerpt_lower not in text_lower:
         return False
+    excerpt_start = text_lower.find(excerpt_lower)
+    excerpt_context = normalized_text[max(0, excerpt_start - 2):excerpt_start + len(normalized_excerpt) + 2]
+    if INLINE_OBJECT_TOKEN in excerpt_context:
+        return False
     if normalized_suggestion.startswith("¿") and normalized_excerpt.endswith("?"):
         start = text_lower.find(excerpt_lower)
         last_opening = text_lower.rfind("¿", 0, start)
@@ -130,6 +136,7 @@ def _append_local_issue(issues, seen, block, text, excerpt, suggestion, reason, 
         "excerpt": clean_excerpt,
         "suggestion": clean_suggestion,
         "providers": ["local-rules"],
+        "languageCode": (block or {}).get("languageCode") or "",
     })
     return len(issues) >= max_issues
 
@@ -195,13 +202,21 @@ def _looks_like_missing_inline_value_before_comma(text="", start=0, end=0):
     }
 
 
-def _find_local_orthotypography_issues(text_blocks, max_issues=20):
+def _punctuation_follows_inline_object(text="", start=0):
+    prefix = str(text or "")[:max(0, int(start or 0))].rstrip()
+    return prefix.endswith(INLINE_OBJECT_TOKEN)
+
+
+def _find_local_orthotypography_issues(text_blocks, max_issues=20, language_code="es-MX"):
     issues = []
     seen = set()
     for block in text_blocks or []:
         for window in _iter_text_windows(block, window_size=1400):
             text = str(window.get("text") or "")
-            for match in re.finditer(r"\s+([,.;:!?])", text):
+            spacing_punctuation = r"[,\.]" if language_code == "fr-FR" else r"[,.;:!?]"
+            for match in re.finditer(rf"\s+({spacing_punctuation})", text):
+                if _punctuation_follows_inline_object(text, match.start()):
+                    continue
                 if match.group(1) == "," and _looks_like_missing_inline_value_before_comma(text, match.start(), match.end()):
                     continue
                 excerpt, suggestion = _build_spacing_before_punctuation_pair(
@@ -217,7 +232,7 @@ def _find_local_orthotypography_issues(text_blocks, max_issues=20):
                 suggestion = "…" if excerpt.startswith("....") else excerpt[0]
                 if _append_local_issue(issues, seen, window, text, excerpt, suggestion, "Secuencia de puntuación anómala.", max_issues):
                     return issues
-            for excerpt, suggestion in _iter_questions_without_opening_mark(text):
+            for excerpt, suggestion in (_iter_questions_without_opening_mark(text) if language_code == "es-MX" else []):
                 if _append_local_issue(issues, seen, window, text, excerpt, suggestion, "Pregunta sin signo de apertura.", max_issues):
                     return issues
             if text.count("(") != text.count(")"):
@@ -228,8 +243,8 @@ def _find_local_orthotypography_issues(text_blocks, max_issues=20):
     return issues
 
 
-def find_orthotypography_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2):
-    issues = _find_local_orthotypography_issues(text_blocks, max_issues=max_issues)
+def find_orthotypography_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2, language_code="es-MX"):
+    issues = _find_local_orthotypography_issues(text_blocks, max_issues=max_issues, language_code=language_code)
     seen = {
         (
             str(issue.get("storyId") or ""),

@@ -1,0 +1,560 @@
+/* Final responsive contract for timeline/progression questions.
+   This file is intentionally loaded after every visual theme. */
+.science-structured-game:not(.is-rive-numeric-console) > header {
+  height: auto !important;
+  min-height: 62px !important;
+  max-height: none !important;
+  padding-block: 10px !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto !important;
+  grid-template-rows: auto !important;
+  align-items: start !important;
+  gap: 12px !important;
+  overflow: visible !important;
+}
+.science-structured-game:not(.is-rive-numeric-console) > header > .science-rive-challenge-signal {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+.science-structured-game:not(.is-rive-numeric-console) > header > .science-structured-question-copy {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: block !important;
+  overflow: visible !important;
+}
+.science-structured-game:not(.is-rive-numeric-console) > header > .science-rive-challenge-progress {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  align-self: start !important;
+  margin-top: 4px !important;
+}
+.science-structured-game:not(.is-rive-numeric-console) > header h2 {
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
+  line-height: 1.2 !important;
+}
+.science-structured-game:not(.is-rive-numeric-console) > .science-structured-status {
+  position: relative !important;
+  inset: auto !important;
+  height: auto !important;
+  min-height: 24px !important;
+  align-items: center !important;
+  gap: 12px !important;
+  transform: none !important;
+}
+@media (max-width: 700px) {
+  .science-structured-game:not(.is-rive-numeric-console) > header {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-rows: auto auto !important;
+    align-items: start !important;
+    gap: 10px !important;
+  }
+  .science-structured-game:not(.is-rive-numeric-console) > header > .science-rive-challenge-signal {
+    grid-column: 1 !important;
+    grid-row: 1 / span 2 !important;
+  }
+  .science-structured-game:not(.is-rive-numeric-console) > header > .science-structured-question-copy {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+  }
+  .science-structured-game:not(.is-rive-numeric-console) > header > .science-rive-challenge-progress {
+    grid-column: 2 !important;
+    grid-row: 2 !important;
+    justify-self: start !important;
+    margin-top: 0 !important;
+  }
+  .science-structured-game:not(.is-rive-numeric-console) > header h2 {
+    font-size: clamp(1rem, 4.6vw, 1.4rem) !important;
+    line-height: 1.22 !important;
+  }
+  .science-structured-game:not(.is-rive-numeric-console) > header .science-rive-challenge-signal {
+    width: 42px !important;
+    height: 42px !important;
+    flex-basis: 42px !important;
+  }
+}
+
+/* Theme-proof structural header: themes may style it, but cannot fix its row height. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game:not(.is-rive-numeric-console) {
+  height: auto !important;
+  max-height: none !important;
+  flex: 0 0 auto !important;
+  grid-template-rows: none !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+  overflow: visible !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game:not(.is-rive-numeric-console) > header.science-structured-question-header {
+  height: auto !important;
+  min-height: 62px !important;
+  max-height: none !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto !important;
+  grid-template-rows: max-content !important;
+  align-items: start !important;
+  align-self: stretch !important;
+  flex: 0 0 auto !important;
+  block-size: max-content !important;
+  min-block-size: max-content !important;
+  overflow: visible !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game:not(.is-rive-numeric-console) > header.science-structured-question-header > .science-structured-question-copy {
+  block-size: max-content !important;
+  min-block-size: max-content !important;
+  align-self: start !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game:not(.is-rive-numeric-console) > .science-structured-status {
+  flex: 0 0 auto !important;
+}
+@media (max-width: 700px), (max-height: 760px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game:not(.is-rive-numeric-console) > header.science-structured-question-header {
+    min-height: 54px !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-rows: max-content max-content !important;
+  }
+}
+
+.science-structured-game.is-timeline-order {
+  container-name: science-timeline-question;
+  container-type: inline-size;
+  height: auto !important;
+  max-height: none !important;
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+}
+.science-structured-game.is-timeline-order > header.science-structured-question-header {
+  order: 1 !important;
+  flex: 0 0 auto !important;
+  height: max-content !important;
+  min-height: max-content !important;
+  max-height: none !important;
+}
+.science-structured-game.is-timeline-order > .science-structured-status {
+  order: 2 !important;
+  flex: 0 0 auto !important;
+}
+.science-structured-game.is-timeline-order > .science-structured-board { order: 3 !important; }
+.science-structured-game.is-timeline-order > footer { order: 4 !important; }
+
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-structured-board {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: clamp(16px, 2.5cqi, 24px) !important;
+  overflow: visible !important;
+  contain: none !important;
+}
+
+/* Actions are siblings of the board and always follow all board content. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order > footer {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 1 !important;
+  width: 100% !important;
+  height: auto !important;
+  margin: 14px 0 0 !important;
+  padding: 0 !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order > footer > button {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+/* Wide view: horizontal axis centered vertically, cards alternate above/below it. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline {
+  order: 1 !important;
+  position: relative !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-track {
+  position: relative !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 440px !important;
+  padding: 14px 18px 24px !important;
+  display: grid !important;
+  grid-auto-flow: column !important;
+  grid-auto-columns: minmax(220px, 1fr) !important;
+  grid-auto-rows: max-content !important;
+  align-items: stretch !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-track::before {
+  left: 18px !important;
+  right: 18px !important;
+  top: 50% !important;
+  bottom: auto !important;
+  width: auto !important;
+  height: 5px !important;
+  transform: translateY(-50%) !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) {
+  position: relative !important;
+  width: auto !important;
+  min-width: 220px !important;
+  height: auto !important;
+  min-height: 440px !important;
+  padding: 0 10px !important;
+  display: grid !important;
+  grid-template-rows: minmax(150px, 1fr) 38px 62px minmax(150px, 1fr) 38px !important;
+  gap: 8px !important;
+  align-content: stretch !important;
+  overflow: visible !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) > i {
+  position: relative !important;
+  inset: auto !important;
+  grid-row: 3 !important;
+  align-self: center !important;
+  justify-self: center !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) > article {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  min-width: 200px !important;
+  max-width: 280px !important;
+  min-height: 150px !important;
+  height: auto !important;
+  margin-inline: auto !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) > article {
+  grid-row: 1 !important;
+  align-self: end !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) > article {
+  grid-row: 4 !important;
+  align-self: start !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) > article::after {
+  left: 50% !important;
+  top: auto !important;
+  bottom: -8px !important;
+  transform: translateX(-50%) rotate(45deg) !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) > article::after {
+  left: 50% !important;
+  top: -8px !important;
+  bottom: auto !important;
+  transform: translateX(-50%) rotate(225deg) !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) > div {
+  position: relative !important;
+  inset: auto !important;
+  align-self: center !important;
+  justify-self: center !important;
+  margin: 0 !important;
+  display: flex !important;
+  gap: 6px !important;
+  transform: none !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) > div { grid-row: 2 !important; }
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) > div { grid-row: 5 !important; }
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-empty > span {
+  position: relative !important;
+  inset: auto !important;
+  grid-row: 4 !important;
+  align-self: start !important;
+  justify-self: center !important;
+  margin-top: 18px !important;
+  transform: none !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-event article :is(strong,p,small) {
+  max-width: 100% !important;
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-token-bank-label {
+  order: 2 !important;
+  margin: 0 !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-bank {
+  order: 3 !important;
+  position: relative !important;
+  z-index: 4 !important;
+  width: 100% !important;
+  height: auto !important;
+  margin: 0 !important;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)) !important;
+  pointer-events: auto !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-bank-card {
+  position: relative !important;
+  z-index: 5 !important;
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-timeline-order .science-timeline-track::before {
+  pointer-events: none !important;
+}
+
+/* Compact/portrait editor: bank on the left, vertical axis centered in its column. */
+@container science-timeline-question (max-width: 760px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-structured-board {
+    display: grid !important;
+    grid-template-columns: minmax(220px, 40%) minmax(360px, 60%) !important;
+    grid-template-areas: "bank-title timeline" "bank timeline" !important;
+    grid-template-rows: auto auto !important;
+    align-items: start !important;
+    gap: 14px 20px !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    flex: 0 0 auto !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-token-bank-label {
+    grid-area: bank-title !important;
+    width: auto !important;
+    padding: 0 6px !important;
+    text-align: left !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-bank {
+    grid-area: bank !important;
+    width: auto !important;
+    min-width: 220px !important;
+    padding: 8px !important;
+    display: grid !important;
+    grid-template-columns: minmax(210px, 1fr) !important;
+    gap: 14px !important;
+    align-self: start !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-bank-card {
+    width: 100% !important;
+    min-width: 210px !important;
+    max-width: none !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline {
+    grid-area: timeline !important;
+    width: 100% !important;
+    min-width: 360px !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline > header {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-track {
+    width: 100% !important;
+    min-width: 360px !important;
+    min-height: 0 !important;
+    padding: 18px 0 !important;
+    display: grid !important;
+    grid-auto-flow: row !important;
+    grid-auto-columns: auto !important;
+    grid-auto-rows: max-content !important;
+    gap: 18px !important;
+    overflow: visible !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-track::before {
+    left: 50% !important;
+    right: auto !important;
+    top: 18px !important;
+    bottom: 18px !important;
+    width: 5px !important;
+    height: auto !important;
+    transform: translateX(-50%) !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) {
+    width: 100% !important;
+    min-width: 360px !important;
+    min-height: 150px !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(142px, 1fr) 76px minmax(142px, 1fr) !important;
+    grid-template-rows: auto auto !important;
+    gap: 8px 0 !important;
+    align-items: center !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) > i {
+    position: relative !important;
+    inset: auto !important;
+    grid-column: 2 !important;
+    grid-row: 1 / span 2 !important;
+    align-self: center !important;
+    justify-self: center !important;
+    transform: none !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) > article {
+    width: 100% !important;
+    min-width: 142px !important;
+    max-width: 260px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    align-self: center !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) > article {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    justify-self: end !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) > article {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    justify-self: start !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) > article::after {
+    left: auto !important;
+    right: -8px !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) rotate(225deg) !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) > article::after {
+    left: -8px !important;
+    right: auto !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) rotate(45deg) !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) > div {
+    grid-row: 2 !important;
+    align-self: start !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) > div {
+    grid-column: 1 !important;
+    justify-self: end !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) > div {
+    grid-column: 3 !important;
+    justify-self: start !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-empty > span {
+    position: relative !important;
+    inset: auto !important;
+    grid-row: 1 !important;
+    margin: 0 !important;
+    white-space: normal !important;
+    transform: none !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-empty:nth-child(odd) > span {
+    grid-column: 1 !important;
+    justify-self: end !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-timeline-empty:nth-child(even) > span {
+    grid-column: 3 !important;
+    justify-self: start !important;
+  }
+}
+
+@container science-timeline-question (max-width: 520px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order .science-structured-board {
+    grid-template-columns: minmax(220px, 1fr) !important;
+    grid-template-areas: "bank-title" "bank" "timeline" !important;
+    overflow-x: auto !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-timeline-order > footer {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Level briefing: keep the teaching block vertically balanced on tall exports.
+   `safe center` falls back to the start edge whenever the content must scroll. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+  .science-rive-briefing-screen.science-micro-mission .science-micro-content {
+  justify-content: safe center !important;
+}
+
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+  .science-rive-briefing-screen.science-micro-mission .science-micro-launch {
+  position: relative !important;
+  z-index: 20 !important;
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+}
+
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+  .science-rive-briefing-screen.science-micro-mission
+  :is([data-science-rive-hud],.science-rive-briefing-frame,.science-rive-briefing-panel,.science-rive-hero-shell,.science-rive-concept-shell,.science-rive-example-shell,.science-rive-launch-shell) {
+  pointer-events: none !important;
+}
+
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+  .science-rive-briefing-screen.science-micro-mission .science-micro-visual
+  :is(.sa-level-hero,.science-level-hero) {
+  object-position: center center !important;
+}
+
+@media (max-width: 780px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .science-rive-briefing-screen.science-micro-mission .science-micro-content {
+    justify-content: flex-start !important;
+  }
+}

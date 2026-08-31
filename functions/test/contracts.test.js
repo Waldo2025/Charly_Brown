@@ -37,10 +37,15 @@ const {
   compactInput,
   publicAiJob,
   extractInteractionAudio,
-  buildLyriaInteractionRequest
+  buildLyriaInteractionRequest,
+  createVertexVideoOperationError,
+  extractVertexVideoOutcome,
+  createVertexVideoEmptyError,
+  normalizeVertexVideoError,
+  isRetryableAiJobError
 } = require("../src/ai-jobs.js");
 const { isAllowedBrowserOrigin } = require("../src/common.js");
-const { staleJobAge } = require("../src/stale-job-monitor.js");
+const { staleJobAge, buildStaleJobPatch } = require("../src/stale-job-monitor.js");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -49,7 +54,7 @@ test("model aliases replace retired Gemini and Veo previews", () => {
   assert.equal(normalizeModel("gemini-3.1-flash-image-preview"), DEFAULT_IMAGE_MODEL);
   assert.equal(normalizeModel("gemini-2.5-flash-native-audio-preview-12-2025"), DEFAULT_LIVE_MODEL);
   assert.equal(normalizeModel("veo-3.1-generate-preview"), DEFAULT_VEO_MODEL);
-  assert.equal(normalizeModel("veo-3.1-lite-generate-preview"), DEFAULT_VEO_FAST_MODEL);
+  assert.equal(normalizeModel("veo-3.1-lite-generate-preview"), "veo-3.1-lite-generate-001");
 });
 
 test("REST Gemini payload is translated to the Vertex SDK request shape", () => {
@@ -64,10 +69,18 @@ test("REST Gemini payload is translated to the Vertex SDK request shape", () => 
   });
   assert.equal(request.model, DEFAULT_TEXT_MODEL);
   assert.equal(request.contents[0].parts[0].text, "hola");
-  assert.equal(request.config.temperature, 0.25);
+  assert.equal(request.config.temperature, undefined, "Gemini 3.6 Flash no admite controles de muestreo explícitos en este proxy");
   assert.equal(request.config.responseMimeType, "application/json");
   assert.equal(request.config.systemInstruction.parts[0].text, "responde en español");
   assert.equal(request.config.safetySettings.length, 1);
+});
+
+test("Gemini proxy accepts bounded inline vision thumbnails without opening an unbounded body", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/index.js"), "utf8");
+  assert.match(source, /const GEMINI_PROXY_JSON_LIMIT = "2mb"/);
+  assert.match(source, /const GEMINI_PROXY_PAYLOAD_LIMIT_BYTES = 1536 \* 1024/);
+  assert.match(source, /createApp\("gemini-api",[\s\S]*?\{ jsonLimit: GEMINI_PROXY_JSON_LIMIT \}\)/);
+  assert.doesNotMatch(source, /> 120 \* 1024/);
 });
 
 test("large scene videos use a direct resumable upload contract", () => {
@@ -196,6 +209,89 @@ test("AI jobs are asynchronous, owner-scoped and never persist inline references
   assert.equal(payload.statusUrl, "/api/podcaster/jobs/job-42");
 });
 
+test("Veo policy rejections are permanent and Cloud Tasks must not retry them", () => {
+  const error = createVertexVideoOperationError({
+    code: 3,
+    message: "The prompt contains sensitive words that violate Google's Responsible AI practices."
+  });
+  assert.equal(error.code, "vertex_video_prompt_blocked");
+  assert.equal(error.providerCode, 3);
+  assert.equal(error.retryable, false);
+  assert.equal(isRetryableAiJobError(error), false);
+  assert.equal(isRetryableAiJobError(Object.assign(new Error("invalid argument"), { code: 3 })), false);
+  assert.equal(isRetryableAiJobError(Object.assign(new Error("unavailable"), { status: 503 })), true);
+
+  const wrappedError = normalizeVertexVideoError(new Error(
+    'vertex_video_error:{"code":3,"message":"The prompt could not be submitted. This prompt contains sensitive words that violate Google\'s Responsible AI practices."}'
+  ));
+  assert.equal(wrappedError.code, "vertex_video_prompt_blocked");
+  assert.equal(wrappedError.providerCode, 3);
+  assert.equal(wrappedError.retryable, false);
+  assert.equal(isRetryableAiJobError(wrappedError), false);
+
+  const legacyPayload = publicAiJob({
+    jobId: "legacy-policy-job",
+    type: "dialogue_video",
+    status: "error",
+    stage: "error",
+    error: {
+      code: 'vertex_video_error:{"code":3,"message":"The prompt contains sensitive words that violate Google\'s Responsible AI practices."}',
+      message: 'vertex_video_error:{"code":3,"message":"The prompt contains sensitive words that violate Google\'s Responsible AI practices."}'
+    }
+  });
+  assert.equal(legacyPayload.stage, "blocked");
+  assert.equal(legacyPayload.retryable, false);
+  assert.equal(legacyPayload.error.code, "vertex_video_prompt_blocked");
+});
+
+test("Veo filtered media preserves the RAI reason instead of reporting an empty video", () => {
+  const operation = {
+    done: true,
+    result: {
+      raiMediaFilteredCount: 1,
+      raiMediaFilteredReasons: ["Input image was filtered by Responsible AI policy."],
+      generatedVideos: []
+    }
+  };
+  const outcome = extractVertexVideoOutcome(operation);
+  assert.equal(outcome.video, null);
+  assert.equal(outcome.filteredCount, 1);
+  assert.deepEqual(outcome.filteredReasons, ["Input image was filtered by Responsible AI policy."]);
+
+  const error = createVertexVideoEmptyError(operation);
+  assert.equal(error.code, "vertex_video_content_filtered");
+  assert.equal(error.retryable, false);
+  assert.equal(isRetryableAiJobError(error), false);
+  assert.deepEqual(error.providerReasons, ["Input image was filtered by Responsible AI policy."]);
+});
+
+test("Veo output extraction accepts SDK result and raw GCS response shapes", () => {
+  assert.equal(extractVertexVideoOutcome({
+    result: { generatedVideos: [{ video: { uri: "gs://bucket/video.mp4" } }] }
+  }).video.uri, "gs://bucket/video.mp4");
+  assert.equal(extractVertexVideoOutcome({
+    response: { videos: [{ gcsUri: "gs://bucket/raw.mp4", mimeType: "video/mp4" }] }
+  }).video.gcsUri, "gs://bucket/raw.mp4");
+
+  const emptyError = createVertexVideoEmptyError({ response: { generatedVideos: [] } });
+  assert.equal(emptyError.code, "vertex_video_empty");
+  assert.equal(emptyError.retryable, false);
+  assert.equal(isRetryableAiJobError(emptyError), false);
+});
+
+test("Veo generation uses the non-deprecated source request", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/ai-jobs.js"), "utf8");
+  const videoProcessor = source.slice(
+    source.indexOf("async function processVideoJob"),
+    source.indexOf("function extractAudioParts")
+  );
+  assert.match(videoProcessor, /generateVideos\(\{[\s\S]*?source:\s*\{[\s\S]*?prompt:\s*promptSpec\.prompt/);
+  assert.doesNotMatch(videoProcessor, /generateVideos\(\{\s*\n\s*model:[^\n]+,\s*\n\s*prompt:\s*promptSpec\.prompt/);
+  assert.match(source, /if \(!retryable\) return \{ failed: true, retryable: false \}/);
+  assert.match(source, /VERTEX_VIDEO_OPERATION_DEADLINE_MS = 26 \* 60 \* 1000/);
+  assert.doesNotMatch(videoProcessor, /polls < 170/);
+});
+
 test("Lyria 3 uses the global Interactions API and accepts nested audio output", () => {
   const request = buildLyriaInteractionRequest({ model: "lyria-3-clip-preview", prompt: "warm ambient" });
   assert.match(request.url, /\/locations\/global\/interactions$/);
@@ -219,6 +315,11 @@ test("Functions allow production, preview and localhost browser origins", () => 
   assert.equal(isAllowedBrowserOrigin("https://charly-brown.web.app"), true);
   assert.equal(isAllowedBrowserOrigin("https://charly-brown--google-preview-abc123.web.app"), true);
   assert.equal(isAllowedBrowserOrigin("http://127.0.0.1:5010"), true);
+  assert.equal(isAllowedBrowserOrigin("http://localhost:5010"), true);
+  assert.equal(isAllowedBrowserOrigin("http://127.0.0.1"), true);
+  assert.equal(isAllowedBrowserOrigin("http://localhost"), true);
+  assert.equal(isAllowedBrowserOrigin("http://127.0.0.1.evil.example:5010"), false);
+  assert.equal(isAllowedBrowserOrigin("https://localhost.evil.example:5010"), false);
   assert.equal(isAllowedBrowserOrigin("https://evil.example"), false);
 });
 
@@ -249,4 +350,27 @@ test("stale job monitoring uses the most recent heartbeat", () => {
     updatedAt: "2026-08-06T17:30:00.000Z",
     heartbeatAt: { toMillis: () => Date.parse("2026-08-06T17:55:00.000Z") }
   }, now), 5 * 60 * 1000);
+});
+
+test("stale Veo and montage jobs become terminal so monitoring does not alert forever", () => {
+  const timestamp = { seconds: 123 };
+  const admin = {
+    firestore: { FieldValue: { serverTimestamp: () => timestamp } }
+  };
+  const aiPatch = buildStaleJobPatch("podcaster_ai_jobs", admin);
+  assert.equal(aiPatch.status, "error");
+  assert.equal(aiPatch.stage, "stale");
+  assert.equal(aiPatch.retryable, false);
+  assert.equal(aiPatch.error.code, "ai_job_heartbeat_expired");
+  assert.equal(aiPatch.updatedAt, timestamp);
+
+  const exportPatch = buildStaleJobPatch("podcaster_export_jobs", admin);
+  assert.equal(exportPatch.status, "error");
+  assert.equal(exportPatch.stage, "stale");
+  assert.equal(exportPatch.retryable, false);
+  assert.equal(exportPatch.error.code, "export_job_heartbeat_expired");
+  assert.equal(exportPatch.heartbeatAt, timestamp);
+  assert.equal(exportPatch.updatedAt, timestamp);
+
+  assert.equal(buildStaleJobPatch("unknown_jobs", admin), null);
 });

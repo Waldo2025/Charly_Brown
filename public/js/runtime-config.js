@@ -1,6 +1,7 @@
 const __charlyHost = String(window.location.hostname || "").toLowerCase();
 const __charlyIsLocalRuntime = __charlyHost === "127.0.0.1" || __charlyHost === "localhost";
 const __charlyGoogleApiBase = "https://charly-brown.web.app/api";
+const __charlyMarcieApiBase = "https://us-central1-charly-brown.cloudfunctions.net/geminiApi";
 
 window.__CHARLY_CONFIG__ = Object.assign(
   {
@@ -15,6 +16,7 @@ window.__CHARLY_CONFIG__ = Object.assign(
     remoteApiBaseUrl: __charlyIsLocalRuntime
       ? __charlyGoogleApiBase
       : "/api",
+    marcieApiBaseUrl: __charlyMarcieApiBase,
     veoApiBaseUrl: __charlyIsLocalRuntime
       ? __charlyGoogleApiBase
       : "/api",

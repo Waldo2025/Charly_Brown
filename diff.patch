@@ -1,0 +1,1811 @@
+diff --git a/public/podcaster.html b/public/podcaster.html
+index 242d4b51..dd873e59 100644
+--- a/public/podcaster.html
++++ b/public/podcaster.html
+@@ -3,10 +3,10 @@
+
+ <head>
+   <meta charset="UTF-8">
+-  <script src="js/cache-version-loader.js?v=2026-1.0.10.539"></script>
++  <script src="js/cache-version-loader.js?v=2026-1.0.10.774"></script>
+   <script data-cache-src="js/runtime-config-loader.js" defer></script>
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+-  <title>Snoopy Podcast Creator</title>
++  <title>Snoopy Creator</title>
+   <link rel="icon" type="image/png" href="SnoopyPodcastCreator.png">
+   <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+@@ -17,9 +17,9 @@
+   <link rel="stylesheet" data-cache-href="podcaster/podcaster-sidepanel-studio.css">
+   <link rel="stylesheet" data-cache-href="podcaster/podcaster-overlay-card-studio.css">
+   <!-- FilePond -->
+-  <link href="https://unpkg.com/filepond/dist/filepond.min.css" rel="stylesheet">
++  <link href="https://unpkg.com/filepond/dist/filepond.min.css" rel="stylesheet" media="print" onload="this.media='all'">
+   <link href="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.css"
+-    rel="stylesheet">
++    rel="stylesheet" media="print" onload="this.media='all'">
+   <style>
+     .movement-options-grid {
+       display: grid;
+@@ -56,6 +56,175 @@
+       margin-bottom: 5px;
+     }
+
++    .pme-stop-motion {
++      margin-top: 1rem;
++      padding: 1rem;
++      border: 1px solid var(--pme-border);
++      border-radius: 12px;
++      background: #f9fafb;
++    }
++
++    .pme-stop-motion-mode,
++    .pme-stop-motion-summary {
++      display: flex;
++      align-items: center;
++      gap: .55rem;
++      flex-wrap: wrap;
++    }
++
++    .pme-stop-motion-mode > span,
++    .pme-stop-motion-summary strong {
++      margin-right: auto;
++      color: var(--pme-text);
++      font-size: .88rem;
++      font-weight: 650;
++    }
++
++    .pme-stop-motion-mode-btn {
++      border: 1px solid var(--pme-border);
++      border-radius: 999px;
++      padding: .4rem .75rem;
++      background: #fff;
++      color: var(--pme-text);
++      font-size: .8rem;
++      cursor: pointer;
++    }
++
++    .pme-stop-motion-mode-btn.is-selected {
++      border-color: var(--pme-primary);
++      background: color-mix(in srgb, var(--pme-primary) 12%, #fff);
++      color: var(--pme-primary);
++    }
++
++    .pme-stop-motion-panel {
++      margin-top: .9rem;
++    }
++
++    .pme-stop-motion-beat-controls {
++      display: flex;
++      align-items: center;
++      flex-wrap: wrap;
++      gap: .65rem .85rem;
++      margin: .7rem 0 .9rem;
++      padding: .7rem .8rem;
++      border: 1px solid rgba(99, 102, 241, .18);
++      border-radius: 10px;
++      background: rgba(238, 242, 255, .55);
++    }
++
++    .pme-stop-motion-beat-controls label {
++      display: inline-flex;
++      align-items: center;
++      gap: .45rem;
++      color: #312e81;
++      font-size: .82rem;
++      font-weight: 650;
++    }
++
++    .pme-stop-motion-help,
++    .pme-stop-motion-empty,
++    .pme-stop-motion-stats {
++      color: #64748b;
++      font-size: .78rem;
++    }
++
++    .pme-stop-motion-help {
++      margin: .35rem 0 .8rem;
++    }
++
++    .pme-upload-error {
++      margin-top: .75rem;
++      padding: .7rem .85rem;
++      border: 1px solid rgba(220, 38, 38, .28);
++      border-radius: 10px;
++      background: rgba(254, 226, 226, .78);
++      color: #991b1b;
++      font-size: .82rem;
++      font-weight: 650;
++      line-height: 1.35;
++    }
++
++    .pme-upload-status {
++      margin-top: .75rem;
++      padding: .7rem .85rem;
++      border: 1px solid rgba(79, 70, 229, .22);
++      border-radius: 10px;
++      background: rgba(238, 242, 255, .82);
++      color: #3730a3;
++      font-size: .82rem;
++      font-weight: 650;
++      line-height: 1.35;
++    }
++
++    .pme-stop-motion-tray {
++      display: grid;
++      grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
++      gap: .65rem;
++    }
++
++    .pme-stop-motion-frame {
++      position: relative;
++      overflow: hidden;
++      min-width: 0;
++      border: 1px solid var(--pme-border);
++      border-radius: 10px;
++      background: #fff;
++      cursor: grab;
++    }
++
++    .pme-stop-motion-frame.is-error {
++      border-color: #dc2626;
++    }
++
++    .pme-stop-motion-frame img {
++      display: block;
++      width: 100%;
++      height: 72px;
++      object-fit: cover;
++      background: #111827;
++    }
++
++    .pme-stop-motion-frame-meta {
++      display: flex;
++      align-items: center;
++      gap: .25rem;
++      padding: .35rem;
++    }
++
++    .pme-stop-motion-frame-name {
++      overflow: hidden;
++      flex: 1;
++      font-size: .7rem;
++      text-overflow: ellipsis;
++      white-space: nowrap;
++    }
++
++    .pme-stop-motion-frame-remove {
++      width: 24px;
++      height: 24px;
++      border: 0;
++      border-radius: 6px;
++      background: #eef2f7;
++      color: #475569;
++      cursor: pointer;
++    }
++
++    .pme-stop-motion-frame-status {
++      position: absolute;
++      top: .3rem;
++      left: .3rem;
++      padding: .15rem .35rem;
++      border-radius: 999px;
++      background: rgb(15 23 42 / 82%);
++      color: #fff;
++      font-size: .62rem;
++    }
++
++    .pme-stop-motion-empty {
++      padding: .85rem 0 0;
++      text-align: center;
++    }
++
+     .speed-control {
+       margin-top: 15px;
+       color: #333;
+@@ -99,6 +268,65 @@
+       z-index: 1;
+     }
+
++    /* === Snoopy Editor: Media Loading Overlay === */
++    #podcastPreviewMediaLoadingOverlay {
++      display: flex;
++      opacity: 0;
++      visibility: hidden;
++      pointer-events: none;
++    }
++
++    #podcastPreviewMediaLoadingOverlay.is-visible {
++      opacity: 1;
++      visibility: visible;
++      pointer-events: auto;
++    }
++
++    .podcast-preview-loading-content {
++      display: grid;
++      justify-items: center;
++      gap: 10px;
++      padding: 20px;
++      text-align: center;
++    }
++
++    .podcast-preview-loading-logo {
++      display: none !important;
++    }
++
++    .podcast-preview-loading-status {
++      margin: 0;
++      color: rgba(226,232,240,.88);
++      font-size: 12px;
++      font-weight: 600;
++      letter-spacing: .02em;
++      max-width: 190px;
++      line-height: 1.4;
++    }
++
++    .podcast-preview-loading-bar-track {
++      width: 140px;
++      height: 3px;
++      border-radius: 999px;
++      background: rgba(255,255,255,.1);
++      overflow: hidden;
++    }
++
++    .podcast-preview-loading-bar-fill {
++      height: 100%;
++      border-radius: 999px;
++      background: linear-gradient(90deg, #6366f1, #818cf8);
++      width: 0%;
++      transition: width 240ms ease;
++    }
++
++    @keyframes snoopyPreviewLogoSpin {
++      from { transform: rotate(0deg) scale(0.94); }
++      50%  { transform: rotate(180deg) scale(1.06); }
++      to   { transform: rotate(360deg) scale(0.94); }
++    }
++
++
+     /* Podcaster Threads UI */
+     .podcaster-threads-selector {
+       background: rgba(255, 255, 255, 0.8);
+@@ -293,15 +521,172 @@
+     href="https://fonts.googleapis.com/css2?family=Bangers&family=Bungee&family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=Lexend:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Nunito:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Oxanium:wght@400;500;600;700&family=Pacifico&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Sora:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@400;500;600;700&family=Unbounded:wght@400;500;600;700&family=Urbanist:wght@400;500;600;700&display=swap"
+     rel="stylesheet">
+   <link rel="stylesheet" href="/podcaster/css/podcaster-media-editor.css">
++  <style id="podcaster-critical-loader-styles">
++    /*
++     * First-paint styles: the loader is correctly sized before external CSS
++     * and the animation runtime finish loading.
++     */
++    #appLoadingScreen {
++      position: fixed;
++      inset: 0;
++      z-index: 2147483647;
++      display: flex;
++      flex-direction: column;
++      align-items: center;
++      justify-content: center;
++      gap: 14px;
++      overflow: hidden;
++      background: #101827;
++      opacity: 1;
++      visibility: visible;
++    }
++
++    #appLoadingScreen .premium-loader-visual {
++      position: relative;
++      display: grid;
++      width: 176px;
++      height: 176px;
++      place-items: center;
++    }
++
++    #appLoadingScreen .premium-loader-composition {
++      position: absolute;
++      inset: 0;
++      display: grid;
++      place-items: center;
++      transform-origin: 50% 50%;
++      animation: premium-loader-critical-composition-spin 12s linear infinite;
++    }
++
++    #appLoadingScreen .premium-loader-logo,
++    #appLoadingScreen .loading-spinner-snoopy {
++      display: block;
++      width: 98px;
++      height: 98px;
++      max-width: 98px;
++      max-height: 98px;
++      object-fit: contain;
++      transform-origin: 50% 50%;
++      animation: premium-loader-critical-composition-spin 12s linear infinite;
++    }
++
++    #appLoadingScreen .premium-loader-orbit,
++    #appLoadingScreen .premium-loader-gold-dust {
++      position: absolute;
++      inset: 0;
++      z-index: 2;
++      pointer-events: none;
++    }
++
++    #appLoadingScreen .premium-loader-orbit {
++      animation: premium-loader-critical-orbit 2.35s linear infinite;
++    }
++
++    #appLoadingScreen .premium-loader-orbit.is-secondary {
++      animation-duration: 3.15s;
++      animation-direction: reverse;
++    }
++
++    #appLoadingScreen .premium-loader-orbit.is-tertiary {
++      animation-duration: 4.35s;
++    }
++
++    #appLoadingScreen.is-premium-loader-ready .premium-loader-composition {
++      animation: none;
++    }
++
++    #appLoadingScreen.is-premium-loader-ready .premium-loader-logo {
++      animation: none;
++    }
++
++    #appLoadingScreen .premium-loader-orbit > span {
++      --loader-particle-angle: calc(var(--loader-particle-index) * 72deg);
++      position: absolute;
++      left: 50%;
++      top: 50%;
++      width: 7px;
++      height: 7px;
++      border-radius: 2px;
++      background: #ffd45a;
++      transform: rotate(var(--loader-particle-angle)) translateY(-60px);
++      box-shadow: -8px 1px 0 -1px rgba(255, 205, 77, .72), -15px 2px 0 -2px rgba(255, 205, 77, .34);
++    }
++
++    #appLoadingScreen .premium-loader-orbit.is-secondary > span {
++      background: #59d6ff;
++      transform: rotate(var(--loader-particle-angle)) translateY(-74px);
++      box-shadow: -8px 1px 0 -1px rgba(89, 214, 255, .68), -16px 2px 0 -2px rgba(89, 214, 255, .28);
++    }
++
++    #appLoadingScreen .premium-loader-orbit.is-tertiary > span {
++      background: #ff7db7;
++      transform: rotate(var(--loader-particle-angle)) translateY(-86px);
++      box-shadow: -9px 1px 0 -1px rgba(255, 125, 183, .64), -18px 2px 0 -2px rgba(255, 125, 183, .26);
++    }
++
++    #appLoadingScreen .premium-loader-gold-dust > span {
++      position: absolute;
++      left: var(--loader-dust-x);
++      top: var(--loader-dust-y);
++      width: 4px;
++      height: 4px;
++      border-radius: 50%;
++      background: #ffd45a;
++      animation: premium-loader-critical-dust 1.25s var(--loader-dust-delay) ease-in-out infinite alternate;
++    }
++
++    @keyframes premium-loader-critical-orbit {
++      to { transform: rotate(360deg); }
++    }
++
++    @keyframes premium-loader-critical-composition-spin {
++      to { transform: rotate(360deg); }
++    }
++
++    @keyframes premium-loader-critical-dust {
++      from { opacity: .18; transform: scale(.55); }
++      to { opacity: .95; transform: scale(1.25); }
++    }
++
++    @media (prefers-reduced-motion: reduce) {
++      #appLoadingScreen .premium-loader-orbit,
++      #appLoadingScreen .premium-loader-composition,
++      #appLoadingScreen .premium-loader-logo,
++      #appLoadingScreen .premium-loader-gold-dust > span {
++        animation: none !important;
++      }
++    }
++
++    #appLoadingScreen:not(.is-hidden) ~ * {
++      visibility: hidden !important;
++    }
++
++    #appLoadingScreen.is-hidden {
++      opacity: 0;
++      visibility: hidden;
++      pointer-events: none;
++    }
++  </style>
+ </head>
+
+ <body>
+-  <div id="appLoadingScreen">
+-    <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="loading-spinner-snoopy">
+-    <div class="loading-dots">
+-      <span></span>
+-      <span></span>
+-      <span></span>
++  <div id="appLoadingScreen" class="premium-loader-host premium-loader-rich">
++    <div class="premium-loader-visual" aria-hidden="true">
++      <div class="premium-loader-composition premium-loader-sprite-2d">
++      <span class="premium-loader-orbit">
++        <span style="--loader-particle-index: 0"></span><span style="--loader-particle-index: 1"></span><span style="--loader-particle-index: 2"></span><span style="--loader-particle-index: 3"></span><span style="--loader-particle-index: 4"></span>
++      </span>
++      <span class="premium-loader-orbit is-secondary">
++        <span style="--loader-particle-index: 0"></span><span style="--loader-particle-index: 1"></span><span style="--loader-particle-index: 2"></span><span style="--loader-particle-index: 3"></span><span style="--loader-particle-index: 4"></span>
++      </span>
++      <span class="premium-loader-orbit is-tertiary">
++        <span style="--loader-particle-index: 0"></span><span style="--loader-particle-index: 1"></span><span style="--loader-particle-index: 2"></span><span style="--loader-particle-index: 3"></span><span style="--loader-particle-index: 4"></span>
++      </span>
++      <span class="premium-loader-gold-dust">
++        <span style="--loader-dust-x: 18%; --loader-dust-y: 28%; --loader-dust-delay: -0.2s"></span><span style="--loader-dust-x: 78%; --loader-dust-y: 24%; --loader-dust-delay: -0.7s"></span><span style="--loader-dust-x: 84%; --loader-dust-y: 69%; --loader-dust-delay: -1s"></span><span style="--loader-dust-x: 24%; --loader-dust-y: 78%; --loader-dust-delay: -0.45s"></span><span style="--loader-dust-x: 10%; --loader-dust-y: 54%; --loader-dust-delay: -0.9s"></span>
++      </span>
++      </div>
++      <img src="SnoopyPodcastCreator.png" alt="" class="loading-spinner-snoopy premium-loader-logo">
+     </div>
+   </div>
+
+@@ -324,32 +709,52 @@
+     <section class="podcaster-shell">
+       <div class="podcaster-layout">
+         <aside class="sessions-rail" aria-label="Historial de sesiones">
+-          <div class="sessions-rail-header">
+-            <div class="sessions-rail-header-copy">
+-              <h2>
+-                <span>Sesiones</span>
+-                <span class="sessions-rail-actions">
+-                  <button id="toggleArchivedSessionsBtn" class="panel-icon-btn" type="button" title="Ver sesiones archivadas" aria-pressed="false" aria-label="Ver sesiones archivadas">
+-                    <i class="fas fa-box-archive"></i>
+-                  </button>
+-                  <button id="newSessionBtn" class="panel-icon-btn" type="button" title="Nueva sesión">
+-                    <i class="fas fa-plus"></i>
+-                  </button>
+-                </span>
+-              </h2>
+-              <div id="sessionsRailFilter" class="sessions-rail-filter" role="tablist" aria-label="Filtrar sesiones">
+-                <button class="sessions-filter-chip is-active" type="button" data-filter="all" aria-pressed="true">Todo</button>
+-                <button class="sessions-filter-chip" type="button" data-filter="podcast" aria-pressed="false">Podcast</button>
+-                <button class="sessions-filter-chip" type="button" data-filter="video" aria-pressed="false">Video</button>
++          <div id="sessionsRailLoader" class="panel-data-loader" role="status" aria-live="polite"
++            aria-label="Cargando sesiones">
++            <div class="panel-data-loader-content">
++              <img src="SnoopyPodcastCreator.png" alt="" aria-hidden="true">
++              <div class="loading-dots" aria-hidden="true">
++                <span></span><span></span><span></span>
+               </div>
+             </div>
+           </div>
++          <div class="sessions-rail-header">
++            <strong class="sessions-rail-header-title">Sesiones</strong>
++            <div class="sessions-rail-actions">
++              <button id="toggleArchivedSessionsBtn" class="panel-icon-btn" type="button" title="Ver sesiones archivadas" aria-pressed="false" aria-label="Ver sesiones archivadas">
++                <i class="fas fa-box-archive"></i>
++              </button>
++            </div>
++          </div>
++          <button id="newSessionBtn" class="sessions-new-session-btn" type="button" title="Nueva sesión" aria-label="Nueva sesión" style="background:inherit!important;color:inherit!important">
++            <i class="fas fa-pen-to-square sessions-new-session-icon" aria-hidden="true"></i>
++            <span>Nueva sesión</span>
++            <i class="fas fa-circle-plus sessions-new-session-plus" aria-hidden="true"></i>
++          </button>
++          <div id="sessionsRailFilter" class="sessions-rail-filter" role="tablist" aria-label="Filtrar sesiones">
++            <button class="sessions-filter-chip is-active" type="button" data-filter="all" aria-pressed="true">Todo</button>
++            <button class="sessions-filter-chip" type="button" data-filter="podcast" aria-pressed="false">Podcast</button>
++            <button class="sessions-filter-chip" type="button" data-filter="video" aria-pressed="false">Video</button>
++          </div>
+
+           <div id="sessionList" class="session-list"></div>
++          <button id="sessionsRailResizeHandle" class="sessions-rail-resize-handle" type="button"
++            aria-label="Redimensionar panel de sesiones"
++            title="Arrastra para cambiar el ancho; doble clic para restablecer"></button>
+         </aside>
+
+         <section class="chat-stage">
+-          <div class="chat-stage-toolbar">
++          <div id="chatStageLoader" class="panel-data-loader" role="status" aria-live="polite"
++            aria-label="Cargando conversación">
++            <div class="panel-data-loader-content">
++              <img src="SnoopyPodcastCreator.png" alt="" aria-hidden="true">
++              <div class="loading-dots" aria-hidden="true">
++                <span></span><span></span><span></span>
++              </div>
++            </div>
++          </div>
++          <header class="chat-stage-header">
++            <strong class="chat-stage-header-title floating-panel-session-title" title="Nombre de la sesión">Sesión sin título</strong>
+             <div id="mainStudioActivityNotification" class="activity-notification-wrap"
+               style="display: none; margin: 0 auto 0 0; pointer-events: auto;">
+               <i class="fas fa-user-edit"></i>
+@@ -359,8 +764,79 @@
+                 <button class="activity-clear-all-btn" onclick="clearAllActivityNotifications()" title="Quitar todas"><i class="fas fa-broom"></i></button>
+               </div>
+             </div>
+-          </div>
++            <div class="chat-stage-header-actions">
++              <button id="toggleSnoopyCreatorThemeBtn"
++                class="chat-stage-header-action snoopy-creator-theme-toggle" type="button"
++                title="Activar tema claro" aria-label="Activar tema claro" aria-pressed="false">
++                <i class="fas fa-sun" aria-hidden="true"></i>
++              </button>
++              <details class="creator-mode-menu">
++                <summary class="chat-stage-header-action creator-mode-menu-toggle"
++                  title="Modos de creación" aria-label="Abrir modos de creación">
++                  <i class="fas fa-sliders-h" aria-hidden="true"></i>
++                </summary>
++                <div class="creator-mode-menu-panel">
++                  <strong class="creator-mode-menu-title">Modos de creación</strong>
++                  <div class="composer-switches-wrapper">
++                    <div class="composer-mode-switch" role="group" aria-label="Modo de generación">
++                      <span class="composer-mode-label">Podcast</span>
++                      <label class="composer-switch" for="composerModeToggle_footer">
++                        <input id="composerModeToggle_footer" type="checkbox" aria-label="Activar modo video">
++                        <span class="composer-switch-track" aria-hidden="true">
++                          <span class="composer-switch-thumb"></span>
++                        </span>
++                      </label>
++                      <span class="composer-mode-label">Activa video</span>
++                    </div>
++                    <div id="composerTableModeWrap" class="composer-mode-switch" role="group"
++                      aria-label="Modo de tabla (componer o crear)">
++                      <span class="composer-mode-label">Componer</span>
++                      <label class="composer-switch" for="composerTableModeToggle_footer">
++                        <input id="composerTableModeToggle_footer" type="checkbox"
++                          aria-label="Crear tabla nueva o componer tabla">
++                        <span class="composer-switch-track" aria-hidden="true">
++                          <span class="composer-switch-thumb"></span>
++                        </span>
++                      </label>
++                      <span class="composer-mode-label">Crear</span>
++                    </div>
++                    <div id="composerNoModifyModeWrap" class="composer-mode-switch" role="group"
++                      aria-label="Conectar tabla sin modificar guion">
++                      <span class="composer-mode-label">Modificar guión</span>
++                      <label class="composer-switch" for="composerNoModifyModeToggle_footer">
++                        <input id="composerNoModifyModeToggle_footer" type="checkbox"
++                          aria-label="No modificar guión de tabla pegada">
++                        <span class="composer-switch-track" aria-hidden="true">
++                          <span class="composer-switch-thumb"></span>
++                        </span>
++                      </label>
++                      <span class="composer-mode-label">No modificar guión</span>
++                    </div>
++                    <div class="composer-mode-switch" role="group" aria-label="Modo Reel/Short">
++                      <span class="composer-mode-label">Normal</span>
++                      <label class="composer-switch" for="reelModeToggle_footer">
++                        <input id="reelModeToggle_footer" type="checkbox" aria-label="Activar modo Reel/Short">
++                        <span class="composer-switch-track" aria-hidden="true">
++                          <span class="composer-switch-thumb"></span>
++                        </span>
++                      </label>
++                      <span class="composer-mode-label">Reel/Short</span>
++                    </div>
++                  </div>
++                </div>
++              </details>
++              <button id="togglePodcastVideoBtn" class="chat-stage-header-action" type="button"
++                title="Mostrar Snoopy Editor" aria-label="Mostrar Snoopy Editor">
++                <i class="fas fa-video" aria-hidden="true"></i>
++              </button>
++            </div>
++          </header>
+           <div class="chat-scroll-region">
++            <button id="openSidepanelBtn" class="panel-icon-btn sidepanel-edge-tab" type="button"
++              data-sidepanel-toggle aria-controls="podcasterSidepanel" aria-expanded="false"
++              title="Mostrar Panel de Escenas" aria-label="Mostrar Panel de Escenas">
++              <i class="fas fa-chevron-left" aria-hidden="true"></i>
++            </button>
+             <div id="chatEmptyState" class="chat-empty-state" aria-hidden="true">
+               <h1>Listo para crear tu guión.</h1>
+             </div>
+@@ -377,72 +853,25 @@
+           </button>
+
+           <footer class="composer-shell">
++            <button id="composerResizeHandle" class="composer-resize-handle" type="button"
++              aria-label="Redimensionar compositor"
++              title="Arrastra hacia arriba para ampliar; doble clic para restablecer"></button>
+             <form id="promptForm" class="prompt-form">
+-              <div class="composer-topline">
+-                <button id="toggleComposerCollapseBtn" class="composer-collapse-toggle-btn" type="button"
+-                  title="Minimizar panel de escritura" aria-label="Minimizar panel de escritura">
+-                  <i class="fas fa-chevron-down"></i>
+-                </button>
+-                <div class="composer-chip-group"></div>
+-                <div class="composer-switches-wrapper">
+-                  <div class="composer-mode-switch" role="group" aria-label="Modo de generación">
+-                    <span class="composer-mode-label">Podcast</span>
+-                    <label class="composer-switch" for="composerModeToggle_footer">
+-                      <input id="composerModeToggle_footer" type="checkbox" aria-label="Activar modo video">
+-                      <span class="composer-switch-track" aria-hidden="true">
+-                        <span class="composer-switch-thumb"></span>
+-                      </span>
+-                    </label>
+-                    <span class="composer-mode-label">Activa video</span>
+-                  </div>
+-                  <div id="composerTableModeWrap" class="composer-mode-switch" role="group"
+-                    aria-label="Modo de tabla (componer o crear)">
+-                    <span class="composer-mode-label">Componer</span>
+-                    <label class="composer-switch" for="composerTableModeToggle_footer">
+-                      <input id="composerTableModeToggle_footer" type="checkbox"
+-                        aria-label="Crear tabla nueva o componer tabla">
+-                      <span class="composer-switch-track" aria-hidden="true">
+-                        <span class="composer-switch-thumb"></span>
+-                      </span>
+-                    </label>
+-                    <span class="composer-mode-label">Crear</span>
+-                  </div>
+-                  <div id="composerNoModifyModeWrap" class="composer-mode-switch" role="group"
+-                    aria-label="Conectar tabla sin modificar guion">
+-                    <span class="composer-mode-label">Modificar guión</span>
+-                    <label class="composer-switch" for="composerNoModifyModeToggle_footer">
+-                      <input id="composerNoModifyModeToggle_footer" type="checkbox"
+-                        aria-label="No modificar guión de tabla pegada">
+-                      <span class="composer-switch-track" aria-hidden="true">
+-                        <span class="composer-switch-thumb"></span>
+-                      </span>
+-                    </label>
+-                    <span class="composer-mode-label">No modificar guión</span>
+-                  </div>
+-                  <div class="composer-mode-switch" role="group" aria-label="Modo Reel/Short">
+-                    <span class="composer-mode-label">Normal</span>
+-                    <label class="composer-switch" for="reelModeToggle_footer">
+-                      <input id="reelModeToggle_footer" type="checkbox" aria-label="Activar modo Reel/Short">
+-                      <span class="composer-switch-track" aria-hidden="true">
+-                        <span class="composer-switch-thumb"></span>
+-                      </span>
+-                    </label>
+-                    <span class="composer-mode-label">Reel/Short</span>
+-                  </div>
+-                </div>
+-              </div>
+-
+               <label class="prompt-box">
+                 <div id="promptInput" class="prompt-editor" contenteditable="true" role="textbox" aria-multiline="true"
+                   data-placeholder="Describe tu idea o pega una tabla de Word..."></div>
+               </label>
+
+               <div class="composer-footer">
+-                <div class="composer-helper-actions">
+-                  <button id="demoPromptBtn" class="composer-mini-btn" type="button" aria-label="Cargar ejemplo"
+-                    title="Cargar ejemplo">
+-                    <i class="fas fa-lightbulb"></i>
++                <div class="composer-topline">
++                  <button id="toggleComposerCollapseBtn" class="composer-collapse-toggle-btn" type="button"
++                    title="Minimizar panel de escritura" aria-label="Minimizar panel de escritura">
++                    <i class="fas fa-chevron-down"></i>
+                   </button>
++                  <div class="composer-chip-group" aria-label="Contexto del compositor">
++                    <span class="composer-context-item"><i class="far fa-folder" aria-hidden="true"></i><span>Guion</span></span>
++                    <span class="composer-context-item"><i class="fas fa-laptop" aria-hidden="true"></i><span>Sesión activa</span></span>
++                  </div>
+                 </div>
+                 <button id="generateScriptBtn" class="composer-send-btn" type="submit" aria-label="Enviar prompt">
+                   <i class="fas fa-arrow-up"></i>
+@@ -452,18 +881,21 @@
+           </footer>
+         </section>
+
+-        <button id="openSidepanelBtn" class="panel-icon-btn sidepanel-edge-tab" type="button" data-sidepanel-toggle
+-          aria-controls="podcasterSidepanel" aria-expanded="false" title="Mostrar inspector">
+-          <i class="fas fa-chevron-left" aria-hidden="true"></i>
+-        </button>
+-        <button id="togglePodcastVideoBtn" type="button"
+-          title="Mostrar u ocultar video">
+-          <i class="fas fa-video"></i>
+-        </button>
+-
+         <aside id="podcasterSidepanel" class="sidepanel" aria-label="Panel lateral de guión">
+-          <header>
+-            <div data-sidepanel-actions>
++          <button id="podcasterSidepanelResizeHandle" class="podcaster-sidepanel-resize-handle" type="button"
++            aria-label="Redimensionar panel lateral"
++            title="Arrastra para cambiar el ancho; doble clic para restablecer"></button>
++          <div id="podcasterSidepanelLoader" class="panel-data-loader" role="status" aria-live="polite"
++            aria-label="Cargando guion">
++            <div class="panel-data-loader-content">
++              <img src="SnoopyPodcastCreator.png" alt="" aria-hidden="true">
++              <div class="loading-dots" aria-hidden="true">
++                <span></span><span></span><span></span>
++              </div>
++            </div>
++          </div>
++          <header class="sidepanel-header">
++            <div class="sidepanel-header-actions" data-sidepanel-actions>
+               <button id="toggleCollapseAllRowsBtn" type="button" title="Colapsar escenas">
+                 <i class="fas fa-compress-alt"></i>
+               </button>
+@@ -578,71 +1010,106 @@
+           <i class="fas fa-times"></i>
+         </button>
+       </header>
+-      <p id="timelineClipDurationLabel" class="timeline-clip-duration-label">Escena --</p>
+-      <label class="row-field">
+-        <span>Tiempo (segundos)</span>
+-        <input id="timelineClipDurationRange" type="range" min="0.5" max="8" step="0.01" value="8">
+-        <input id="timelineClipDurationNumber" type="number" min="0.5" max="8" step="0.01" value="8" inputmode="decimal"
+-          aria-label="Duración de escena en segundos">
+-      </label>
+-      <small id="timelineClipDurationHint" class="timeline-clip-duration-hint">Solo puedes recortar; no es posible
+-        ampliar.</small>
+-      <label class="row-field">
+-        <span>Volumen clip (Veo) %</span>
+-        <div class="studio-volume-control">
+-          <input id="timelineClipVeoVolumeRange" type="range" min="0" max="100" step="1" value="100"
+-            aria-label="Volumen Veo de escena">
+-          <input id="timelineClipVeoVolumeNumber" type="number" min="0" max="100" step="1" value="100"
+-            inputmode="numeric" aria-label="Volumen Veo numérico">
+-        </div>
+-      </label>
+-      <label class="row-field">
+-        <span>Volumen voz (Gemini) %</span>
+-        <div class="studio-volume-control">
+-          <input id="timelineClipGeminiVolumeRange" type="range" min="0" max="100" step="1" value="100"
+-            aria-label="Volumen Gemini de escena">
+-          <input id="timelineClipGeminiVolumeNumber" type="number" min="0" max="100" step="1" value="100"
+-            inputmode="numeric" aria-label="Volumen Gemini numérico">
+-        </div>
+-      </label>
+-      <label class="row-field">
+-        <span>Volumen audio de fondo %</span>
+-        <div class="studio-volume-control">
+-          <input id="timelineClipBackgroundVolumeRange" type="range" min="0" max="200" step="1" value="100"
+-            aria-label="Volumen audio de fondo de escena">
+-          <input id="timelineClipBackgroundVolumeNumber" type="number" min="0" max="200" step="1" value="100"
+-            inputmode="numeric" aria-label="Volumen audio de fondo numérico">
+-        </div>
+-      </label>
+-      <label class="row-field">
+-        <span>Estilo visual de escena</span>
+-        <select id="timelineClipVisualLayoutMode" aria-label="Estilo visual de escena">
+-          <option value="default">Normal</option>
+-          <option value="blur-backdrop">Pequeño + fondo blur</option>
+-        </select>
+-      </label>
+-      <label class="global-check-row timeline-clip-duration-continuity">
+-        <input id="timelineClipRelatePrevCheckbox" type="checkbox">
+-        <span>Relacionar con escena anterior (continuidad)</span>
+-      </label>
+-      <small id="timelineClipRelatePrevHint" class="timeline-clip-duration-hint"></small>
+-      <label class="global-check-row timeline-clip-duration-continuity">
+-        <input id="timelineClipApplyRelateAheadCheckbox" type="checkbox">
+-        <span>Aplicar continuidad a todas las escenas siguientes</span>
+-      </label>
+-      <small id="timelineClipApplyRelateAheadHint" class="timeline-clip-duration-hint"></small>
++      <div class="timeline-clip-duration-tabs" role="tablist" aria-label="Opciones de escena">
++        <button class="timeline-clip-duration-tab is-active" type="button" role="tab" aria-selected="true"
++          data-duration-tab="duration">
++          <i class="fas fa-cut" aria-hidden="true"></i>
++          <span>Duración</span>
++        </button>
++        <button class="timeline-clip-duration-tab" type="button" role="tab" aria-selected="false"
++          data-duration-tab="audio">
++          <i class="fas fa-volume-up" aria-hidden="true"></i>
++          <span>Audio</span>
++        </button>
++        <button class="timeline-clip-duration-tab" type="button" role="tab" aria-selected="false"
++          data-duration-tab="scene">
++          <i class="fas fa-layer-group" aria-hidden="true"></i>
++          <span>Escena</span>
++        </button>
++      </div>
++      <div class="timeline-clip-duration-tab-panels">
++        <section class="timeline-clip-duration-tab-panel is-duration" role="tabpanel"
++          data-duration-tab-panel="duration">
++          <label class="row-field">
++            <span>Tiempo (segundos)</span>
++            <div class="timeline-clip-duration-time-control">
++              <input id="timelineClipDurationRange" type="range" min="0.5" max="8" step="0.01" value="8">
++              <input id="timelineClipDurationNumber" type="number" min="0.5" max="8" step="0.01" value="8"
++                inputmode="decimal" aria-label="Duración de escena en segundos">
++            </div>
++          </label>
++          <small id="timelineClipDurationHint" class="timeline-clip-duration-hint">Solo puedes recortar; no es
++            posible ampliar.</small>
++        </section>
++        <section class="timeline-clip-duration-tab-panel is-audio" role="tabpanel"
++          data-duration-tab-panel="audio" hidden>
++          <label class="row-field">
++            <span>Clip Veo %</span>
++            <div class="studio-volume-control">
++              <input id="timelineClipVeoVolumeRange" type="range" min="0" max="100" step="1" value="100"
++                aria-label="Volumen Veo de escena">
++              <input id="timelineClipVeoVolumeNumber" type="number" min="0" max="100" step="1" value="100"
++                inputmode="numeric" aria-label="Volumen Veo numérico">
++            </div>
++          </label>
++          <label class="row-field">
++            <span>Voz Gemini %</span>
++            <div class="studio-volume-control">
++              <input id="timelineClipGeminiVolumeRange" type="range" min="0" max="100" step="1" value="100"
++                aria-label="Volumen Gemini de escena">
++              <input id="timelineClipGeminiVolumeNumber" type="number" min="0" max="100" step="1" value="100"
++                inputmode="numeric" aria-label="Volumen Gemini numérico">
++            </div>
++          </label>
++          <label class="row-field">
++            <span>Fondo %</span>
++            <div class="studio-volume-control">
++              <input id="timelineClipBackgroundVolumeRange" type="range" min="0" max="200" step="1" value="100"
++                aria-label="Volumen audio de fondo de escena">
++              <input id="timelineClipBackgroundVolumeNumber" type="number" min="0" max="200" step="1" value="100"
++                inputmode="numeric" aria-label="Volumen audio de fondo numérico">
++            </div>
++          </label>
++        </section>
++        <section class="timeline-clip-duration-tab-panel is-scene" role="tabpanel"
++          data-duration-tab-panel="scene" hidden>
++          <label class="row-field">
++            <span>Estilo visual</span>
++            <select id="timelineClipVisualLayoutMode" aria-label="Estilo visual de escena">
++              <option value="default">Normal</option>
++              <option value="blur-backdrop">Pequeño + fondo blur</option>
++            </select>
++          </label>
++          <div class="timeline-clip-continuity-options">
++            <label class="global-check-row timeline-clip-duration-continuity">
++              <input id="timelineClipRelatePrevCheckbox" type="checkbox">
++              <span>Relacionar con la escena anterior</span>
++            </label>
++            <small id="timelineClipRelatePrevHint" class="timeline-clip-duration-hint"></small>
++            <label class="global-check-row timeline-clip-duration-continuity">
++              <input id="timelineClipApplyRelateAheadCheckbox" type="checkbox">
++              <span>Aplicar a las escenas siguientes</span>
++            </label>
++            <small id="timelineClipApplyRelateAheadHint" class="timeline-clip-duration-hint"></small>
++          </div>
++        </section>
++      </div>
+       <div class="timeline-clip-duration-actions">
+         <button id="resetTimelineClipDurationBtn"
+           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn" type="button"
+           title="Quitar cortes y restablecer video">
+           <i class="fas fa-undo-alt" aria-hidden="true"></i>
+-          <span>Restablecer video</span>
++          <span>Restablecer</span>
+         </button>
+         <button id="cancelTimelineClipDurationBtn"
+           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+           type="button">Cancelar</button>
+-        <button id="applyTimelineClipDurationBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+-          type="button">Aplicar recorte</button>
++        <button id="applyTimelineClipDurationBtn"
++          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-apply-btn"
++          type="button">
++          <i class="fas fa-check" aria-hidden="true"></i>
++          <span>Aceptar</span>
++        </button>
+       </div>
+     </section>
+   </div>
+@@ -767,10 +1234,16 @@
+         <div class="studio-volume-control">
+           <input id="geminiTrackVolumeRange" type="range" min="0" max="100" step="1" value="100">
+           <input id="geminiTrackVolumeNumber" type="number" min="0" max="100" step="1" value="100" inputmode="numeric"
+-            aria-label="Volumen general del track Gemini">
++          aria-label="Volumen general del track Gemini">
+         </div>
+       </label>
+-      <small class="timeline-clip-duration-hint">Se aplica a toda la voz Gemini del timeline, salvo overrides por escena.</small>
++      <label class="row-field">
++        <span>Velocidad de todas las escenas</span>
++        <input id="geminiTrackSpeedRange" type="range" min="0.5" max="10" step="0.01" value="1">
++        <input id="geminiTrackSpeedNumber" type="number" min="0.5" max="10" step="0.01" value="1" inputmode="decimal"
++          aria-label="Velocidad de todas las voces Gemini">
++      </label>
++      <small class="timeline-clip-duration-hint">La velocidad se aplica a toda la voz Gemini del timeline; 1.00 es normal.</small>
+       <div class="timeline-clip-duration-actions">
+         <button id="resetGeminiTrackVolumeBtn"
+           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn" type="button">
+@@ -959,7 +1432,7 @@
+         </div>
+       </label>
+       <label class="row-field">
+-        <span>Volumen voz (Gemini) %</span>
++        <span>Volumen voz en off %</span>
+         <div class="studio-volume-control">
+           <input id="montageSceneGeminiVolumeRange" type="range" min="0" max="100" step="1" value="100"
+             aria-label="Volumen Gemini global">
+@@ -970,13 +1443,28 @@
+       <label class="row-field">
+         <span>Volumen audio de fondo %</span>
+         <div class="studio-volume-control">
+-          <input id="montageSceneBackgroundVolumeRange" type="range" min="0" max="200" step="1" value="100"
++          <input id="montageSceneBackgroundVolumeRange" type="range" min="0" max="200" step="1" value="50"
+             aria-label="Volumen audio de fondo global">
+-          <input id="montageSceneBackgroundVolumeNumber" type="number" min="0" max="200" step="1" value="100"
++          <input id="montageSceneBackgroundVolumeNumber" type="number" min="0" max="200" step="1" value="50"
+             inputmode="numeric" aria-label="Volumen audio de fondo global numérico">
+         </div>
+       </label>
++      <label class="row-field">
++        <span>Volumen del fondo cuando habla la voz en off %</span>
++        <div class="studio-volume-control">
++          <input id="audioTrackDuckVolume" type="range" min="40" max="100" step="1" value="46"
++            aria-label="Volumen del audio de fondo cuando habla la voz en off">
++          <input id="audioTrackDuckVolumeNumber" type="number" min="40" max="100" step="1" value="46"
++            inputmode="numeric" aria-label="Volumen del audio de fondo cuando habla la voz en off numérico">
++        </div>
++      </label>
+       <div class="timeline-clip-duration-actions">
++        <button id="defaultMontageSceneMixBtn"
++          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn"
++          type="button">
++          <i class="fas fa-undo-alt" aria-hidden="true"></i>
++          Default
++        </button>
+         <button id="cancelMontageSceneMixBtn"
+           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+           type="button">Cancelar</button>
+@@ -990,58 +1478,128 @@
+       aria-label="Cerrar video"></button>
+     <section id="podcastVideoShell" class="podcast-video-shell floating-panel-card" aria-label="Video compuesto">
+
+-      <div id="podcastVideoLoader" class="podcast-video-loader" hidden aria-live="polite"
++      <div id="podcastVideoLoader" class="podcast-video-loader premium-loader-rich" hidden aria-live="polite"
+         aria-label="Abriendo panel de video">
+         <div class="podcast-video-loader-backdrop"></div>
+         <div class="podcast-video-loader-card">
+-          <div class="podcast-video-loader-ripple ripple-a"></div>
+-          <div class="podcast-video-loader-ripple ripple-b"></div>
+-          <div class="podcast-video-loader-ripple ripple-c"></div>
+-          <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator" class="podcast-video-loader-logo">
+-          <strong>Snoopy Video Creator</strong>
+-          <span>Preparando el estudio de video...</span>
++          <div class="premium-loader-visual" aria-hidden="true">
++            <div class="premium-loader-composition premium-loader-sprite-2d">
++            <span class="premium-loader-orbit">
++              <span style="--loader-particle-index: 0"></span><span style="--loader-particle-index: 1"></span><span style="--loader-particle-index: 2"></span><span style="--loader-particle-index: 3"></span><span style="--loader-particle-index: 4"></span>
++            </span>
++            <span class="premium-loader-orbit is-secondary">
++              <span style="--loader-particle-index: 0"></span><span style="--loader-particle-index: 1"></span><span style="--loader-particle-index: 2"></span><span style="--loader-particle-index: 3"></span><span style="--loader-particle-index: 4"></span>
++            </span>
++            <span class="premium-loader-orbit is-tertiary">
++              <span style="--loader-particle-index: 0"></span><span style="--loader-particle-index: 1"></span><span style="--loader-particle-index: 2"></span><span style="--loader-particle-index: 3"></span><span style="--loader-particle-index: 4"></span>
++            </span>
++            <span class="premium-loader-gold-dust">
++              <span style="--loader-dust-x: 18%; --loader-dust-y: 28%; --loader-dust-delay: -0.2s"></span><span style="--loader-dust-x: 78%; --loader-dust-y: 24%; --loader-dust-delay: -0.7s"></span><span style="--loader-dust-x: 84%; --loader-dust-y: 69%; --loader-dust-delay: -1s"></span><span style="--loader-dust-x: 24%; --loader-dust-y: 78%; --loader-dust-delay: -0.45s"></span><span style="--loader-dust-x: 10%; --loader-dust-y: 54%; --loader-dust-delay: -0.9s"></span>
++            </span>
++            </div>
++            <img src="SnoopyPodcastCreator.png" alt="" class="podcast-video-loader-logo premium-loader-logo">
++          </div>
+         </div>
+       </div>
+       <div class="floating-panel-head">
++        <button id="closePodcastVideoBtn" class="row-icon-btn podcast-header-leading-close" type="button"
++          title="Cerrar video" aria-label="Cerrar editor">
++          <i class="fas fa-times"></i>
++        </button>
+         <h3 class="podcast-brand-title">
+-          <span>Snoopy Video Creator Creativo</span>
+-          <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator" class="podcast-brand-title-icon"
++          <span>Editor Snoopy</span>
++          <img src="SnoopyPodcastCreator.png" alt="Editor Snoopy" class="podcast-brand-title-icon"
+             loading="lazy">
+         </h3>
+         <div class="floating-panel-session-title" title="Nombre de la sesión"></div>
+
+-        <div class="composer-mode-switch" role="group" aria-label="Modo de generación">
+-          <span class="composer-mode-label">Podcast</span>
+-          <label class="composer-switch" for="composerModeToggle">
+-            <input id="composerModeToggle" type="checkbox" aria-label="Activar modo video">
+-            <span class="composer-switch-track" aria-hidden="true">
+-              <span class="composer-switch-thumb"></span>
+-            </span>
+-          </label>
+-          <span class="composer-mode-label">Activa video</span>
++        <div class="podcast-header-action-group is-panels podcast-header-leading-panels" role="group"
++          aria-label="Paneles del editor">
++          <button id="togglePodcastVideoLibraryBtn"
++            class="row-icon-btn podcast-header-library-toggle is-active" type="button"
++            aria-controls="podcastVideoLibrary" aria-expanded="true" aria-pressed="true"
++            title="Ocultar librería" aria-label="Ocultar librería">
++            <i class="fas fa-photo-video" aria-hidden="true"></i>
++          </button>
++          <button id="togglePodcastStudioInspectorBtn"
++            class="row-icon-btn podcast-header-inspector-toggle is-active" type="button"
++            aria-controls="podcastStudioInspector" aria-expanded="true" aria-pressed="true"
++            title="Ocultar inspector" aria-label="Ocultar inspector">
++            <i class="fas fa-columns" aria-hidden="true"></i>
++          </button>
+         </div>
+
+-        <div class="composer-mode-switch" role="group" aria-label="Modo Reel/Short">
+-          <span class="composer-mode-label">Normal</span>
+-          <label class="composer-switch" for="reelModeToggle">
+-            <input id="reelModeToggle" type="checkbox" aria-label="Activar modo Reel/Short">
+-            <span class="composer-switch-track" aria-hidden="true">
+-              <span class="composer-switch-thumb"></span>
+-            </span>
+-          </label>
+-          <span class="composer-mode-label">Reel/Short</span>
+-        </div>
++        <div class="podcast-header-action-group is-modes podcast-header-modes-group" role="group"
++          aria-label="Modos y tema del editor">
++          <details class="podcast-header-mode-menu" aria-label="Modos del editor">
++          <summary class="row-icon-btn podcast-header-mode-menu-trigger" title="Modos del editor"
++            aria-label="Abrir menú de modos">
++            <i class="fas fa-sliders-h" aria-hidden="true"></i>
++          </summary>
++          <div class="podcast-header-mode-menu-panel">
++            <div class="podcast-header-mode-menu-title">Modos del editor</div>
++
++            <div class="composer-mode-switch podcast-studio-video-mode-switch" role="group"
++              aria-label="Modo podcast o podcast con video">
++              <span class="composer-mode-label">sin video</span>
++              <label class="composer-switch" for="podcastVideoModeToggle">
++                <input id="podcastVideoModeToggle" type="checkbox" aria-label="Activar podcast con video">
++                <span class="composer-switch-track" aria-hidden="true">
++                  <span class="composer-switch-thumb"></span>
++                </span>
++              </label>
++              <span class="composer-mode-label">con video</span>
++            </div>
+
+-        <div id="composerPublishModeWrap" class="composer-mode-switch" role="group"
+-          aria-label="Estado de publicación de la sesión">
+-          <span class="composer-mode-label">Borrador</span>
+-          <label class="composer-switch" for="sessionPublishToggle">
+-            <input id="sessionPublishToggle" type="checkbox" aria-label="Publicar sesión">
+-            <span class="composer-switch-track" aria-hidden="true">
+-              <span class="composer-switch-thumb"></span>
+-            </span>
+-          </label>
+-          <span class="composer-mode-label">Publicar</span>
++            <div class="composer-mode-switch" role="group" aria-label="Modo de generación">
++              <span class="composer-mode-label">podcast</span>
++              <label class="composer-switch" for="composerModeToggle">
++                <input id="composerModeToggle" type="checkbox" aria-label="Activar modo video">
++                <span class="composer-switch-track" aria-hidden="true">
++                  <span class="composer-switch-thumb"></span>
++                </span>
++              </label>
++              <span class="composer-mode-label">video activo</span>
++            </div>
++
++            <div class="composer-mode-switch" role="group" aria-label="Modo Reel/Short">
++              <span class="composer-mode-label">normal</span>
++              <label class="composer-switch" for="reelModeToggle">
++                <input id="reelModeToggle" type="checkbox" aria-label="Activar modo Reel/Short">
++                <span class="composer-switch-track" aria-hidden="true">
++                  <span class="composer-switch-thumb"></span>
++                </span>
++              </label>
++              <span class="composer-mode-label">reel/short</span>
++            </div>
++
++            <div id="composerPublishModeWrap" class="composer-mode-switch" role="group"
++              aria-label="Estado de publicación de la sesión">
++              <span class="composer-mode-label">borrador</span>
++              <label class="composer-switch" for="sessionPublishToggle">
++                <input id="sessionPublishToggle" type="checkbox" aria-label="Publicar sesión">
++                <span class="composer-switch-track" aria-hidden="true">
++                  <span class="composer-switch-thumb"></span>
++                </span>
++              </label>
++              <span class="composer-mode-label">publicar</span>
++            </div>
++          </div>
++          </details>
++          <button class="row-icon-btn regenerate-all-gemini-audios-trigger" type="button"
++            data-action="regenerate-all-gemini-audios"
++            title="Regenerar audios Gemini (todas las escenas)" aria-label="Regenerar audios Gemini de todas las escenas">
++            <i class="fas fa-wave-square" aria-hidden="true"></i>
++          </button>
++          <button class="row-icon-btn open-music-config-trigger" type="button"
++            data-action="open-music-config-modal"
++            title="Música de fondo" aria-label="Música de fondo">
++            <i class="fas fa-music" aria-hidden="true"></i>
++          </button>
++          <button id="togglePodcastEditorThemeBtn" class="row-icon-btn podcast-editor-theme-toggle" type="button"
++            title="Activar tema claro" aria-label="Activar tema claro" aria-pressed="false">
++            <i class="fas fa-sun" aria-hidden="true"></i>
++          </button>
+         </div>
+
+         <div id="podcastVideoActivityNotification" class="activity-notification-wrap"
+@@ -1057,30 +1615,29 @@
+         </div>
+
+         <div class="floating-panel-head-actions">
+-          <div id="podcastSessionShareMenuWrap" class="podcast-session-share-menu-wrap">
+-            <button id="sharePodcastVideoSessionBtn" class="row-icon-btn" type="button"
+-              title="Compartir sesión" aria-label="Compartir sesión" aria-haspopup="menu" aria-expanded="false"
+-              aria-controls="podcastSessionShareMenu">
+-              <i class="fas fa-share-alt" aria-hidden="true"></i>
+-            </button>
+-            <div id="podcastSessionShareMenu" class="podcast-session-share-menu" role="menu" hidden>
+-              <button id="copyPodcastVideoSessionLinkBtn" type="button" role="menuitem">
+-                <i class="fas fa-link" aria-hidden="true"></i>
+-                <span>Copiar enlace</span>
+-              </button>
+-              <button id="openPodcastVideoSessionLinkBtn" type="button" role="menuitem">
+-                <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+-                <span>Abrir enlace</span>
++          <div class="podcast-header-action-group is-view" role="group" aria-label="Compartir y pantalla completa">
++            <div id="podcastSessionShareMenuWrap" class="podcast-session-share-menu-wrap">
++              <button id="sharePodcastVideoSessionBtn" class="row-icon-btn" type="button"
++                title="Compartir sesión" aria-label="Compartir sesión" aria-haspopup="menu" aria-expanded="false"
++                aria-controls="podcastSessionShareMenu">
++                <i class="fas fa-share-alt" aria-hidden="true"></i>
+               </button>
++              <div id="podcastSessionShareMenu" class="podcast-session-share-menu" role="menu" hidden>
++                <button id="copyPodcastVideoSessionLinkBtn" type="button" role="menuitem">
++                  <i class="fas fa-link" aria-hidden="true"></i>
++                  <span>Copiar enlace</span>
++                </button>
++                <button id="openPodcastVideoSessionLinkBtn" type="button" role="menuitem">
++                  <i class="fas fa-external-link-alt" aria-hidden="true"></i>
++                  <span>Abrir enlace</span>
++                </button>
++              </div>
+             </div>
++            <button id="podcastVideoModalFullscreenBtn" class="row-icon-btn snoopy-editor-fullscreen-toggle"
++              type="button" title="Pantalla completa" aria-label="Pantalla completa" aria-pressed="false">
++              <i class="fas fa-expand"></i>
++            </button>
+           </div>
+-          <button id="podcastVideoModalFullscreenBtn" class="row-icon-btn snoopy-editor-fullscreen-toggle" type="button"
+-            title="Pantalla completa" aria-label="Pantalla completa" aria-pressed="false">
+-            <i class="fas fa-expand"></i>
+-          </button>
+-          <button id="closePodcastVideoBtn" class="row-icon-btn" type="button" title="Cerrar video">
+-            <i class="fas fa-times"></i>
+-          </button>
+         </div>
+       </div>
+
+@@ -1122,6 +1679,8 @@
+                 </select>
+               </div>
+               <div id="podcastSceneLibraryList" class="podcast-scene-library-list" aria-live="polite"></div>
++              <button id="podcastVideoLibraryResizeHandle" class="podcast-video-library-resize-handle" type="button"
++                aria-label="Redimensionar biblioteca pública" title="Arrastra para cambiar el ancho"></button>
+             </aside>
+             <div class="podcast-video-preview-shell">
+               <div class="podcast-preview-left-toolbar" role="toolbar" aria-label="Herramientas de escena">
+@@ -1130,12 +1689,6 @@
+                   aria-label="Mostrar librería" aria-expanded="false" data-tooltip="Mostrar librería">
+                   <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                 </button>
+-                <button id="togglePodcastVideoLibraryBtn"
+-                  class="row-icon-btn podcast-preview-toolbar-btn podcast-preview-toolbar-btn--library" type="button"
+-                  aria-controls="podcastVideoLibrary" aria-expanded="true" title="Cerrar librería"
+-                  aria-label="Cerrar librería" data-tooltip="Cerrar librería">
+-                  <i class="fas fa-chevron-left" aria-hidden="true"></i>
+-                </button>
+                 <button class="row-icon-btn podcast-preview-toolbar-btn podcast-overlay-card-add-btn" type="button"
+                   data-action="overlay-card-open" aria-label="Añadir card" title="Añadir card"
+                   data-tooltip="Añadir card">
+@@ -1175,7 +1728,22 @@
+                     <button id="podcastTimelineFloatingPreviewStopBtn" class="row-icon-btn" type="button" title="Detener montaje" aria-label="Detener montaje"><i class="fas fa-stop" aria-hidden="true"></i></button>
+                   </div>
+                 </div>
++                <button id="podcastTimelineFloatingPreviewResizeHandle"
++                  class="podcast-timeline-floating-preview-resize-handle" type="button"
++                  aria-label="Redimensionar visor flotante"
++                  title="Arrastra para cambiar el tamaño del visor"></button>
++                <!-- Media Loading Overlay – visible while preparePlaybackRange carga los archivos -->
++                <div id="podcastPreviewMediaLoadingOverlay" aria-live="polite" aria-label="Cargando archivos del timeline">
++                  <div class="podcast-preview-loading-content">
++                    <img src="SnoopyPodcastCreator.png" alt="" class="podcast-preview-loading-logo" aria-hidden="true">
++                    <p id="podcastPreviewMediaLoadingStatus" class="podcast-preview-loading-status">Preparando archivos...</p>
++                    <div class="podcast-preview-loading-bar-track" aria-hidden="true">
++                      <div id="podcastPreviewMediaLoadingBar" class="podcast-preview-loading-bar-fill"></div>
++                    </div>
++                  </div>
++                </div>
+                 <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
++
+                 <button id="podcastPreviewFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
+                   aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
+                   <i class="fas fa-expand" aria-hidden="true"></i>
+@@ -1217,67 +1785,33 @@
+           </div>
+
+           <div class="podcast-studio-tracks">
+-            <div class="podcast-studio-track-head">
+-              <div class="podcast-studio-track-head-left">
+-                <div class="podcast-timeline-ruler-zoom-inner">
+-                  <input id="podcastTimelineZoomOutRange" class="podcast-timeline-zoom-range" type="range" min="0.25"
+-                    max="1" step="0.05" value="1" aria-label="Zoom del timeline" title="Zoom del timeline">
+-                </div>
+-                <div class="composer-mode-switch podcast-studio-video-mode-switch" role="group"
+-                  aria-label="Modo podcast o podcast con video">
+-                  <span class="composer-mode-label">Sin video</span>
+-                  <label class="composer-switch" for="podcastVideoModeToggle">
+-                    <input id="podcastVideoModeToggle" type="checkbox" aria-label="Activar podcast con video">
+-                    <span class="composer-switch-track" aria-hidden="true">
+-                      <span class="composer-switch-thumb"></span>
+-                    </span>
+-                  </label>
+-                  <span class="composer-mode-label">Con video</span>
+-                </div>
+-              </div>
+-              <div class="podcast-studio-track-head-right">
+-                <span id="podcastStudioTrackTitle">Escenas</span>
+-                <span id="podcastStudioTrackHeadTime" class="timeline-clip-duration-label" aria-live="polite">00:00.0</span>
+-                <div class="podcast-timeline-view-toggle" role="group" aria-label="Modo de timeline">
+-                  <button id="podcastTimelineNormalModeBtn" class="timeline-mode-btn" type="button"
+-                    title="Modo normal">Normal</button>
+-                  <button id="podcastTimelineTracksModeBtn" class="timeline-mode-btn" type="button"
+-                    title="Modo tracks">Tracks</button>
+-                </div>
+-              </div>
+-            </div>
+             <div id="podcastTimelineRuler" class="podcast-timeline-ruler"></div>
+             <div id="podcastVideoTimeline" class="podcast-video-timeline podcast-video-timeline-tracks"
+               aria-live="polite"></div>
+           </div>
+         </div>
+-        <button id="togglePodcastStudioInspectorBtn" class="row-icon-btn podcast-studio-inspector-toggle"
+-          type="button" aria-controls="podcastStudioInspector" aria-expanded="true" title="Ocultar inspector">
+-          <i class="fas fa-chevron-right"></i>
+-        </button>
+         <aside id="podcastStudioInspector" class="podcast-studio-inspector">
+           <div class="studio-generate-toolbar-head">
+-            Acciones de escena
+-          </div>
+-          <div class="studio-generate-toolbar">
+-            <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-video"
+-              title="Generar video de la escena activa con Veo" aria-label="Generar video de escena activa">
+-              <i class="fas fa-film"></i>
+-            </button>
+-            <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-audio"
+-              title="Generar voz de la escena activa" aria-label="Generar voz de escena activa">
+-              <i class="fas fa-microphone-alt"></i>
+-            </button>
+-            <button id="playDialogueAudioBtn" class="row-icon-btn row-play-btn" type="button"
+-              title="Reproducir voz guardada de la escena" aria-label="Reproducir voz guardada de escena">
+-              <i class="fas fa-play"></i>
+-            </button>
+-            <button id="regenerateAllPortraitsBtn" class="row-icon-btn" type="button"
+-              title="Regenerar todos los retratos" aria-label="Regenerar retratos">
+-              <i class="fas fa-user-circle"></i>
+-            </button>
+-            <button id="deleteDialogueAudioBtn" class="row-icon-btn" type="button" title="Eliminar voz escena"
+-              aria-label="Eliminar voz de escena"><i class="fas fa-trash"></i></button>
++            <div class="studio-generate-toolbar">
++              <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-video"
++                title="Generar video de la escena activa con Veo" aria-label="Generar video de escena activa">
++                <i class="fas fa-film"></i>
++              </button>
++              <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-audio"
++                title="Generar voz de la escena activa" aria-label="Generar voz de escena activa">
++                <i class="fas fa-microphone-alt"></i>
++              </button>
++              <button id="playDialogueAudioBtn" class="row-icon-btn row-play-btn" type="button"
++                title="Reproducir voz guardada de la escena" aria-label="Reproducir voz guardada de escena">
++                <i class="fas fa-play"></i>
++              </button>
++              <button id="regenerateAllPortraitsBtn" class="row-icon-btn" type="button"
++                title="Regenerar todos los retratos" aria-label="Regenerar retratos">
++                <i class="fas fa-user-circle"></i>
++              </button>
++              <button id="deleteDialogueAudioBtn" class="row-icon-btn" type="button" title="Eliminar voz escena"
++                aria-label="Eliminar voz de escena"><i class="fas fa-trash"></i></button>
++            </div>
+           </div>
+           <section class="inspector-scene-panel" aria-label="Editor de escena seleccionada">
+             <div class="inspector-scene-panel-head">Escena seleccionada</div>
+@@ -1294,8 +1828,8 @@
+         </button>
+       </div>
+       <div class="podcast-video-transport" role="group" aria-label="Controles del montaje">
+-        <div class="podcast-video-transport-group is-left" aria-label="Acciones generales">
+-          <div class="podcast-video-transport-bundle" aria-label="Ordenar y generar">
++        <div class="podcast-video-transport-group is-left is-tools" aria-label="Acciones generales">
++          <div class="podcast-video-transport-bundle is-tools" aria-label="Ordenar y generar">
+             <button id="importGeminiDialogueTrackBtn" class="row-icon-btn is-active" type="button"
+               aria-label="Ocultar audio del montaje" data-tooltip="Ocultar audio del montaje">
+               <i class="fas fa-wave-square"></i>
+@@ -1304,14 +1838,16 @@
+               aria-label="Reordenar escenas entre tracks" data-tooltip="Reordenar escenas entre tracks">
+               <i class="fas fa-stream"></i>
+             </button>
+-            <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-video-batch"
+-              aria-label="Generar escenas faltantes" data-tooltip="Generar escenas faltantes">
+-              <i class="fas fa-layer-group"></i>
+-            </button>
+-            <button class="row-icon-btn" type="button" data-action="timeline-regenerate-scene-video-batch-hq"
+-              aria-label="Generar o regenerar todas las escenas" data-tooltip="Generar/Regenerar todas las escenas">
+-              <i class="fas fa-sync-alt"></i>
+-            </button>
++            <span class="podcast-tools-generate-group" role="group" aria-label="Generación de escenas">
++              <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-video-batch"
++                aria-label="Generar escenas faltantes" data-tooltip="Generar escenas faltantes">
++                <i class="fas fa-layer-group"></i>
++              </button>
++              <button class="row-icon-btn" type="button" data-action="timeline-regenerate-scene-video-batch-hq"
++                aria-label="Generar o regenerar todas las escenas" data-tooltip="Generar/Regenerar todas las escenas">
++                <i class="fas fa-sync-alt"></i>
++              </button>
++            </span>
+             <button id="autoLinkStorageVideosBtn" class="row-icon-btn" type="button"
+               aria-label="Autoconectar videos desde Storage" data-tooltip="Autoconectar videos desde Storage">
+               <i class="fas fa-magic"></i>
+@@ -1319,8 +1855,17 @@
+           </div>
+         </div>
+
+-        <div class="podcast-video-transport-group is-middle is-floating-toolbar" aria-label="Reproducción">
+-          <div class="podcast-video-transport-bundle" aria-label="Reproducción">
++        <div class="podcast-video-transport-bundle podcast-timeline-footer-zoom is-zoom"
++          aria-label="Zoom del timeline">
++          <i class="fas fa-search-minus" aria-hidden="true"></i>
++          <div class="podcast-timeline-ruler-zoom-inner">
++            <input id="podcastTimelineZoomOutRange" class="podcast-timeline-zoom-range" type="range" min="0.25"
++              max="1" step="0.05" value="1" aria-label="Zoom del timeline" title="Zoom del timeline">
++          </div>
++          <i class="fas fa-search-plus" aria-hidden="true"></i>
++        </div>
++
++        <div class="podcast-video-transport-bundle is-playback" aria-label="Reproducción">
+             <button id="podcastVideoPrevBtn" class="row-icon-btn" type="button" data-tooltip="Escena anterior"
+               aria-label="Escena anterior"><i class="fas fa-step-backward"></i></button>
+             <button id="podcastVideoPlayBtn" class="row-icon-btn is-playing" type="button"
+@@ -1331,8 +1876,13 @@
+               aria-label="Detener"><i class="fas fa-stop"></i></button>
+             <button id="podcastVideoNextBtn" class="row-icon-btn" type="button" data-tooltip="Siguiente escena"
+               aria-label="Siguiente escena"><i class="fas fa-step-forward"></i></button>
+-          </div>
+-          <div class="podcast-video-transport-bundle" aria-label="Velocidad y zoom">
++            <div class="podcast-playback-time-status" aria-label="Tiempo del montaje">
++              <span id="podcastStudioTrackTitle">Tiempo</span>
++              <span id="podcastStudioTrackHeadTime" class="timeline-clip-duration-label"
++                aria-live="polite">00:00.0</span>
++            </div>
++        </div>
++        <div class="podcast-video-transport-bundle is-view-controls" aria-label="Velocidad y zoom">
+             <label class="studio-speed-wrap">
+               <select id="podcastVideoSpeedSelect">
+                 <option value="0.75">0.75x</option>
+@@ -1341,23 +1891,22 @@
+                 <option value="1.5">1.50x</option>
+               </select>
+             </label>
+-            <button id="copyVoiceoverToOnscreenTextAllBtn" class="row-icon-btn" type="button"
+-              aria-label="Copiar guión a texto en pantalla en todas las escenas"
+-              data-tooltip="Copiar guión → texto en pantalla (todas las escenas)">
+-              <i class="fas fa-copy"></i>
+-            </button>
+-            <button id="toggleOnScreenTextTrackBtn" class="row-icon-btn is-active" type="button"
+-              aria-label="Ocultar track de texto" aria-pressed="true" data-tooltip="Ocultar track de texto">
+-              <i class="fas fa-closed-captioning"></i>
+-            </button>
+             <button id="podcastVideoZoomBtn" class="row-icon-btn" type="button" aria-label="Activar zoom de video"
+               data-tooltip="Activar zoom de video">
+               <i class="fas fa-search-plus"></i>
+             </button>
+-          </div>
++        </div>
++        <div class="podcast-studio-track-head-right podcast-timeline-footer-summary is-summary"
++          aria-label="Estado del timeline">
++            <div class="podcast-timeline-view-toggle" role="group" aria-label="Modo de timeline">
++              <button id="podcastTimelineNormalModeBtn" class="timeline-mode-btn" type="button"
++                title="Modo normal">Normal</button>
++              <button id="podcastTimelineTracksModeBtn" class="timeline-mode-btn" type="button"
++                title="Modo tracks">Tracks</button>
++            </div>
+         </div>
+
+-        <div class="podcast-video-transport-corner" aria-label="Guardar y exportar">
++        <div class="podcast-video-transport-corner is-output" aria-label="Guardar y exportar">
+           <button id="exportMontageBtn" class="row-icon-btn" type="button" aria-label="Exportar montaje"
+             data-tooltip="Exportar montaje">
+             <i class="fas fa-file-export"></i>
+@@ -1392,10 +1941,16 @@
+     <section class="podcast-scene-insert-panel floating-panel-card" role="dialog" aria-modal="true"
+       aria-label="Elegir posición para insertar escena pública">
+       <div class="floating-panel-head">
+-        <div>
+-          <h3 id="podcastSceneInsertTitle">Insertar escena pública</h3>
+-          <p id="podcastSceneInsertHint" class="podcast-scene-insert-hint">Elige dónde colocar la escena en el timeline.
+-          </p>
++        <div class="podcast-scene-insert-heading">
++          <span class="podcast-scene-insert-heading-icon" aria-hidden="true">
++            <i class="fas fa-layer-group"></i>
++          </span>
++          <div class="podcast-scene-insert-heading-copy">
++            <span class="podcast-scene-insert-eyebrow">Biblioteca pública</span>
++            <h3 id="podcastSceneInsertTitle">Insertar escena pública</h3>
++            <p id="podcastSceneInsertHint" class="podcast-scene-insert-hint">Elige dónde colocar la escena en el timeline.
++            </p>
++          </div>
+         </div>
+         <div class="floating-panel-head-actions">
+           <button id="closePodcastSceneInsertBtn" class="row-icon-btn" type="button" title="Cerrar" aria-label="Cerrar">
+@@ -1403,14 +1958,28 @@
+           </button>
+         </div>
+       </div>
+-      <div id="podcastSceneInsertList" class="podcast-scene-insert-list"
+-        aria-label="Posiciones disponibles para insertar"></div>
++      <div class="podcast-scene-insert-workspace">
++        <div class="podcast-scene-insert-destinations">
++          <div class="podcast-scene-insert-destinations-head">
++            <div>
++              <strong>Destino en el timeline</strong>
++              <span>Pasa el cursor entre dos escenas para elegir la posición</span>
++            </div>
++            <i class="fas fa-stream" aria-hidden="true"></i>
++          </div>
++          <div id="podcastSceneInsertList" class="podcast-scene-insert-list"
++            aria-label="Posiciones disponibles para insertar"></div>
++        </div>
++      </div>
+       <div class="podcast-scene-insert-actions">
+-        <button id="cancelPodcastSceneInsertBtn" class="podcast-scene-insert-action-btn" type="button">Cancelar</button>
+-        <button id="confirmPodcastSceneInsertNewTrackBtn" class="podcast-scene-insert-action-btn" type="button">Insertar
+-          escena en track nuevo</button>
+-        <button id="confirmPodcastSceneInsertBtn" class="podcast-scene-insert-action-btn is-primary"
+-          type="button">Insertar escena</button>
++        <button id="cancelPodcastSceneInsertBtn" class="podcast-scene-insert-action-btn is-cancel"
++          type="button">Cancelar</button>
++        <div class="podcast-scene-insert-commit-actions">
++          <button id="confirmPodcastSceneInsertNewTrackBtn" class="podcast-scene-insert-action-btn is-secondary"
++            type="button"><i class="fas fa-layer-group" aria-hidden="true"></i><span>Nuevo track</span></button>
++          <button id="confirmPodcastSceneInsertBtn" class="podcast-scene-insert-action-btn is-primary"
++            type="button"><i class="fas fa-check" aria-hidden="true"></i><span>Insertar escena</span></button>
++        </div>
+       </div>
+     </section>
+   </div>
+@@ -1466,11 +2035,11 @@
+     <button class="floating-panel-backdrop" type="button" data-action="close-creative-video-modal"
+       aria-label="Cerrar video creativo"></button>
+     <section id="creativeVideoShell" class="creative-video-shell floating-panel-card"
+-      aria-label="Snoopy Video Creator Creativo">
++      aria-label="Snoopy Editor">
+       <div class="floating-panel-head">
+         <h3 class="podcast-brand-title">
+-          <span>Snoopy Video Creator Creativo</span>
+-          <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator Creativo" class="podcast-brand-title-icon"
++          <span class="snoopy-editor-brand-copy">Snoopy<br>Editor</span>
++          <img src="SnoopyPodcastCreator.png" alt="Snoopy Editor" class="podcast-brand-title-icon"
+             loading="lazy">
+         </h3>
+         <div class="floating-panel-session-title" title="Nombre de la sesión"></div>
+@@ -1663,76 +2232,60 @@
+         </button>
+       </div>
+
+-      <!-- CONTROLES ROW: preset + volumen -->
+-      <div class="mc-controls-row">
+-        <label class="mc-ctrl-block mc-ctrl-preset">
+-          <span class="mc-ctrl-label"><i class="fas fa-layer-group"></i> Preset</span>
+-          <select id="panelMusicPreset" class="mc-select">
+-            <option value="ambient">Ambient</option>
+-            <option value="focus">Focus</option>
+-            <option value="pulse">Pulse</option>
+-          </select>
+-        </label>
+-        <label class="mc-ctrl-block mc-ctrl-vol">
+-          <span class="mc-ctrl-label"><i class="fas fa-volume-up"></i> Volumen</span>
+-          <div class="mc-vol-row">
+-            <input id="panelMusicVolume" class="mc-range" type="range" min="0" max="100" step="1" value="22">
+-            <span class="mc-vol-num" id="panelMusicVolumeDisplay">22</span>
++      <!-- BODY GRID (2 COLUMNAS) -->
++      <div class="mc-body-grid">
++        <!-- COLUMNA IZQUIERDA: CONTROLES + ESTA SESIÓN -->
++        <div class="mc-col-left">
++          <div class="mc-controls-row">
++            <label class="mc-ctrl-block mc-ctrl-preset">
++              <span class="mc-ctrl-label"><i class="fas fa-layer-group"></i> Preset</span>
++              <select id="panelMusicPreset" class="mc-select">
++                <option value="ambient">Ambient</option>
++                <option value="focus">Focus</option>
++                <option value="pulse">Pulse</option>
++              </select>
++            </label>
++            <label class="mc-ctrl-block mc-ctrl-vol">
++              <span class="mc-ctrl-label"><i class="fas fa-volume-up"></i> Volumen</span>
++              <div class="mc-vol-row">
++                <input id="panelMusicVolume" class="mc-range" type="range" min="0" max="100" step="1" value="22">
++                <span class="mc-vol-num" id="panelMusicVolumeDisplay">22</span>
++              </div>
++            </label>
+           </div>
+-        </label>
+-      </div>
+
+-      <!-- SEPARADOR -->
+-      <div class="mc-divider"><span>Biblioteca global</span>
+-        <label class="mc-add-file-btn" title="Añadir a biblioteca global">
+-          <i class="fas fa-upload"></i>
+-          <input id="panelMusicFileInput" type="file" accept="audio/*" hidden>
+-        </label>
+-      </div>
+-      <div id="panelMusicGlobalLibraryList" class="mc-track-list mc-track-list--empty"></div>
+-
+-      <!-- SEPARADOR SESIÓN -->
+-      <div class="mc-divider">
+-        <span>Esta sesión</span>
+-        <span class="mc-divider-actions">
+-          <button id="selectAllSessionAudiosBtn" class="mc-icon-btn" type="button"
+-            title="Seleccionar todos"><i class="fas fa-check-double"></i></button>
+-          <button id="clearAllSessionAudiosBtn" class="mc-icon-btn" type="button"
+-            title="Quitar todos"><i class="fas fa-ban"></i></button>
+-          <button id="addPanelMusicTrackBtn" class="mc-icon-btn mc-icon-btn--accent" type="button"
+-            title="Añadir audios"><i class="fas fa-plus"></i></button>
+-        </span>
+-      </div>
+-      <div id="panelMusicTrackList" class="mc-track-list mc-track-list--empty"></div>
++          <div class="mc-divider">
++            <span>Esta sesión</span>
++            <span class="mc-divider-actions">
++              <button id="selectAllSessionAudiosBtn" class="mc-icon-btn" type="button"
++                title="Seleccionar todos"><i class="fas fa-check-double"></i></button>
++              <button id="clearAllSessionAudiosBtn" class="mc-icon-btn" type="button"
++                title="Quitar todos"><i class="fas fa-ban"></i></button>
++              <button id="addPanelMusicTrackBtn" class="mc-icon-btn mc-icon-btn--accent" type="button"
++                title="Añadir audios"><i class="fas fa-plus"></i></button>
++            </span>
++          </div>
++          <div id="panelMusicTrackList" class="mc-track-list mc-track-list--empty"></div>
+
+-      <!-- TRACK INFO -->
+-      <div id="panelMusicTrackInfo" class="mc-track-info">
+-        <i class="fas fa-compact-disc mc-track-info-icon"></i>
+-        <span>Sin canción seleccionada</span>
+-      </div>
++          <div id="panelMusicTrackInfo" class="mc-track-info">
++            <i class="fas fa-compact-disc mc-track-info-icon"></i>
++            <span>Sin canción seleccionada</span>
++          </div>
++        </div>
+
+-      <!-- IA PROMPT -->
+-      <div class="mc-ai-block">
+-        <div class="mc-ai-label"><i class="fas fa-wand-magic-sparkles"></i> Generar con IA</div>
+-        <textarea id="panelMusicAiPrompt" class="mc-ai-textarea" rows="2"
+-          placeholder="Ej. Ambient instrumental cálido, pads suaves, sin voces…"></textarea>
+-        <button id="generatePanelMusicAiBtn" class="mc-ai-generate-btn" type="button">
+-          <i class="fas fa-magic"></i> Generar música
+-        </button>
++        <!-- COLUMNA DERECHA: BIBLIOTECA GLOBAL -->
++        <div class="mc-col-right">
++          <div class="mc-divider">
++            <span>Biblioteca global</span>
++            <label class="mc-add-file-btn" title="Añadir a biblioteca global">
++              <i class="fas fa-upload"></i>
++              <input id="panelMusicFileInput" type="file" accept="audio/*" hidden>
++            </label>
++          </div>
++          <div id="panelMusicGlobalLibraryList" class="mc-track-list mc-track-list--empty"></div>
++        </div>
+       </div>
+
+-      <!-- TOOLBAR INFERIOR -->
+-      <div class="mc-toolbar">
+-        <button id="panelMusicPlayBtn" class="mc-tool-btn" type="button" title="Reproducir">
+-          <i class="fas fa-play"></i>
+-        </button>
+-        <button id="panelMusicStopBtn" class="mc-tool-btn" type="button" title="Detener">
+-          <i class="fas fa-stop"></i>
+-        </button>
+-        <button id="clearPanelMusicTrackBtn" class="mc-tool-btn mc-tool-btn--danger" type="button" title="Quitar canción">
+-          <i class="fas fa-eraser"></i>
+-        </button>
+-      </div>
+
+     </section>
+   </div>
+@@ -1752,8 +2305,8 @@
+         <label class="row-field wide">
+           <span>Volumen general de la sesión</span>
+           <div class="studio-volume-control">
+-            <input id="audioTrackMontageVolume" type="range" min="0" max="100" step="1" value="100">
+-            <input id="audioTrackMontageVolumeNumber" type="number" min="0" max="100" step="1" value="100"
++            <input id="audioTrackMontageVolume" type="range" min="0" max="100" step="1" value="50">
++            <input id="audioTrackMontageVolumeNumber" type="number" min="0" max="100" step="1" value="50"
+               inputmode="numeric" aria-label="Volumen general de la sesión">
+           </div>
+         </label>
+@@ -1775,14 +2328,6 @@
+           </select>
+         </label>
+         <div id="audioTrackSourceInfo" class="music-track-info">Sin track disponible. Se usará preset.</div>
+-        <label class="row-field wide">
+-          <span>Volumen del fondo cuando Gemini habla</span>
+-          <div class="studio-volume-control">
+-            <input id="audioTrackDuckVolume" type="range" min="40" max="100" step="1" value="60">
+-            <input id="audioTrackDuckVolumeNumber" type="number" min="40" max="100" step="1" value="60"
+-              inputmode="numeric" aria-label="Volumen del audio de fondo cuando Gemini habla">
+-          </div>
+-        </label>
+       </div>
+       <div class="timeline-clip-duration-actions">
+         <button id="cancelAudioTrackMixBtn"
+@@ -2199,13 +2744,20 @@
+   <div id="montageExportFloatingCard" class="montage-export-floating-card" hidden>
+     <div class="montage-export-floating-card-shell">
+       <div class="montage-export-floating-card-head" data-action="drag-montage-export-floating-card">
++        <div class="montage-export-floating-card-actions is-left">
++          <button id="reopenMontageExportModalBtn" class="row-icon-btn" type="button" title="Reabrir exportación"
++            aria-label="Reabrir exportación">
++            <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i>
++          </button>
++        </div>
+         <div class="montage-export-floating-card-title">
+           <strong id="montageExportFloatingTitle">Exportación en curso</strong>
+           <span id="montageExportFloatingStatus">Seguimiento activo.</span>
+         </div>
+-        <div class="montage-export-floating-card-actions">
+-          <button id="reopenMontageExportModalBtn" class="row-icon-btn" type="button" title="Reabrir exportación" aria-label="Reabrir exportación">
+-            <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i>
++        <div class="montage-export-floating-card-actions is-right">
++          <button id="closeMontageExportFloatingCardBtn" class="row-icon-btn" type="button"
++            title="Cerrar seguimiento" aria-label="Cerrar seguimiento de exportación">
++            <i class="fas fa-times" aria-hidden="true"></i>
+           </button>
+         </div>
+       </div>
+@@ -2221,17 +2773,28 @@
+
+   <!-- Modal Reemplazar Escena -->
+   <div id="podcastSceneVideoSelectorModal" class="pme-modal-overlay" hidden>
+-    <div class="pme-modal-container">
++    <div class="pme-modal-container pme-scene-replacement-modal">
+       <div class="pme-modal-header">
+-        <h3 id="podcastSceneVideoSelectorModalTitle">Reemplazar Escena</h3>
+-        <button id="closeSceneVideoSelectorBtn" class="pme-modal-close" type="button"><i
++        <div class="pme-modal-heading">
++          <span class="pme-modal-eyebrow">Medios de escena</span>
++          <h3 id="podcastSceneVideoSelectorModalTitle">Reemplazar escena</h3>
++          <p>Elige un recurso generado, usa otro archivo o sube contenido nuevo.</p>
++        </div>
++        <button id="closeSceneVideoSelectorBtn" class="pme-modal-close" type="button"
++          aria-label="Cerrar selector de escena"><i
+             class="fas fa-times"></i></button>
+       </div>
+
+       <div class="pme-tabs">
+-        <button id="sceneVideoTabGeneratedBtn" class="pme-tab-btn is-active" type="button">Generados</button>
+-        <button id="sceneVideoTabOthersBtn" class="pme-tab-btn" type="button">Otros</button>
+-        <button id="sceneVideoTabUploadBtn" class="pme-tab-btn" type="button">Subir Archivo</button>
++        <button id="sceneVideoTabGeneratedBtn" class="pme-tab-btn is-active" type="button">
++          <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span>Generados</span>
++        </button>
++        <button id="sceneVideoTabOthersBtn" class="pme-tab-btn" type="button">
++          <i class="fas fa-photo-video" aria-hidden="true"></i><span>Otros medios</span>
++        </button>
++        <button id="sceneVideoTabUploadBtn" class="pme-tab-btn" type="button">
++          <i class="fas fa-cloud-upload-alt" aria-hidden="true"></i><span>Subir archivo</span>
++        </button>
+       </div>
+
+       <div class="pme-modal-body" style="display: block;">
+@@ -2247,18 +2810,73 @@
+         </div>
+
+         <div id="sceneMediaUploadContainer" style="display: none;">
+-          <input type="file" id="podcast-media-upload-input" name="filepond" />
++          <input type="file" id="podcast-media-upload-input" name="filepond"
++            accept="image/*,video/mp4,video/quicktime,.mp4,.mov" />
++          <div id="sceneMediaUploadStatus" class="pme-upload-status" role="status" aria-live="polite" hidden></div>
++          <div id="sceneMediaUploadError" class="pme-upload-error" role="alert" hidden></div>
+         </div>
+
++        <section id="sceneExistingMediaSelection" class="pme-existing-media" hidden
++          style="margin-top: 1rem; padding: 0.75rem; border: 1px solid var(--pme-border); border-radius: 12px; background: #f8fafc;">
++          <div style="display: flex; align-items: center; gap: 0.75rem;">
++            <img id="sceneExistingMediaPreview" alt="Imagen seleccionada actualmente"
++              style="width: 96px; height: 64px; object-fit: cover; border-radius: 8px; background: #020617;">
++            <video id="sceneExistingVideoPreview" aria-label="Video seleccionado actualmente" muted playsinline preload="metadata"
++              style="display: none; width: 96px; height: 64px; object-fit: cover; border-radius: 8px; background: #020617;"></video>
++            <div style="min-width: 0; flex: 1;">
++              <strong id="sceneExistingMediaLabel"
++                style="display: block; color: var(--pme-text); font-size: 0.86rem;">Archivo actual</strong>
++              <span id="sceneExistingMediaName"
++                style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pme-muted); font-size: 0.78rem;"></span>
++            </div>
++            <button id="removeSceneExistingMediaBtn" class="pme-btn pme-btn-ghost" type="button"
++              aria-label="Quitar archivo actual de la selección">
++              <i class="fas fa-times" aria-hidden="true"></i> Quitar
++            </button>
++          </div>
++        </section>
++
++        <section class="pme-stop-motion" aria-labelledby="pme-stop-motion-title">
++          <div class="pme-stop-motion-mode" role="group" aria-label="Tipo de reemplazo de escena">
++            <span id="pme-stop-motion-title">Tipo de reemplazo</span>
++            <button class="pme-stop-motion-mode-btn is-selected" type="button" data-stop-motion-mode="single"
++              aria-pressed="true">Una imagen</button>
++            <button class="pme-stop-motion-mode-btn" type="button" data-stop-motion-mode="stop-motion"
++              aria-pressed="false">Stop motion</button>
++            <button class="pme-stop-motion-mode-btn" type="button" data-stop-motion-mode="video"
++              aria-pressed="false"><i class="fas fa-film" aria-hidden="true"></i> Video MP4 / MOV</button>
++          </div>
++          <p id="sceneVideoUploadHelp" class="pme-stop-motion-help" hidden>
++            Los archivos MOV de iPhone o macOS se convierten automáticamente a MP4 antes de guardarse.
++          </p>
++          <div class="pme-stop-motion-panel" hidden>
++            <div class="pme-stop-motion-summary">
++              <strong>Secuencia</strong>
++              <span class="pme-stop-motion-stats">0 imágenes</span>
++            </div>
++            <p class="pme-stop-motion-help">Selecciona entre 2 y 60 imágenes. Puedes combinarlas desde la biblioteca y desde tus archivos.</p>
++            <div class="pme-stop-motion-beat-controls">
++              <label>
++                <input id="stopMotionSyncToMusic" type="checkbox">
++                Cambiar imágenes al ritmo de la música de fondo
++              </label>
++              <button id="analyzeStopMotionMusicBtn" class="pme-btn pme-btn-ghost" type="button">Analizar ritmo</button>
++              <span id="stopMotionMusicStatus" class="pme-stop-motion-help" role="status" aria-live="polite"></span>
++            </div>
++            <div class="pme-stop-motion-tray" role="list" aria-label="Orden de imágenes stop motion"></div>
++            <div class="pme-stop-motion-empty">Agrega imágenes y arrástralas para cambiar su orden.</div>
++          </div>
++        </section>
++
+         <div id="image-movement-settings"
+           style="display: none; padding: 1.5rem; background: #f9fafb; border-radius: 12px; margin-top: 1rem; border: 1px solid var(--pme-border);">
+           <h6 style="margin-top: 0; font-weight: 600; color: var(--pme-text); font-size: 0.9rem; margin-bottom: 1rem;">
+             Efectos de Movimiento (Ken Burns)</h6>
+           <div class="movement-options-grid">
+-            <div class="movement-option" data-effect="pan-left"><i class='fas fa-arrow-right'></i> Izq a Der</div>
+-            <div class="movement-option" data-effect="pan-right"><i class='fas fa-arrow-left'></i> Der a Izq</div>
+-            <div class="movement-option" data-effect="pan-up"><i class='fas fa-arrow-up'></i> Abajo a Arriba</div>
+-            <div class="movement-option" data-effect="pan-down"><i class='fas fa-arrow-down'></i> Arriba a Abajo</div>
++            <div class="movement-option" data-effect="pan-right"><i class='fas fa-arrow-right'></i> Izq a Der</div>
++            <div class="movement-option" data-effect="pan-left"><i class='fas fa-arrow-left'></i> Der a Izq</div>
++            <div class="movement-option" data-effect="pan-down"><i class='fas fa-arrow-up'></i> Abajo a Arriba</div>
++            <div class="movement-option" data-effect="pan-up"><i class='fas fa-arrow-down'></i> Arriba a Abajo</div>
+             <div class="movement-option" data-effect="zoom-in"><i class='fas fa-search-plus'></i> Zoom In</div>
+             <div class="movement-option" data-effect="zoom-out"><i class='fas fa-search-minus'></i> Zoom Out</div>
+           </div>
+@@ -2275,6 +2893,7 @@
+       </div>
+
+       <div class="pme-modal-footer">
++        <span class="pme-modal-footer-hint">Selecciona un recurso para habilitar la confirmación.</span>
+         <button id="cancelSceneVideoSelectorBtn" class="pme-btn pme-btn-ghost">Cancelar</button>
+         <button id="confirmSceneMediaReplacementBtn" class="pme-btn pme-btn-primary" style="display: none;">
+           <i class="fas fa-check"></i> Confirmar
+@@ -2364,35 +2983,28 @@
+   <script src="vendor/sortablejs/Sortable.min.js"></script>
+   <script type="module" src="js/chromeLayout.js"></script>
+   <script data-cache-src="podcaster/podcaster-scene-media-render-spec.js"></script>
++  <script data-cache-src="podcaster/podcaster-stop-motion.js"></script>
++  <script data-cache-src="podcaster/podcaster-stop-motion-beats.js"></script>
+   <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
+   <script data-cache-src="podcaster/podcaster-text-render.js"></script>
+   <script data-cache-src="podcaster/podcaster-threads.js"></script>
+   <script data-cache-src="podcaster/podcaster-runtime-globals.js"></script>
+   <script data-cache-src="js/sidebar.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-timeline-model.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-scene-media-position.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-overlay-card-studio.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-overlay-cards.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-podcast-script-domain.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-video-script-domain.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-script-generator.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-script-editor.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-montage-export-v2.js" data-cache-type="module"></script>
+   <script data-cache-src="podcaster/podcaster-chat-assistant.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster.js" data-cache-type="module"></script>
+-  <script type="module" src="podcaster/podcaster-reels.js"></script>
+-  <script data-cache-src="podcaster/podcaster-public-library.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-audioGemini-timeline.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-video-generator.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-montage-export.js" data-cache-type="module"></script>
+-  <script type="module" src="podcaster/podcaster-reel-podcast-generator.js"></script>
++  <script data-cache-src="podcaster/podcaster.js" data-cache-type="module" data-cache-role="app"></script>
+   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+-  <script src="https://unpkg.com/filepond/dist/filepond.min.js"></script>
+-  <script src="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.js"></script>
+-  <script data-cache-src="js/canvas-text-baseline-guard.js"></script>
+-  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+-  <script data-cache-src="podcaster/podcaster-media-editor.js" data-cache-type="module"></script>
+-  <script data-cache-src="podcaster/podcaster-media-replacement.js" data-cache-type="module"></script>
++  <script data-cache-src="https://unpkg.com/filepond/dist/filepond.min.js" data-cache-role="deferred" data-cache-defer-until="idle"></script>
++  <script data-cache-src="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.js" data-cache-role="deferred" data-cache-defer-until="idle"></script>
++  <script data-cache-src="js/canvas-text-baseline-guard.js" data-cache-role="deferred" data-cache-defer-until="idle"></script>
++  <script data-cache-src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js" data-cache-role="deferred" data-cache-defer-until="idle"></script>
++  <script data-cache-src="podcaster/podcaster-media-editor.js" data-cache-type="module" data-cache-role="deferred" data-cache-defer-until="idle"></script>
++  <script data-cache-src="podcaster/podcaster-media-replacement.js" data-cache-type="module" data-cache-role="deferred" data-cache-defer-until="idle"></script>
+   <script src="js/update-banner-loader.js" defer></script>
+ </body>

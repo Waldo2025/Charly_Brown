@@ -71,7 +71,7 @@ def main():
         }
     ]
 
-    spelling = find_spelling_issues(blocks, gemini_verifier=None)
+    spelling, _dictionary_code = find_spelling_issues(blocks, gemini_verifier=None)
     orthotypography = find_orthotypography_issues(blocks, gemini_verifier=None)
 
     assert_true(

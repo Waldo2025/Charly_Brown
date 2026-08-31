@@ -28,7 +28,7 @@ const saveAnalizarPdfSession = async (session, analysisResults = []) => {
   })) } };
 };`;
 const patchedSource = source.replace(
-  /import\s*\{[\s\S]*?\}\s*from\s*["']\.\/analizar-pdf-api\.js["'];/,
+  /import\s*\{[\s\S]*?\}\s*from\s*["']\.\/analizar-pdf-api\.js(?:\?[^"']*)?["'];/,
   stubImport
 ).replace(
   /import\s*\{\s*createAnalizarPdfSaveCoordinator\s*\}\s*from\s*["']\.\/analizar-pdf-save-coordinator\.js["'];/,
@@ -67,7 +67,7 @@ const tempApiModulePath = path.join(tempDir, "analizar-pdf-api.mjs");
 try {
   await writeFile(tempModulePath, patchedSource, "utf8");
   const apiPatchedSource = apiSource.replace(
-    /import\s*\{\s*authFetch,\s*authFetchJson,\s*buildApiUrl,\s*hasAvailableApiBase\s*\}\s*from\s*["']\.\.\/js\/api-client\.js["'];/,
+    /import\s*\{\s*authFetch,\s*authFetchJson,\s*(?:buildApiUrl,\s*)?hasAvailableApiBase\s*\}\s*from\s*["']\.\.\/js\/api-client\.js["'];/,
     `const authFetch = async (url, options = {}) => fetch(url, options);
 const authFetchJson = async () => ({});
 const buildApiUrl = (path) => path;
@@ -128,6 +128,9 @@ const hasAvailableApiBase = () => true;`
     spellingIssueCount: 0,
     orthotypographyIssueCount: 0,
     redactionIssueCount: 0,
+    noteIssueCount: 0,
+    trackedChangeIssueCount: 0,
+    customRuleIssueCount: 0,
     colorIssueCount: 0,
     recortableIssueCount: 0,
     pageCount: 0,
@@ -206,6 +209,9 @@ const hasAvailableApiBase = () => true;`
     spellingIssueCount: 1,
     orthotypographyIssueCount: 1,
     redactionIssueCount: 0,
+    noteIssueCount: 0,
+    trackedChangeIssueCount: 0,
+    customRuleIssueCount: 0,
     colorIssueCount: 1,
     recortableIssueCount: 0,
     pageCount: 24,

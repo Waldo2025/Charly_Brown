@@ -1,6 +1,6 @@
 import {
   getFirestore, collection, query, where, getDocs, doc,
-  updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot,
+  updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot, setDoc, serverTimestamp,
   orderBy, limit
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import {
@@ -13,16 +13,18 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
-import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.572";
+import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.10.853";
 import { createPodcasterMediaRuntimeApi } from "../podcaster/podcaster-media-runtime.js?v=2026-1.0.10.539";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
+import { createPodcasterAcademicMetadataApi } from "../podcaster/podcaster-academic-metadata.js?v=2026-1.0.10.717";
 import { buildPreviewDocument } from "./escape-room-package-builder.mjs";
 import "../podcaster/podcaster-scene-media-render-spec.js";
 import { createVideoPlayerReviewManager } from "./video-player-review-manager.js";
 import { setScenePanelSectionVisibility, bindNewProposalToggleButtons } from "./video-player-panel-ui.js";
+import { resolveApprovedUserProfile } from "./user-approval.js?v=2026-1.0.10.827";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -30,6 +32,17 @@ void bootstrapFirebaseAppCheck(app);
 // Reutilizamos la instancia existente para no inicializarla con opciones distintas.
 const db = getFirestore(app);
 const auth = getAuth(app);
+const academicMetadataApi = createPodcasterAcademicMetadataApi({
+  db,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
+  nowIso: () => new Date().toISOString(),
+  getCurrentUserUid: () => String(auth.currentUser?.uid || "").trim(),
+  getCurrentUserName: () => String(currentUserName || "").trim()
+});
 const workbenchFilters = {
   lecturas: "published",
   unidades: "published",
@@ -106,25 +119,64 @@ async function notifyActivity(action = "", sceneIndex = -1) {
 }
 
 // Mueve esta línea al inicio para que sea global
-let currentUserRole = "editor";
+let currentUserRole = "";
+let currentUserApprovalStatus = "pending";
+let currentUserApproved = false;
+let currentUserProfileLoaded = false;
 
 let coleccionLecturaActual = "lecturas";
 const COLECCION_UNIDADES = "unidadesGeneradas";
 const COLECCION_DOWNLOADS = "wordDownloads";
+let multimediaWorkbenchItems = [];
+let multimediaAcademicModalSessionId = "";
 
 
 // Función para verificar el rol del usuario en Firestore
 const verificarRolUsuario = async (user) => {
-  if (user) {
-    const userDocRef = doc(db, 'users', user.uid);
-    const userSnap = await getDoc(userDocRef);
+  currentUserProfileLoaded = false;
+  currentUserRole = "";
+  currentUserApprovalStatus = "pending";
+  currentUserApproved = false;
+  if (!user) {
+    currentUserProfileLoaded = true;
+    return;
+  }
 
-    if (userSnap.exists()) {
-      const userData = userSnap.data();
-      currentUserRole = userData.role || userData.rol || userData.userRole || "editor"; // Asignar "editor" por defecto
-    } else {
+  try {
+    const tokenResult = await user.getIdTokenResult?.().catch(() => null);
+    const tokenAccess = resolveApprovedUserProfile(tokenResult?.claims || {});
+    let userData = null;
+    const directSnap = await getDoc(doc(db, "users", user.uid)).catch(() => null);
+    if (directSnap?.exists?.()) {
+      userData = directSnap.data() || {};
     }
-  } else {
+
+    if (!userData) {
+      const byUid = await getDocs(query(collection(db, "users"), where("uid", "==", user.uid), limit(1))).catch(() => null);
+      if (byUid && !byUid.empty) userData = byUid.docs[0].data() || {};
+    }
+
+    const email = String(user.email || "").trim();
+    if (!userData && email) {
+      const byEmail = await getDocs(query(collection(db, "users"), where("email", "==", email), limit(1))).catch(() => null);
+      if (byEmail && !byEmail.empty) userData = byEmail.docs[0].data() || {};
+    }
+
+    if (!userData && email && email !== email.toLowerCase()) {
+      const byEmailLower = await getDocs(query(collection(db, "users"), where("email", "==", email.toLowerCase()), limit(1))).catch(() => null);
+      if (byEmailLower && !byEmailLower.empty) userData = byEmailLower.docs[0].data() || {};
+    }
+
+    const profileAccess = resolveApprovedUserProfile(userData || {});
+    currentUserRole = profileAccess.role || tokenAccess.role || "";
+    currentUserApproved = profileAccess.approved || tokenAccess.approved;
+    currentUserApprovalStatus = currentUserApproved
+      ? "approved"
+      : (profileAccess.status || tokenAccess.status || "pending");
+  } catch (error) {
+    console.error("[Dashboard] No se pudo verificar el perfil y la aprobación del usuario:", error);
+  } finally {
+    currentUserProfileLoaded = true;
   }
 };
 
@@ -248,7 +300,7 @@ function crearElementoComentario(comentarioData) {
           <span class="selection-count" title="${totalSelecciones} selección(es)">
             ${totalSelecciones > 0 ? totalSelecciones : ''}
           </span>
-          <i class='bx ${totalSelecciones > 0 ? 'bxs-checkbox-checked' : 'bx-checkbox'} select-comment' 
+          <i class='bx ${totalSelecciones > 0 ? 'bxs-checkbox-checked' : 'bx-checkbox'} select-comment'
              style="color: ${totalSelecciones > 0 ? 'green' : 'gray'};"
              title="${estaSeleccionado ? 'Deseleccionar' : 'Seleccionar'}"></i>
         </span>
@@ -572,7 +624,7 @@ const renderLecturas = () => {
         ${bgImageSafe ? `
         <div class="card-image" style="background-image: url('${bgImageSafe}');"></div>
         ` : ''}
-        
+
         <header class="card-header" style="box-shadow: none; border-bottom: 1px solid #f5f5f5;">
           <div class="card-header-title" style="flex-direction: column; align-items: flex-start; padding: 1rem;">
             <span class="is-size-7 has-text-grey-light is-uppercase" style="letter-spacing: 0.5px;">Autor: ${autorNombreSafe}</span>
@@ -782,6 +834,11 @@ const configurarEventos = () => {
     e.preventDefault();
 
     const id = btnAction.dataset.id;
+    if (btnAction.dataset.action === "open-multimedia-academic-data") {
+      const targetItem = multimediaWorkbenchItems.find((item) => String(item?.id || "").trim() === String(id || "").trim()) || null;
+      void openMultimediaAcademicModal(targetItem);
+      return;
+    }
     const user = auth.currentUser;
     if (!id || !user) return;
 
@@ -1849,7 +1906,7 @@ export async function renderDesdeArray(imagenes) {
               <a href="${imageUrlSafe}" download="${nombreSafe}.png" rel="noopener noreferrer" title="Descargar imagen">
                 <i class='bx bx-download' style="font-size: 24px;"></i>
               </a>
-              <i class='bx bx-archive archivar-imagen' 
+              <i class='bx bx-archive archivar-imagen'
                 data-id="${data.id}"
                 title="Archivar imagen"
                 style="font-size: 24px; margin-left: 12px; color: gray; cursor: pointer;"></i>
@@ -1931,7 +1988,46 @@ function mostrarModalUpdates(version = "v2.0.0") {
 mostrarModalUpdates("v2.0.0");/**
  * NAVEGACIÓN DEL DASHBOARD
  */
+const HOME_FLOW_STATUS_LAYOUT_KEY = "charly_home_flow_status_layout_v1";
+
+function applyHomeFlowStatusLayout(layout = "cards") {
+  const container = document.getElementById("homeFlowStatus");
+  const toggle = document.getElementById("flowStatusLayoutToggle");
+  if (!container || !toggle) return;
+  const normalized = layout === "icons" ? "icons" : "cards";
+  const nextIsCards = normalized === "icons";
+  container.dataset.layout = normalized;
+  toggle.setAttribute("aria-pressed", String(normalized === "icons"));
+  toggle.setAttribute("aria-label", nextIsCards ? "Cambiar a vista de tarjetas" : "Cambiar a vista de iconos");
+  toggle.setAttribute("title", nextIsCards ? "Mostrar tarjetas compactas" : "Mostrar iconos cuadrados");
+  const icon = toggle.querySelector("i");
+  const label = toggle.querySelector("span");
+  if (icon) {
+    icon.classList.toggle("fa-grip", normalized === "cards");
+    icon.classList.toggle("fa-rectangle-list", normalized === "icons");
+  }
+  if (label) label.textContent = nextIsCards ? "Vista tarjetas" : "Vista iconos";
+}
+
+function initializeHomeFlowStatusLayout() {
+  const toggle = document.getElementById("flowStatusLayoutToggle");
+  const container = document.getElementById("homeFlowStatus");
+  if (!toggle || !container || toggle.dataset.layoutBound === "true") return;
+  toggle.dataset.layoutBound = "true";
+  let savedLayout = "cards";
+  try {
+    savedLayout = localStorage.getItem(HOME_FLOW_STATUS_LAYOUT_KEY) || "cards";
+  } catch (_) { }
+  applyHomeFlowStatusLayout(savedLayout);
+  toggle.addEventListener("click", () => {
+    const nextLayout = container.dataset.layout === "icons" ? "cards" : "icons";
+    applyHomeFlowStatusLayout(nextLayout);
+    try { localStorage.setItem(HOME_FLOW_STATUS_LAYOUT_KEY, nextLayout); } catch (_) { }
+  });
+}
+
 function initDashboardNavigation() {
+  initializeHomeFlowStatusLayout();
   // Click en las tarjetas del dashboard
   document.querySelectorAll('.section-card[data-view]').forEach(card => {
     card.addEventListener('click', (e) => {
@@ -1979,6 +2075,15 @@ function isCurrentUserAdmin() {
 
 function isCurrentUserEditorial() {
   return isCurrentUserAdmin() || ["author", "Author", "autor", "Autor", "editor", "Editor", "editorial", "Editorial", "editoria", "Editoria"].includes(currentUserRole);
+}
+
+function isCurrentUserApproved() {
+  if (!currentUserProfileLoaded) return false;
+  return currentUserApproved || isCurrentUserEditorial();
+}
+
+function canWriteAcademicMetadata() {
+  return Boolean(auth.currentUser) && currentUserProfileLoaded && isCurrentUserApproved();
 }
 
 function configureWorkbenchFilters() {
@@ -2239,6 +2344,224 @@ async function prefetchUsers(uids) {
   await Promise.all(promises);
 }
 
+function getMultimediaAcademicMetadata(item = null) {
+  return academicMetadataApi.resolveAcademicMetadata(
+    item?.academicMetadata,
+    item,
+    item?.session?.academicMetadata,
+    item?.session
+  );
+}
+
+async function hydrateMultimediaAcademicMetadata(item = null) {
+  const session = item?.session || item || null;
+  const sessionId = String(session?.id || item?.id || "").trim();
+  if (!session || !sessionId || typeof academicMetadataApi?.loadAcademicMetadata !== "function") {
+    return session;
+  }
+  try {
+    const academicMetadata = await academicMetadataApi.loadAcademicMetadata(sessionId);
+    if (!academicMetadata) return session;
+    const mergedSession = academicMetadataApi.mergeAcademicMetadataIntoEntity(session, academicMetadata);
+    const currentMultimediaId = String(currentMultimediaSession?.id || "").trim();
+    if (currentMultimediaId && currentMultimediaId === sessionId) {
+      currentMultimediaSession = mergedSession;
+    }
+    const listIndex = multimediaWorkbenchItems.findIndex((item) => String(item?.id || "").trim() === sessionId);
+    if (listIndex >= 0) {
+      const existing = multimediaWorkbenchItems[listIndex];
+      multimediaWorkbenchItems[listIndex] = academicMetadataApi.mergeAcademicMetadataIntoEntity(existing || mergedSession, academicMetadata);
+    }
+    return mergedSession;
+  } catch (error) {
+    console.warn("[Dashboard][AcademicMetadata] No se pudo hidratar metadata para sesión multimedia:", error);
+    return session;
+  }
+}
+
+function getMultimediaAcademicSummary(item = null) {
+  return academicMetadataApi.buildAcademicMetadataSummary(getMultimediaAcademicMetadata(item));
+}
+
+function getCurrentMultimediaAcademicFilters() {
+  return {
+    nivel: String(document.getElementById("multimediaAcademicLevelFilter")?.value || "all").trim(),
+    grado: String(document.getElementById("multimediaAcademicGradeFilter")?.value || "all").trim(),
+    trimestre: String(document.getElementById("multimediaAcademicTermFilter")?.value || "all").trim(),
+    unidad: String(document.getElementById("multimediaAcademicUnitFilter")?.value || "all").trim(),
+    materia: String(document.getElementById("multimediaAcademicSubjectFilter")?.value || "all").trim()
+  };
+}
+
+function matchesMultimediaAcademicFilters(metadata = null, filters = null) {
+  return academicMetadataApi.matchesAcademicMetadataFilters(
+    getMultimediaAcademicMetadata(metadata),
+    filters || getCurrentMultimediaAcademicFilters()
+  );
+}
+
+function syncMultimediaAcademicUnitUi(level = "") {
+  const labelEl = document.getElementById("videoAcademicUnitLabel");
+  const selectEl = document.getElementById("videoAcademicUnitSelect");
+  if (!labelEl || !selectEl) return;
+  const unitLabel = academicMetadataApi.resolveAcademicUnitLabel(level);
+  labelEl.textContent = unitLabel;
+  selectEl.setAttribute("aria-label", unitLabel);
+  const placeholder = selectEl.querySelector("option[value='']");
+  if (placeholder) placeholder.textContent = `Selecciona ${unitLabel.toLowerCase()}`;
+  const options = academicMetadataApi.resolveAcademicUnitOptions(level);
+  selectEl.querySelectorAll("option:not([value=''])").forEach((option, index) => {
+    if (options[index]) option.textContent = options[index].label;
+  });
+}
+
+function syncMultimediaAcademicSubjectUi(level = "", grade = "") {
+  const fieldEl = document.getElementById("videoAcademicSubjectField");
+  const labelEl = document.getElementById("videoAcademicSubjectLabel");
+  const selectEl = document.getElementById("videoAcademicSubjectSelect");
+  if (!fieldEl || !labelEl || !selectEl) return;
+
+  const isSecondary = String(level || "").trim().toLowerCase() === "secundaria";
+  fieldEl.hidden = !isSecondary;
+  if (!isSecondary) {
+    selectEl.value = "";
+    selectEl.innerHTML = `<option value="">Selecciona una materia</option>`;
+    return;
+  }
+
+  const options = academicMetadataApi.resolveAcademicSubjectOptions(level, grade);
+  labelEl.textContent = "Materia";
+  selectEl.setAttribute("aria-label", "Materia");
+  const currentValue = String(selectEl.value || "").trim();
+  selectEl.innerHTML = `<option value="">Selecciona una materia</option>${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}`;
+  if (options.some((option) => option.value === currentValue)) {
+    selectEl.value = currentValue;
+  }
+}
+
+function closeMultimediaAcademicModal() {
+  const modal = document.getElementById("videoAcademicDataModal");
+  if (modal) modal.hidden = true;
+  multimediaAcademicModalSessionId = "";
+}
+
+async function openMultimediaAcademicModal(item = null) {
+  const sourceItem = item?.session || item || null;
+  const session = await hydrateMultimediaAcademicMetadata(sourceItem);
+  const sessionId = String(session?.id || sourceItem?.id || "").trim();
+  if (!sessionId) return;
+  const modal = document.getElementById("videoAcademicDataModal");
+  const metadata = getMultimediaAcademicMetadata(session);
+  multimediaAcademicModalSessionId = sessionId;
+  if (modal) {
+    modal.hidden = false;
+    modal.dataset.sessionId = sessionId;
+  }
+  const levelSelect = document.getElementById("videoAcademicLevelSelect");
+  const gradeSelect = document.getElementById("videoAcademicGradeSelect");
+  const termSelect = document.getElementById("videoAcademicTermSelect");
+  const unitSelect = document.getElementById("videoAcademicUnitSelect");
+  const subjectSelect = document.getElementById("videoAcademicSubjectSelect");
+  if (levelSelect) levelSelect.value = metadata.nivel;
+  if (gradeSelect) gradeSelect.value = metadata.grado;
+  if (termSelect) termSelect.value = metadata.trimestre;
+  if (unitSelect) unitSelect.value = metadata.unidad;
+  if (subjectSelect) subjectSelect.value = metadata.materia;
+  syncMultimediaAcademicUnitUi(metadata.nivel);
+  syncMultimediaAcademicSubjectUi(metadata.nivel, metadata.grado);
+}
+
+async function saveMultimediaAcademicModal() {
+  const sessionId = String(document.getElementById("videoAcademicDataModal")?.dataset.sessionId || multimediaAcademicModalSessionId || "").trim();
+  if (!sessionId) {
+    console.error("[Dashboard] No se guardaron los datos académicos: falta el sessionId del video.");
+    alert("No se pudo identificar la sesión del video. Cierra el modal e inténtalo nuevamente.");
+    return;
+  }
+  if (!canWriteAcademicMetadata()) {
+    console.warn("[Dashboard] Guardado académico bloqueado por el estado de acceso del usuario.", {
+      sessionId,
+      authenticated: Boolean(auth.currentUser),
+      profileLoaded: currentUserProfileLoaded,
+      role: currentUserRole || "sin-rol",
+      approvalStatus: currentUserApprovalStatus || "sin-estado"
+    });
+    alert("No tienes permiso para asignar datos académicos a este video.");
+    return;
+  }
+  const nextMetadata = {
+    nivel: String(document.getElementById("videoAcademicLevelSelect")?.value || "").trim(),
+    grado: String(document.getElementById("videoAcademicGradeSelect")?.value || "").trim(),
+    trimestre: String(document.getElementById("videoAcademicTermSelect")?.value || "").trim(),
+    unidad: String(document.getElementById("videoAcademicUnitSelect")?.value || "").trim(),
+    materia: String(document.getElementById("videoAcademicSubjectSelect")?.value || "").trim()
+  };
+  const subjectOptions = academicMetadataApi.resolveAcademicSubjectOptions(nextMetadata.nivel, nextMetadata.grado);
+  nextMetadata.materia = academicMetadataApi.normalizeAcademicField(nextMetadata.materia, subjectOptions.map((option) => option.value));
+  if (String(nextMetadata.nivel || "").trim().toLowerCase() !== "secundaria") {
+    nextMetadata.materia = "";
+  }
+  console.log("[Dashboard][AcademicMetadata] Iniciando guardado del video.", {
+    sessionId,
+    metadata: nextMetadata
+  });
+  try {
+    await academicMetadataApi.saveAcademicMetadata(sessionId, nextMetadata, {
+      entityType: "session",
+      snapshotTargets: [{
+        ref: doc(db, "podcaster_sessions", sessionId)
+      }]
+    });
+    console.log("[Dashboard][AcademicMetadata] Datos académicos guardados.", {
+      sessionId,
+      metadata: nextMetadata
+    });
+    currentMultimediaSession = academicMetadataApi.mergeAcademicMetadataIntoEntity(
+      currentMultimediaSession || { id: sessionId },
+      nextMetadata
+    );
+    const currentItem = multimediaWorkbenchItems.find((item) => String(item?.id || "").trim() === sessionId);
+    if (currentItem) {
+      Object.assign(currentItem, academicMetadataApi.mergeAcademicMetadataIntoEntity(currentItem, nextMetadata));
+    }
+    renderVideoPlayerAcademicMetadata(currentMultimediaSession);
+    closeMultimediaAcademicModal();
+    if (typeof loadUserMultimedia === "function") {
+      loadUserMultimedia();
+    }
+  } catch (error) {
+    console.error("[Dashboard] No se pudo guardar metadata académica del video:", error);
+    alert("No se pudo guardar la asignación académica del video.");
+  }
+}
+
+const videoAcademicDataModal = document.getElementById("videoAcademicDataModal");
+if (videoAcademicDataModal && videoAcademicDataModal.dataset.videoAcademicBound !== "true") {
+  videoAcademicDataModal.dataset.videoAcademicBound = "true";
+  videoAcademicDataModal.addEventListener("click", (event) => {
+    const closeBtn = event.target.closest("[data-action='close-video-academic-data-modal']");
+    if (closeBtn || event.target === videoAcademicDataModal) {
+      closeMultimediaAcademicModal();
+    }
+  });
+  document.getElementById("closeVideoAcademicDataBtn")?.addEventListener("click", () => closeMultimediaAcademicModal());
+  document.getElementById("cancelVideoAcademicDataBtn")?.addEventListener("click", () => closeMultimediaAcademicModal());
+  document.getElementById("btnEditPlayerAcademicData")?.addEventListener("click", () => {
+    void openMultimediaAcademicModal(currentMultimediaSession);
+  });
+  document.getElementById("videoAcademicLevelSelect")?.addEventListener("change", (event) => {
+    syncMultimediaAcademicUnitUi(event.target.value);
+    syncMultimediaAcademicSubjectUi(event.target.value, document.getElementById("videoAcademicGradeSelect")?.value || "");
+  });
+  document.getElementById("videoAcademicGradeSelect")?.addEventListener("change", (event) => {
+    syncMultimediaAcademicSubjectUi(document.getElementById("videoAcademicLevelSelect")?.value || "", event.target.value);
+  });
+  document.getElementById("videoAcademicDataForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await saveMultimediaAcademicModal();
+  });
+}
+
 async function loadUserMultimedia() {
   const user = auth.currentUser;
   if (!user) return;
@@ -2253,6 +2576,15 @@ async function loadUserMultimedia() {
   configureWorkbenchFilters();
   updateWorkbenchFilterButtons("multimedia");
   contenedor.innerHTML = '<div class="flex justify-center p-8"><div class="loading-spinner-snoopy w-12 h-12 opacity-40"></div></div>';
+
+  if (document.body.dataset.multimediaAcademicFiltersBound !== "true") {
+    document.body.dataset.multimediaAcademicFiltersBound = "true";
+    ["multimediaAcademicLevelFilter", "multimediaAcademicGradeFilter", "multimediaAcademicTermFilter", "multimediaAcademicUnitFilter", "multimediaAcademicSubjectFilter"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("change", () => {
+        renderUserItemList(contenedor, multimediaWorkbenchItems, "multimedia");
+      });
+    });
+  }
 
   try {
     const isAdmin = isCurrentUserAdmin();
@@ -2302,7 +2634,25 @@ async function loadUserMultimedia() {
 
       if (authorIds.size > 0) await prefetchUsers(authorIds);
 
-      renderUserItemList(contenedor, allItems, 'multimedia');
+      const missingMetadataIds = allItems
+        .filter((item) => academicMetadataApi.academicMetadataIsEmpty(getMultimediaAcademicMetadata(item)))
+        .map((item) => String(item.id || "").trim())
+        .filter(Boolean);
+      if (missingMetadataIds.length > 0) {
+        await Promise.all(missingMetadataIds.map(async (sessionId) => {
+          try {
+            const metadata = await academicMetadataApi.loadAcademicMetadata(sessionId);
+            if (!metadata) return;
+            const target = allItems.find((item) => String(item.id || "").trim() === sessionId);
+            if (target) {
+              Object.assign(target, academicMetadataApi.mergeAcademicMetadataIntoEntity(target, metadata));
+            }
+          } catch (_) { }
+        }));
+      }
+
+      multimediaWorkbenchItems = allItems;
+      renderUserItemList(contenedor, multimediaWorkbenchItems, 'multimedia');
 
       const totalCount = document.getElementById("multimediaWorkbenchTotal");
       if (totalCount) totalCount.textContent = allItems.length;
@@ -2491,6 +2841,30 @@ let homePlaybackState = {
   montageActive: true
 };
 
+function renderVideoPlayerAcademicMetadata(session = null) {
+  const target = document.getElementById("playerAcademicMeta");
+  if (!target) return;
+  const metadata = getMultimediaAcademicMetadata(session);
+  const summary = academicMetadataApi.buildAcademicMetadataSummary(metadata);
+  if (!summary.length) {
+    target.innerHTML = `<span class="player-academic-chip is-muted">Sin clasificar</span>`;
+    target.hidden = false;
+    return;
+  }
+  const renderedSummary = summary.map((entry) => {
+    const rawEntry = String(entry || "").trim();
+    if (rawEntry.toLowerCase().startsWith("materia ")) {
+      return String(metadata.materia || rawEntry.replace(/^materia\s+/i, "")).trim();
+    }
+    return rawEntry;
+  });
+  target.innerHTML = renderedSummary.map((entry, index) => {
+    const isPrimary = index === 0;
+    return `<span class="player-academic-chip${isPrimary ? " is-primary" : ""}">${escapeHtml(entry)}</span>`;
+  }).join("");
+  target.hidden = false;
+}
+
 function extractDashboardSessionRows(session = null) {
   const source = session && typeof session === "object" ? session : {};
   const scriptRows = Array.isArray(source?.script?.rows) ? source.script.rows : [];
@@ -2672,7 +3046,7 @@ function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntrie
 
   const layoutMap = cfg.timelineOnScreenTextLayoutByRowId || {};
   const runtimeByRowId = new Map((Array.isArray(runtimeEntries) ? runtimeEntries : []).map((entry) => [String(entry?.rowId || "").trim(), entry]));
-  
+
   const segments = rows.map((row, index) => {
     const rowId = String(row?.id || "").trim();
     if (!rowId) return null;
@@ -2896,6 +3270,26 @@ function buildDashboardSessionFromPodcasterDoc(data = null, sessionId = "", fall
       ownerId: String(docData.ownerId || "").trim() || null,
       savedAt: docData.updatedAt?.toDate ? docData.updatedAt.toDate().toISOString() : null
     };
+  }
+
+  // La sesión anidada conserva snapshots legacy y puede contener campos académicos
+  // vacíos. No deben sobrescribir la clasificación vigente del documento raíz ni
+  // la metadata ya hidratada desde podcaster_academic_metadata.
+  const academicMetadata = academicMetadataApi.resolveAcademicMetadata(
+    topLevel.academicMetadata,
+    topLevel,
+    nested.academicMetadata,
+    nested,
+    fallback.academicMetadata,
+    fallback
+  );
+  if (!academicMetadataApi.academicMetadataIsEmpty(academicMetadata)) {
+    Object.assign(session, academicMetadataApi.buildAcademicMetadataSnapshot(academicMetadata, {
+      updatedAt: topLevel.academicMetadataUpdatedAt
+        || nested.academicMetadataUpdatedAt
+        || fallback.academicMetadataUpdatedAt
+        || ""
+    }));
   }
 
   return session;
@@ -3174,94 +3568,111 @@ function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
   return String(parsed?.storagePath || "").trim();
 }
 
+function getDirectMediaStorageBucket() {
+  return String(
+    window.__CHARLY_CONFIG__?.firebase?.storageBucket
+    || app?.options?.storageBucket
+    || "charly-brown.firebasestorage.app"
+  ).trim();
+}
+
+function parseGsStorageReference(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean.startsWith("gs://")) return null;
+  const withoutScheme = clean.replace(/^gs:\/\//i, "");
+  const slashIndex = withoutScheme.indexOf("/");
+  if (slashIndex < 1) return null;
+  const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
+  const storagePath = String(withoutScheme.slice(slashIndex + 1) || "").replace(/^\/+/, "").trim();
+  return bucket && storagePath ? { bucket, storagePath } : null;
+}
+
+function unwrapLegacyMediaProxy(rawUrl = "") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return { url: "", storagePath: "" };
+  try {
+    const parsed = new URL(clean, window.location.origin);
+    if (!/\/api\/assets\/(?:proxy-media|proxy-image|signed-url)$/i.test(String(parsed.pathname || ""))) {
+      return { url: clean, storagePath: "" };
+    }
+    return {
+      url: String(parsed.searchParams.get("url") || "").trim(),
+      storagePath: String(parsed.searchParams.get("storagePath") || "").trim()
+    };
+  } catch (_) {
+    return { url: clean, storagePath: "" };
+  }
+}
+
+function buildDirectFirebaseMediaReference(rawUrl = "", storagePath = "") {
+  const cleanUrl = String(rawUrl || "").trim();
+  const legacy = unwrapLegacyMediaProxy(cleanUrl);
+  const candidateUrl = String(legacy.url || cleanUrl || "").trim();
+
+  if (/^https?:\/\//i.test(candidateUrl)) {
+    const parsedCandidate = parseFirebaseStorageObjectUrl(candidateUrl);
+    if (!parsedCandidate) return candidateUrl;
+    if (/[?&](?:token|downloadToken)=/i.test(candidateUrl)) return candidateUrl;
+  }
+
+  const gsReference = parseGsStorageReference(storagePath)
+    || parseGsStorageReference(legacy.storagePath)
+    || parseGsStorageReference(candidateUrl);
+  if (gsReference) return `gs://${gsReference.bucket}/${gsReference.storagePath}`;
+
+  const firebaseReference = parseFirebaseStorageObjectUrl(candidateUrl);
+  const resolvedStoragePath = String(
+    storagePath
+    || legacy.storagePath
+    || firebaseReference?.storagePath
+    || ""
+  ).replace(/^\/+/, "").trim();
+  if (resolvedStoragePath) {
+    const bucket = String(firebaseReference?.bucket || getDirectMediaStorageBucket()).trim();
+    return bucket ? `gs://${bucket}/${resolvedStoragePath}` : "";
+  }
+  return candidateUrl;
+}
+
 function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media") {
   return multimediaRuntimeResolveStaleAwareProxyMediaUrl(rawUrl, storagePath, kind);
 }
 
 function resolveStorageVideoUrl(downloadUrl, storagePath) {
-  const clean = String(downloadUrl || "").trim();
-  const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
-  if (!clean && !cleanStoragePath) return "";
-  if (!hasAvailableApiBase()) return clean;
-  try {
-    if (cleanStoragePath) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
-    }
-    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrlPreferRemote(clean);
-    if (clean.startsWith("/api/assets/proxy-image?")) {
-      const parsedProxy = new URL(buildApiUrlPreferRemote(clean), window.location.origin);
-      const nested = String(parsedProxy.searchParams.get("url") || "").trim();
-      return nested ? buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(nested)}`) : buildApiUrlPreferRemote(clean);
-    }
-    const parsed = new URL(clean, window.location.origin);
-    const pathname = String(parsed.pathname || "").toLowerCase();
-    const hasVideoExt = /\.(mp4|webm|mov|m4v)(?:$|\?)/i.test(pathname);
-    const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
-    if (isStorageUrl || hasVideoExt) {
-      return buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
-    }
-    return clean;
-  } catch (_) {
-    return clean;
-  }
+  return buildDirectFirebaseMediaReference(downloadUrl, storagePath);
 }
 
 function resolveStorageAudioUrl(downloadUrl, storagePath) {
-  const clean = String(downloadUrl || "").trim();
-  const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
-  if (!clean && !cleanStoragePath) return "";
-  if (!hasAvailableApiBase()) return clean;
+  return buildDirectFirebaseMediaReference(downloadUrl, storagePath);
+}
+
+async function resolveFirebaseStorageUrl(gsPath = "") {
+  const cleanReference = String(gsPath || "").trim();
+  const gsReference = parseGsStorageReference(cleanReference);
+  const storagePath = String(gsReference?.storagePath || cleanReference)
+    .replace(/^gs:\/\/[^/]+\//i, "")
+    .replace(/^\/+/, "")
+    .trim();
+  if (!storagePath) return "";
+  const referenceInput = gsReference
+    ? `gs://${gsReference.bucket}/${gsReference.storagePath}`
+    : storagePath;
   try {
-    const firebaseGsUrl = (() => {
-      const gsSource = String(cleanStoragePath || clean || "").trim();
-      if (!gsSource.startsWith("gs://")) return "";
-      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
-      const slashIndex = withoutScheme.indexOf("/");
-      if (slashIndex < 0) return "";
-      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
-      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
-      if (!bucket || !objectPath) return "";
-      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
-    })();
-    if (firebaseGsUrl) {
-      return buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}`);
-    }
-    if (cleanStoragePath) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
-    }
-    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrlPreferRemote(clean);
-    if (clean.startsWith("/api/assets/proxy-image?")) {
-      const parsedProxy = new URL(buildApiUrlPreferRemote(clean), window.location.origin);
-      const nested = String(parsedProxy.searchParams.get("url") || "").trim();
-      return nested ? buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(nested)}`) : buildApiUrlPreferRemote(clean);
-    }
-    const parsed = new URL(clean, window.location.origin);
-    const pathname = String(parsed.pathname || "").toLowerCase();
-    const hasAudioExt = /\.(wav|mp3|ogg|m4a|flac)(?:$|\?)/i.test(pathname);
-    const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
-    if (isStorageUrl || hasAudioExt) {
-      return buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
-    }
-    return clean;
-  } catch (_) {
-    return clean;
+    return await getDownloadURL(ref(storage, referenceInput));
+  } catch (error) {
+    console.warn("[video-player] Firebase Storage no pudo resolver el medio:", {
+      storagePath,
+      code: String(error?.code || "storage/unknown"),
+      message: String(error?.message || "No se pudo resolver el medio.")
+    });
+    return "";
   }
 }
 
 async function resolveAuthorizedAssetUrl(proxyUrl = "") {
-  const clean = String(proxyUrl || "").trim();
-  if (!clean) return "";
-
-  const parsed = new URL(clean, window.location.origin);
-  const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
-  if (!storagePath) return clean;
-
-  const data = await authFetchJson(
-    `/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`
-  );
-  const signedUrl = String(data?.url || "").trim();
-  if (!signedUrl) throw new Error("signed_asset_url_missing");
-  return signedUrl;
+  const directReference = buildDirectFirebaseMediaReference(proxyUrl, "");
+  if (!directReference.startsWith("gs://")) return directReference;
+  return resolveFirebaseStorageUrl(directReference);
 }
 
 const HOME_TIMELINE_MIN_CLIP_MS = 500;
@@ -3846,21 +4257,21 @@ function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
   const s = session || (typeof currentMultimediaSession !== "undefined" ? currentMultimediaSession : null);
   const key = String(rowId || "").trim();
   if (!key || !s) return 1;
-  
+
   // Combinar todas las fuentes posibles de configuración de audio para no perder nada
   const audioMap = {
     ...(s.script?.dialogueAudioMap || {}),
     ...(s.podcastStudioUiState?.dialogueAudiosByRowId || {}),
     ...(s.dialogueAudioMap || {})
   };
-    
+
   let clip = audioMap[key] || null;
   let rate = 1;
 
   if (clip && clip.playbackRate) {
     rate = clip.playbackRate;
   }
-  
+
   // Buscar siempre en la fila como fallback definitivo o override
   if (s.script?.rows) {
     const row = s.script.rows.find(r => String(r.id || "").trim() === key);
@@ -3873,10 +4284,10 @@ function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
   }
 
   const finalRate = normalizeDialogueAudioPlaybackRate(rate);
-  
+
   if (clip || rate !== 1) {
   }
-  
+
   return finalRate;
 }
 
@@ -4064,6 +4475,7 @@ function mergeHomePodcastVideoConfig(base = {}, incoming = {}) {
 }
 
 const multimediaPlaybackDeps = {
+  preferDirectFirebaseStorage: true,
   getTimelineTotalDurationMs: (s) => {
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
     if (!entries.length) return 0;
@@ -4132,21 +4544,7 @@ const multimediaPlaybackDeps = {
     cachedRuntimeEntriesKey = cacheKey;
     return finalEntries;
   },
-  resolveFirebaseStorageUrl: async (gsPath) => {
-    if (!gsPath) return "";
-    const storagePath = String(gsPath || "")
-      .replace(/^gs:\/\/[^/]+\//i, "")
-      .replace(/^\/+/, "")
-      .trim();
-    if (!storagePath) return "";
-    try {
-      return await getDownloadURL(ref(storage, storagePath));
-    } catch (_) {
-      return buildApiUrlPreferRemote(
-        `/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`
-      );
-    }
-  },
+  resolveFirebaseStorageUrl,
   setPodcastStageVideoSourceForElement: (video, url, options = {}) => (
     multimediaPlaybackController.setStageVideoSourceForElement(video, url, options)
   ),
@@ -4252,14 +4650,14 @@ const multimediaPlaybackDeps = {
       const allRows = extractDashboardSessionRows(s);
       const row = allRows.find(r => r.id === entry.rowId);
       const dialogueText = resolveDashboardRowOnScreenText(row);
-      const savedClip = existingOnScreenTextClips?.[entry.rowId] 
-        || cfg.timelineOnScreenTextClipsByRowId?.[entry.rowId] 
+      const savedClip = existingOnScreenTextClips?.[entry.rowId]
+        || cfg.timelineOnScreenTextClipsByRowId?.[entry.rowId]
         || null;
 
       if (dialogueText) {
         const audioDur = Math.max(500, Number(entry.audioDurationMs || entry.effectiveDurationMs || entry.durationMs || 0) || 1000);
         const baseClip = savedClip ? { ...savedClip } : {};
-        
+
         // Preservar trimInMs y trimOutMs personalizados de la base de datos si existen
         const trimIn = Math.max(0, Number(savedClip?.trimInMs ?? 0));
         const trimOut = Math.max(trimIn + 500, Number(savedClip?.trimOutMs ?? audioDur));
@@ -4541,9 +4939,9 @@ const multimediaPlaybackDeps = {
   },
   resolveDialogueAudioForRow: (s, rowId) => {
     const key = String(rowId || "").trim();
-    const map = s?.dialogueAudioMap 
-      || s?.podcastStudioUiState?.dialogueAudiosByRowId 
-      || s?.script?.dialogueAudioMap 
+    const map = s?.dialogueAudioMap
+      || s?.podcastStudioUiState?.dialogueAudiosByRowId
+      || s?.script?.dialogueAudioMap
       || {};
     return map[key] || null;
   },
@@ -4628,6 +5026,7 @@ function initMultimediaPlayer() {
   const stopBtn = document.getElementById("playerStopBtn");
   const prevBtn = document.getElementById("playerPrevBtn");
   const nextBtn = document.getElementById("playerNextBtn");
+  const openPodcasterFromPlayerBtn = document.getElementById("btnOpenPodcasterFromPlayer");
   const scenePanel = document.getElementById("playerSidePanel");
   const scenePanelResizeHandle = document.getElementById("playerSidePanelResizeHandle");
 
@@ -4637,6 +5036,13 @@ function initMultimediaPlayer() {
   if (prevBtn) prevBtn.onclick = () => multimediaPlaybackController.prev();
   if (nextBtn) nextBtn.onclick = () => multimediaPlaybackController.next();
   getVideoPlayerReviewManager().bindToolbarButtons();
+  if (openPodcasterFromPlayerBtn) {
+    openPodcasterFromPlayerBtn.onclick = () => {
+      const sessionId = String(currentMultimediaSession?.id || "").trim();
+      if (!sessionId) return;
+      window.location.href = `podcaster.html?sessionId=${encodeURIComponent(sessionId)}`;
+    };
+  }
 
   if (scenePanel && scenePanelResizeHandle) {
     const playerShell = scenePanel.closest(".video-player-shell");
@@ -4812,6 +5218,17 @@ async function abrirReproductorMultimedia(session) {
   currentMultimediaSession = session;
   const sessionId = String(session?.id || "").trim();
   syncReelModeUi(session);
+  if (sessionId && academicMetadataApi?.loadAcademicMetadata) {
+    try {
+      const academicSnapshot = await academicMetadataApi.loadAcademicMetadata(sessionId);
+      if (academicSnapshot) {
+        currentMultimediaSession = academicMetadataApi.mergeAcademicMetadataIntoEntity(session, academicSnapshot);
+        session = currentMultimediaSession;
+      }
+    } catch (error) {
+      console.warn("[Dashboard][AcademicMetadata] No se pudo hidratar la colección académica:", error);
+    }
+  }
 
   if (multimediaPlayerUnsubscribe) {
     multimediaPlayerUnsubscribe();
@@ -4836,7 +5253,7 @@ async function abrirReproductorMultimedia(session) {
         const data = snap.data() || {};
         const incomingSession = buildDashboardSessionFromPodcasterDoc(data, sessionId, currentMultimediaSession);
         if (!incomingSession) return;
-        
+
         // Aviso de cambios si detectamos versión nueva
         const getMs = (val) => {
           if (!val) return 0;
@@ -4884,6 +5301,7 @@ async function abrirReproductorMultimedia(session) {
 
           if (!modal.classList.contains("hidden")) {
             syncReelModeUi(currentMultimediaSession);
+            renderVideoPlayerAcademicMetadata(currentMultimediaSession);
             multimediaPlaybackDeps.updatePodcastVideoTransportUi();
           }
         }
@@ -4901,17 +5319,17 @@ async function abrirReproductorMultimedia(session) {
         badge.classList.remove("hidden");
         badge.onclick = async () => {
           hidePlaybackUpdateBadge();
-          
+
           try {
             // Forzar recarga completa de la sesión actual desde Firebase
             const freshSession = await loadFullDashboardPodcasterSession(sessionId, currentMultimediaSession);
             if (freshSession) {
               currentMultimediaSession = freshSession;
-              
+
               // Importante: invalidar caches de filas que pudieran haber cambiado su audio
               const rows = extractDashboardSessionRows(freshSession);
               rows.forEach(r => multimediaPlaybackController.invalidateRowAudioCache(r.id));
-              
+
               multimediaPlaybackController.sync(currentMultimediaSession);
               multimediaPlaybackDeps.updatePodcastVideoTransportUi();
             } else {
@@ -4927,6 +5345,7 @@ async function abrirReproductorMultimedia(session) {
     }
 
     if (title) title.textContent = session.title || "Sin título";
+    renderVideoPlayerAcademicMetadata(session);
     if (sidePanel) sidePanel.classList.add("is-open");
     if (btnToggle) btnToggle.classList.add("active");
 
@@ -5045,38 +5464,16 @@ async function abrirReproductorMultimedia(session) {
         if (!file) return;
 
         try {
-          // Leer y comprimir imagen a max 800x800, JPEG 0.7
+          // Leer la imagen sin compresión para preservar la máxima calidad
           const dataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (event) => {
-              const img = new Image();
-              img.onload = () => {
-                const canvas = document.createElement("canvas");
-                const MAX_WIDTH = 800;
-                const MAX_HEIGHT = 800;
-                let width = img.width;
-                let height = img.height;
-
-                if (width > height) {
-                  if (width > MAX_WIDTH) {
-                    height = Math.round((height * MAX_WIDTH) / width);
-                    width = MAX_WIDTH;
-                  }
-                } else {
-                  if (height > MAX_HEIGHT) {
-                    width = Math.round((width * MAX_HEIGHT) / height);
-                    height = MAX_HEIGHT;
-                  }
-                }
-
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL("image/jpeg", 0.7));
-              };
-              img.onerror = () => reject(new Error("Error al cargar imagen."));
-              img.src = event.target.result;
+              const loaded = String(event.target.result || "").trim();
+              if (!loaded) {
+                reject(new Error("No se pudo leer la imagen."));
+                return;
+              }
+              resolve(loaded);
             };
             reader.onerror = () => reject(new Error("Error al leer archivo."));
             reader.readAsDataURL(file);
@@ -5896,11 +6293,11 @@ function renderUserItemList(container, items, type) {
             <div class="workbench-action-area">
               <div class="workbench-item-actions" style="flex-direction: row; gap: 0.75rem; justify-content: flex-end; width: 100%;">
                 ${topicSummaries.length ? topicSummaries.map((topic) => `
-                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-topic-id="${escapeHtml(String(topic.id || ""))}" data-type="escapeRoom_preview" title="Ver Tema ${escapeHtml(String(topic.academicNumber || ""))}" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #ec4899 !important; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3) !important;">
+                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-topic-id="${escapeHtml(String(topic.id || ""))}" data-type="escapeRoom_preview" title="Ver Tema ${escapeHtml(String(topic.academicNumber || ""))}">
                     <i class="fas fa-eye"></i><span>Tema ${escapeHtml(String(topic.academicNumber || ""))} · ${escapeHtml(String(topic.title || "Escape Room"))}</span>
                   </a>
                 `).join("") : `
-                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="escapeRoom_preview" title="Ver preview" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #ec4899 !important; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3) !important;">
+                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="escapeRoom_preview" title="Ver preview">
                     <i class="fas fa-eye"></i><span>Ver preview</span>
                   </a>
                 `}
@@ -5910,36 +6307,46 @@ function renderUserItemList(container, items, type) {
         </div>
       `;
     } else if (type === 'multimedia' || type === 'podcast') {
+      if (type === "multimedia" && !matchesMultimediaAcademicFilters(item)) return "";
       const session = item.session || item;
       const ui = session?.podcastStudioUiState || {};
       const clipMap = session?.timelineClipMap || ui.timelineClipsByRowId || {};
-      const nivel = String(session?.nivel || item?.nivel || "").trim();
-      const grado = String(session?.grado || item?.grado || "").trim();
-      const trimestre = String(session?.trimestre || item?.trimestre || "").trim();
-      const unidad = String(session?.unidad || item?.unidad || "").trim();
-      const academicDetailItems = [
-        nivel ? `
+      const academicMetadata = getMultimediaAcademicMetadata(item);
+      const isAcademicEmpty = academicMetadataApi.academicMetadataIsEmpty(academicMetadata);
+      const academicDetailItems = isAcademicEmpty ? `
+            <div class="multimedia-detail-item">
+              <span class="multimedia-detail-label">Clasificación</span>
+              <span class="multimedia-detail-value"><span class="workbench-tag is-status">Sin clasificar</span></span>
+            </div>
+      ` : [
+        academicMetadata.nivel ? `
             <div class="multimedia-detail-item">
               <span class="multimedia-detail-label">Nivel</span>
-              <span class="multimedia-detail-value">${escapeHtml(nivel)}</span>
+              <span class="multimedia-detail-value">${escapeHtml(academicMetadata.nivel)}</span>
             </div>
         ` : "",
-        grado ? `
+        academicMetadata.grado ? `
             <div class="multimedia-detail-item">
               <span class="multimedia-detail-label">Grado</span>
-              <span class="multimedia-detail-value">${escapeHtml(grado)}</span>
+              <span class="multimedia-detail-value">${escapeHtml(academicMetadata.grado)}</span>
             </div>
         ` : "",
-        trimestre ? `
+        academicMetadata.trimestre ? `
             <div class="multimedia-detail-item">
               <span class="multimedia-detail-label">Trimestre</span>
-              <span class="multimedia-detail-value">${escapeHtml(trimestre)}</span>
+              <span class="multimedia-detail-value">Trimestre ${escapeHtml(academicMetadata.trimestre)}</span>
             </div>
         ` : "",
-        unidad ? `
+        academicMetadata.unidad ? `
             <div class="multimedia-detail-item">
-              <span class="multimedia-detail-label">Unidad</span>
-              <span class="multimedia-detail-value">${escapeHtml(unidad)}</span>
+              <span class="multimedia-detail-label">${escapeHtml(academicMetadata.unitLabel || academicMetadataApi.resolveAcademicUnitLabel(academicMetadata.nivel))}</span>
+              <span class="multimedia-detail-value">${escapeHtml(academicMetadata.unitLabel || academicMetadataApi.resolveAcademicUnitLabel(academicMetadata.nivel))} ${escapeHtml(academicMetadata.unidad)}</span>
+            </div>
+        ` : "",
+        academicMetadata.materia ? `
+            <div class="multimedia-detail-item">
+              <span class="multimedia-detail-label">Materia</span>
+              <span class="multimedia-detail-value">${escapeHtml(academicMetadata.materia)}</span>
             </div>
         ` : ""
       ].join("");
@@ -5980,6 +6387,7 @@ function renderUserItemList(container, items, type) {
             ${escapeHtml(displayTitle)}
             ${hasPending ? `<span class="proposal-badge is-pending" style="margin-left: 10px; vertical-align: middle;">PROPUESTA</span>` : ""}
             ${hasRealized ? `<span class="proposal-badge is-realized" style="margin-left: 10px; vertical-align: middle;">REALIZADA</span>` : ""}
+            ${isAcademicEmpty ? `<span class="proposal-badge is-pending" style="margin-left: 10px; vertical-align: middle;">Sin clasificar</span>` : ""}
           </div>
           <i class="fas fa-chevron-down multimedia-accordion-icon"></i>
         </div>
@@ -6009,6 +6417,11 @@ function renderUserItemList(container, items, type) {
                 </div>
             ` : ""}
             <div class="multimedia-action-area">
+              ${canWriteAcademicMetadata() ? `
+                <button class="btn-multimedia-academic-edit btn-workbench-action" type="button" data-action="open-multimedia-academic-data" data-id="${item.id}">
+                  <i class="fas fa-pen-to-square"></i> ${isAcademicEmpty ? "Asignar datos" : "Editar datos"}
+                </button>
+              ` : ""}
               <button class="btn-multimedia-play-large btn-multimedia-play" data-id="${item.id}">
                 <i class="fas fa-play-circle"></i> Ver Video
               </button>
@@ -6038,7 +6451,7 @@ function renderUserItemList(container, items, type) {
             </div>
             <h2 class="workbench-item-title">${escapeHtml(displayTitle)}</h2>
           </div>
-          
+
           <i class="fas fa-chevron-down workbench-accordion-icon"></i>
         </div>
 
@@ -6064,22 +6477,22 @@ function renderUserItemList(container, items, type) {
                 <span class="workbench-tag is-status">${statusLabel}</span>
               </span>
             </div>
-            
+
             <div class="workbench-action-area">
               <div class="workbench-item-actions" style="flex-direction: row; gap: 0.75rem; justify-content: flex-end; width: 100%;">
                 ${type !== 'download' ? `
-                  <a href="#" class="btn-workbench-action btn-item-edit" data-id="${item.id}" data-type="${type}" data-coleccion="${item.coleccion || ''}" title="Editar" style="padding: 0.6rem 1.2rem; font-size: 0.85rem;">
+                  <a href="#" class="btn-workbench-action btn-item-edit" data-id="${item.id}" data-type="${type}" data-coleccion="${item.coleccion || ''}" title="Editar">
                     <i class="fas fa-edit"></i>
                     <span>Editar</span>
                   </a>
                   ${type === 'lectura' ? `
-                  <a href="#" class="btn-workbench-action ver-lectura" data-id="${item.id}" data-coleccion="${item.coleccion || ''}" title="Ver lectura" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #6366f1 !important; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3) !important;">
+                  <a href="#" class="btn-workbench-action ver-lectura" data-id="${item.id}" data-coleccion="${item.coleccion || ''}" title="Ver lectura">
                     <i class="fas fa-eye"></i>
                     <span>Ver Lectura</span>
                   </a>
                   ` : ''}
                   ${type === 'aprende' ? `
-                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="aprende_ver" title="Ver Contenido" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #f59e0b !important; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3) !important;">
+                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="aprende_ver" title="Ver Contenido">
                     <i class="fas fa-eye"></i>
                     <span>Ver Contenido</span>
                   </a>

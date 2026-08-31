@@ -55,7 +55,7 @@ def main():
         "redaction",
     )
     redaction_snippets = [
-        "incoherencias reales de redaccion",
+        "incoherencias reales que dificulten entenderla",
         "Ignora referencias editoriales y complementos con codigos",
         "Recortable PaT1",
         "Anexo PbT1",

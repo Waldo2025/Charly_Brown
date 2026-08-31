@@ -143,10 +143,19 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     promptHtml: String(source.promptHtml || "").slice(0, 120000),
     archived: source.archived === true,
     publicar: source.publicar === true,
-    nivel: String(source.nivel || "").trim().slice(0, 60),
-    grado: String(source.grado || "").trim().slice(0, 60),
-    trimestre: String(source.trimestre || "").trim().slice(0, 20),
-    unidad: String(source.unidad || "").trim().slice(0, 20),
+    nivel: String(source.nivel || source?.academicMetadata?.nivel || "").trim().slice(0, 60),
+    grado: String(source.grado || source?.academicMetadata?.grado || "").trim().slice(0, 60),
+    trimestre: String(source.trimestre || source?.academicMetadata?.trimestre || "").trim().slice(0, 20),
+    unidad: String(source.unidad || source?.academicMetadata?.unidad || "").trim().slice(0, 20),
+    materia: String(source.materia || source?.academicMetadata?.materia || "").trim().slice(0, 120),
+    academicMetadata: {
+      nivel: String(source?.academicMetadata?.nivel || source.nivel || "").trim().slice(0, 60),
+      grado: String(source?.academicMetadata?.grado || source.grado || "").trim().slice(0, 60),
+      trimestre: String(source?.academicMetadata?.trimestre || source.trimestre || "").trim().slice(0, 20),
+      unidad: String(source?.academicMetadata?.unidad || source.unidad || "").trim().slice(0, 20),
+      materia: String(source?.academicMetadata?.materia || source.materia || "").trim().slice(0, 120),
+      unitLabel: String(source?.academicMetadata?.unitLabel || "").trim().slice(0, 80)
+    },
     videoContentType: resolvedVideoContentType,
     updatedAt: nowIso?.() || new Date().toISOString(),
     podcastStudioUiState: normalizePodcastStudioUiState?.(source.podcastStudioUiState || null, source) || {},
@@ -361,6 +370,9 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     rowReferenceVideoMap: stripInlineMediaRecordMap(getRowReferenceVideoMap?.(source) || {}),
     rowReferenceModeByRowId: getRowReferenceModeByRowId?.(source) || {},
     dialogueVideoMap: normalizeDialogueVideoMapForCloud(getDialogueVideoMap?.(source) || {}),
+    dialogueVideoDeletedAtMap: source?.dialogueVideoDeletedAtMap && typeof source.dialogueVideoDeletedAtMap === "object"
+      ? source.dialogueVideoDeletedAtMap
+      : {},
     dialogueAudioMap: getDialogueAudioMap?.(source) || {},
     podcastVideoConfig: normalizePodcastVideoConfig?.(source?.podcastVideoConfig || {}) || {},
     creativeVideoConfig: normalizeCreativeVideoConfig?.(source?.creativeVideoConfig || {}) || {},
@@ -379,7 +391,7 @@ export function compactCloudSessionPayload(payload = null, deps = {}) {
       trimmedChat: false
     };
   }
-  
+
   const targetBytes = deps.CLOUD_SESSION_PAYLOAD_TARGET_BYTES || 850000;
   const initialBytes = measureJsonUtf8Bytes(source);
   if (initialBytes <= targetBytes) {

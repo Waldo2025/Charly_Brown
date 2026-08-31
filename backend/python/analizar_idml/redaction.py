@@ -131,17 +131,24 @@ def find_redaction_issues(text_blocks, gemini_verifier=None, max_windows=8, max_
     processed_windows = 0
     story_windows = {}
     for block in text_blocks or []:
-        if not _is_candidate_block(block):
+        is_full_page = str((block or {}).get("pageAnalysisMode") or "").strip() == "full-page-coherence"
+        if not is_full_page and not _is_candidate_block(block):
             continue
         story_id = str((block or {}).get("storyId") or "")
-        for window in _iter_text_windows(block):
+        if is_full_page:
+            page_text = _normalize_text((block or {}).get("text") or "")
+            windows = [{**(block or {}), "text": page_text}] if len(page_text) >= 70 else []
+        else:
+            windows = _iter_text_windows(block)
+        for window in windows:
             if processed_windows >= max_windows or len(issues) >= max_issues:
                 return issues
-            current_story_windows = story_windows.get(story_id, 0)
-            if current_story_windows >= max_windows_per_story:
+            current_story_windows = story_windows.get(story_id, 0) if not is_full_page else 0
+            if not is_full_page and current_story_windows >= max_windows_per_story:
                 break
             processed_windows += 1
-            story_windows[story_id] = current_story_windows + 1
+            if not is_full_page:
+                story_windows[story_id] = current_story_windows + 1
             for item in gemini_verifier.verify_text_block(window, "redaction"):
                 excerpt = _normalize_text(item.get("excerpt") or "")
                 suggestion = _normalize_text(item.get("suggestion") or "")

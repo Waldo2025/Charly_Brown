@@ -4,6 +4,7 @@
   <script src="js/cache-version-loader.js"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
+  <link rel="modulepreload" href="js/scienceActivities.bundle.js?v=20260816-micro-concept-fulltext-v220">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Science Activities Creator</title>
   <link rel="icon" type="image/png" href="pigpen.png">
@@ -11,10 +12,8 @@
   <link rel="stylesheet" data-cache-href="tailwind-lite.css">
   <link rel="stylesheet" data-cache-href="sidebar.css">
   <link rel="stylesheet" data-cache-href="header.css">
-  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-  <link rel="stylesheet" href="scienceActivities.css?v=20260731-session-panel-v1">
-  <link rel="stylesheet" href="science-hud-themes.css?v=20260802-rive-sequence-route-v2">
+  <link rel="stylesheet" href="scienceActivities.css?v=20260815-question-points-v51">
   <style>
     .sa-briefing-layer {
       align-items: flex-start !important;
@@ -27,7 +26,6 @@
   <div id="app-container">
     <div class="main-header"><div class="header-content"></div></div>
     <div id="sidebar">
-      <button id="menuToggle" aria-label="Abrir menú"><i class="fas fa-bars"></i></button>
       <div class="sidebar-menu"></div>
     </div>
 
@@ -59,6 +57,7 @@
             </div>
             <div class="sa-summary-group sa-summary-preview-title-group" aria-label="Título de la actividad activa">
               <span id="previewTitle">Misión Antideslizante</span>
+              <span id="saveStatus" class="sa-save-status" role="status" aria-live="polite">Guardado local</span>
             </div>
           </div>
         </section>
@@ -93,19 +92,10 @@
                 <small>La IA creará la explicación, las preguntas y la dinámica a partir de este tema.</small>
               </label>
 
-              <label class="sa-field">
+              <label class="sa-field" id="activityScenarioField" data-experience-scope="game">
                 <span>Escenario del tema</span>
                 <select id="scenarioSelect"></select>
               </label>
-
-              <div class="sa-field">
-                <span>¿Qué deben experimentar?</span>
-                <textarea id="experiencePrompt" rows="5" placeholder="Genera una propuesta auténtica o describe qué quieres que manipulen, observen y descubran…"></textarea>
-                <button id="generateExperienceBtn" class="sa-experience-generate" type="button" aria-label="Proponer experiencia con IA" title="Proponer experiencia con IA">
-                  <span class="sa-action-sheen" aria-hidden="true"></span>
-                  <i class="fas fa-wand-magic-sparkles"></i>
-                </button>
-              </div>
 
               <label class="sa-field">
                 <span>Modalidad de la actividad</span>
@@ -113,10 +103,68 @@
                   <option value="game" selected>Videojuego educativo</option>
                   <option value="simulator">Simulador científico</option>
                 </select>
-                <small>El videojuego usa retos y puntuación. El simulador permite experimentar libremente con variables científicas.</small>
               </label>
 
-              <div class="sa-form-row" id="gameStructureFields">
+              <label class="sa-field" id="expectedLearningsField" data-experience-scope="game">
+                <span>Aprendizajes esperados</span>
+                <textarea id="expectedLearnings" rows="6" placeholder="Pega aquí los aprendizajes esperados, propósitos curriculares o contenidos que debe cubrir la actividad…"></textarea>
+              </label>
+
+              <div class="sa-field" id="experiencePromptField" data-experience-scope="game">
+                <span>Experiencia o idea de contexto</span>
+                <textarea id="experiencePrompt" rows="5" placeholder="Puedes escribir una idea de contexto o dejarlo vacío para que la IA proponga una experiencia nueva…"></textarea>
+                <button id="generateExperienceBtn" class="sa-experience-generate" type="button" aria-label="Proponer experiencia con IA" title="Proponer experiencia con IA">
+                  <span class="sa-action-sheen" aria-hidden="true"></span>
+                  <i class="fas fa-wand-magic-sparkles"></i>
+                  <span>Proponer experiencia</span>
+                </button>
+              </div>
+
+              <div class="sa-field" id="simulatorProfileSummary" data-experience-scope="simulator" hidden>
+                <span>Qué permite experimentar este simulador</span>
+                <p id="simulatorProfileDescription"></p>
+              </div>
+
+              <fieldset class="sa-simulator-visual-choices" id="simulatorVisualChoiceFields" data-experience-scope="simulator" hidden>
+                <legend>Escena y variables del simulador</legend>
+                <div class="sa-form-row sa-simulator-choice-grid">
+                  <div class="sa-simulator-choice-column">
+                    <label class="sa-field">
+                      <span>Escenario del simulador</span>
+                      <select id="simulatorScenarioSelect"></select>
+                    </label>
+                    <label class="sa-field sa-simulator-custom-choice" id="simulatorCustomScenarioField" hidden>
+                      <span>Describe tu escenario</span>
+                      <input id="simulatorCustomScenarioInput" type="text" maxlength="180" autocomplete="off" placeholder="Ej. Una autopista recta junto al mar al atardecer">
+                      <small>Gemini respetará esta ambientación y la adaptará al fenómeno científico.</small>
+                    </label>
+                  </div>
+                  <div class="sa-simulator-choice-column" id="simulatorObjectChoiceColumn">
+                    <label class="sa-field">
+                      <span>Objeto principal</span>
+                      <select id="simulatorObjectSelect"></select>
+                    </label>
+                    <label class="sa-field sa-simulator-custom-choice" id="simulatorCustomObjectField" hidden>
+                      <span>Describe tu objeto</span>
+                      <input id="simulatorCustomObjectInput" type="text" maxlength="140" autocomplete="off" placeholder="Ej. Una motocicleta eléctrica azul vista de lado">
+                      <small>Describe un solo objeto completo y coherente con el tema.</small>
+                    </label>
+                  </div>
+                </div>
+                <section class="sa-simulator-variable-section" aria-labelledby="simulatorVariableTitle">
+                  <header>
+                    <div>
+                      <span id="simulatorVariableTitle">Variables del tema</span>
+                      <small id="simulatorVariableFormula"></small>
+                    </div>
+                    <output id="simulatorVariableCount" aria-live="polite"></output>
+                  </header>
+                  <div class="sa-simulator-variable-choices" id="simulatorVariableChoices"></div>
+                </section>
+                <small>Las opciones se adaptan automáticamente a la materia y al tema. Gemini generará exactamente esta combinación.</small>
+              </fieldset>
+
+              <div class="sa-form-row" id="gameStructureFields" data-experience-scope="game">
                 <label class="sa-field">
                   <span>Nivel</span>
                   <select id="gradeSelect">
@@ -129,21 +177,21 @@
                 <label class="sa-field">
                   <span>Dificultad</span>
                   <select id="difficultySelect">
-                    <option value="guided">Guiada</option>
+                    <option value="guided">Fácil</option>
                     <option value="balanced" selected>Equilibrada</option>
                     <option value="challenge">Desafío</option>
                   </select>
                 </label>
               </div>
 
-              <div class="sa-form-row">
+              <div class="sa-form-row" id="gameProgressionFields" data-experience-scope="game">
                 <label class="sa-field">
                   <span>Niveles del juego</span>
                   <input id="gameLevelCount" type="number" min="1" step="1" value="3" inputmode="numeric">
                 </label>
                 <label class="sa-field" id="questionsPerLevelField">
                   <span>Preguntas por nivel</span>
-                  <input id="questionsPerLevel" type="number" min="1" step="1" value="3" inputmode="numeric">
+                  <input id="questionsPerLevel" type="number" min="1" max="15" step="1" value="3" inputmode="numeric">
                 </label>
               </div>
 
@@ -154,6 +202,11 @@
                     <option value="rive-kawaii-signal" selected>Kawaii Signal</option>
                     <option value="rive-tokyo-tech">Tokyo Tech</option>
                     <option value="rive-arcade-matsuri">Arcade Matsuri</option>
+                    <option value="rive-solar-circuit">Solar Circuit</option>
+                    <option value="rive-bio-pulse">Bio Pulse</option>
+                    <option value="rive-lunar-blueprint">Lunar Blueprint</option>
+                    <option value="rive-volcanic-core">Volcanic Core</option>
+                    <option value="rive-prism-glass">Prism Glass</option>
                   </optgroup>
                   <optgroup label="Estilos clásicos">
                   <option value="kawaii-lab">Laboratorio kawaii</option>
@@ -169,31 +222,22 @@
                 </select>
               </label>
 
-              <div class="sa-character-field">
-                <label class="sa-field">
-                  <span>Personaje del juego</span>
-                  <select id="characterSelect" aria-describedby="characterDescription"></select>
-                </label>
-                <div class="sa-character-preview">
-                  <div id="characterPreviewSprite" class="sa-character-preview-sprite" aria-hidden="true"></div>
-                  <div class="sa-character-preview-copy">
-                    <strong id="characterPreviewName">Personaje</strong>
-                    <small id="characterDescription">Personaje adaptado a la materia y al estilo visual.</small>
-                    <button id="createCharacterBtn" class="sa-character-create" type="button">
-                      <span class="sa-action-sheen" aria-hidden="true"></span>
-                      <i class="fas fa-sliders"></i>
-                      <span>Personalizar personaje</span>
-                    </button>
-                  </div>
-                </div>
+              <div hidden aria-hidden="true">
+                <select id="characterSelect" tabindex="-1"></select>
+                <button id="createCharacterBtn" type="button" tabindex="-1"></button>
+                <div id="characterPreviewSprite"></div>
+                <strong id="characterPreviewName"></strong>
+                <small id="characterDescription"></small>
               </div>
 
               <label class="sa-field">
                 <span>Modelo de IA</span>
                 <select id="modelSelect">
-                  <option value="gemini-2.5-flash" selected>Generación rápida</option>
-                  <option value="gemini-2.5-pro">Generación avanzada</option>
-                  <option value="gemini-3-flash-preview">Generación experimental</option>
+                  <option value="gemini-3.6-flash" selected>Gemini 3.6 Flash · recomendado</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                 </select>
               </label>
 
@@ -214,6 +258,7 @@
               </div>
               <div class="sa-stage-actions">
                 <div class="sa-stage-group">
+                  <button id="copyScienceAnswersBtn" class="sa-icon-button" type="button" aria-label="Copiar preguntas y respuestas correctas" title="Copiar preguntas y respuestas correctas"><i class="fas fa-copy" aria-hidden="true"></i></button>
                   <button id="restartPreviewBtn" class="sa-icon-button" type="button" aria-label="Reiniciar juego desde el inicio" title="Reiniciar juego desde el inicio"><i class="fas fa-rotate-right"></i></button>
                   <button id="fullscreenBtn" class="sa-icon-button" type="button" aria-label="Pantalla completa"><i class="fas fa-expand"></i></button>
                   <button id="quickQuestionReviewBtn" class="sa-quick-question-review" type="button" title="Cargar y comprobar la respuesta correcta de la pregunta seleccionada" aria-label="Probar respuesta correcta en revisión rápida"><span class="sa-action-sheen" aria-hidden="true"></span><i class="fas fa-circle-check" aria-hidden="true"></i></button>
@@ -273,6 +318,26 @@
           </aside>
         </section>
   </main>
+
+  <div id="newSessionModal" class="sa-session-setup-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="newSessionModalTitle" aria-describedby="newSessionModalDescription">
+    <div class="sa-session-setup-dialog" tabindex="-1">
+      <header class="sa-session-setup-header">
+        <div>
+          <span id="newSessionModalKicker">Nueva sesión · Videojuego educativo</span>
+          <h2 id="newSessionModalTitle">Diseña tu experiencia científica</h2>
+          <p id="newSessionModalDescription">Completa el brief. El estudio se abrirá cuando el videojuego o simulador esté listo.</p>
+        </div>
+        <button id="cancelNewSessionBtn" type="button" aria-label="Cancelar nueva sesión" hidden>
+          <i class="fas fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div id="newSessionBriefMount" class="sa-session-setup-body"></div>
+      <button id="backToSessionsBtn" class="sa-session-back" type="button">
+        <i class="fas fa-arrow-left" aria-hidden="true"></i>
+        <span>Volver a sesiones</span>
+      </button>
+    </div>
+  </div>
 
   <div id="characterCreatorModal" class="sa-character-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="characterModalTitle">
     <div class="sa-character-modal-dialog">
@@ -401,13 +466,9 @@
     </div>
   </div>
 
-  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
-  <script src="js/html-docx.js"></script>
-  <script src="vendor/rive/rive.js" defer></script>
-  <script src="js/science-rive-hud.js?v=20260731-rive-mission-controls-v1" defer></script>
   <script type="module" data-cache-src="js/chromeLayout.js"></script>
   <script type="module" data-cache-src="js/sidebar.js"></script>
-  <script type="module" src="js/scienceActivities.js?v=20260731-session-panel-v1"></script>
+  <script type="module" src="js/scienceActivities.bundle.js?v=20260816-micro-concept-fulltext-v220"></script>
   <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

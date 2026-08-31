@@ -1237,7 +1237,7 @@ function detectarPerfilAutorQuizz(texto = "") {
         /\b(no tocar|no toques|no modifiques|no modificar|sin modificar|transcrib|transcribir|transcribe|copia exacta|copiar exact|tal como estan|tal como estan|tal cual|exactamente como estan)\b/i.test(normalized);
 
     const pidioPreguntasAbiertas =
-        /\b(preguntas abiertas|pregunta abierta|respuesta abierta|preguntas de desarrollo|desarrollo)\b/i.test(normalized);
+        /\b(preguntas? abiertas?|pregunta abierta|respuestas? abiertas?|preguntas? de desarrollo|respuestas? de desarrollo|preguntas abiertas tipo ensayo|preguntas de tipo ensayo|open[- ]ended|essay question)\b/i.test(normalized);
 
     const pidioNoAgregar =
         /\b(no agregues|no anadas|no inventes|solo estas preguntas|solo estas|unicamente estas preguntas)\b/i.test(normalized);
@@ -1626,7 +1626,7 @@ async function generarContenidoGemini(options = {}) {
     // Obtener elementos por los IDs correctos
     const instruccionesElement = options.instruccionesDiv || document.getElementById("instruccionesSubtema");
     const resultadoElement = options.resultadoDiv || document.getElementById("resultadoGenerado");
-    
+
     // Verificar que existan
     if (!instruccionesElement || !resultadoElement) {
         if (resultadoElement) {
@@ -1634,14 +1634,14 @@ async function generarContenidoGemini(options = {}) {
         }
         return;
     }
-    
+
     // Obtener texto de las instrucciones
     const instrucciones = instruccionesElement.innerText || instruccionesElement.textContent || "";
-    
+
     // Obtener subtema y tema de window (donde están definidos)
     const subtema = options.subtema || window.subtemaActivo;
     const tema = options.tema || window.temaActivo;
-    
+
     if (!subtema) {
         resultadoElement.innerHTML = `<p class="text-red-500 text-xs">No hay subtema activo seleccionado.</p>`;
         return;
@@ -1664,7 +1664,7 @@ async function generarContenidoGemini(options = {}) {
     try {
         const prompt = `
 # RESET — Nueva sesión
-Olvida toda memoria anterior. No conserves contexto previo.  
+Olvida toda memoria anterior. No conserves contexto previo.
 Eres un experto en diseño instruccional, pedagogía y creación de cursos Moodle.
 Trabaja EXCLUSIVAMENTE con la información proporcionada en las instrucciones del autor.
 
@@ -1728,7 +1728,7 @@ for (let intento = 0; intento < 3; intento++) {
                     if (response.status === 503 && intento < 2) {
                         // Espera progresiva: 2s, 4s, 8s...
                         const waitTime = 2000 * Math.pow(2, intento);
-                        
+
                         // Actualizar mensaje para el usuario
                         resultadoElement.innerHTML = `  // ← ¡CAMBIA AQUÍ! Usa resultadoElement, no resultado
                             <div class="flex items-center gap-2 text-yellow-600">
@@ -1736,7 +1736,7 @@ for (let intento = 0; intento < 3; intento++) {
                                 <span class="text-xs">Servidor ocupado, reintentando en ${waitTime/1000} segundos...</span>
                             </div>
                         `;
-                        
+
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                         continue;
                     }
@@ -1757,7 +1757,7 @@ for (let intento = 0; intento < 3; intento++) {
 
             } catch (error) {
                 lastError = error;
-                
+
                 if (intento < 2) {
                     const waitTime = 1000 * Math.pow(2, intento);
                     await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -2000,8 +2000,8 @@ export async function generarModuloGemini(moduloId) {
 
 
         // 🔥 NUEVO: Detectar si el usuario incluye una lectura que NO debe modificarse
-        const tieneLecturaProtegida = instrucciones.includes("no modifiques") && 
-                                     (instrucciones.includes("lectura") || 
+        const tieneLecturaProtegida = instrucciones.includes("no modifiques") &&
+                                     (instrucciones.includes("lectura") ||
                                       instrucciones.includes("texto original") ||
                                       instrucciones.includes("transcribir") ||
                                       instrucciones.includes("copia exacta"));
@@ -2499,7 +2499,7 @@ async function generarContenidoLargoConGemini(promptInicial, maxIter = 5) {
     for (let i = 0; i < maxIter; i++) {
         let response;
         let data;
-        
+
         // INTENTAR MÁXIMO 3 VECES POR FRAGMENTO
         for (let intento = 0; intento < 3; intento++) {
             try {
@@ -2519,7 +2519,7 @@ async function generarContenidoLargoConGemini(promptInicial, maxIter = 5) {
                 }
 
                 break; // Salir del bucle de reintentos si tuvo éxito
-                
+
             } catch (error) {
                 if (intento === 2) throw error; // Último intento, lanzar error
                 await new Promise(resolve => setTimeout(resolve, 1000 * (intento + 1)));
@@ -3316,8 +3316,8 @@ function esRespuestaCortadaPorTokens(texto = "") {
 
 
 // Exporta las funciones
-export { 
-    generarContenidoGemini, 
+export {
+    generarContenidoGemini,
     geminiGenerateRequest,
     getGeminiEndpoint,
     reformularParrafoConIA,

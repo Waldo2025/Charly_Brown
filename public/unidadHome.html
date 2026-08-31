@@ -21,16 +21,16 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <!-- Bootstrap Select CSS -->
     <link rel="stylesheet" href="vendor/bootstrap-select/bootstrap-select.min.css">
-  
+
    <link rel="stylesheet" href="unidadHome.css">
-   <link rel="stylesheet" href="sidebar.css">
+   <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
    <link rel="stylesheet" href="chatbot.css">
    <link rel="stylesheet" href="header.css">
 
 </head>
 <body>
 
-  
+
 
 
   <header class="main-header">
@@ -38,13 +38,10 @@
       <!-- header-content loaded from chromeLayout.js -->
     </div>
   </header>
- 
 
-  
+
+
   <div id="sidebar">
-    <button id="menuToggle" aria-label="Abrir menú">
-      <i class="fas fa-bars"></i>
-    </button>
 
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
@@ -53,7 +50,7 @@
 <div class="chatbot-container resizable" id="chatbotContainer" data-x="0">
     <!-- 🟣 Handle invisible para arrastrar (resize desde el lado izquierdo) -->
     <div class="chatbot-resize-handle"></div>
-  
+
     <div class="chatbot-header">
       <div class="chatbot-brand">
         <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
@@ -61,18 +58,18 @@
       </div>
       <button class="chatbot-close" id="chatbotClose">&times;</button>
     </div>
-    
+
     <div class="chatbot-messages" id="chatbotMessages">
       <!-- Aquí se mostrarán los mensajes -->
     </div>
-  
+
     <div class="chatbot-input">
       <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
       <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>
-  
-   
+
+
 
 
 
@@ -104,8 +101,8 @@
 
   <!-- Incluir el script de la lógica de la página -->
   <script type="module" src="js/unidadHome.js"></script>
-  <script type="module" src="js/chromeLayout.js"></script>
-  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
+  <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
   <script type="module" src="js/chatbot.js"></script>
 
 

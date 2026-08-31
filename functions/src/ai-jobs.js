@@ -7,7 +7,7 @@ const {
   resolveAuthContext,
   asyncRoute
 } = require("./common.js");
-const { createVertexClient, normalizeModel, DEFAULT_IMAGE_MODEL, DEFAULT_VEO_MODEL, DEFAULT_VEO_FAST_MODEL } = require("./vertex.js");
+const { createVertexClient, normalizeModel, normalizeVeoModel, DEFAULT_IMAGE_MODEL, DEFAULT_VEO_MODEL } = require("./vertex.js");
 const { enqueueHttpTask, QUEUES } = require("./tasks.js");
 const { sessionAccess } = require("./podcaster-data.js");
 const { buildDialogueVideoPrompt } = require("./video-prompt.js");
@@ -16,6 +16,116 @@ const AI_JOB_COLLECTION = "podcaster_ai_jobs";
 const AI_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 const TASK_INVOKER = `charly-tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com`;
 const VEO_DISPATCH_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/dispatchVeoTask`;
+const NON_RETRYABLE_VERTEX_CODES = new Set([3, 5, 7, 9, 12, 16]);
+const VERTEX_VIDEO_OPERATION_DEADLINE_MS = 26 * 60 * 1000;
+
+function normalizeVertexModelName(model = "") {
+  return String(model || "")
+    .trim()
+    .replace(/^.*\/models\//i, "")
+    .replace(/:generateContent$/i, "");
+}
+
+function createVertexVideoOperationError(detail = {}) {
+  const providerCode = Number(detail?.code);
+  const providerMessage = String(detail?.message || "Vertex AI no pudo generar el video.").trim();
+  const policyBlocked = providerCode === 3 && /sensitive words|responsible ai|violate/i.test(providerMessage);
+  const error = new Error(policyBlocked
+    ? "Google bloqueó el prompt por sus políticas de IA responsable. Reformula el contenido e inténtalo de nuevo."
+    : providerMessage);
+  error.code = policyBlocked ? "vertex_video_prompt_blocked" : "vertex_video_operation_failed";
+  error.providerCode = Number.isFinite(providerCode) ? providerCode : null;
+  error.retryable = !NON_RETRYABLE_VERTEX_CODES.has(providerCode);
+  return error;
+}
+
+function normalizeVertexRaiReasons(value = null) {
+  const source = Array.isArray(value) ? value : (value == null ? [] : [value]);
+  return source
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return "";
+      return String(item.message || item.reason || item.code || "").trim();
+    })
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim().slice(0, 300))
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function extractVertexVideoOutcome(operation = {}) {
+  const response = operation?.response && typeof operation.response === "object"
+    ? operation.response
+    : (operation?.result && typeof operation.result === "object" ? operation.result : {});
+  const generatedVideos = [
+    response?.generatedVideos,
+    response?.generated_videos,
+    response?.videos,
+    response?.generatedSamples,
+    response?.generated_samples
+  ].find(Array.isArray) || [];
+  const first = generatedVideos[0] && typeof generatedVideos[0] === "object"
+    ? generatedVideos[0]
+    : null;
+  const video = first?.video && typeof first.video === "object" ? first.video : first;
+  const filteredReasons = normalizeVertexRaiReasons(
+    response?.raiMediaFilteredReasons ?? response?.rai_media_filtered_reasons
+  );
+  const filteredCount = Math.max(0, Number(
+    response?.raiMediaFilteredCount ?? response?.rai_media_filtered_count ?? 0
+  ) || 0);
+  return { response, video, filteredCount, filteredReasons };
+}
+
+function createVertexVideoEmptyError(operation = {}) {
+  const outcome = extractVertexVideoOutcome(operation);
+  if (outcome.filteredCount > 0 || outcome.filteredReasons.length > 0) {
+    const error = new Error(
+      "Google filtró la imagen de referencia o el video generado por sus políticas de IA responsable. Prueba con otra imagen de referencia o elimina la referencia y vuelve a generar."
+    );
+    error.code = "vertex_video_content_filtered";
+    error.retryable = false;
+    error.providerReasons = outcome.filteredReasons;
+    error.filteredCount = outcome.filteredCount;
+    return error;
+  }
+  const error = new Error("Vertex AI terminó la generación sin devolver un archivo de video. Inténtalo nuevamente.");
+  error.code = "vertex_video_empty";
+  // The provider operation already reached a terminal successful state. Retrying
+  // the Cloud Task would submit a brand-new paid generation and turn one empty
+  // result into a burst of 5xx responses. A user can still retry explicitly.
+  error.retryable = false;
+  return error;
+}
+
+function normalizeVertexVideoError(error) {
+  if (Number.isFinite(Number(error?.providerCode))) return error;
+  const directCode = Number(error?.code);
+  if (Number.isFinite(directCode)) {
+    return createVertexVideoOperationError({ code: directCode, message: error?.message });
+  }
+  const rawMessage = String(error?.message || error || "").trim();
+  const marker = "vertex_video_error:";
+  const markerIndex = rawMessage.toLowerCase().indexOf(marker);
+  if (markerIndex < 0) return error;
+  const encodedDetail = rawMessage.slice(markerIndex + marker.length).trim();
+  try {
+    const detail = JSON.parse(encodedDetail);
+    return Number.isFinite(Number(detail?.code))
+      ? createVertexVideoOperationError(detail)
+      : error;
+  } catch (_) {
+    return error;
+  }
+}
+
+function isRetryableAiJobError(error) {
+  if (typeof error?.retryable === "boolean") return error.retryable;
+  const providerCode = Number(error?.providerCode ?? error?.code);
+  if (NON_RETRYABLE_VERTEX_CODES.has(providerCode)) return false;
+  const status = Number(error?.status || error?.statusCode || 0);
+  if (status >= 400 && status < 500 && ![408, 409, 429].includes(status)) return false;
+  return true;
+}
 
 function tokenDownloadUrl(bucketName, storagePath, token) {
   return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${encodeURIComponent(token)}`;
@@ -43,19 +153,39 @@ function compactInput(value, depth = 0) {
 }
 
 function publicAiJob(job = {}) {
+  let publicStage = String(job.stage || "queued");
+  let publicHint = String(job.hint || "");
+  let publicError = job.error;
+  let publicRetryable = typeof job.retryable === "boolean" ? job.retryable : undefined;
+  if (job.type === "dialogue_video" && job.error) {
+    const storedError = new Error(String(job.error?.message || job.error?.code || job.error));
+    if (job.error?.providerCode != null) storedError.providerCode = job.error.providerCode;
+    const normalizedError = normalizeVertexVideoError(storedError);
+    if (normalizedError?.code === "vertex_video_prompt_blocked") {
+      publicStage = "blocked";
+      publicHint = "Google bloqueó el prompt. Reformúlalo e intenta de nuevo.";
+      publicRetryable = false;
+      publicError = {
+        code: normalizedError.code,
+        message: normalizedError.message,
+        providerCode: normalizedError.providerCode
+      };
+    }
+  }
   const payload = {
     ok: true,
     jobId: String(job.jobId || ""),
     type: String(job.type || ""),
     status: String(job.status || "queued"),
-    stage: String(job.stage || "queued"),
+    stage: publicStage,
     progress: Math.max(0, Math.min(1, Number(job.progress || 0) || 0)),
-    hint: String(job.hint || ""),
+    hint: publicHint,
     updatedAt: String(job.updatedAt || new Date().toISOString()),
     statusUrl: `/api/podcaster/jobs/${encodeURIComponent(String(job.jobId || ""))}`
   };
+  if (typeof publicRetryable === "boolean") payload.retryable = publicRetryable;
   if (job.model) payload.model = String(job.model);
-  if (job.error) payload.error = job.error;
+  if (publicError) payload.error = publicError;
   if (job.result && typeof job.result === "object") {
     payload.result = job.result;
     for (const key of ["portrait", "image", "dialogueVideo", "dialogueAudio", "track"]) {
@@ -99,7 +229,21 @@ async function createAiJob(req, type) {
   const input = compactInput(req.body || {});
   const sessionId = cleanId(input?.sessionId || "");
   const { db, admin } = getAdminServices();
-  const sessionSnapshot = await db.collection("podcaster_sessions").doc(sessionId).get();
+  const sessionRef = db.collection("podcaster_sessions").doc(sessionId);
+  let sessionSnapshot = await sessionRef.get();
+  if (!sessionSnapshot.exists && sessionId) {
+    const nowIso = new Date().toISOString();
+    await sessionRef.set({
+      id: sessionId,
+      ownerId: authContext.uid,
+      title: String(input?.title || "Sesión de Podcaster").trim(),
+      script: { rows: [] },
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      autoCreatedByAiJob: true
+    }, { merge: true });
+    sessionSnapshot = await sessionRef.get();
+  }
   if (!sessionSnapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
   if (!sessionAccess(sessionSnapshot.data(), authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
   const jobId = crypto.randomUUID();
@@ -107,7 +251,7 @@ async function createAiJob(req, type) {
   const isVideo = type === "dialogue_video";
   const requestedModel = String(input.model || "");
   const model = isVideo
-    ? (/lite|fast/i.test(requestedModel) ? DEFAULT_VEO_FAST_MODEL : normalizeModel(requestedModel, DEFAULT_VEO_MODEL))
+    ? normalizeVeoModel(requestedModel, DEFAULT_VEO_MODEL)
     : type === "dialogue_audio"
       ? normalizeModel(requestedModel, "gemini-3.1-flash-tts-preview")
       : type === "music"
@@ -174,6 +318,12 @@ function gsPath(uri = "") {
   return match ? match[1] : "";
 }
 
+function buildCanonicalDialogueVideoStoragePath(job = {}, input = {}, mimeType = "video/mp4") {
+  const rowId = cleanId(input?.rowId || "row_unknown");
+  const extension = String(mimeType || "").toLowerCase().includes("webm") ? "webm" : "mp4";
+  return `podcaster/sessions/${job.sessionId}/owners/${job.ownerId}/videos/${rowId}/${job.jobId}.${extension}`;
+}
+
 function normalizeOwnedReferencePath(value = "", job = {}) {
   let path = String(value || "").trim();
   if (!path) return "";
@@ -228,10 +378,11 @@ async function resolveVertexVideoReferences(bucket, input = {}, job = {}) {
 }
 
 async function processVideoJob(job, ref) {
-  const { bucket, admin } = getAdminServices();
+  const { bucket, db, admin } = getAdminServices();
   const client = createVertexClient({ location: REGION });
   const input = job.input || {};
   const references = await resolveVertexVideoReferences(bucket, input, job);
+  const videoModel = normalizeVeoModel(job.model, DEFAULT_VEO_MODEL);
   const promptSpec = buildDialogueVideoPrompt(input, {
     hasReferenceImage: Boolean(references.firstFrame || references.referenceImages.length),
     referenceMode: references.mode
@@ -245,42 +396,81 @@ async function processVideoJob(job, ref) {
     generateAudio: promptSpec.generateAudio,
     outputGcsUri: `gs://${bucket.name}/${outputPrefix}`
   };
-  if (references.referenceImages.length) {
+  if (/^veo-2\.0-/.test(videoModel)) {
+    delete config.resolution;
+    delete config.generateAudio;
+  }
+  const supportsAssetReferences = /^veo-3\.1-(?:fast-)?generate-001$/.test(videoModel);
+  if (references.referenceImages.length && supportsAssetReferences) {
     config.referenceImages = references.referenceImages.map((image) => ({
       image: { gcsUri: image.gcsUri, mimeType: image.mimeType },
       referenceType: "ASSET"
     }));
   }
   let operation = await client.models.generateVideos({
-    model: normalizeModel(job.model, DEFAULT_VEO_MODEL),
-    prompt: promptSpec.prompt,
-    ...(references.firstFrame ? {
-      image: { gcsUri: references.firstFrame.gcsUri, mimeType: references.firstFrame.mimeType }
-    } : {}),
+    model: videoModel,
+    source: {
+      prompt: promptSpec.prompt,
+      ...(references.firstFrame ? {
+        image: { gcsUri: references.firstFrame.gcsUri, mimeType: references.firstFrame.mimeType }
+      } : {})
+    },
     config
   });
+  const operationDeadlineAt = Date.now() + VERTEX_VIDEO_OPERATION_DEADLINE_MS;
   let polls = 0;
-  while (!operation.done && polls < 170) {
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+  while (!operation.done && Date.now() < operationDeadlineAt) {
+    const remainingMs = operationDeadlineAt - Date.now();
+    await new Promise((resolve) => setTimeout(resolve, Math.min(10000, Math.max(0, remainingMs))));
+    if (Date.now() >= operationDeadlineAt) break;
     operation = await client.operations.getVideosOperation({ operation });
     polls += 1;
     if (polls % 2 === 0 && String((await ref.get()).data()?.status || "") === "cancelled") throw Object.assign(new Error("ai_job_cancelled"), { code: "ai_job_cancelled" });
     if (polls % 3 === 0) await ref.set({ stage: "vertex_video_generation", progress: Math.min(0.9, 0.08 + polls / 200), hint: "Vertex AI está generando el video.", heartbeatAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
   }
-  if (!operation.done) throw Object.assign(new Error("vertex_video_timeout"), { status: 504 });
-  if (operation.error) throw new Error(`vertex_video_error:${JSON.stringify(operation.error).slice(0, 500)}`);
-  const video = operation.response?.generatedVideos?.[0]?.video || null;
-  let storagePath = gsPath(video?.uri);
-  if (!storagePath && video?.videoBytes) {
-    storagePath = `${outputPrefix}video.mp4`;
-    await bucket.file(storagePath).save(Buffer.from(video.videoBytes, "base64"), { resumable: false, metadata: { contentType: video.mimeType || "video/mp4" } });
+  if (!operation.done) {
+    const error = new Error("Vertex AI excedió el tiempo máximo de generación del video. Inténtalo nuevamente.");
+    error.code = "vertex_video_timeout";
+    error.status = 504;
+    error.retryable = false;
+    throw error;
   }
-  if (!storagePath) throw new Error("vertex_video_empty");
+  if (operation.error) throw createVertexVideoOperationError(operation.error);
+  const outcome = extractVertexVideoOutcome(operation);
+  const video = outcome.video;
+  let storagePath = gsPath(video?.uri || video?.gcsUri || video?.gcs_uri);
+  const videoBytes = video?.videoBytes || video?.video_bytes || "";
+  if (!storagePath && videoBytes) {
+    storagePath = `${outputPrefix}video.mp4`;
+    await bucket.file(storagePath).save(Buffer.from(videoBytes, "base64"), { resumable: false, metadata: { contentType: video.mimeType || video?.mime_type || "video/mp4" } });
+  }
+  if (!storagePath) throw createVertexVideoEmptyError(operation);
   if (String((await ref.get()).data()?.status || "") === "cancelled") throw Object.assign(new Error("ai_job_cancelled"), { code: "ai_job_cancelled" });
-  const videoFile = bucket.file(storagePath);
+  const sourceStoragePath = storagePath;
+  const canonicalStoragePath = buildCanonicalDialogueVideoStoragePath(job, input, video?.mimeType || "video/mp4");
+  let videoFile = bucket.file(sourceStoragePath);
+  if (sourceStoragePath !== canonicalStoragePath) {
+    await videoFile.copy(bucket.file(canonicalStoragePath));
+    videoFile = bucket.file(canonicalStoragePath);
+    storagePath = canonicalStoragePath;
+  }
   const [videoMetadata] = await videoFile.getMetadata();
   const videoToken = String(videoMetadata?.metadata?.firebaseStorageDownloadTokens || crypto.randomUUID());
-  if (!videoMetadata?.metadata?.firebaseStorageDownloadTokens) await videoFile.setMetadata({ metadata: { ...(videoMetadata?.metadata || {}), firebaseStorageDownloadTokens: videoToken } });
+  await videoFile.setMetadata({
+    contentType: String(video?.mimeType || videoMetadata?.contentType || "video/mp4"),
+    metadata: {
+      ...(videoMetadata?.metadata || {}),
+      firebaseStorageDownloadTokens: videoToken,
+      jobId: String(job.jobId || ""),
+      rowId: String(input.rowId || ""),
+      sessionId: String(job.sessionId || ""),
+      ownerId: String(job.ownerId || ""),
+      sourceType: "generated"
+    }
+  });
+  if (sourceStoragePath !== storagePath) {
+    await bucket.file(sourceStoragePath).delete({ ignoreNotFound: true }).catch(() => {});
+  }
   const dialogueVideo = {
     rowId: String(input.rowId || ""),
     downloadUrl: tokenDownloadUrl(bucket.name, storagePath, videoToken),
@@ -292,6 +482,29 @@ async function processVideoJob(job, ref) {
     referenceMode: references.mode,
     updatedAt: new Date().toISOString()
   };
+  const generatedRowId = String(input.rowId || "").trim();
+  const sessionRef = db.collection("podcaster_sessions").doc(String(job.sessionId || ""));
+  if (generatedRowId) await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(sessionRef);
+    if (!snapshot.exists) return;
+    const sessionData = snapshot.data()?.session && typeof snapshot.data().session === "object" ? snapshot.data().session : {};
+    const currentClip = sessionData?.dialogueVideoMap?.[generatedRowId];
+    const currentSourceType = String(currentClip?.sourceType || currentClip?.replacementSource || "").trim().toLowerCase();
+    const currentIsManual = currentClip?.manuallyReplaced === true || currentSourceType === "manual-replacement" || currentSourceType === "manual";
+    if (currentIsManual) return;
+    const currentUpdatedAt = currentClip?.updatedAt?.toDate?.().getTime?.()
+      ?? Date.parse(String(currentClip?.updatedAt || ""));
+    const generatedUpdatedAt = Date.parse(dialogueVideo.updatedAt);
+    if (Number.isFinite(currentUpdatedAt) && currentUpdatedAt >= generatedUpdatedAt) return;
+    transaction.set(sessionRef, {
+      session: {
+        dialogueVideoMap: { [generatedRowId]: dialogueVideo },
+        updatedAt: dialogueVideo.updatedAt
+      },
+      sessionUpdatedAt: dialogueVideo.updatedAt,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
   await ref.set({ status: "ready", stage: "ready", progress: 1, hint: "Video listo.", result: { dialogueVideo }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
 }
 
@@ -426,6 +639,7 @@ async function dispatchAiJob(jobId) {
     if (!snapshot.exists) throw Object.assign(new Error("ai_job_not_found"), { status: 404 });
     const job = snapshot.data() || {};
     if (["ready", "cancelled"].includes(String(job.status || ""))) return null;
+    if (job.status === "error" && job.retryable === false) return null;
     const leaseMs = job.leaseUntil?.toMillis?.() || 0;
     if (job.status === "running" && leaseMs > Date.now()) return null;
     transaction.set(ref, { status: "running", stage: "starting", progress: 0.04, hint: "Iniciando Vertex AI.", attempt: Number(job.attempt || 0) + 1, leaseUntil: admin.firestore.Timestamp.fromMillis(Date.now() + 35 * 60 * 1000), heartbeatAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
@@ -439,7 +653,30 @@ async function dispatchAiJob(jobId) {
     return { completed: true };
   } catch (error) {
     if (String(error?.code || error?.message || "") === "ai_job_cancelled") return { cancelled: true };
-    await ref.set({ status: "error", stage: "error", hint: "Vertex AI no pudo completar el trabajo.", error: { code: String(error?.code || error?.message || "ai_job_failed").slice(0, 160), message: String(error?.message || error).slice(0, 600) }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    const jobError = claimed.type === "dialogue_video"
+      ? normalizeVertexVideoError(error)
+      : error;
+    const retryable = isRetryableAiJobError(jobError);
+    const promptBlocked = ["vertex_video_prompt_blocked", "vertex_video_content_filtered"].includes(jobError?.code);
+    await ref.set({
+      status: "error",
+      stage: promptBlocked ? "blocked" : "error",
+      retryable,
+      hint: jobError?.code === "vertex_video_content_filtered"
+        ? "Google filtró la referencia o el resultado. Prueba otra imagen o genera sin referencia."
+        : (promptBlocked ? "Google bloqueó el prompt. Reformúlalo e intenta de nuevo." : "Vertex AI no pudo completar el trabajo."),
+      error: {
+        code: String(jobError?.code || jobError?.message || "ai_job_failed").slice(0, 160),
+        message: String(jobError?.message || jobError).slice(0, 600),
+        ...(Number.isFinite(jobError?.providerCode) ? { providerCode: jobError.providerCode } : {}),
+        ...(Array.isArray(jobError?.providerReasons) && jobError.providerReasons.length
+          ? { providerReasons: jobError.providerReasons.slice(0, 5) }
+          : {}),
+        ...(Number.isFinite(jobError?.filteredCount) ? { filteredCount: jobError.filteredCount } : {})
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    if (!retryable) return { failed: true, retryable: false };
     throw error;
   }
 }
@@ -492,6 +729,23 @@ function registerGeminiJobRoutes(app) {
     const job = await createAiJob(req, type);
     res.status(202).json(publicAiJob(job));
   });
+  app.get("/api/gemini/models", asyncRoute(async (req, res) => {
+    await resolveAuthContext(req);
+    const client = createVertexClient({ location: "global" });
+    const models = [];
+    const seenModelNames = new Set();
+    const pager = await client.models.list({
+      config: { queryBase: true, pageSize: 100 }
+    });
+    for await (const model of pager) {
+      if (!model || typeof model !== "object") continue;
+      const normalizedName = normalizeVertexModelName(model.name || "");
+      if (normalizedName && seenModelNames.has(normalizedName)) continue;
+      if (normalizedName) seenModelNames.add(normalizedName);
+      models.push({ ...model, name: normalizedName || model.name });
+    }
+    res.status(200).json({ models });
+  }));
   app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-audios/generate"], create("dialogue_audio"));
   app.post("/api/podcaster/music/generate", create("music"));
 }
@@ -503,7 +757,13 @@ module.exports = {
   publicAiJob,
   extractInteractionAudio,
   buildLyriaInteractionRequest,
+  createVertexVideoOperationError,
+  extractVertexVideoOutcome,
+  createVertexVideoEmptyError,
+  normalizeVertexVideoError,
+  isRetryableAiJobError,
   normalizeOwnedReferencePath,
+  buildCanonicalDialogueVideoStoragePath,
   resolveVertexVideoReferences,
   registerVeoRoutes,
   registerGeminiJobRoutes,

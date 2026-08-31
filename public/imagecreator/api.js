@@ -3,6 +3,47 @@ import { prepareAttachmentsForGemini } from "./attachments.js";
 import { buildGeminiImagePayload, estimateGeminiPayloadBytes } from "./payloads.js";
 import { MAX_GEMINI_PAYLOAD_BYTES, MAX_RESULTS_PER_TURN } from "./constants.js";
 
+const GEMINI_IMAGE_QUOTA_COOLDOWN_MS = 60_000;
+let geminiImageQuotaBlockedUntil = 0;
+
+function isGeminiImageQuotaError(error) {
+  return Number(error?.status || 0) === 429
+    || String(error?.code || "").toUpperCase() === "GEMINI_QUOTA_EXHAUSTED"
+    || /resource[_ ]exhausted|quota|too many requests/i.test(String(error?.message || error?.detail?.error?.message || ""));
+}
+
+function isGeminiImageTransientError(error) {
+  const status = Number(error?.status || 0);
+  const text = String(error?.message || error?.detail?.error?.message || error?.code || "");
+  return isGeminiImageQuotaError(error)
+    || [502, 503, 504].includes(status)
+    || /failed to fetch|networkerror|load failed|bad gateway|gateway timeout|upstream_timeout|temporarily unavailable/i.test(text);
+}
+
+function quotaRetryDelayMs(error) {
+  const explicitSeconds = Number(error?.detail?.retryAfterSeconds || error?.detail?.retryAfter || 0);
+  if (Number.isFinite(explicitSeconds) && explicitSeconds > 0) return Math.min(explicitSeconds * 1000, 5 * 60_000);
+  const retryInfo = Array.isArray(error?.detail?.error?.details)
+    ? error.detail.error.details.find((item) => /RetryInfo/i.test(String(item?.["@type"] || "")))
+    : null;
+  const match = String(retryInfo?.retryDelay || "").match(/([\d.]+)s/i);
+  return match ? Math.min(Math.ceil(Number(match[1]) * 1000), 5 * 60_000) : GEMINI_IMAGE_QUOTA_COOLDOWN_MS;
+}
+
+function buildGeminiImageQuotaError(error, retryAfterMs) {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  const quotaLimited = isGeminiImageQuotaError(error);
+  const transientError = new Error(quotaLimited
+    ? `Gemini alcanzó temporalmente el límite de generación de imágenes. Intenta nuevamente en aproximadamente ${seconds} segundos.`
+    : `Gemini no respondió a tiempo. La escena conservará lo ya generado; intenta nuevamente en aproximadamente ${seconds} segundos.`);
+  transientError.name = quotaLimited ? "GeminiQuotaError" : "GeminiTemporaryUnavailableError";
+  transientError.code = quotaLimited ? "GEMINI_QUOTA_EXHAUSTED" : "GEMINI_IMAGE_TEMPORARILY_UNAVAILABLE";
+  transientError.status = quotaLimited ? 429 : 503;
+  transientError.retryAfterMs = retryAfterMs;
+  transientError.detail = error?.detail;
+  return transientError;
+}
+
 function makeId(prefix = "msg") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -31,9 +72,11 @@ function extractGeminiImageResults(imageData = {}, { sourceMessageId = "", optio
 }
 
 export async function generateImagesViaGemini({ mode, prompt, options, attachments }) {
+  const cooldownRemaining = geminiImageQuotaBlockedUntil - Date.now();
+  if (cooldownRemaining > 0) throw buildGeminiImageQuotaError(null, cooldownRemaining);
   const count = Math.max(1, Math.min(MAX_RESULTS_PER_TURN, Number(options?.count || 1) || 1));
   const results = [];
-  let lastError = "";
+  let lastError = null;
   const preparedAttachments = await prepareAttachmentsForGemini(attachments, {
     maxPayloadBytes: MAX_GEMINI_PAYLOAD_BYTES
   });
@@ -64,12 +107,17 @@ export async function generateImagesViaGemini({ mode, prompt, options, attachmen
         results.push(item);
       }
     } catch (error) {
-      lastError = String(error?.message || "Error al generar imagen con Gemini.");
+      if (isGeminiImageTransientError(error)) {
+        const retryAfterMs = quotaRetryDelayMs(error);
+        geminiImageQuotaBlockedUntil = Date.now() + retryAfterMs;
+        throw buildGeminiImageQuotaError(error, retryAfterMs);
+      }
+      lastError = error instanceof Error ? error : new Error(String(error || "Error al generar imagen con Gemini."));
     }
   }
 
   if (!results.length) {
-    throw new Error(lastError || "Gemini no devolvió imágenes.");
+    throw lastError || new Error("Gemini no devolvió imágenes.");
   }
 
   return results;

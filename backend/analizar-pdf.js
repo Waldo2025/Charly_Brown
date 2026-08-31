@@ -14,6 +14,10 @@ const EMPTY_ANALYSIS_RESULT = Object.freeze({
   spellingIssues: [],
   orthotypographyIssues: [],
   redactionIssues: [],
+  noteIssues: [],
+  noteHistoryIssues: [],
+  trackedChangeIssues: [],
+  customRuleIssues: [],
   colorIssues: [],
   recortableIssues: [],
   stats: null
@@ -118,6 +122,13 @@ function sanitizePageIssue(raw = {}, options = {}) {
     reason: clampText(source.reason || "", 240),
     severity: clampText(source.severity || "", 40),
     code: clampText(source.code || "", 80),
+    ruleId: clampText(source.ruleId || "", 120),
+    ruleName: clampText(source.ruleName || "", 160),
+    mechanism: clampText(source.mechanism || "", 80),
+    languageCode: clampText(source.languageCode || "", 20),
+    layerId: clampText(source.layerId || "", 120),
+    layerName: clampText(source.layerName || "", 240),
+    providers: sanitizeStringList(source.providers, 12, 80),
     confidence: Number.isFinite(Number(source.confidence)) ? Math.max(0, Math.min(1, Number(source.confidence))) : undefined,
     origins: sanitizeStringList(source.origins, 24, 80),
     destinations: sanitizeStringList(source.destinations, 24, 80),
@@ -244,6 +255,7 @@ function sanitizePageReport(raw = {}) {
     orthotypographyIssues: (Array.isArray(source.orthotypographyIssues) ? source.orthotypographyIssues : []).map((item) => sanitizePageIssue(item)),
     redactionIssues: (Array.isArray(source.redactionIssues) ? source.redactionIssues : []).map((item) => sanitizePageIssue(item)),
     recortableIssues: (Array.isArray(source.recortableIssues) ? source.recortableIssues : []).map((item) => sanitizePageIssue(item)),
+    customRuleIssues: (Array.isArray(source.customRuleIssues) ? source.customRuleIssues : []).map((item) => sanitizePageIssue(item)),
     notes: sanitizePageNotes(source.notes),
     noteHistory: sanitizePageNotes(source.noteHistory),
     instructionWorkModes: (Array.isArray(source.instructionWorkModes) ? source.instructionWorkModes : []).map((item) => compactAnalizarPdfPayloadValue({
@@ -251,6 +263,9 @@ function sanitizePageReport(raw = {}) {
       text: clampText(item?.text || "", 600),
     })),
     recortableSummary: sanitizeRecortableSummary(source.recortableSummary),
+    notes: compactAnalizarPdfPayloadValue(source.notes || []),
+    noteHistory: compactAnalizarPdfPayloadValue(source.noteHistory || []),
+    trackedChanges: compactAnalizarPdfPayloadValue(source.trackedChanges || []),
   }, { preserveKeys: new Set(["pageName"]) });
 }
 
@@ -272,6 +287,8 @@ function sanitizeResultStats(raw = null) {
     configurationWarnings: sanitizeStringList(source.configurationWarnings, 20, 900),
     swatchInventory: (Array.isArray(source.swatchInventory) ? source.swatchInventory : []).map((item, index) => sanitizeColorEntry(item, index)),
     pageReports: (Array.isArray(source.pageReports) ? source.pageReports : []).slice(0, 120).map((page) => sanitizePageReport(page)),
+    language: compactAnalizarPdfPayloadValue(source.language || {}),
+    analysisRules: compactAnalizarPdfPayloadValue(source.analysisRules || {}),
   }, { preserveKeys: new Set(["documentName", "pageCount", "pageReports"]) });
 }
 
@@ -326,6 +343,9 @@ function buildResultSummary(result = {}) {
   const spellingIssues = Array.isArray(result?.spellingIssues) ? result.spellingIssues.length : 0;
   const orthotypographyIssues = Array.isArray(result?.orthotypographyIssues) ? result.orthotypographyIssues.length : 0;
   const redactionIssues = Array.isArray(result?.redactionIssues) ? result.redactionIssues.length : 0;
+  const noteIssues = Array.isArray(result?.noteIssues) ? result.noteIssues.length : 0;
+  const trackedChangeIssues = Array.isArray(result?.trackedChangeIssues) ? result.trackedChangeIssues.length : 0;
+  const customRuleIssues = Array.isArray(result?.customRuleIssues) ? result.customRuleIssues.length : 0;
   const colorIssues = Array.isArray(result?.colorIssues) ? result.colorIssues.length : 0;
   const recortableIssues = Array.isArray(result?.recortableIssues) ? result.recortableIssues.length : 0;
   const stats = result?.stats && typeof result.stats === "object" ? result.stats : null;
@@ -335,6 +355,9 @@ function buildResultSummary(result = {}) {
     spellingIssueCount: spellingIssues,
     orthotypographyIssueCount: orthotypographyIssues,
     redactionIssueCount: redactionIssues,
+    noteIssueCount: noteIssues,
+    trackedChangeIssueCount: trackedChangeIssues,
+    customRuleIssueCount: customRuleIssues,
     colorIssueCount: colorIssues,
     recortableIssueCount: recortableIssues,
     pageCount: Number(stats?.pageCount || 0) || 0,
@@ -367,6 +390,9 @@ function sanitizeResultSummary(raw = {}, result = {}) {
     redactionIssueCount: Number(source.redactionIssueCount) >= 0
       ? Number(source.redactionIssueCount)
       : base.redactionIssueCount,
+    noteIssueCount: Number(source.noteIssueCount) >= 0 ? Number(source.noteIssueCount) : base.noteIssueCount,
+    trackedChangeIssueCount: Number(source.trackedChangeIssueCount) >= 0 ? Number(source.trackedChangeIssueCount) : base.trackedChangeIssueCount,
+    customRuleIssueCount: Number(source.customRuleIssueCount) >= 0 ? Number(source.customRuleIssueCount) : base.customRuleIssueCount,
     colorIssueCount: Number(source.colorIssueCount) >= 0
       ? Number(source.colorIssueCount)
       : base.colorIssueCount,
@@ -532,6 +558,10 @@ function sanitizeResult(raw = {}) {
     spellingIssues: Array.isArray(result.spellingIssues) ? result.spellingIssues : [],
     orthotypographyIssues: Array.isArray(result.orthotypographyIssues) ? result.orthotypographyIssues : [],
     redactionIssues: Array.isArray(result.redactionIssues) ? result.redactionIssues : [],
+    noteIssues: Array.isArray(result.noteIssues) ? result.noteIssues : [],
+    noteHistoryIssues: Array.isArray(result.noteHistoryIssues) ? result.noteHistoryIssues : [],
+    trackedChangeIssues: Array.isArray(result.trackedChangeIssues) ? result.trackedChangeIssues : [],
+    customRuleIssues: Array.isArray(result.customRuleIssues) ? result.customRuleIssues : [],
     colorIssues: Array.isArray(result.colorIssues) ? result.colorIssues : [],
     recortableIssues: Array.isArray(result.recortableIssues) ? result.recortableIssues : [],
     stats: sanitizeResultStats(result.stats)
@@ -594,6 +624,11 @@ function sanitizeAnalizarPdfFile(raw = {}, index = 0) {
     fileSize: Math.max(0, Number(source.fileSize || 0) || 0),
     fileLastModified: Math.max(0, Number(source.fileLastModified || 0) || 0),
     fileMimeType: clampText(source.fileMimeType || "", 160),
+    workflowRole: ["source", "destination", "both"].includes(String(source.workflowRole || "").toLowerCase()) ? String(source.workflowRole).toLowerCase() : "source",
+    linkedAssetKind: ["recortable", "ficha", "anexo", "video"].includes(String(source.linkedAssetKind || "").toLowerCase()) ? String(source.linkedAssetKind).toLowerCase() : "",
+    analysisSelected: source.analysisSelected !== false,
+    detectedLanguageCode: clampText(source.detectedLanguageCode || result?.stats?.language?.resolvedCode || "", 16),
+    languageConfidence: Math.max(0, Math.min(1, Number(source.languageConfidence || result?.stats?.language?.confidence || 0) || 0)),
     sourceStoragePath: clampText(source.sourceStoragePath || "", 900),
     sourceDownloadUrl: clampText(source.sourceDownloadUrl || "", 3200),
     correctedStoragePath: clampText(source.correctedStoragePath || "", 900),
@@ -621,6 +656,9 @@ function sanitizeAnalizarPdfRevision(raw = {}, index = 0) {
     title: clampText(source.title || buildRevisionTitle(source), 240) || buildRevisionTitle(source),
     unidad,
     revisionNumero: clampText(source.revisionNumero || "", 80),
+    workflowRole: ["source", "destination", "both"].includes(String(source.workflowRole || "").toLowerCase()) ? String(source.workflowRole).toLowerCase() : "source",
+    linkedAssetKind: ["recortable", "ficha", "anexo", "video"].includes(String(source.linkedAssetKind || "").toLowerCase()) ? String(source.linkedAssetKind).toLowerCase() : "",
+    detectedStructure: compactAnalizarPdfPayloadValue(source.detectedStructure || {}),
     recortableRole: /^recortables$/i.test(unidad)
       ? (["source", "destination", "both"].includes(rawRecortableRole) ? rawRecortableRole : "source")
       : "",
@@ -637,11 +675,21 @@ function sanitizeAnalizarPdfRevision(raw = {}, index = 0) {
       spellingIssueCount: Math.max(0, Number(summary.spellingIssueCount || 0) || 0),
       orthotypographyIssueCount: Math.max(0, Number(summary.orthotypographyIssueCount || 0) || 0),
       redactionIssueCount: Math.max(0, Number(summary.redactionIssueCount || 0) || 0),
+      noteIssueCount: Math.max(0, Number(summary.noteIssueCount || 0) || 0),
+      trackedChangeIssueCount: Math.max(0, Number(summary.trackedChangeIssueCount || 0) || 0),
+      customRuleIssueCount: Math.max(0, Number(summary.customRuleIssueCount || 0) || 0),
       colorIssueCount: Math.max(0, Number(summary.colorIssueCount || 0) || 0),
       recortableIssueCount: Math.max(0, Number(summary.recortableIssueCount || 0) || 0)
     },
     files
   };
+}
+
+function sanitizeAnalysisRuleConfig(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const customRuleIds = [...new Set((Array.isArray(source.customRuleIds) ? source.customRuleIds : []).map((value) => clampText(value, 120)).filter(Boolean))].slice(0, 20);
+  const customRules = (Array.isArray(source.customRules) ? source.customRules : []).filter((rule) => rule && typeof rule === "object" && customRuleIds.includes(String(rule.id || ""))).slice(0, 20).map((rule) => compactAnalizarPdfPayloadValue(rule));
+  return { customRuleIds, catalogVersion: clampText(source.catalogVersion || "", 40), customRules };
 }
 
 function sanitizeAnalizarPdfSession(raw = {}, options = {}) {
@@ -667,6 +715,9 @@ function sanitizeAnalizarPdfSession(raw = {}, options = {}) {
     updatedAt: clampText(source.updatedAt || nowIso(), 80),
     sessionKey: clampText(source.sessionKey || buildSessionKey(bibliographicInfo), 240),
     sourceType: String(source.sourceType || "pdf").trim() === "idml" ? "idml" : "pdf",
+    workflowFormat: String(source.workflowFormat || "en_forma") === "libre" ? "libre" : "en_forma",
+    languageCode: ["auto", "es-MX", "en-US", "fr-FR", "pt-BR", "de-DE", "it-IT", "ca-ES"].includes(String(source.languageCode || "")) ? String(source.languageCode) : "es-MX",
+    analysisRuleConfig: sanitizeAnalysisRuleConfig(source.analysisRuleConfig),
     analysisStatus: normalizeAnalysisStatus(source.analysisStatus),
     analysisJobId: clampText(source.analysisJobId || "", 160),
     bibliographicInfo,

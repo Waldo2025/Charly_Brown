@@ -1,9 +1,20 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-08-20.2";
-import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.537";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.853";
+import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.853";
+import {
+  AVAILABLE_PODCASTER_VIDEO_MODELS,
+  collectAvailablePodcasterVideoModels,
+  formatPodcasterVideoModelLabel,
+  isVertexVeoModelId,
+  normalizeVertexVeoModelId
+} from "./podcaster-video-model-catalog.js";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.538";
+import {
+  createSnoopyShortcutGuide,
+  handleSnoopyReorderTimelineTracksShortcut
+} from "./podcaster-shortcut-guide.js?v=2026-1.0.10.855";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.857";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
@@ -18,6 +29,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -48,18 +60,19 @@ import {
 } from "./podcaster-montage-export-v2.js?v=2026-08-20.2";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
-import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
+import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-1.0.10.850";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-1.0.10.537";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.537";
+import { createAuthorizedAssetResolver } from "./podcaster-authorized-asset-resolver.js?v=2026-1.0.10.853";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.853";
 import { createPodcasterAcademicMetadataApi } from "./podcaster-academic-metadata.js?v=2026-1.0.10.717";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
-import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.719";
+import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.857";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
-import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js";
-import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-08-20.2";
+import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-1.0.10.853";
+import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js?v=2026-1.0.10.853";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-08-26.1";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js?v=2026-1.0.10.544";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -267,13 +280,6 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
   "gemini-3-pro-image-preview",
   "gemini-2.5-flash-image",
   "gemini-2.0-flash-preview-image-generation"
-]);
-const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
-  "auto",
-  "gemini-omni-flash-preview",
-  "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview"
 ]);
 const DISFLUENCY_LEVEL_MAX = Object.freeze({
   fillerLevel: 300,
@@ -635,6 +641,8 @@ const els = {
   speakerReferenceImageInput: document.getElementById("speakerReferenceImageInput"),
   scenarioReferenceImageInput: document.getElementById("scenarioReferenceImageInput"),
   rowReferenceImageInput: document.getElementById("rowReferenceImageInput"),
+  rowReferenceFolderInput: document.getElementById("rowReferenceFolderInput"),
+  attachAllRowReferenceImagesBtn: document.getElementById("attachAllRowReferenceImagesBtn"),
   podcastVideoPrevBtn: document.getElementById("podcastVideoPrevBtn"),
   podcastVideoPlayBtn: document.getElementById("podcastVideoPlayBtn"),
   podcastVideoPauseBtn: document.getElementById("podcastVideoPauseBtn"),
@@ -1053,7 +1061,7 @@ function showActivityNotification(activity) {
   let activePodId = "mainStudioActivityNotification";
   const pModal = document.getElementById("podcastVideoModal");
   const cModal = document.getElementById("creativeVideoModal");
-  
+
   if (cModal && !cModal.hidden) {
     activePodId = "creativeVideoActivityNotification";
   } else if (pModal && !pModal.hidden) {
@@ -1352,6 +1360,8 @@ let podcastStudioInspectorCollapsed = (() => {
   }
 })();
 let podcastVideoOpenRunToken = 0;
+let activeSessionActivationToken = 0;
+let snoopyShortcutGuide = null;
 const globalScenarioImagePending = new Set();
 let geminiLiveAudioCtx = null;
 let geminiLivePlayAt = 0;
@@ -1781,6 +1791,24 @@ const podcasterMediaReferenceApi = createPodcasterMediaReferenceApi({
   renderPodcastVideoShell,
   renderCreativeVideoShell,
   renderPodcastVideoTimeline,
+  refreshRowReferenceUi: (rowId, session) => {
+    const activeSession = session || getActiveSession();
+    syncPodcastStudioInspector(activeSession, { forceRender: true });
+    if (creativeVideoState.enabled) {
+      renderCreativeVideoShell(activeSession);
+    } else if (!podcastVideoState.enabled) {
+      renderScript(activeSession);
+    }
+  },
+  refreshBulkRowReferenceUi: (session) => {
+    const activeSession = session || getActiveSession();
+    syncPodcastStudioInspector(activeSession, { forceRender: true });
+    if (creativeVideoState.enabled) {
+      renderCreativeVideoShell(activeSession);
+    } else if (!podcastVideoState.enabled) {
+      renderScript(activeSession);
+    }
+  },
   setPodcastVideoRow,
   resolveStorageVideoUrl,
   saveSessionToCloud,
@@ -1819,10 +1847,13 @@ const {
   setScenarioReferenceImage,
   setRowReferenceImage,
   setRowReferenceImages,
+  setRowReferenceImagesBulk,
   setRowReferenceVideo,
   promptSpeakerReferenceSelection,
   promptScenarioReferenceSelection,
   promptRowReferenceSelection,
+  promptRowReferenceFolderSelection,
+  applyRowReferenceFolderFiles,
   clearRowReference,
   bindInputEvents: bindMediaReferenceInputEvents
 } = podcasterMediaReferenceApi;
@@ -3708,7 +3739,8 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
       sceneDescription: String(row?.sceneDescription || row?.scenePrompt || row?.descripcionEscena || row?.descripcionDeEscena || row?.escena || row?.scene || "").slice(0, 120),
       visualNotes: String(row?.visualNotes || row?.visual || row?.elementoVisual || row?.elemento_visual || row?.visualElement || "").slice(0, 120),
       videoDirective: String(row?.videoDirective || row?.direccionVideo || row?.direcciónVideo || row?.videoDirection || "").slice(0, 120),
-      onScreenText: String(row?.onScreenText || row?.textoPantalla || row?.textoEnPantalla || "").slice(0, 120)
+      onScreenText: String(row?.onScreenText || "").slice(0, 120),
+      inSceneText: String(row?.inSceneText || row?.textoPantalla || row?.textoEnPantalla || "").slice(0, 120)
     });
   }
   const sanitizeCreativeText = (value = "") => String(value || "")
@@ -3831,8 +3863,9 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
   const normalizedEditorialText = normalizePodcasterSceneTextFields({
     ...row,
     voiceOverText,
-    onScreenText: normalizeCreativeFieldText(
-      row?.onScreenText,
+    onScreenText: normalizeCreativeFieldText(row?.onScreenText),
+    inSceneText: normalizeCreativeFieldText(
+      row?.inSceneText,
       row?.["Texto en pantalla"],
       row?.["Texto en Pantalla"],
       row?.textoPantalla,
@@ -3841,7 +3874,8 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
     onScreenTextNoSummarize: preserveOnScreenText
   }, {
     strictHeadline: strictValidation && row?.textSource !== "manual",
-    strictInScene: strictValidation
+    strictInScene: strictValidation,
+    syncCaptionWithVoiceOver: true
   });
   const editorialText = strictValidation && !Object.prototype.hasOwnProperty.call(row || {}, "textSource")
     ? { ...normalizedEditorialText, textSource: "generated" }
@@ -3899,7 +3933,7 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
     excludeScriptFromVideoPrompt: row?.excludeScriptFromVideoPrompt === true,
     visualNotesEditedText,
     visualNotesEditedStored,
-    onScreenTextNoSummarize: preserveOnScreenText,
+    onScreenTextNoSummarize: true,
     voiceOverText: strictValidation ? voiceOverText : fallbackVoiceOver,
     sceneDescription: strictValidation ? sceneDescription : (sceneDescription || fallbackScenePrompt),
     headlineText: editorialText.headlineText,
@@ -7471,16 +7505,28 @@ async function resolveFirebaseStorageUrl(gsUrl = "") {
   }
 }
 
-async function resolveAuthorizedAssetUrl(proxyUrl = "") {
-  const clean = String(proxyUrl || "").trim();
-  if (!clean) return "";
-  const parsed = new URL(clean, window.location.origin);
-  const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
-  if (!storagePath) return clean;
-  const data = await authFetchJson(`/api/assets/signed-url?storagePath=${encodeURIComponent(storagePath)}`);
-  const signedUrl = String(data?.url || "").trim();
-  if (!signedUrl) throw new Error("signed_asset_url_missing");
-  return signedUrl;
+const authorizedAssetResolver = createAuthorizedAssetResolver({
+  authFetchJson,
+  expirySkewMs: 60 * 1000
+});
+
+async function resolveAuthorizedAssetMetadata(proxyUrl = "", options = {}) {
+  return authorizedAssetResolver.resolveRecord(proxyUrl, options);
+}
+
+// Wrapper compatible con controladores y mocks históricos que consumen sólo
+// el string. La metadata permanece disponible para invalidar/renovar sin
+// propagar URLs firmadas vencidas por la sesión del editor.
+async function resolveAuthorizedAssetUrl(proxyUrl = "", options = {}) {
+  return authorizedAssetResolver.resolveUrl(proxyUrl, options);
+}
+
+function invalidateAuthorizedAssetUrl(proxyUrl = "", options = {}) {
+  return authorizedAssetResolver.invalidate(proxyUrl, options);
+}
+
+async function resolveAuthorizedAssetUrlWithRetry(proxyUrl = "", consumer, options = {}) {
+  return authorizedAssetResolver.resolveWithRetry(proxyUrl, consumer, options);
 }
 
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
@@ -8021,6 +8067,7 @@ function reconcileDialogueMediaMapsForRows(session = null, options = {}) {
 
 function upsertSessionById(sessionId, mutator, options = {}) {
   const { render: shouldRender = true } = options;
+  const lightweight = options.lightweight === true;
   const shouldPersist = options.persist === true
     ? true
     : options.persist === false
@@ -8032,20 +8079,34 @@ function upsertSessionById(sessionId, mutator, options = {}) {
   const idx = state.sessions.findIndex((session) => String(session?.id || "").trim() === key);
   if (idx === -1) return null;
   const current = state.sessions[idx];
-  const next = mutator({
-    ...current,
-    script: {
-      ...(current.script || {}),
-      rows: normalizeRows(current.script?.rows)
-    },
-    chat: Array.isArray(current.chat) ? [...current.chat] : []
-  });
+  // Text inputs in the scene inspector already operate on a valid in-memory
+  // session. Re-normalizing every row and cloning the complete chat for every
+  // keystroke makes editing cost grow with the whole document.
+  const mutableSession = lightweight
+    ? {
+      ...current,
+      script: {
+        ...(current.script || {}),
+        rows: Array.isArray(current.script?.rows) ? current.script.rows : normalizeRows(current.script?.rows)
+      }
+    }
+    : {
+      ...current,
+      script: {
+        ...(current.script || {}),
+        rows: normalizeRows(current.script?.rows)
+      },
+      chat: Array.isArray(current.chat) ? [...current.chat] : []
+    };
+  const next = mutator(mutableSession);
   if (!next) return null;
   state.sessions[idx] = {
     ...next,
-    updatedAt: nowIso()
+    updatedAt: options.touchUpdatedAt === false ? current.updatedAt : nowIso()
   };
-  invalidateStudioRuntimeCache();
+  if (options.invalidateRuntimeCache !== false) {
+    invalidateStudioRuntimeCache();
+  }
   if (shouldPersist !== false) {
     persistSessions();
   }
@@ -8174,11 +8235,17 @@ function setWorkspacePanelLoading({ sessions = null, workspace = null } = {}) {
 }
 
 async function setActiveSession(sessionId, options = {}) {
+  const activationToken = ++activeSessionActivationToken;
+  const isCurrentActivation = () => (
+    activationToken === activeSessionActivationToken
+    && String(state.activeSessionId || "").trim() === String(sessionId || "").trim()
+  );
   if (options.showLoader !== false) {
     setWorkspacePanelLoading({ workspace: true });
   }
   window.backgroundDialogueAudioWarmupToken = 0;
   playbackController.stop({ keepStatus: true });
+  playbackController.beginSessionTransition?.(sessionId);
   podcastVideoState.enabled = false;
   state.activeSessionId = sessionId;
   expandSession(sessionId);
@@ -8207,8 +8274,10 @@ async function setActiveSession(sessionId, options = {}) {
         localVideos: Object.keys(getDialogueVideoMap(nextSession) || {}).length
       });
       const cloudSession = await loadCloudSessionDocumentDirect(sessionId);
+      if (!isCurrentActivation()) return;
       if (cloudSession) {
-        const targetSession = getActiveSession() || nextSession;
+        const targetSession = getActiveSession();
+        if (!targetSession || String(targetSession.id || "").trim() !== String(sessionId || "").trim()) return;
         const mergedSession = mergeCloudSessionOverLocalCache(cloudSession, targetSession);
         console.info("[podcaster][sessions] Sesión Firebase recibida", {
           sessionId,
@@ -8235,21 +8304,25 @@ async function setActiveSession(sessionId, options = {}) {
       if (typeof academicMetadataApi?.loadAcademicMetadata === "function") {
         try {
           const storedMetadata = await academicMetadataApi.loadAcademicMetadata(sessionId);
-          const targetForHydration = getActiveSession() || activatedSession || nextSession;
+          if (!isCurrentActivation()) return;
+          const targetForHydration = getActiveSession();
           if (storedMetadata && targetForHydration) {
             const hydrated = academicMetadataApi.mergeAcademicMetadataIntoEntity(targetForHydration, storedMetadata);
             Object.assign(targetForHydration, hydrated);
           }
         } catch (error) {
+          if (!isCurrentActivation()) return;
           console.warn("[podcaster][sessions] No se pudieron rehidratar metadatos académicos para la sesión activa:", error);
         }
       }
     } catch (error) {
+      if (!isCurrentActivation()) return;
       console.error("[podcaster] Error activando sesión stub:", error);
       setGenerationStatus("Error de red al cargar sesión.", "is-error");
     }
   }
 
+  if (!isCurrentActivation()) return;
   activatedSession = getActiveSession() || activatedSession || nextSession;
   syncMontageExportFilenameForSession(activatedSession);
   resetPodcastStudioSessionUiState(activatedSession);
@@ -8323,12 +8396,15 @@ async function setActiveSession(sessionId, options = {}) {
     suppressPodcastStudioUiStateSync = false;
   }
   try {
-    const refsHydrated = await hydrateSessionReferenceMedia(activatedSession);
-    const musicHydrated = await hydratePanelMusicLocalCaches(activatedSession);
+    const refsHydrated = await hydrateSessionReferenceMedia(activatedSession, { isCurrent: isCurrentActivation });
+    if (!isCurrentActivation()) return;
+    const musicHydrated = await hydratePanelMusicLocalCaches(activatedSession, { isCurrent: isCurrentActivation });
+    if (!isCurrentActivation()) return;
     if (refsHydrated || musicHydrated) {
       persistSessions();
     }
   } catch (_) {
+    if (!isCurrentActivation()) return;
     // noop
   }
   try {
@@ -8371,7 +8447,7 @@ async function setActiveSession(sessionId, options = {}) {
     prewarmSessionMediaWithOverlay(activatedSession).catch(() => {});
   }
 
-  if (options.showLoader !== false) {
+  if (options.showLoader !== false && isCurrentActivation()) {
     setWorkspacePanelLoading({ workspace: false });
   }
 }
@@ -9225,13 +9301,44 @@ function buildPortraitImageModelChain() {
 
 function buildPodcasterVideoModelChain(preferredModel = "") {
   const requested = String(preferredModel || "").trim();
-  const legacyMap = {
-    "veo-3.0-generate-001": "veo-3.1-generate-preview",
-    "veo-3.0-fast-generate-001": "veo-3.1-fast-generate-preview",
-    "veo-2.0-generate-001": "veo-3.1-generate-preview"
-  };
-  const normalized = legacyMap[requested] || requested;
-  return [AVAILABLE_PODCASTER_VIDEO_MODELS.includes(normalized) ? normalized : "auto"];
+  const normalized = normalizeVertexVeoModelId(requested);
+  const accepted = AVAILABLE_PODCASTER_VIDEO_MODELS.includes(normalized) || isVertexVeoModelId(normalized);
+  return [accepted ? normalized : "auto"];
+}
+
+let globalVideoModelCatalogPromise = null;
+
+function renderGlobalVideoModelOptions(models = [], selectedValue = "") {
+  const select = els.globalCheapVideoMode;
+  if (!select) return;
+  const selected = buildPodcasterVideoModelChain(selectedValue || select.value)[0] || "auto";
+  const catalog = collectAvailablePodcasterVideoModels(models);
+  if (isVertexVeoModelId(selected) && !catalog.includes(selected)) catalog.push(selected);
+  select.replaceChildren(...catalog.map((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = formatPodcasterVideoModelLabel(model);
+    return option;
+  }));
+  select.value = catalog.includes(selected) ? selected : "auto";
+}
+
+async function refreshGlobalVideoModelOptions() {
+  const select = els.globalCheapVideoMode;
+  if (!select) return [];
+  const selected = select.value;
+  renderGlobalVideoModelOptions([], selected);
+  if (!globalVideoModelCatalogPromise) {
+    globalVideoModelCatalogPromise = authFetchJson("/api/gemini/models")
+      .then((payload) => Array.isArray(payload?.models) ? payload.models : [])
+      .catch((error) => {
+        console.warn("[Podcaster] No se pudo actualizar el catálogo Veo; se usa el catálogo Vertex verificado.", error);
+        return [];
+      });
+  }
+  const models = await globalVideoModelCatalogPromise;
+  renderGlobalVideoModelOptions(models, selected);
+  return models;
 }
 
 function parseSceneSelection(input = "", totalRows = 0) {
@@ -10490,6 +10597,7 @@ function setGlobalConfigOpen(isOpen) {
   if (els.globalConfigModal) {
     els.globalConfigModal.hidden = !globalConfigOpen;
   }
+  if (globalConfigOpen) void refreshGlobalVideoModelOptions();
 }
 
 function setMusicConfigOpen(isOpen) {
@@ -10497,6 +10605,12 @@ function setMusicConfigOpen(isOpen) {
   if (els.musicConfigModal) {
     els.musicConfigModal.hidden = !musicConfigOpen;
   }
+}
+
+function openMusicConfigModal() {
+  syncMusicControls();
+  if (!musicConfigOpen) fetchGlobalPanelMusicLibrary().catch(() => { });
+  setMusicConfigOpen(true);
 }
 
 function setAudioTrackMixOpen(isOpen) {
@@ -11150,6 +11264,10 @@ function compactCloudSessionPayload(payload = null) {
 async function saveSessionToCloud(sessionId = null, options = {}) {
   persistPanelMusicSettings();
   persistPanelMusicToActiveSession();
+  const sessionBeforeSave = getActiveSession();
+  if (window.PodcasterThreads?.syncActiveThreadToSession && sessionBeforeSave) {
+    window.PodcasterThreads.syncActiveThreadToSession(sessionBeforeSave);
+  }
   const response = await sessionStore.saveManual(sessionId, options);
   const activeSession = getActiveSession();
   const requestedSessionId = String(sessionId || activeSession?.id || "").trim();
@@ -11517,9 +11635,9 @@ function readGlobalVideoConfigControls() {
   return {
     videoModel: selectedVideoModel,
     videoGenerator,
-    videoQuality: selectedVideoModel === "veo-3.1-lite-generate-preview" ? "draft" : "final",
+    videoQuality: /-lite-generate-/.test(selectedVideoModel) ? "draft" : "final",
     videoRoutingVersion: 2,
-    cheapVideoMode: selectedVideoModel === "veo-3.1-lite-generate-preview",
+    cheapVideoMode: /-lite-generate-/.test(selectedVideoModel),
     mediaLoadMode: ["streaming", "blob", "auto"].includes(selectedMediaLoadMode)
       ? selectedMediaLoadMode
       : "streaming"
@@ -12424,6 +12542,13 @@ function applySceneTimingEdit(rowId = "", mutator) {
       timelineOnScreenTextClipsByRowId: cfg?.timelineOnScreenTextClipsByRowId || {},
       geminiDialogueTrack: cfg?.geminiDialogueTrack || {}
     }, key, deltaMs, activeSession);
+    shifted.timelineClipsByRowId = {
+      ...(shifted.timelineClipsByRowId || {}),
+      [key]: {
+        ...(shifted.timelineClipsByRowId?.[key] || clip),
+        durationMode: "manual"
+      }
+    };
     const shiftedTextClips = window.normalizeOnScreenTextClipsByRowId(shifted.timelineOnScreenTextClipsByRowId || {});
     const currentTextClip = shiftedTextClips[key] || null;
     if (currentTextClip) {
@@ -12894,6 +13019,11 @@ function setPodcastVideoStatus(text = "") {
  * Recibe el mismo shape que onProgress de prepareSessionMedia:
  *   { state: "loading"|"ready"|"error", completed: number, total: number, failures: [] }
  */
+let snoopyEditorMediaLoadingHideTimer = 0;
+let snoopyEditorMediaLoadingRevision = 0;
+let snoopyEditorMediaLoadingState = "idle";
+let snoopyEditorPrewarmRequestSeq = 0;
+
 function updateSnoopyEditorMediaLoadingUi(detail = {}) {
   const overlay = document.getElementById("podcastPreviewMediaLoadingOverlay");
   const statusEl = document.getElementById("podcastPreviewMediaLoadingStatus");
@@ -12901,6 +13031,12 @@ function updateSnoopyEditorMediaLoadingUi(detail = {}) {
   if (!overlay) return;
 
   const state = String(detail?.state || "loading");
+  const revision = ++snoopyEditorMediaLoadingRevision;
+  snoopyEditorMediaLoadingState = state;
+  if (snoopyEditorMediaLoadingHideTimer) {
+    clearTimeout(snoopyEditorMediaLoadingHideTimer);
+    snoopyEditorMediaLoadingHideTimer = 0;
+  }
   const completed = Math.max(0, Number(detail?.completed || 0) || 0);
   const total = Math.max(1, Number(detail?.total || 1) || 1);
 
@@ -12908,7 +13044,11 @@ function updateSnoopyEditorMediaLoadingUi(detail = {}) {
     // Completado: muestra 100% un instante y luego oculta
     if (barEl) barEl.style.width = "100%";
     if (statusEl) statusEl.textContent = "Listo";
-    setTimeout(() => { overlay.classList.remove("is-visible"); }, 380);
+    snoopyEditorMediaLoadingHideTimer = setTimeout(() => {
+      if (revision !== snoopyEditorMediaLoadingRevision || snoopyEditorMediaLoadingState !== "ready") return;
+      overlay.classList.remove("is-visible");
+      snoopyEditorMediaLoadingHideTimer = 0;
+    }, 380);
     return;
   }
 
@@ -12937,14 +13077,22 @@ function updateSnoopyEditorMediaLoadingUi(detail = {}) {
 async function prewarmSessionMediaWithOverlay(session) {
   if (!playbackController) return;
   const targetSession = session || getActiveSession();
+  const targetSessionId = String(targetSession?.id || "").trim();
+  const requestId = ++snoopyEditorPrewarmRequestSeq;
+  const isCurrentRequest = () => requestId === snoopyEditorPrewarmRequestSeq
+    && (!targetSessionId || targetSessionId === String(getActiveSession()?.id || "").trim());
   updateSnoopyEditorMediaLoadingUi({ state: "loading", completed: 0, total: 1 });
   try {
     await playbackController.prepareSessionMedia({
       session: targetSession,
-      onProgress: updateSnoopyEditorMediaLoadingUi
+      onProgress: (progress) => {
+        if (isCurrentRequest()) updateSnoopyEditorMediaLoadingUi(progress);
+      }
     });
+    if (!isCurrentRequest()) return;
     updateSnoopyEditorMediaLoadingUi({ state: "ready" });
   } catch (error) {
+    if (error?.name === "AbortError" || !isCurrentRequest()) return;
     const failures = Array.isArray(error?.failures)
       ? error.failures.map((failure) => ({
           kind: String(failure?.kind || "unknown"),
@@ -13517,7 +13665,32 @@ async function playPodcastStageVideo(options = {}) {
       const fallbackSrc = String(video?.dataset?.src || "").trim();
       if (fallbackSrc && /^https?:\/\//i.test(fallbackSrc)) {
         const fallbackResponse = await fetch(fallbackSrc, { method: "GET", mode: "same-origin" });
-        if (fallbackResponse.status === 404 || fallbackResponse.status === 403) {
+        if (fallbackResponse.status === 403) {
+          // Un 403 suele ser una URL firmada vencida o un fallo temporal de
+          // autorización. Renueva y reintenta una vez; nunca borres la escena.
+          playbackController.invalidateAuthorizedAssetSource?.(fallbackSrc);
+          await playbackController.invalidateBlobUrl?.(fallbackSrc);
+          const refreshedSource = await playbackController.getBlobUrl?.(fallbackSrc, {
+            persistent: true,
+            forceAuthorizedRefresh: true
+          });
+          if (refreshedSource) {
+            assignStageVideoElementSource(video, refreshedSource, {
+              logicalSrc: fallbackSrc,
+              mode: "cache",
+              cacheKey: fallbackSrc,
+              rowId: String(podcastVideoState.activeRowId || "").trim()
+            });
+            try { video.load(); } catch (_) { }
+            await safeMediaPlay(video);
+            updatePodcastVideoTransportUi();
+            return true;
+          }
+          if (!silent) addChatMessage("system", "No se pudo renovar temporalmente el acceso al video. Intenta reproducir de nuevo.");
+          updatePodcastVideoTransportUi();
+          return false;
+        }
+        if (fallbackResponse.status === 404) {
           const rowId = String(podcastVideoState.activeRowId || "").trim();
           const sessionId = String(getActiveSession()?.id || "").trim();
           const clip = rowId ? resolveDialogueVideoForRow(getActiveSession(), rowId) : null;
@@ -13529,9 +13702,9 @@ async function playPodcastStageVideo(options = {}) {
             return candidateSrc && candidateSrc === fallbackSrc;
           }) || clip;
           if (rowId && attemptedSegment) {
-            markStaleDialogueVideoSource(sessionId, rowId, attemptedSegment, "proxy-media-access-denied");
+            markStaleDialogueVideoSource(sessionId, rowId, attemptedSegment, "proxy-media-404-confirmed");
           }
-          markStaleProxyMediaUrl(fallbackSrc, "proxy-media-access-denied", {
+          markStaleProxyMediaUrl(fallbackSrc, "proxy-media-404-confirmed", {
             kind: "stage-playback-fallback",
             rowId,
             status: Number(fallbackResponse.status || 0)
@@ -13581,8 +13754,17 @@ function updatePodcastVideoTransportUi() {
   const hasTimelinePosition = Math.max(0, Number(podcastVideoState.montageCursorMs || 0)) > 0;
   const pausedByStatus = /paus/i.test(String(els.podcastVideoStatus?.textContent || ""));
   const isPausedVisual = Boolean(podcastVideoState.montagePaused || (!stagePlaying && pausedByStatus));
+  const mediaPreparing = playbackController?.state?.sessionMediaStatus === "loading"
+    || playbackController?.state?.isPreparing === true;
+  const playRequestPreparing = playbackController?.state?.isPreparing === true;
   const rows = getActiveSession()?.script?.rows || [];
-  if (els.podcastVideoPlayBtn) els.podcastVideoPlayBtn.disabled = !rows.length || (podcastVideoState.montageActive && !podcastVideoState.montagePaused) || sequencePlaying;
+  if (els.podcastVideoPlayBtn) {
+    els.podcastVideoPlayBtn.disabled = playRequestPreparing
+      || !rows.length
+      || (podcastVideoState.montageActive && !podcastVideoState.montagePaused)
+      || sequencePlaying;
+    els.podcastVideoPlayBtn.setAttribute("aria-busy", mediaPreparing ? "true" : "false");
+  }
   if (els.podcastVideoPauseBtn) els.podcastVideoPauseBtn.disabled = !podcastVideoState.montageActive && !stagePlaying && !sequencePlaying;
   if (els.podcastVideoPlayBtn) {
     els.podcastVideoPlayBtn.classList.toggle("is-playing", stagePlaying || montagePlaying || sequencePlaying);
@@ -13787,9 +13969,14 @@ function removeDialogueVideoForRow(rowId = "", options = {}) {
   upsertActiveSession((current) => {
     const nextMap = { ...getDialogueVideoMap(current) };
     delete nextMap[key];
+    const deletedAt = nowIso();
     return {
       ...current,
-      dialogueVideoMap: nextMap
+      dialogueVideoMap: nextMap,
+      dialogueVideoDeletedAtMap: {
+        ...(current.dialogueVideoDeletedAtMap || {}),
+        [key]: deletedAt
+      }
     };
   }, { render: false });
   const session = getActiveSession();
@@ -14608,6 +14795,7 @@ const sessionStore = createPodcasterSessionStore({
   doc,
   getDoc,
   setDoc,
+  runTransaction,
   serverTimestamp,
   getSessions: () => state.sessions,
   setSessions: (nextSessions) => {
@@ -14664,6 +14852,7 @@ playbackController.init(els, {
   setTimelinePreviewsSuspended,
   buildTimelineRuntimeEntries,
   getTimelineTotalDurationMs,
+  resolveSceneNumberByRowId,
   getPanelMontageMusicConfig,
   getActiveStageVideoEl,
   getInactiveStageVideoEl,
@@ -14694,7 +14883,11 @@ playbackController.init(els, {
   buildOnScreenTextBubbleInlineStyle,
   escapeHtml,
   resolveFirebaseStorageUrl,
+  resolveAuthorizedAssetMetadata,
   resolveAuthorizedAssetUrl,
+  invalidateAuthorizedAssetUrl,
+  resolveAuthorizedAssetUrlWithRetry,
+  clearAuthorizedAssetUrls: () => authorizedAssetResolver.clear(),
   renderPodcastVideoTimeline,
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -14705,6 +14898,7 @@ playbackController.init(els, {
   resolveSceneMediaRenderSpec,
   applySceneMediaScaleToStage
 });
+playbackController.on("mediaready", updateSnoopyEditorMediaLoadingUi);
 
 // Inicialización del controlador de preview de exportación
 const exportPreviewEls = {
@@ -14775,6 +14969,7 @@ exportPreviewController.init(exportPreviewEls, {
   setTimelinePreviewsSuspended: () => { },
   buildTimelineRuntimeEntries,
   getTimelineTotalDurationMs,
+  resolveSceneNumberByRowId,
   getPanelMontageMusicConfig,
   getActiveStageVideoEl: () => els.montageExportPreviewVideo,
   getInactiveStageVideoEl: () => null,
@@ -14811,7 +15006,11 @@ exportPreviewController.init(exportPreviewEls, {
   buildOnScreenTextBubbleInlineStyle,
   escapeHtml,
   resolveFirebaseStorageUrl,
+  resolveAuthorizedAssetMetadata,
   resolveAuthorizedAssetUrl,
+  invalidateAuthorizedAssetUrl,
+  resolveAuthorizedAssetUrlWithRetry,
+  clearAuthorizedAssetUrls: () => authorizedAssetResolver.clear(),
   renderPodcastVideoTimeline: () => { },
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -15990,9 +16189,9 @@ function renderCreativeInspector(session = null) {
     </label>
     <label class="row-field">
       <span class="row-field-head">
-        <span>Texto en pantalla</span>
+        <span>Subtítulo</span>
       </span>
-      <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(activeRow?.headlineText || activeRow?.onScreenText || "").trim())}" placeholder="Texto breve en pantalla">
+      <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(activeRow?.voiceOverText || activeRow?.text || "").trim())}" placeholder="Se sincroniza automáticamente con Guion" readonly aria-readonly="true" title="Subtítulo sincronizado automáticamente con Guion">
     </label>
     <label class="row-field">
       <span>Transición</span>
@@ -16023,7 +16222,7 @@ function renderCreativeInspector(session = null) {
         </span>
       </span>
       <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué elemento visual refuerza la explicación">${escapeHtml(resolveVisualNotesEditorValue(activeRow))}</textarea>
-      
+
       <!-- PROPUESTA ACTIVA EN INSPECTOR -->
       ${displayedActiveVisualProposal ? `
         <div class="row-active-proposal${isVisualProposalResolved(activeRow, displayedActiveVisualProposal) ? " is-resolved" : ""}" style="margin-top: 8px; border-radius: 6px; padding: 8px;">
@@ -16407,12 +16606,17 @@ async function openPodcastVideoModalWithLoader() {
       els.podcastVideoShell?.classList.remove("is-editor-entrance-preparing");
       return;
     }
-    setPodcastVideoLoaderOpen(false, animatePodcastMontagePreviewEntrance);
+    setPodcastVideoLoaderOpen(false, () => {
+      animatePodcastMontagePreviewEntrance();
+      snoopyShortcutGuide?.scheduleAutoOpen(900);
+    });
   }, 140);
 }
 
 function closePodcastVideoModal() {
   podcastVideoOpenRunToken += 1;
+  snoopyShortcutGuide?.cancelPending();
+  snoopyShortcutGuide?.close({ restoreFocus: false, animate: false });
   setSnoopyEditorFullscreen(els.podcastVideoModal, false);
   setPodcastVideoLoaderOpen(false);
   playbackController.stop({ keepStatus: true, keepCursor: true });
@@ -16663,21 +16867,19 @@ async function regenerateAllSpeakerPortraits() {
 function renderPodcastPortraitStrip(session = null, options = {}) {
   if (!els.podcastPortraitStrip) return;
   const activeSession = session || getActiveSession();
-  if (isEducationalVideoMode(activeSession) || !isVideoPodcastMode(activeSession)) {
+  const footer = els.podcastPortraitStrip.closest(".snoopy-portrait-dock");
+  const shouldShowPortraitDock = isVideoPodcastMode(activeSession) && !isCurrentModeVideo(activeSession);
+  if (footer) {
+    footer.hidden = !shouldShowPortraitDock;
+    footer.style.removeProperty("display");
+  }
+  if (!shouldShowPortraitDock) {
     els.podcastPortraitStrip.hidden = true;
-    const footer = els.podcastPortraitStrip.closest(".podcast-studio-footer");
-    if (footer) {
-      footer.style.display = "none";
-    }
     els.podcastPortraitStrip.innerHTML = "";
     podcastRenderState.portraitStructureKey = "";
     return;
   }
   els.podcastPortraitStrip.hidden = false;
-  const footer = els.podcastPortraitStrip.closest(".podcast-studio-footer");
-  if (footer) {
-    footer.style.display = "";
-  }
   const renderReason = String(options.reason || "structure").trim() || "structure";
   const structureKey = buildPodcastPortraitStripStructureKey(activeSession);
   const canReuseStructure = (
@@ -16831,6 +17033,7 @@ function renderPodcastVideoShell(session = null) {
   }
   syncPodcastVideoSpeakerCardVisibility();
   if (!shouldBeOpen) return;
+  snoopyShortcutGuide?.scheduleAutoOpen(1100);
 
   resetPodcastStudioSessionUiState(activeSession);
   setPodcastStudioInspectorCollapsed(podcastStudioInspectorCollapsed);
@@ -19154,9 +19357,7 @@ function attachEvents() {
   }
   document.querySelectorAll("#openMusicConfigBtn, .open-music-config-trigger, [data-action='open-music-config-modal']").forEach((btn) => {
     btn.addEventListener("click", () => {
-      syncMusicControls();
-      fetchGlobalPanelMusicLibrary().catch(() => { });
-      setMusicConfigOpen(true);
+      openMusicConfigModal();
     });
   });
   if (els.addPanelMusicTrackBtn) {
@@ -19883,38 +20084,39 @@ function attachEvents() {
             if (targetIndex < 0) return rows;
             const currentRow = rows[targetIndex] || {};
             if (editorialFields.has(field)) {
-              const migratedRow = { ...currentRow, ...normalizePodcasterSceneTextFields(currentRow) };
+              const migratedRow = { ...currentRow, ...normalizePodcasterSceneTextFields(currentRow, { syncCaptionWithVoiceOver: true }) };
               const candidate = {
                 ...migratedRow,
-                [field === "onScreenText" ? "headlineText" : field]: rawValue,
+                ...(field === "onScreenText" ? {} : { [field]: rawValue }),
+                ...(field === "inSceneText" ? { inSceneTextEditedStored: true } : {}),
                 ...(field === "overlayMode" ? {} : { textSource: "manual" })
               };
-              if (field === "onScreenText") {
-                candidate.captionText = "";
-                candidate.overlayMode = String(rawValue || "").trim() ? "headline" : "none";
-                candidate.onScreenTextNoSummarize = false;
-              } else if (field === "headlineText") {
+              if (field === "headlineText") {
                 const hasHeadline = Boolean(String(rawValue || "").trim());
-                const hasCaption = Boolean(String(candidate.captionText || "").trim());
-                candidate.overlayMode = hasHeadline
-                  ? (hasCaption ? "both" : "headline")
-                  : (hasCaption ? "captions" : "none");
-              } else if (field === "captionText") {
-                const hasHeadline = Boolean(String(candidate.headlineText || "").trim());
-                const hasCaption = Boolean(String(rawValue || "").trim());
-                candidate.overlayMode = hasCaption
-                  ? (hasHeadline ? "both" : "captions")
-                  : (hasHeadline ? "headline" : "none");
+                candidate.overlayMode = hasHeadline ? "both" : "captions";
               }
+              candidate.onScreenTextNoSummarize = true;
               rows[targetIndex] = {
                 ...candidate,
-                ...normalizePodcasterSceneTextFields(candidate)
+                ...normalizePodcasterSceneTextFields(candidate, { syncCaptionWithVoiceOver: true })
               };
             } else {
-              rows[targetIndex] = {
+              const candidate = {
                 ...currentRow,
-                [field]: rawValue
+                [field]: rawValue,
+                ...(field === "voiceOverText"
+                  ? {
+                    text: rawValue,
+                    captionText: rawValue,
+                    overlayMode: String(currentRow?.headlineText || "").trim() ? "both" : "captions",
+                    onScreenTextNoSummarize: true,
+                    textSource: "manual"
+                  }
+                  : {})
               };
+              rows[targetIndex] = field === "voiceOverText"
+                ? { ...candidate, ...normalizePodcasterSceneTextFields(candidate, { syncCaptionWithVoiceOver: true }) }
+                : candidate;
             }
             return rows;
           })()
@@ -19925,7 +20127,7 @@ function attachEvents() {
         recordHistory: !isLiveInput,
         autosaveReason: field === "durationSec" ? "structure" : "script-edit"
       });
-      if (editorialFields.has(field)) {
+      if (editorialFields.has(field) || field === "voiceOverText") {
         const refreshedRow = getSessionRows(getActiveSession())
           .find((row) => String(row?.id || "").trim() === rowId) || null;
         const nextText = getOnScreenTextClipText(refreshedRow);
@@ -20164,8 +20366,10 @@ function attachEvents() {
           prepare: true,
           lookAheadMs: 12000
         });
+      } catch (error) {
+        console.error("[podcaster] No se pudo iniciar la reproducción:", error);
       } finally {
-        els.podcastVideoPlayBtn.disabled = false;
+        updatePodcastVideoTransportUi();
       }
     });
   }
@@ -20680,6 +20884,7 @@ function attachEvents() {
     });
   }
   if (els.reorderTimelineTracksBtn) {
+    els.reorderTimelineTracksBtn.setAttribute("aria-keyshortcuts", "Meta+Shift+O Control+Shift+O");
     els.reorderTimelineTracksBtn.addEventListener("click", () => {
       if (podcastVideoState.busy) return;
       const ok = reorderTimelineClipsByTracks();
@@ -21991,6 +22196,124 @@ function attachEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (handleSnoopyReorderTimelineTracksShortcut(event, {
+      editorEnabled: podcastVideoState.enabled,
+      isEditingTextField: isPodcasterEditingTextField,
+      button: els.reorderTimelineTracksBtn
+    })) return;
+
+    const isMusicConfigShortcut = (event.metaKey || event.ctrlKey)
+      && !event.shiftKey
+      && !event.altKey
+      && (event.key === "m" || event.key === "M" || event.code === "KeyM");
+    if (isMusicConfigShortcut) {
+      if (event.defaultPrevented || !podcastVideoState.enabled || isPodcasterEditingTextField(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openMusicConfigModal();
+      return;
+    }
+    const isHighResolutionExportShortcut = (event.metaKey || event.ctrlKey)
+      && event.shiftKey
+      && !event.altKey
+      && (event.key === "e" || event.key === "E" || event.code === "KeyE");
+    if (isHighResolutionExportShortcut) {
+      if (event.defaultPrevented || !podcastVideoState.enabled || isPodcasterEditingTextField(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      openMontageExportModal();
+      montageExportState.onlyAudio = false;
+      montageExportState.format = "mp4_h264";
+      montageExportState.resolution = "1080p";
+      if (els.montageExportOnlyAudio) els.montageExportOnlyAudio.checked = false;
+      if (els.montageExportFormat) els.montageExportFormat.value = "mp4_h264";
+      if (els.montageExportResolution) els.montageExportResolution.value = "1080p";
+      syncMontageExportUi();
+      persistMontageExportSettings();
+
+      queueMicrotask(() => {
+        const confirmButton = els.confirmMontageExportBtn;
+        if (!confirmButton || confirmButton.disabled || window.montageExportBusy) {
+          setMontageExportStatus(
+            "La exportación ya está en curso.",
+            "Espera a que termine el job actual o retoma su seguimiento desde el panel.",
+            { tone: "warning" }
+          );
+          return;
+        }
+        confirmButton.click();
+      });
+      return;
+    }
+    const isSceneMediaShortcut = (event.metaKey || event.ctrlKey)
+      && event.shiftKey
+      && !event.altKey
+      && (event.key === "l" || event.key === "L" || event.code === "KeyL");
+    if (isSceneMediaShortcut) {
+      if (event.defaultPrevented || !podcastVideoState.enabled || isPodcasterEditingTextField(event.target)) return;
+      const session = getActiveSession();
+      const sessionRowIds = new Set(getSessionRows(session).map((row) => String(row?.id || "").trim()).filter(Boolean));
+      const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+      const rowId = sessionRowIds.has(activeRowId)
+        ? activeRowId
+        : String(resolveTargetVideoRowId(session) || "").trim();
+      if (!rowId) {
+        setGenerationStatus("Selecciona una escena para reemplazar su video.", "");
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const cacheVersion = String(window.__CHARLY_CACHE_VERSION__ || "").trim();
+      const ensureReplacementModule = typeof window.PodcasterMediaReplacement?.openSceneVideoSelectorModal === "function"
+        ? Promise.resolve()
+        : import(`./podcaster-media-replacement.js${cacheVersion ? `?v=${encodeURIComponent(cacheVersion)}` : ""}`);
+      ensureReplacementModule
+        .then(() => openSceneVideoSelectorModal(rowId, { triggerSource: "keyboard-shortcut-mod-shift-l" }))
+        .catch((error) => {
+          setGenerationStatus("No se pudo abrir Reemplazar escena.", "");
+          logPodcastRenderDebug?.("scene-media-shortcut-open-failed", {
+            rowId,
+            error: String(error?.message || error || "unknown")
+          });
+        });
+      return;
+    }
+    const isRequestedSceneGenerateShortcut = (event.metaKey || event.ctrlKey)
+      && event.shiftKey
+      && !event.altKey
+      && (event.key === "g" || event.key === "G" || event.code === "KeyG");
+    const isReliableSceneGenerateShortcut = (event.metaKey || event.ctrlKey)
+      && event.altKey
+      && !event.shiftKey
+      && (event.key === "g" || event.key === "G" || event.code === "KeyG");
+    if (isRequestedSceneGenerateShortcut || isReliableSceneGenerateShortcut) {
+      if (event.defaultPrevented || !podcastVideoState.enabled || isPodcasterEditingTextField(event.target)) return;
+      const session = getActiveSession();
+      const sessionRowIds = new Set(getSessionRows(session).map((row) => String(row?.id || "").trim()).filter(Boolean));
+      const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+      const rowId = sessionRowIds.has(activeRowId)
+        ? activeRowId
+        : String(resolveTargetVideoRowId(session) || "").trim();
+      if (!rowId) {
+        setGenerationStatus("Selecciona una escena para regenerar su video.", "");
+        return;
+      }
+      const generateButton = findTimelineActionButton("timeline-generate-scene-video", rowId)
+        || document.querySelector(`[data-action="timeline-generate-scene-video"][data-row-id="${CSS.escape(rowId)}"]`);
+      if (!generateButton) {
+        setGenerationStatus("No se encontró el control para regenerar esta escena.", "");
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (generateButton.disabled || generateButton.classList.contains("is-loading")) {
+        setPodcastVideoStatus("Esta escena ya se está generando.");
+        return;
+      }
+      generateButton.click();
+      return;
+    }
     if (event.defaultPrevented) return;
     if (!podcastVideoState.enabled) return;
     if (isPodcasterEditingTextField(event.target)) return;
@@ -22006,7 +22329,7 @@ function attachEvents() {
       if (podcastVideoState.montageActive && !podcastVideoState.montagePaused) {
         playbackController.pause();
       } else {
-        playbackController.play(Number(podcastVideoState.montageCursorMs || 0));
+        els.podcastVideoPlayBtn?.click?.();
       }
       return;
     }
@@ -22617,6 +22940,15 @@ window.resolveSpeakerFromAliases = resolveSpeakerFromAliases;
 window.splitDialogueTextIntoSegments = splitDialogueTextIntoSegments;
 
 function init() {
+  snoopyShortcutGuide = createSnoopyShortcutGuide({
+    trigger: document.getElementById("podcastShortcutGuideBtn"),
+    modal: els.podcastVideoModal,
+    shell: els.podcastVideoShell,
+    loadAnime: loadGeminiAudioAnimeJs,
+    isEditorReady: () => podcastVideoState.enabled === true
+      && els.podcastVideoModal?.hidden === false
+      && els.podcastVideoLoader?.hidden !== false
+  });
   attachEvents();
   setupSessionsRailResize();
   setupPodcasterSidepanelResize();
@@ -22646,6 +22978,9 @@ function init() {
     if (!nextUid) {
       redirectToIndex();
       return;
+    }
+    if (currentStorageScopeUid && currentStorageScopeUid !== nextUid) {
+      authorizedAssetResolver.clear();
     }
     currentStorageScopeUid = nextUid;
     stopPanelMusic();
@@ -22784,12 +23119,13 @@ function updateTimelineClipSourceDurationIfGreater(rowId = "", durationMs = 0) {
   const clips = ensureTimelineClipsByRowId(session, { persist: false });
   const current = clips[key];
   if (!current) return;
-  // Solo actualizar si la nueva duracion es mayor o si no teniamos duracion confiable
-  if (durationMs > (Number(current.sourceDurationMs || 0) + 100) || !current.sourceDurationMs) {
-    // console.log(`[Podcaster] Updating sourceDurationMs for ${key}: ${current.sourceDurationMs} -> ${durationMs}`);
+  // loadedmetadata describes the physical file, not the visible timeline span.
+  // It must be allowed to correct both upward and downward without retiming a
+  // manually extended scene.
+  if (Math.abs(Number(current.mediaDurationMs || 0) - durationMs) > 25) {
     updateTimelineClipForRow(key, (prev) => ({
       ...prev,
-      sourceDurationMs: durationMs
+      mediaDurationMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(durationMs))
     }));
   }
 }
@@ -23090,6 +23426,61 @@ window.PodcasterUI = {
   syncStageMedia: (rowId = "", options = {}) => syncPodcastVideoStageMedia(getActiveSession(), rowId, options)
 };
 
+function resolveSceneMediaUpdatedAtMs(value = null) {
+  if (value?.toDate && typeof value.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(Number(value?.seconds))) {
+    return (Number(value.seconds) * 1000) + (Number(value.nanoseconds || 0) / 1e6);
+  }
+  return Date.parse(String(value || ""));
+}
+
+async function persistLatestDialogueVideoForRow(rowId = "", clip = null, sessionId = "") {
+  const key = String(rowId || "").trim();
+  const cleanSessionId = String(sessionId || getActiveSession()?.id || "").trim();
+  const uid = resolveCurrentUid();
+  if (!uid || !key || !cleanSessionId || !clip || typeof clip !== "object") return clip;
+  const sessionRef = doc(firestoreDb, "podcaster_sessions", cleanSessionId);
+  let committedClip = clip;
+  try {
+    await runTransaction(firestoreDb, async (transaction) => {
+      const snapshot = await transaction.get(sessionRef);
+      if (!snapshot.exists()) return;
+      const data = snapshot.data() || {};
+      if (String(data.ownerId || "").trim() !== uid) return;
+      const currentClip = data?.session?.dialogueVideoMap?.[key];
+      const currentSourceType = String(currentClip?.sourceType || currentClip?.replacementSource || "").trim().toLowerCase();
+      const currentIsManual = currentClip?.manuallyReplaced === true || currentSourceType === "manual-replacement" || currentSourceType === "manual";
+      if (currentIsManual) {
+        committedClip = currentClip;
+        return;
+      }
+      const currentMs = resolveSceneMediaUpdatedAtMs(currentClip?.updatedAt);
+      const incomingMs = resolveSceneMediaUpdatedAtMs(clip.updatedAt);
+      if (currentClip && Number.isFinite(currentMs) && (!Number.isFinite(incomingMs) || currentMs >= incomingMs)) {
+        committedClip = currentClip;
+        return;
+      }
+      const updatedAt = Number.isFinite(incomingMs) ? new Date(incomingMs).toISOString() : nowIso();
+      committedClip = { ...clip, updatedAt };
+      transaction.set(sessionRef, {
+        session: {
+          dialogueVideoMap: { [key]: committedClip },
+          updatedAt
+        },
+        sessionUpdatedAt: updatedAt,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    });
+  } catch (error) {
+    logPodcastRenderDebug?.("dialogue-video-row-cloud-persist-failed", {
+      sessionId: cleanSessionId,
+      rowId: key,
+      error: String(error?.message || error?.code || "unknown")
+    });
+  }
+  return committedClip;
+}
+
 // Explicit runtime API for modularized generation logic.
 const podcasterGenerationRuntimeApi = {
   getActiveSession,
@@ -23125,6 +23516,7 @@ const podcasterGenerationRuntimeApi = {
   hasGeneratedDialogueVideoForRow,
   resolveCurrentUid,
   sessionStore,
+  persistLatestDialogueVideoForRow,
   invalidateStudioRuntimeCache,
   render,
   upsertPodcastVideoConfig,

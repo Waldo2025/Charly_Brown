@@ -44,11 +44,18 @@ if (!/const visualEffects = normalizeMontageVisualEffects\(entry\?\.visualEffect
   throw new Error("La rama de export de imagen debe aplicar visualEffects al filtro de video.");
 }
 
+if (!/const imageMotionFrameRate = isImageAsset[\s\S]*resolveMontageImageMotionFrameRate\(mediaMotionPreset, visualEffects\)/.test(back)
+  || !/"-framerate", String\(imageMotionFrameRate\)/.test(back)
+  || !/args\.push\("-r", String\(imageMotionFrameRate\)/.test(back)) {
+  throw new Error("Los efectos Ken Burns del modal deben usar el FPS alto en la entrada y la salida FFmpeg.");
+}
+
 if (!/function buildSceneMediaMotionProgressExpr\(durationSec = 1\)/.test(back)
   || !/const spec = resolveSceneMediaRenderSpec\(\{/.test(back)
   || !/overlay=x='/.test(back)
-  || !/scale=w=\$\{widthExpr\}:h=\$\{heightExpr\}:eval=frame/.test(back)
-  || !/scale=\$\{motionWidth\}:\$\{motionHeight\}:eval=frame/.test(back)) {
+  || !/function buildMontageFixedSurfaceImageZoomFilter\(\{/.test(back)
+  || !/zoompan=z='\$\{zoomExpr\}'/.test(back)
+  || !/scale=\$\{motionWidth\}:\$\{motionHeight\}:eval=frame:flags=\$\{MONTAGE_IMAGE_SCALE_FLAGS\}/.test(back)) {
   throw new Error("El filtro Ken Burns de imágenes debe usar la geometría compartida y overlay sobre canvas final.");
 }
 

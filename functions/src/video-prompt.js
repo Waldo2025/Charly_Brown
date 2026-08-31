@@ -50,12 +50,10 @@ function buildDialogueVideoPrompt(input = {}, options = {}) {
   const hasReferenceImage = options.hasReferenceImage === true;
   const referenceMode = clean(options.referenceMode || (hasReferenceImage ? "first_frame" : "none"));
   const aspectRatio = clean(input.aspectRatio) === "9:16" ? "9:16" : "16:9";
-  const durationSeconds = Math.max(4, Math.min(8, Math.round(Number(
-    input.requestedDurationSec
-    || input.durationSec
-    || input.targetDurationSec
-    || 8
-  ) || 8)));
+  // Veo scene generation produces a full eight-second source. Timeline edits
+  // (including clips shorter than eight seconds) are represented separately by
+  // trimInMs/trimOutMs and must never reduce the provider request duration.
+  const durationSeconds = 8;
 
   const prompt = [
     `Create a polished ${durationSeconds}-second video in ${aspectRatio} as one continuous shot.`,

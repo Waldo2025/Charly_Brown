@@ -7,6 +7,8 @@ const { spawn, execSync } = require("node:child_process");
 const { createHash, randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
+const { registerMarcieWordPressRoutes } = require("../functions/src/marcie-wordpress.js");
+const { registerMarcieEditorialResearchRoutes } = require("../functions/src/marcie-editorial-research.js");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.resolve(REPO_ROOT, "public");
 const {
@@ -215,7 +217,7 @@ function resolveFfmpegBinaryPath() {
   } catch (_) {
     // noop
   }
-  
+
   // Probe static path first
   if (staticPath && fs.existsSync(staticPath)) {
     try {
@@ -1236,6 +1238,36 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 const storageBucket = admin.storage().bucket();
+registerMarcieWordPressRoutes(app, {
+  resolveAuthContext: async (req) => {
+    const localAuth = await verifyFirebaseBearer(req);
+    return { uid: localAuth.uid, token: localAuth.decoded || {}, decoded: localAuth.decoded || {} };
+  },
+  getAdminServices: () => ({ db, bucket: storageBucket }),
+  asyncRoute: (handler) => async (req, res) => {
+    try {
+      return await handler(req, res);
+    } catch (error) {
+      const status = Math.max(400, Math.min(599, Number(error?.status || 500)));
+      return res.status(status).json({ error: String(error?.code || error?.message || "marcie_request_failed"), detail: { blockers: error?.blockers || [] } });
+    }
+  }
+});
+registerMarcieEditorialResearchRoutes(app, {
+  resolveAuthContext: async (req) => {
+    const localAuth = await verifyFirebaseBearer(req);
+    return { uid: localAuth.uid, role: String(localAuth.decoded?.role || ""), token: localAuth.decoded || {} };
+  },
+  getAdminServices: () => ({ db, bucket: storageBucket }),
+  asyncRoute: (handler) => async (req, res) => {
+    try {
+      return await handler(req, res);
+    } catch (error) {
+      const status = Math.max(400, Math.min(599, Number(error?.status || 500)));
+      return res.status(status).json({ error: String(error?.code || error?.message || "marcie_research_failed") });
+    }
+  }
+});
 const EXPLICIT_STORAGE_BUCKET_NAME = String(
   process.env.FIREBASE_STORAGE_BUCKET
   || process.env.STORAGE_BUCKET
@@ -1357,6 +1389,8 @@ function buildAnalizarPdfFileStatePatch({
   mappingTitle = "",
   mappingUpdatedAt = "",
   sourceAssetPath = "",
+  sourceStoragePath = undefined,
+  sourceDownloadUrl = undefined,
   result = undefined,
   resultSummary = undefined
 } = {}) {
@@ -1371,6 +1405,12 @@ function buildAnalizarPdfFileStatePatch({
     mappingUpdatedAt,
     sourceAssetPath
   };
+  if (sourceStoragePath !== undefined) {
+    patch.sourceStoragePath = clampText(sourceStoragePath || "", 900);
+  }
+  if (sourceDownloadUrl !== undefined) {
+    patch.sourceDownloadUrl = clampText(sourceDownloadUrl || "", 3200);
+  }
   if (result !== undefined) {
     patch.result = result;
   }
@@ -1564,7 +1604,7 @@ async function withRetry(fn, retries = 6, delayMs = 500) {
       lastErr = err;
       const msg = String(err?.message || "").toLowerCase();
       const code = String(err?.code || "").toLowerCase();
-      const isTransient = /premature close|econnreset|etimedout|epipe|enotfound|eaddrinfo|socket hang up|fetch/i.test(msg) || 
+      const isTransient = /premature close|econnreset|etimedout|epipe|enotfound|eaddrinfo|socket hang up|fetch/i.test(msg) ||
                           /econnreset|etimedout|epipe|enotfound|eaddrinfo/i.test(code);
       if (!isTransient || attempt === retries) {
         throw err;
@@ -1964,6 +2004,7 @@ const MONTAGE_IMAGE_MOTION_FRAME_RATE = Math.max(
   24,
   Math.round(Number(process.env.MONTAGE_IMAGE_MOTION_FRAME_RATE || 90) || 90)
 );
+const MONTAGE_IMAGE_SCALE_FLAGS = "lanczos+accurate_rnd+full_chroma_int";
 const MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER = IS_RENDER_RUNTIME && process.env.MONTAGE_EXPORT_FORCE_ASS_TEXT_ON_RENDER !== "false";
 const MONTAGE_TEXT_RETRY_DELAYS_MS = [300, 900, 1800];
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
@@ -3182,6 +3223,39 @@ async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl 
   return { buffer, mimeType };
 }
 
+let sharpInstance = null;
+try {
+  sharpInstance = require("sharp");
+} catch (_) {
+  sharpInstance = null;
+}
+
+async function normalizeImageBufferToAspectRatio(inputBuffer, targetAspectRatio = "16:9") {
+  if (!inputBuffer || !Buffer.isBuffer(inputBuffer) || !inputBuffer.length || !sharpInstance) return inputBuffer;
+  try {
+    const cleanRatio = String(targetAspectRatio || "").trim();
+    const isReel = cleanRatio === "9:16";
+    const targetWidth = isReel ? 720 : 1280;
+    const targetHeight = isReel ? 1280 : 720;
+    const meta = await sharpInstance(inputBuffer).metadata().catch(() => null);
+    if (!meta || !meta.width || !meta.height) return inputBuffer;
+    const currentRatio = meta.width / meta.height;
+    const targetRatio = targetWidth / targetHeight;
+    if (Math.abs(currentRatio - targetRatio) < 0.02) return inputBuffer;
+    const resized = await sharpInstance(inputBuffer)
+      .resize(targetWidth, targetHeight, {
+        fit: "cover",
+        position: "center"
+      })
+      .toFormat("png")
+      .toBuffer();
+    return resized || inputBuffer;
+  } catch (err) {
+    console.warn("[backend][image-aspect-ratio] Error normalizando aspect ratio de imagen:", err?.message || err);
+    return inputBuffer;
+  }
+}
+
 async function loadScenarioReferenceFromSession({ uid = "", sessionId = "", scenarioId = "" }) {
   const cleanSessionId = clampText(sessionId || "", 140);
   const cleanScenarioId = clampText(scenarioId || "", 80);
@@ -3312,7 +3386,7 @@ function sanitizePodcasterSession(raw = {}) {
   const rowsInput = Array.isArray(raw?.script?.rows) ? raw.script.rows : [];
   const rows = rowsInput.slice(0, 400).map((row, index) => {
     const nextRow = { ...row };
-    
+
     // Asegurar campos canónicos con sanitización y fallbacks
     nextRow.id = clampText(row?.id || `row_${index + 1}`, 80) || `row_${index + 1}`;
     nextRow.speaker = clampText(row?.speaker || "Host A", 80) || "Host A";
@@ -3364,7 +3438,7 @@ function sanitizePodcasterSession(raw = {}) {
     nextRow.sourcePublicSceneLibraryId = clampText(row?.sourcePublicSceneLibraryId || "", 140);
     nextRow.visualNotesProposals = normalizeProposalList(row?.visualNotesProposals);
     nextRow.visualNotesResolvedProposals = normalizeProposalList(row?.visualNotesResolvedProposals);
-    
+
     // Sanitizar otros campos conocidos si existen
     if (nextRow.notes) nextRow.notes = clampText(nextRow.notes, 5000);
     if (nextRow.transition) nextRow.transition = clampText(nextRow.transition, 1200);
@@ -4002,7 +4076,7 @@ function sanitizePodcasterSession(raw = {}) {
     },
     track: sanitizePanelMusicTrack(panelMusicTrackRaw, "Audio")
   };
-  
+
   // Si no hay un track activo seleccionado explícitamente pero la librería tiene pistas,
   // y el modo es 'track', intentamos poblarlo para asegurar que el dashboard tenga algo que reproducir.
   if (panelMusicConfig.sourceType === "track" && !panelMusicConfig.track) {
@@ -4652,7 +4726,13 @@ function parseAnalizarPdfLocalAnalysisContextHeader(req = null) {
   const raw = String(req?.headers?.["x-local-analysis-context"] || "").trim();
   if (!raw) return null;
   try {
-    return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+    const isGzip = raw.startsWith("gzip:");
+    const encoded = isGzip ? raw.slice("gzip:".length) : raw;
+    const decoded = Buffer.from(encoded, "base64");
+    const json = isGzip
+      ? require("node:zlib").gunzipSync(decoded).toString("utf8")
+      : decoded.toString("utf8");
+    return JSON.parse(json);
   } catch (error) {
     const err = new Error("Contexto local de análisis inválido.");
     err.status = 400;
@@ -7140,16 +7220,22 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
     const tempDir = path.join(os.tmpdir(), "analizar-pdf-jobs", sessionId, randomUUID());
     ensureDirSync(tempDir);
     tempFilePath = path.join(tempDir, normalizedFileName.endsWith(expectedExt) ? rawFileName : `${rawFileName}${expectedExt}`);
-    let stableSourcePath = "";
+    const stableSourceDir = path.join(os.tmpdir(), "analizar-pdf-sources", sessionId, revisionId || "default");
+    ensureDirSync(stableSourceDir);
+    let stableSourcePath = path.join(stableSourceDir, `${fileId || buildFileKey(rawFileName) || randomUUID()}${expectedExt}`);
+    let sourceStoragePath = clampText(targetFile?.sourceStoragePath || "", 900);
     let bytesRead = 0;
     if (reuseStoredSource) {
       const existingSourcePath = clampText(targetFile?.sourceAssetPath || "", 600);
-      if (!existingSourcePath || !fs.existsSync(existingSourcePath)) {
+      if (existingSourcePath && fs.existsSync(existingSourcePath)) {
+        stableSourcePath = existingSourcePath;
+      } else if (sourceStoragePath) {
+        await storageBucket.file(sourceStoragePath).download({ destination: stableSourcePath });
+      } else {
         return res.status(404).json({ error: "No se encontró la copia local del archivo original para reanalizar." });
       }
-      stableSourcePath = existingSourcePath;
-      fs.copyFileSync(existingSourcePath, tempFilePath);
-      bytesRead = Number(fs.statSync(existingSourcePath).size || 0) || 0;
+      fs.copyFileSync(stableSourcePath, tempFilePath);
+      bytesRead = Number(fs.statSync(stableSourcePath).size || 0) || 0;
       logAnalizarPdf("analyze.stored-source.reused", {
         sessionId,
         revisionId,
@@ -7159,9 +7245,6 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
         bytesRead
       });
     } else {
-      const stableSourceDir = path.join(os.tmpdir(), "analizar-pdf-sources", sessionId, revisionId || "default");
-      ensureDirSync(stableSourceDir);
-      stableSourcePath = path.join(stableSourceDir, `${fileId || buildFileKey(rawFileName) || randomUUID()}${expectedExt}`);
       const output = fs.createWriteStream(tempFilePath);
       req.on("data", (chunk) => {
         bytesRead += Buffer.byteLength(chunk);
@@ -7171,9 +7254,26 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
       });
       await pipeline(req, output);
       fs.copyFileSync(tempFilePath, stableSourcePath);
+      sourceStoragePath = `analizar-pdf/sources/${uid}/${sessionId}/${revisionId}/${fileId}${expectedExt}`;
+      await storageBucket.upload(stableSourcePath, {
+        destination: sourceStoragePath,
+        resumable: false,
+        metadata: {
+          contentType: session.sourceType === "idml" ? "application/vnd.adobe.indesign-idml-package" : "application/pdf",
+          cacheControl: "private, max-age=0, no-store",
+          metadata: {
+            ownerId: uid,
+            sessionId,
+            revisionId,
+            fileId,
+            originalName: rawFileName
+          }
+        }
+      });
       logAnalizarPdf("analyze.upload.saved", {
         sessionId,
         tempFilePath,
+        sourceStoragePath,
         bytesRead
       });
     }
@@ -7196,7 +7296,8 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
         mappingId: selectedMapping?.id || mappingId || "",
         mappingTitle: selectedMapping?.title || "",
         mappingUpdatedAt: selectedMapping?.updatedAt || "",
-        sourceAssetPath: stableSourcePath
+        sourceAssetPath: stableSourcePath,
+        sourceStoragePath
       })
     });
     logAnalizarPdf("job.queued", { jobId, sessionId, ownerId: uid });
@@ -7861,12 +7962,15 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
         || ""
       ).trim().toLowerCase();
       const sessionUpdatedAt = data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || null;
+      const academicMetadata = resolvePodcasterAcademicMetadataFromDocData(data);
       merged.set(docSnap.id, {
         id: docSnap.id,
         title: data.title || sessionData?.title || "Sin título",
         updatedAt: sessionUpdatedAt,
         archived: data.archived === true,
         publicar: data.publicar === true,
+        ...academicMetadata,
+        academicMetadata,
         podcastStudioUiState: sessionUiState,
         videoContentType: sessionVideoContentType || null,
         isStub: true,
@@ -7893,6 +7997,26 @@ function isPodcasterPlainRecord(value = null) {
 
 function hasPodcasterRecordEntries(value = null) {
   return isPodcasterPlainRecord(value) && Object.keys(value).length > 0;
+}
+
+function resolvePodcasterAcademicMetadataFromDocData(data = null) {
+  const docData = isPodcasterPlainRecord(data) ? data : {};
+  const nested = isPodcasterPlainRecord(docData.session) ? docData.session : {};
+  const rootAcademic = isPodcasterPlainRecord(docData.academicMetadata) ? docData.academicMetadata : {};
+  const nestedAcademic = isPodcasterPlainRecord(nested.academicMetadata) ? nested.academicMetadata : {};
+  const resolveField = (field, maxLength = 80) => clampText(
+    docData[field] || rootAcademic[field] || nested[field] || nestedAcademic[field] || "",
+    maxLength
+  );
+  const nivel = resolveField("nivel");
+  return {
+    nivel,
+    grado: resolveField("grado"),
+    trimestre: resolveField("trimestre", 20),
+    unidad: resolveField("unidad", 20),
+    materia: resolveField("materia", 120),
+    unitLabel: clampText(rootAcademic.unitLabel || nestedAcademic.unitLabel || docData.academicMetadataUnitLabel || nested.academicMetadataUnitLabel || (nivel.toLowerCase() === "secundaria" ? "Tema" : "Unidad"), 80)
+  };
 }
 
 function mergePodcasterRowsPreservingFallback(primaryRows = [], fallbackRows = []) {
@@ -7927,6 +8051,8 @@ function buildPodcasterSessionFromDocData(data = null, sessionId = "") {
     ...nested,
     id: String(sessionId || nested.id || topLevel.id || "").trim()
   };
+  const academicMetadata = resolvePodcasterAcademicMetadataFromDocData(docData);
+  Object.assign(session, academicMetadata, { academicMetadata });
   const nestedRows = mergePodcasterRowsPreservingFallback(
     Array.isArray(nested?.script?.rows) ? nested.script.rows : [],
     Array.isArray(nested?.rows) ? nested.rows : []
@@ -8034,13 +8160,15 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
           for (const file of files) {
             const filePath = String(file.name || "").trim();
             if (!filePath || filesByPath.has(filePath)) continue;
+            if (filePath.toLowerCase().includes("/references/") || filePath.toLowerCase().includes("/reference/")) continue;
             const ext = filePath.split(".").pop().toLowerCase();
             if (!allowedExts.has(ext)) continue;
             const [metadata] = await file.getMetadata().catch(() => [{}]);
             const token = String(metadata?.metadata?.firebaseStorageDownloadTokens || "").trim();
             const mimeType = String(metadata?.contentType || "").trim().toLowerCase()
               || (["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ? `image/${ext === "jpg" ? "jpeg" : ext}` : "video/mp4");
-            const type = mimeType.startsWith("image/") ? "image" : "video";
+            if (mimeType.startsWith("image/")) continue;
+            const type = "video";
             const downloadUrl = token
               ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
               : `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media`;
@@ -8577,17 +8705,27 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
           progress: 0.08,
           hint: "Iniciando generacion en backend."
         });
-        const syncResponse = await fetchCompat(`${loopbackBaseUrl}/api/podcaster/dialogue-videos/generate-sync`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(authHeader ? { Authorization: authHeader } : {})
-          },
-          body: JSON.stringify(requestBody)
-        });
-        const data = await safeJson(syncResponse);
-        if (!syncResponse.ok) {
-          const errorMessage = extractErrorText(data, `HTTP ${syncResponse.status}`) || "dialogue_video_generate_failed";
+        let data = null;
+        let syncResponseOk = true;
+        let syncResponseStatus = 500;
+        try {
+          const syncResponse = await fetchCompat(`${loopbackBaseUrl}/api/podcaster/dialogue-videos/generate-sync`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(authHeader ? { Authorization: authHeader } : {})
+            },
+            body: JSON.stringify(requestBody)
+          });
+          syncResponseStatus = Number(syncResponse.status || 500);
+          data = await safeJson(syncResponse);
+          syncResponseOk = syncResponse.ok;
+        } catch (fetchError) {
+          syncResponseOk = false;
+          data = { error: String(fetchError?.message || "fetch_failed"), code: "loopback_fetch_failed" };
+        }
+        if (!syncResponseOk || !data) {
+          const errorMessage = extractErrorText(data, `HTTP ${syncResponseStatus}`) || "dialogue_video_generate_failed";
           upsertDialogueVideoJob(jobId, {
             status: "error",
             stage: "error",
@@ -8596,7 +8734,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
             error: {
               error: errorMessage,
               code: String(data?.code || "").trim() || undefined,
-              status: Number(syncResponse.status || 500),
+              status: syncResponseStatus,
               detail: data?.detail && typeof data.detail === "object" ? data.detail : data
             }
           });
@@ -8998,9 +9136,10 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         });
         continue;
       }
+      const normBuffer = await normalizeImageBufferToAspectRatio(sceneReference.buffer, requestedAspectRatio);
       sceneReferences.push({
-        buffer: sceneReference.buffer,
-        mimeType: String(sceneReference.mimeType || "image/png").trim().toLowerCase() || "image/png"
+        buffer: normBuffer,
+        mimeType: "image/png"
       });
     }
     if (referenceMode === "image" && sceneReferenceSources.length > 0 && !sceneReferences.length) {
@@ -9042,12 +9181,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       referenceType: "asset"
     }));
     const hasSceneReference = sceneReferenceImages.length > 0;
-    // A single scene reference without a separate portrait is an image-to-video
-    // source, not merely a loose style reference. Veo follows composition and
-    // appearance much more faithfully when it receives that image as frame 1.
-    const useSceneReferenceAsInitImage = sceneReferenceImages.length === 1
-      && !strictIdentity
-      && !hasPortraitAsset;
+    // Pass scene reference images as Asset references instead of firstFrame
+    // to prevent VEO's static-image-to-video initial expansion/morphing effect.
+    const useSceneReferenceAsInitImage = false;
     let sceneReferenceVideoFrameBase64 = "";
     let sceneReferenceVideoFrameMimeType = "image/png";
     let sceneReferenceVideoInput = null;
@@ -9434,6 +9570,14 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           : (useSceneReferenceAsInitImage ? (providerImages[sceneProviderImageStartIndex] || null) : null)));
     if (explicitLastFrame && !firstFrame) {
       firstFrame = providerImages[sceneProviderImageStartIndex] || providerImages[0] || null;
+    }
+    if (firstFrame?.data) {
+      const normFrameBuf = await normalizeImageBufferToAspectRatio(Buffer.from(firstFrame.data, "base64"), requestedAspectRatio);
+      firstFrame = {
+        ...firstFrame,
+        data: normFrameBuf.toString("base64"),
+        mimeType: "image/png"
+      };
     }
     try {
       updateDialogueVideoJob({
@@ -11976,7 +12120,7 @@ function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolu
   const safeHeight = Math.max(2, Math.round(Number(sourceHeight || 720) || 720));
   const even = (value = 0) => Math.max(2, Math.round(value / 2) * 2);
   const key = String(resolution || "source").trim().toLowerCase();
-  
+
   let result;
   if (key === "source") {
     result = { width: even(safeWidth), height: even(safeHeight) };
@@ -12229,10 +12373,61 @@ function resolveMontageKenBurnsEffect(rawEffects = null) {
   }).kenBurns;
 }
 
+function hasMontageImageMotion(mediaMotionPreset = "none", visualEffects = null) {
+  const preset = normalizeMontageMediaMotionPreset(mediaMotionPreset);
+  const kenBurns = resolveMontageKenBurnsEffect(visualEffects);
+  return preset !== "none" || Boolean(kenBurns?.effect);
+}
+
+function resolveMontageImageMotionFrameRate(mediaMotionPreset = "none", visualEffects = null) {
+  return hasMontageImageMotion(mediaMotionPreset, visualEffects)
+    ? MONTAGE_IMAGE_MOTION_FRAME_RATE
+    : 24;
+}
+
 function buildSceneMediaMotionProgressExpr(durationSec = 1) {
   const duration = Math.max(0.2, Number(durationSec || 1) || 1);
   const raw = `min(max(t/${duration.toFixed(3)}\\,0)\\,1)`;
   return `((${raw})*(${raw})*(3-2*(${raw})))`;
+}
+
+function buildMontageChromaAlignedOverlayExpr(expression = "0") {
+  return `round((${String(expression || "0")})/2)*2`;
+}
+
+function buildMontageFixedSurfaceImageZoomFilter({
+  inputChain = "[0:v]",
+  outputLabel = "scene_fg",
+  baseWidth = 1280,
+  baseHeight = 720,
+  durationSec = 1,
+  zoomFrom = 1,
+  zoomTo = 1.3,
+  frameRate = 24
+} = {}) {
+  const safeBaseWidth = Math.max(2, Math.round(Number(baseWidth || 1280) || 1280));
+  const safeBaseHeight = Math.max(2, Math.round(Number(baseHeight || 720) || 720));
+  const maxZoom = Math.max(1, Number(zoomFrom || 1) || 1, Number(zoomTo || 1) || 1);
+  const workWidth = Math.max(2, Math.ceil((safeBaseWidth * maxZoom) / 2) * 2);
+  const workHeight = Math.max(2, Math.ceil((safeBaseHeight * maxZoom) / 2) * 2);
+  const safeDurationSec = Math.max(0.2, Number(durationSec || 1) || 1);
+  const safeFrameRate = Math.max(1, Math.round(Number(frameRate || 24) || 24));
+  const lastOutputFrame = Math.max(1, Math.round(safeDurationSec * safeFrameRate) - 1);
+  const rawFrameProgress = `min(max(on/${lastOutputFrame}\\,0)\\,1)`;
+  const smoothFrameProgress = `${rawFrameProgress}*${rawFrameProgress}*(3-2*${rawFrameProgress})`;
+  const zoomExpr = `${Number(zoomFrom || 1).toFixed(5)}+(${Number(zoomTo || 1).toFixed(5)}-${Number(zoomFrom || 1).toFixed(5)})*(${smoothFrameProgress})`;
+  return {
+    filter: [
+      `color=c=black@0.0:s=${workWidth}x${workHeight}:d=${safeDurationSec.toFixed(3)}:r=${safeFrameRate},format=rgba[zoom_surface]`,
+      `${inputChain},scale=${safeBaseWidth}:${safeBaseHeight}:flags=${MONTAGE_IMAGE_SCALE_FLAGS},setsar=1,format=rgba[zoom_source]`,
+      `[zoom_surface][zoom_source]overlay=x='(W-w)/2':y='(H-h)/2':shortest=1:format=auto,format=rgba[zoom_base]`,
+      `[zoom_base]zoompan=z='${zoomExpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${workWidth}x${workHeight}:fps=${safeFrameRate},setsar=1,format=rgba[${outputLabel}]`
+    ].join(";"),
+    baseWidth: safeBaseWidth,
+    baseHeight: safeBaseHeight,
+    workWidth,
+    workHeight
+  };
 }
 
 function buildSceneMediaPositionCropFilter({
@@ -12293,10 +12488,11 @@ function buildSceneMediaPositionCropFilter({
     const prepFilter = cloneTail
       ? `${inputLabel}tpad=stop_mode=clone:stop_duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}[v_padded];`
       : "";
-    
+
     const inputChain = [
       `[vfg_src]scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`
     ];
+    let transformedFilter = "";
     if (mediaKind === "image") inputChain.push(`fps=${outputFrameRate}`);
     if (mediaKind === "image" && spec.kenBurns.effect) {
       const panScale = Number(spec.kenBurns.panScale || 1.2);
@@ -12305,16 +12501,23 @@ function buildSceneMediaPositionCropFilter({
       if (spec.kenBurns.effect === "zoom-in" || spec.kenBurns.effect === "zoom-out") {
         const zoomFrom = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomTo || 1.3) : Number(spec.kenBurns.zoomFrom || 1);
         const zoomTo = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomFrom || 1) : Number(spec.kenBurns.zoomTo || 1.3);
-        const zoomExpr = `${zoomFrom.toFixed(3)}+((${zoomTo.toFixed(3)}-${zoomFrom.toFixed(3)})*(${progressExpr}))`;
-        const widthExpr = `'ceil(${spec.scaledRect.width.toFixed(3)}*(${zoomExpr})/2)*2'`;
-        const heightExpr = `'ceil(${spec.scaledRect.height.toFixed(3)}*(${zoomExpr})/2)*2'`;
-        xExpr = `${spec.leftPx.toFixed(3)}-((${widthExpr}-${spec.scaledRect.width.toFixed(3)})/2)`;
-        yExpr = `${spec.topPx.toFixed(3)}-((${heightExpr}-${spec.scaledRect.height.toFixed(3)})/2)`;
-        inputChain.push(`scale=w=${widthExpr}:h=${heightExpr}:eval=frame`);
+        const fixedZoom = buildMontageFixedSurfaceImageZoomFilter({
+          inputChain: inputChain.join(","),
+          outputLabel: transformedLabel,
+          baseWidth: spec.evenScaledSize.width,
+          baseHeight: spec.evenScaledSize.height,
+          durationSec,
+          zoomFrom,
+          zoomTo,
+          frameRate: outputFrameRate
+        });
+        transformedFilter = fixedZoom.filter;
+        xExpr = `${(spec.leftPx - ((fixedZoom.workWidth - fixedZoom.baseWidth) / 2)).toFixed(3)}`;
+        yExpr = `${(spec.topPx - ((fixedZoom.workHeight - fixedZoom.baseHeight) / 2)).toFixed(3)}`;
       } else {
         const motionWidth = Math.max(2, Math.round(spec.scaledRect.width * panScale / 2) * 2);
         const motionHeight = Math.max(2, Math.round(spec.scaledRect.height * panScale / 2) * 2);
-        inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame`);
+        inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame:flags=${MONTAGE_IMAGE_SCALE_FLAGS}`);
         const baseLeft = spec.leftPx - ((motionWidth - spec.scaledRect.width) / 2);
         const topAlignedImageMotion = spec.fitMode === "width";
         const baseTop = topAlignedImageMotion
@@ -12339,14 +12542,20 @@ function buildSceneMediaPositionCropFilter({
         }
       }
     } else {
-      inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}`);
+      inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}${mediaKind === "image" ? `:flags=${MONTAGE_IMAGE_SCALE_FLAGS}` : ""}`);
     }
+
+    if (!transformedFilter) {
+      transformedFilter = `${inputChain.join(",")},setsar=1[${transformedLabel}]`;
+    }
+    const overlayXExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(xExpr) : xExpr;
+    const overlayYExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(yExpr) : yExpr;
 
     return [
       `${prepFilter}${prepLabel}split=2[vbg_src][vfg_src]`,
       `[vbg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=24:8,eq=saturation=1.08[${backgroundLabel}]`,
-      `${inputChain.join(",")}[${transformedLabel}]`,
-      `[${backgroundLabel}][${transformedLabel}]overlay=x='${xExpr}':y='${yExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
+      transformedFilter,
+      `[${backgroundLabel}][${transformedLabel}]overlay=x='${overlayXExpr}':y='${overlayYExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
     ].filter(Boolean).join(";");
   }
 
@@ -12356,6 +12565,7 @@ function buildSceneMediaPositionCropFilter({
   if (mediaKind === "image") {
     inputChain.push(`fps=${outputFrameRate}`);
   }
+  let transformedFilter = "";
   if (mediaKind === "image" && spec.kenBurns.effect) {
     const panScale = Number(spec.kenBurns.panScale || 1.2);
     const panDistanceXPx = spec.scaledRect.width * Number(spec.kenBurns.panDistancePct || 0.10);
@@ -12363,16 +12573,23 @@ function buildSceneMediaPositionCropFilter({
     if (spec.kenBurns.effect === "zoom-in" || spec.kenBurns.effect === "zoom-out") {
       const zoomFrom = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomTo || 1.3) : Number(spec.kenBurns.zoomFrom || 1);
       const zoomTo = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomFrom || 1) : Number(spec.kenBurns.zoomTo || 1.3);
-      const zoomExpr = `${zoomFrom.toFixed(3)}+((${zoomTo.toFixed(3)}-${zoomFrom.toFixed(3)})*(${progressExpr}))`;
-      const widthExpr = `'ceil(${spec.scaledRect.width.toFixed(3)}*(${zoomExpr})/2)*2'`;
-      const heightExpr = `'ceil(${spec.scaledRect.height.toFixed(3)}*(${zoomExpr})/2)*2'`;
-      xExpr = `${spec.leftPx.toFixed(3)}-((${widthExpr}-${spec.scaledRect.width.toFixed(3)})/2)`;
-      yExpr = `${spec.topPx.toFixed(3)}-((${heightExpr}-${spec.scaledRect.height.toFixed(3)})/2)`;
-      inputChain.push(`scale=w=${widthExpr}:h=${heightExpr}:eval=frame`);
+      const fixedZoom = buildMontageFixedSurfaceImageZoomFilter({
+        inputChain: inputChain.join(","),
+        outputLabel: transformedLabel,
+        baseWidth: spec.evenScaledSize.width,
+        baseHeight: spec.evenScaledSize.height,
+        durationSec,
+        zoomFrom,
+        zoomTo,
+        frameRate: outputFrameRate
+      });
+      transformedFilter = fixedZoom.filter;
+      xExpr = `${(spec.leftPx - ((fixedZoom.workWidth - fixedZoom.baseWidth) / 2)).toFixed(3)}`;
+      yExpr = `${(spec.topPx - ((fixedZoom.workHeight - fixedZoom.baseHeight) / 2)).toFixed(3)}`;
     } else {
       const motionWidth = Math.max(2, Math.round(spec.scaledRect.width * panScale / 2) * 2);
       const motionHeight = Math.max(2, Math.round(spec.scaledRect.height * panScale / 2) * 2);
-      inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame`);
+      inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame:flags=${MONTAGE_IMAGE_SCALE_FLAGS}`);
       const baseLeft = spec.leftPx - ((motionWidth - spec.scaledRect.width) / 2);
       const topAlignedImageMotion = spec.fitMode === "width";
       const baseTop = topAlignedImageMotion
@@ -12397,12 +12614,17 @@ function buildSceneMediaPositionCropFilter({
       }
     }
   } else {
-    inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}`);
+    inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}${mediaKind === "image" ? `:flags=${MONTAGE_IMAGE_SCALE_FLAGS}` : ""}`);
   }
+  if (!transformedFilter) {
+    transformedFilter = `${inputChain.join(",")},setsar=1[${transformedLabel}]`;
+  }
+  const overlayXExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(xExpr) : xExpr;
+  const overlayYExpr = mediaKind === "image" ? buildMontageChromaAlignedOverlayExpr(yExpr) : yExpr;
   return [
     `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}:r=${outputFrameRate}[${backgroundLabel}]`,
-    `${inputChain.join(",")}[${transformedLabel}]`,
-    `[${backgroundLabel}][${transformedLabel}]overlay=x='${xExpr}':y='${yExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
+    transformedFilter,
+    `[${backgroundLabel}][${transformedLabel}]overlay=x='${overlayXExpr}':y='${overlayYExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
   ].join(";");
 }
 
@@ -12421,6 +12643,7 @@ function buildMontageImageMotionVideoFilter({
   mediaOffsetYPct = 0,
   mediaMotionPreset = "none"
 } = {}) {
+  const imageMotionFrameRate = resolveMontageImageMotionFrameRate(mediaMotionPreset, visualEffects);
   return buildSceneMediaPositionCropFilter({
     inputLabel,
     outputLabel,
@@ -12435,7 +12658,7 @@ function buildMontageImageMotionVideoFilter({
     mediaOffsetYPct,
     mediaMotionPreset,
     visualEffects,
-    frameRate: mediaMotionPreset === "none" ? 24 : MONTAGE_IMAGE_MOTION_FRAME_RATE,
+    frameRate: imageMotionFrameRate,
     mediaKind: "image"
   });
 }
@@ -12544,7 +12767,7 @@ function buildMontageOverlapCompositionPlan(exportedEntries = []) {
     const current = planned[index];
     const currentStartMs = Math.round(Number(current?.timelineStartMs || 0) || 0);
     const previousEndMs = Math.round(Number(previous?.timelineEndMs || 0) || 0);
-    
+
     if (currentStartMs < previousEndMs - 1) {
       hasOverlap = true;
     }
@@ -12589,14 +12812,39 @@ function remapMontageTimelineSegmentsToExportOffsets(segments = [], exportOffset
     const rowId = String(segment?.rowId || "").trim();
     const exportOffset = rowId ? exportOffsetsByRowId.get(rowId) : null;
     if (!exportOffset) return segment;
-    const segmentStartMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const rawSegmentStartMs = Number(segment?.startMs || 0);
+    const segmentStartMs = Number.isFinite(rawSegmentStartMs) ? Math.round(rawSegmentStartMs) : 0;
     const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
-    const relativeStartMs = Math.max(0, segmentStartMs - baseTimelineStartMs);
+    const rawExportStartMs = Number(exportOffset?.startMs || 0);
+    const exportStartMs = Number.isFinite(rawExportStartMs) ? Math.round(rawExportStartMs) : 0;
+    const relativeStartMs = segmentStartMs - baseTimelineStartMs;
+    const remappedStartMs = segmentStartMs < 0
+      ? Math.max(0, exportStartMs + segmentStartMs)
+      : Math.max(0, exportStartMs + relativeStartMs);
     return {
       ...segment,
-      startMs: Math.max(0, Math.round(Number(exportOffset?.startMs || 0) || 0) + relativeStartMs)
+      startMs: remappedStartMs
     };
   });
+}
+
+function resolveExportOffsetStartMsFromSegment(segment = {}, exportOffsetsByRowId = new Map()) {
+  if (!segment || typeof segment !== "object") return 0;
+  const rowId = String(segment?.rowId || "").trim();
+  const rawSegmentStartMs = Number(segment?.startMs || 0);
+  const segmentStartMs = Number.isFinite(rawSegmentStartMs) ? Math.round(rawSegmentStartMs) : 0;
+  if (!(exportOffsetsByRowId instanceof Map) || !exportOffsetsByRowId.size || !rowId) {
+    return Math.max(0, segmentStartMs);
+  }
+  const exportOffset = exportOffsetsByRowId.get(rowId);
+  if (!exportOffset) return Math.max(0, segmentStartMs);
+  const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
+  const rawExportStartMs = Number(exportOffset?.startMs || 0);
+  const exportStartMs = Number.isFinite(rawExportStartMs) ? Math.round(rawExportStartMs) : 0;
+  const remappedStartMs = segmentStartMs < 0
+    ? exportStartMs + segmentStartMs
+    : exportStartMs + (segmentStartMs - baseTimelineStartMs);
+  return Math.max(0, remappedStartMs);
 }
 
 function buildMontageTransitionProgressExpr(startSec = 0, durationSec = 0.3) {
@@ -14624,29 +14872,30 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const mediaOffsetXPct = normalizeMontageMediaOffset(entry?.mediaOffsetXPct || entry?.clip?.mediaOffsetXPct || 0);
         const mediaOffsetYPct = normalizeMontageMediaOffset(entry?.mediaOffsetYPct || entry?.clip?.mediaOffsetYPct || 0);
         const mediaMotionPreset = normalizeMontageMediaMotionPreset(entry?.mediaMotionPreset || entry?.clip?.mediaMotionPreset || "none");
-        const args = ["-y", "-hide_banner", "-loglevel", "warning"];
-        const sourceFrameRate = isImageAsset
-          ? (mediaMotionPreset === "none" ? 24 : MONTAGE_IMAGE_MOTION_FRAME_RATE)
+        const visualEffects = normalizeMontageVisualEffects(entry?.visualEffects || null);
+        const imageMotionFrameRate = isImageAsset
+          ? resolveMontageImageMotionFrameRate(mediaMotionPreset, visualEffects)
           : 24;
+        const args = ["-y", "-hide_banner", "-loglevel", "warning"];
         if (isImageAsset) {
-          args.push("-loop", "1", "-framerate", String(sourceFrameRate), "-i", inputVisualPath);
+          args.push("-loop", "1", "-framerate", String(imageMotionFrameRate), "-i", inputVisualPath);
         } else {
           args.push("-i", inputVisualPath);
         }
-        
+
         // Input 1: anullsrc como fallback universal para asegurar pista de audio
         args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
-        
+
         if (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) {
           args.push("-i", inputAudioPath);
         }
 
         const veoVolume = (veoVolumePct / 100).toFixed(3);
-        
+
         // Mapeo de audio dinámico para asegurar consistencia en concat
         let audioMapLabel = "[aout]";
         let audioFilterGraph = "";
-        
+
         if (forceSilentAudio) {
           audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         } else if (!useNativeVideoAudio && inputAudioPath) {
@@ -14666,7 +14915,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
 
         // Filtro de video para asegurar duración exacta (tpad congela el último frame si el video es corto)
-        const visualEffects = normalizeMontageVisualEffects(entry?.visualEffects || null);
         const sceneTimelineStartMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
         const sceneTimelineEndMs = Math.max(sceneTimelineStartMs + 1, Math.round(Number(entry?.timelineEndMs || (sceneTimelineStartMs + durationMs)) || (sceneTimelineStartMs + durationMs)));
         const sceneReelModeEnabled = input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || "");
@@ -14846,9 +15094,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
         args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
-        const imageMotionFrameRate = isImageAsset
-          ? (mediaMotionPreset === "none" ? 24 : MONTAGE_IMAGE_MOTION_FRAME_RATE)
-          : 24;
         args.push("-r", String(imageMotionFrameRate), "-c:v", intermediateParams.vCodec);
         args.push(...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", intermediateParams.aCodec, "-ar", "48000", ...intermediateParams.aArgs, intermediatePath);
         const sceneMemoryBeforeFfmpeg = process.memoryUsage();
@@ -17514,6 +17759,18 @@ app.post("/api/gemini/generate", async (req, res) => {
 
     const shouldAugmentCreative = isCreativeVideoPayload(originalPayload);
     let payload = shouldAugmentCreative ? augmentCreativeVideoPayload(originalPayload) : originalPayload;
+    if (Array.isArray(payload.tools)) {
+      payload.tools = payload.tools.map((tool) => ({
+        ...(tool || {}),
+        ...(tool?.googleSearch ? { google_search: tool.googleSearch } : {}),
+        ...(tool?.urlContext ? { url_context: tool.urlContext } : {})
+      })).map((tool) => {
+        const next = { ...tool };
+        delete next.googleSearch;
+        delete next.urlContext;
+        return next;
+      });
+    }
     if (isHeadlineTask) {
       payload = JSON.parse(JSON.stringify(payload || {}));
       payload.generationConfig = payload.generationConfig && typeof payload.generationConfig === "object"
@@ -17764,7 +18021,7 @@ app.get("/api/assets/proxy-image", async (req, res) => {
       }
     }
 
-    const upstream = await fetchCompat(finalRequestUrl, { 
+    const upstream = await fetchCompat(finalRequestUrl, {
       method: "GET",
       headers: { "User-Agent": "CharlyBrown-Backend/1.0" }
     });
@@ -17928,6 +18185,31 @@ app.get("/api/assets/montage-download", async (req, res) => {
   }
 });
 
+async function assertProxyMediaStorageAccess(req, storagePath = "") {
+  const cleanStoragePath = String(storagePath || "").trim().replace(/^\/+/, "");
+  if (!cleanStoragePath || /^podcaster\/library\//i.test(cleanStoragePath)) return null;
+
+  const authContext = await verifyFirebaseBearer(req);
+  const sessionMatch = cleanStoragePath.match(/^podcaster\/sessions\/([^/]+)\//i);
+  if (!sessionMatch) return authContext;
+
+  const sessionId = String(sessionMatch[1] || "").trim();
+  const sessionSnapshot = await admin.firestore().collection("podcaster_sessions").doc(sessionId).get();
+  if (!sessionSnapshot.exists) {
+    const error = new Error("podcaster_session_not_found");
+    error.status = 404;
+    throw error;
+  }
+  const session = sessionSnapshot.data() || {};
+  const sharedWithIds = Array.isArray(session.sharedWithIds) ? session.sharedWithIds.map(String) : [];
+  if (String(session.ownerId || "") !== authContext.uid && !sharedWithIds.includes(authContext.uid)) {
+    const error = new Error("asset_forbidden");
+    error.status = 403;
+    throw error;
+  }
+  return authContext;
+}
+
 app.get("/api/assets/proxy-media", async (req, res) => {
   const requestId = randomUUID().slice(0, 8);
   let upstreamLifecycle = null;
@@ -17952,6 +18234,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     });
 
     if (storagePath) {
+      await assertProxyMediaStorageAccess(req, storagePath);
       console.info("[backend][proxy-media] attempting storage stream", {
         requestId,
         storagePath,
@@ -18022,6 +18305,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
     const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
     if (isPodcasterAsset && objectPath) {
+      await assertProxyMediaStorageAccess(req, objectPath);
       console.info("[backend][proxy-media] attempting admin storage stream", {
         requestId,
         objectPath,
@@ -18059,9 +18343,9 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       ...(rangeHeader ? { Range: rangeHeader } : {})
     };
 
-    console.info("[backend][proxy-media] fetching upstream", { 
+    console.info("[backend][proxy-media] fetching upstream", {
       requestId,
-      host, 
+      host,
       hasToken: finalRequestUrl.includes("token="),
       hasRange: !!rangeHeader
     });
@@ -18150,7 +18434,8 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       message: String(error?.message || error),
       code: String(error?.code || "").trim() || null
     });
-    return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
+    const status = Math.max(400, Math.min(599, Number(error?.status || error?.statusCode || 500) || 500));
+    return res.status(status).json({ error: String(error?.message || "Error en proxy de media.") });
   }
 });
 

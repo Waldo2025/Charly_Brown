@@ -1,0 +1,15 @@
+/**
+ * Anime.js - ESM minified bundle
+ * @version v4.5.0
+ * @license MIT
+ * @copyright 2026 - Julian Garnier
+ */
+
+Bundled license information:
+
+html2canvas-pro/dist/html2canvas-pro.esm.js:
+  /*!
+  * html2canvas-pro 2.3.8 <https://yorickshan.github.io/html2canvas-pro/>
+  * Copyright (c) 2024-present yorickshan and html2canvas-pro contributors
+  * Released under MIT License
+  */

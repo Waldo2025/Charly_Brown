@@ -2,11 +2,17 @@
   if (window.__cbUpdateBannerLoaderInit) return;
   window.__cbUpdateBannerLoaderInit = true;
 
+  function getVersionInfo() {
+    window.__CHARLY_VERSION_INFO_PROMISE__ ||= fetch(`version.json?t=${Date.now()}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : {})
+      .catch(() => ({}));
+    return window.__CHARLY_VERSION_INFO_PROMISE__;
+  }
+
   async function load() {
     let version = "";
     try {
-      const response = await fetch("version.json", {cache: "no-store"});
-      const data = await response.json();
+      const data = await getVersionInfo();
       version = data && data.version ? String(data.version) : "";
     } catch (_) {
       version = "";
@@ -17,9 +23,19 @@
     document.body.appendChild(script);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", load, {once: true});
-  } else {
-    load();
+  function scheduleLoad() {
+    const run = () => {
+      if ("requestIdleCallback" in window) window.requestIdleCallback(() => void load(), { timeout: 1500 });
+      else setTimeout(() => void load(), 0);
+    };
+    const isScienceActivities = /(?:^|\/)scienceActivities(?:\.html)?$/i.test(location.pathname);
+    if (isScienceActivities && document.documentElement.dataset.scienceActivitiesInteractive !== "true") {
+      document.addEventListener("scienceactivities:interactive", run, { once: true });
+    } else {
+      run();
+    }
   }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleLoad, { once: true });
+  else scheduleLoad();
 })();

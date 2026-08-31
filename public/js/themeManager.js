@@ -1715,7 +1715,6 @@
       }
 
       .main-header *,
-      #menuToggle,
       #sidebar .sidebar-link,
       #sidebar .sidebar-link i,
       #sidebar .sidebar-link span {

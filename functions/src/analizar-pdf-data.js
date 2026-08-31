@@ -7,6 +7,53 @@ const {
 
 const SESSION_COLLECTION = "analizarPDF";
 const STYLE_MAPPING_COLLECTION = "analizarPDFStyleMappings";
+const CUSTOM_RULE_COLLECTION = "analizarPDFCustomRules";
+const ANALYSIS_RULE_CATALOG_VERSION = "2026.08.1";
+const RULE_FIELDS = new Set(["visibleText", "pageText", "fileName", "page", "layer", "paragraphStyle", "characterStyle", "swatch", "story", "frameStatus", "notes", "trackedChanges", "linkedAssets"]);
+const RULE_COMPARATORS = new Set(["contains", "not_contains", "equals", "not_equals", "starts_with", "ends_with", "whole_word", "exists", "not_exists", "count_eq", "count_gt", "count_lt", "guided_pattern"]);
+const RULE_LANGUAGES = new Set(["auto", "es-MX", "en-US", "fr-FR", "pt-BR", "de-DE", "it-IT", "ca-ES"]);
+
+const RAW_ANALYSIS_RULE_CATALOG = [
+  ["idml.structure", "Estructura IDML", "Estructura del paquete", "Comprueba que el IDML pueda abrirse y que sus recursos XML esenciales estén relacionados.", "Abre el ZIP, recorre el designmap y valida referencias internas.", "XML", "idml", ["en_forma", "libre"]],
+  ["pagination.sequence", "Paginación", "Secuencia de páginas", "Detecta páginas faltantes, duplicadas o fuera de secuencia.", "Normaliza nombres de página y compara su orden editorial.", "XML", "pagination", ["en_forma", "libre"]],
+  ["sections.expected", "Secciones", "Secciones editoriales", "Contrasta las secciones esperadas con las encontradas.", "Compara estilos, encabezados y estructura de la ficha.", "Mapeo", "sections", ["en_forma", "libre"]],
+  ["styles.mapping", "Estilos", "Estilos de texto", "Revisa estilos de párrafo y carácter usados en el documento.", "Lee estilos aplicados y los contrasta con el mapeo activo.", "Mapeo", "sections", ["en_forma", "libre"]],
+  ["layers.assignment", "Capas", "Capas y ubicación", "Relaciona textos y objetos con su página y capa.", "Resuelve stories, spreads, marcos y capas por sus referencias XML.", "XML", "sections", ["en_forma", "libre"]],
+  ["swatches.inventory", "Swatches", "Colores del documento", "Inventaría colores y detecta el swatch editorial predominante.", "Cuenta usos reales, omitiendo negro de texto para el color principal.", "XML", "colors", ["en_forma", "libre"]],
+  ["frames.overflow", "Texto", "Texto fuera o desbordado", "Detecta texto parcial, fuera de página o desbordado.", "Compara geometría de marcos, páginas y estado del story.", "Geometría", "overflow", ["en_forma", "libre"]],
+  ["typography.widows", "Ortotipografía", "Viudas y huérfanas", "Señala finales y comienzos de párrafo editorialmente débiles.", "Analiza composición, saltos y geometría cuando están disponibles.", "Geometría", "orthotypography", ["en_forma", "libre"]],
+  ["spelling.dictionary", "Ortografía", "Ortografía contextual", "Busca palabras posiblemente mal escritas y valida el contexto.", "Tokenización Unicode, diccionario del idioma y verificación conservadora con Gemini.", "Diccionario", "spelling", ["en_forma", "libre"]],
+  ["orthotypography.rules", "Ortotipografía", "Puntuación y espacios", "Revisa puntuación, delimitadores y espacios según el idioma.", "Reglas internas y expresiones regulares seguras por perfil lingüístico.", "Regex interna", "orthotypography", ["en_forma", "libre"]],
+  ["redaction.coherence", "Redacción", "Coherencia de la página", "Evalúa instrucciones, claridad y coherencia usando el texto completo de la página.", "Gemini recibe página actual, anterior, idioma y metadatos editoriales.", "Gemini", "redaction", ["en_forma", "libre"]],
+  ["notes.extract", "Notas", "Notas editoriales", "Extrae notas incluso cuando están dentro de cambios rastreados.", "Recorre stories directos, embebidos, maestras y contenido no colocado.", "XML", "notes", ["en_forma", "libre"]],
+  ["changes.extract", "Control de cambios", "Cambios rastreados", "Extrae inserciones y eliminaciones con autor, fecha, página y capa.", "Interpreta nodos Change sin mezclar texto eliminado con ortografía.", "XML", "tracked-changes", ["en_forma", "libre"]],
+  ["language.resolve", "Idioma", "Idioma del archivo", "Aplica el perfil elegido o detecta el idioma por archivo.", "Resuelve idioma y confianza antes de ejecutar reglas locales.", "Diccionario", "language", ["en_forma", "libre"]],
+  ["assets.references", "Referencias editoriales", "Recortables, fichas, anexos y videos", "Verifica que cada referencia encuentre su archivo destino.", "Índices de destino y reconciliación ligera por mapeo editorial.", "Mapeo", "recortables", ["en_forma"]],
+  ["custom.rules", "Personalizadas", "Condiciones personalizadas", "Ejecuta las condiciones activas de tu biblioteca.", "Árboles guiados y criterios semánticos agrupados por página.", "Gemini", "custom-rules", ["en_forma", "libre"]],
+];
+const ANALYSIS_RULE_CATALOG = Object.freeze(RAW_ANALYSIS_RULE_CATALOG.map(function (entry) {
+  const id = String(entry[0] || "");
+  const category = String(entry[1] || "");
+  const title = String(entry[2] || "");
+  const editorialDescription = String(entry[3] || "");
+  const technicalDescription = String(entry[4] || "");
+  const mechanism = String(entry[5] || "");
+  const categoryFilter = entry[6];
+  const applicableWorkflows = entry[7];
+  return {
+    id,
+    category,
+    title,
+    editorialDescription,
+    technicalDescription,
+    exceptions: id === "assets.references" ? "No aplica en flujo Libre." : "Depende de que el contenido necesario exista en el IDML.",
+    mechanisms: [mechanism],
+    dependency: mechanism === "Gemini" ? "Gemini" : mechanism === "Diccionario" ? "Hunspell/PyEnchant" : "",
+    categoryFilter,
+    applicableWorkflows,
+    languages: ["auto", "es-MX", "en-US", "fr-FR", "pt-BR", "de-DE", "it-IT", "ca-ES"]
+  };
+}));
 const REVISION_COLLECTION = "revisions";
 const RESULT_COLLECTION = "analysisResults";
 const CHUNK_COLLECTION = "chunks";
@@ -291,6 +338,14 @@ function registerSessionRoutes(app) {
     res.status(200).json({ ok: true, sessions });
   }));
 
+  app.get("/api/analizar-pdf/sessions/detail", asyncRoute(async (req, res) => {
+    const authContext = await resolveAuthContext(req);
+    const { db } = getAdminServices();
+    const { ref, data } = await loadOwnedSession(db, authContext.uid, req.query?.sessionId);
+    const session = await hydrateSession(ref, data);
+    res.status(200).json({ ok: true, session });
+  }));
+
   app.post("/api/analizar-pdf/sessions/save", asyncRoute(async (req, res) => {
     const authContext = await resolveAuthContext(req);
     const source = req.body?.session && typeof req.body.session === "object" ? cloneJson(req.body.session) : null;
@@ -409,14 +464,109 @@ function registerStyleMappingRoutes(app) {
   }));
 }
 
+function sanitizeConditionTree(raw, depth = 0, budget = { count: 0 }) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  if (depth > 3) throw Object.assign(new Error("analizar_pdf_rule_depth_exceeded"), { status: 400 });
+  if (source.type === "predicate") {
+    budget.count += 1;
+    if (budget.count > 20) throw Object.assign(new Error("analizar_pdf_rule_predicate_limit"), { status: 400 });
+    const field = text(source.field, 40);
+    const comparator = text(source.comparator, 40);
+    if (!RULE_FIELDS.has(field) || !RULE_COMPARATORS.has(comparator)) throw Object.assign(new Error("analizar_pdf_rule_condition_invalid"), { status: 400 });
+    return { type: "predicate", field, comparator, value: text(source.value, 500), negate: source.negate === true };
+  }
+  return {
+    type: "group",
+    operator: source.operator === "any" ? "any" : "all",
+    negate: source.negate === true,
+    children: (Array.isArray(source.children) ? source.children : []).slice(0, 20).map((child) => sanitizeConditionTree(child, depth + 1, budget))
+  };
+}
+
+function sanitizeCustomRule(raw = {}, context = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const id = context.id || (source.id ? identifier(source.id, "rule_id") : `custom_rule_${crypto.randomUUID().slice(0, 12)}`);
+  const severity = ["information", "warning", "error"].includes(source.severity) ? source.severity : "warning";
+  return {
+    id,
+    ownerId: text(context.ownerId || source.ownerId, 160),
+    name: text(source.name, 100),
+    description: text(source.description, 600),
+    enabled: source.enabled !== false,
+    severity,
+    languages: [...new Set((Array.isArray(source.languages) ? source.languages : []).map((value) => text(value, 20)).filter((value) => RULE_LANGUAGES.has(value)))],
+    workflowFormats: [...new Set((Array.isArray(source.workflowFormats) ? source.workflowFormats : []).map((value) => text(value, 20)).filter((value) => ["en_forma", "libre"].includes(value)))],
+    units: [...new Set((Array.isArray(source.units) ? source.units : []).map((value) => text(value, 80)).filter(Boolean))].slice(0, 30),
+    pageRange: { from: Math.max(0, Number(source.pageRange?.from || 0) || 0), to: Math.max(0, Number(source.pageRange?.to || 0) || 0) },
+    layers: [...new Set((Array.isArray(source.layers) ? source.layers : []).map((value) => text(value, 120)).filter(Boolean))].slice(0, 30),
+    styles: [...new Set((Array.isArray(source.styles) ? source.styles : []).map((value) => text(value, 160)).filter(Boolean))].slice(0, 30),
+    fileTypes: [...new Set((Array.isArray(source.fileTypes) ? source.fileTypes : []).map((value) => text(value, 20).toLowerCase()).filter((value) => ["idml", "pdf"].includes(value)))],
+    conditionTree: sanitizeConditionTree(source.conditionTree),
+    semanticCriterion: text(source.semanticCriterion, 1600),
+    message: text(source.message, 600),
+    suggestion: text(source.suggestion, 600),
+    version: Math.max(1, Number(source.version || 1) || 1),
+    createdAt: text(source.createdAt || nowIso(), 48),
+    updatedAt: text(source.updatedAt || nowIso(), 48)
+  };
+}
+
+function registerCustomRuleRoutes(app) {
+  app.get("/api/analizar-pdf/analysis-rules/catalog", asyncRoute(async (req, res) => {
+    await resolveAuthContext(req);
+    res.status(200).json({ ok: true, version: ANALYSIS_RULE_CATALOG_VERSION, rules: ANALYSIS_RULE_CATALOG });
+  }));
+  app.get("/api/analizar-pdf/custom-rules/list", asyncRoute(async (req, res) => {
+    const auth = await resolveAuthContext(req);
+    const { db } = getAdminServices();
+    const snapshot = await db.collection(CUSTOM_RULE_COLLECTION).where("ownerId", "==", auth.uid).limit(50).get();
+    const rules = snapshot.docs.map((doc) => sanitizeCustomRule(doc.data(), { id: doc.id, ownerId: auth.uid })).sort((a, b) => a.name.localeCompare(b.name));
+    res.status(200).json({ ok: true, rules });
+  }));
+  app.post("/api/analizar-pdf/custom-rules/save", asyncRoute(async (req, res) => {
+    const auth = await resolveAuthContext(req);
+    const source = req.body?.rule && typeof req.body.rule === "object" ? req.body.rule : null;
+    if (!source) throw Object.assign(new Error("analizar_pdf_rule_payload_required"), { status: 400 });
+    const { db } = getAdminServices();
+    const id = source.id ? identifier(source.id, "rule_id") : `custom_rule_${crypto.randomUUID().slice(0, 12)}`;
+    const ref = db.collection(CUSTOM_RULE_COLLECTION).doc(id);
+    const existing = await ref.get();
+    if (existing.exists && existing.data()?.ownerId !== auth.uid) throw Object.assign(new Error("analizar_pdf_rule_forbidden"), { status: 403 });
+    if (!existing.exists) {
+      const count = await db.collection(CUSTOM_RULE_COLLECTION).where("ownerId", "==", auth.uid).limit(50).get();
+      if (count.size >= 50) throw Object.assign(new Error("analizar_pdf_rule_library_limit"), { status: 400 });
+    }
+    const rule = sanitizeCustomRule({ ...(existing.data() || {}), ...source, createdAt: existing.data()?.createdAt || nowIso(), updatedAt: nowIso(), version: Number(existing.data()?.version || 0) + 1 }, { id, ownerId: auth.uid });
+    if (!rule.name || !rule.message) throw Object.assign(new Error("analizar_pdf_rule_required_fields"), { status: 400 });
+    await ref.set(rule, { merge: false });
+    res.status(200).json({ ok: true, rule });
+  }));
+  app.post("/api/analizar-pdf/custom-rules/delete", asyncRoute(async (req, res) => {
+    const auth = await resolveAuthContext(req);
+    const { db } = getAdminServices();
+    const ruleId = identifier(req.body?.ruleId, "rule_id");
+    const ref = db.collection(CUSTOM_RULE_COLLECTION).doc(ruleId);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) throw Object.assign(new Error("analizar_pdf_rule_not_found"), { status: 404 });
+    if (snapshot.data()?.ownerId !== auth.uid) throw Object.assign(new Error("analizar_pdf_rule_forbidden"), { status: 403 });
+    await ref.delete();
+    res.status(200).json({ ok: true, ruleId });
+  }));
+}
+
 function registerAnalizarPdfDataRoutes(app) {
   registerSessionRoutes(app);
   registerStyleMappingRoutes(app);
+  registerCustomRuleRoutes(app);
 }
 
 module.exports = {
   SESSION_COLLECTION,
   STYLE_MAPPING_COLLECTION,
+  CUSTOM_RULE_COLLECTION,
+  ANALYSIS_RULE_CATALOG_VERSION,
+  ANALYSIS_RULE_CATALOG,
+  sanitizeCustomRule,
   sanitizeStyleMappingEntry,
   sanitizeStyleMapping,
   registerAnalizarPdfDataRoutes

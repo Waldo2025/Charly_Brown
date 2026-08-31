@@ -115,6 +115,13 @@ service cloud.firestore {
       );
     }
 
+    function isMarcieBlogEditorSessionOwner(sessionId) {
+      return (
+        exists(/databases/$(database)/documents/MarcieBlogEditor/$(sessionId)) &&
+        isDocOwner(get(/databases/$(database)/documents/MarcieBlogEditor/$(sessionId)).data)
+      );
+    }
+
     function isConversationParticipant(conversationId) {
       return isSignedIn() && conversationId.matches("^" + request.auth.uid + "_.+$|^.+_" + request.auth.uid + "$");
     }
@@ -219,6 +226,48 @@ service cloud.firestore {
             isPodcasterSharedWithUser(data)
           )
         );
+    }
+
+    function isAcademicMetadataDocShape(data, sessionId) {
+      return data is map &&
+        data.entityId == sessionId &&
+        data.entityType == "session" &&
+        data.academicMetadata is map &&
+        data.academicMetadata.nivel is string &&
+        data.academicMetadata.grado is string &&
+        data.academicMetadata.trimestre is string &&
+        data.academicMetadata.unidad is string &&
+        data.academicMetadata.materia is string &&
+        data.academicMetadata.unitLabel is string &&
+        data.nivel is string &&
+        data.grado is string &&
+        data.trimestre is string &&
+        data.unidad is string &&
+        data.materia is string;
+    }
+
+    function isAcademicMetadataSessionPatch(resourceData, requestData) {
+      return requestData.ownerId == resourceData.ownerId &&
+        requestData.diff(resourceData).affectedKeys().hasOnly([
+          "academicMetadata",
+          "academicMetadataCollection",
+          "academicMetadataUnitLabel",
+          "academicMetadataUpdatedAt",
+          "academicMetadataUpdatedAtIso",
+          "academicMetadataUpdatedByUid",
+          "academicMetadataUpdatedByName",
+          "academicMetadataCollection",
+          "nivel",
+          "grado",
+          "trimestre",
+          "unidad",
+          "materia",
+          "updatedAt",
+          "updatedAtIso",
+          "updatedByUid",
+          "updatedByName",
+          "sessionUpdatedAt"
+        ]);
     }
 
     function canAccessPodcasterSessionById(sessionId) {
@@ -336,13 +385,26 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
       allow update: if isSignedIn() &&
-        request.resource.data.ownerId == resource.data.ownerId &&
-        isPodcasterSessionShape(request.resource.data, sessionId);
+        (
+          (
+            request.resource.data.ownerId == resource.data.ownerId &&
+            isPodcasterSessionShape(request.resource.data, sessionId)
+          ) || (
+            isApprovedUser() &&
+            isAcademicMetadataSessionPatch(resource.data, request.resource.data)
+          )
+        );
       allow delete: if isAdmin();
 
       match /audit_events/{eventId} {
         allow read: if isSignedIn();
       }
+    }
+
+    match /podcaster_academic_metadata/{sessionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isApprovedUser() && isAcademicMetadataDocShape(request.resource.data, sessionId);
+      allow delete: if isAdmin();
     }
 
     match /experiencia_menu_sessions/{sessionId} {
@@ -457,6 +519,77 @@ service cloud.firestore {
         request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if isApprovedUser() &&
         resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Reglas para Marcie Blog Editor (sesiones y artículos)
+    match /MarcieBlogEditor/{sessionId} {
+      allow read: if isApprovedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.ownerUid == request.auth.uid ||
+        isEditor()
+      );
+      allow create: if isApprovedUser() && (
+        request.resource.data.ownerId == request.auth.uid ||
+        request.resource.data.ownerUid == request.auth.uid ||
+        isEditor()
+      );
+      allow update: if isApprovedUser() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.ownerUid == request.auth.uid ||
+        isEditor()
+      );
+      allow delete: if isAdmin() || (
+        isApprovedUser() && (
+          resource.data.ownerId == request.auth.uid ||
+          resource.data.ownerUid == request.auth.uid
+        )
+      );
+
+      match /{subcollection=**} {
+        allow read, write: if isApprovedUser() && (
+          isEditor() || isMarcieBlogEditorSessionOwner(sessionId)
+        );
+      }
+    }
+
+    match /MarcieBlogEidtor/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /MarcieEditorialCalendar/{itemId} {
+      allow read: if isApprovedUser();
+      allow create, update, delete: if isEditor();
+    }
+
+    match /MarcieTrendSnapshots/{snapshotId} {
+      allow read: if isApprovedUser();
+      allow create, update, delete: if isEditor();
+    }
+
+    match /MarcieEditorialProfiles/{profileId} {
+      allow read: if isApprovedUser();
+      allow create, update, delete: if isEditor();
+    }
+
+    match /MarcieEditorialSettings/{settingsId} {
+      allow read: if isApprovedUser();
+      allow create, update, delete: if isEditor();
+    }
+
+    match /MarcieNotifications/{notificationId} {
+      allow read: if isApprovedUser();
+      allow update: if isEditor();
+      allow create, delete: if false;
+    }
+
+    match /marcie_publications/{publicationId} {
+      allow read: if isApprovedUser() && (isEditor() || resource.data.ownerId == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /MarciePublicationAudit/{auditId} {
+      allow read: if isEditor();
+      allow write: if false;
     }
 
     // Fuentes de lecturas para juego/editor.

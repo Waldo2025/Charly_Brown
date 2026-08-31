@@ -1123,18 +1123,18 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         const idx = sameLane.findIndex((item) => String(item?.rowId || "").trim() === String(drag.rowId || "").trim());
         const prev = idx > 0 ? sameLane[idx - 1] : null;
         const minStartMs = prev ? Math.max(0, Number(prev.startMs || 0) + getOnScreenTextClipEffectiveDurationMs(prev)) : 0;
-  
+
         const initialStartMs = Math.max(0, Number(drag.initialStartMs || 0));
         const initialTrimInMs = Math.max(0, Number(drag.initialTrimInMs || 0));
         const maxTrimIn = Math.max(0, Number(current.trimOutMs || 0) - minTrimLen);
-  
+
         // Calculate projected trim and start based on TOTAL delta
         const nextTrimInRaw = Math.max(0, Math.min(maxTrimIn, snapTimelineMsWithStep(initialTrimInMs + deltaMsRaw, dragStepMs)));
         const trimDeltaMs = nextTrimInRaw - initialTrimInMs;
-  
+
         const nextStartMs = Math.max(minStartMs, snapTimelineMsWithStep(initialStartMs + trimDeltaMs, dragStepMs));
         const actualTrimIn = Math.max(0, Math.min(maxTrimIn, initialTrimInMs + (nextStartMs - initialStartMs)));
-  
+
         // Ripple: calculate how much the END of this clip moved.
         // oldEnd = initialStart + (trimOut - initialTrimIn)
         // newEnd = nextStart + (trimOut - actualTrimIn)
@@ -1142,7 +1142,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         const oldEndMs = initialStartMs + (Math.max(0, Number(current.trimOutMs || 0)) - initialTrimInMs);
         const newEndMs = nextStartMs + (Math.max(0, Number(current.trimOutMs || 0)) - actualTrimIn);
         const rippleDeltaMs = newEndMs - oldEndMs;
-  
+
         const nextClips = {
           ...(getPodcastVideoConfig(session)?.timelineOnScreenTextClipsByRowId || {}),
           [drag.rowId]: normalizeOnScreenTextClipItem({
@@ -1151,7 +1151,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
             trimInMs: actualTrimIn
           }, drag.rowId)
         };
-  
+
         if (rippleDeltaMs !== 0) {
           sameLane.slice(idx + 1).forEach((item) => {
             const itemRowId = String(item?.rowId || "").trim();
@@ -1162,7 +1162,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
             }, itemRowId);
           });
         }
-  
+
         upsertPodcastVideoConfig((cfg) => ({
           ...cfg,
           ...buildManualOnScreenTextTrackConfig(cfg, {
@@ -1287,7 +1287,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         const trimDeltaMs = nextTrimIn - Number(drag.initialTrimInMs || 0);
         const nextStartOffsetMs = Math.max(0, snapTimelineMsWithStep(initialStartOffsetMs + trimDeltaMs, dragStepMs));
         const actualTrimIn = Math.max(0, Math.min(maxTrimIn, Number(drag.initialTrimInMs || 0) + (nextStartOffsetMs - initialStartOffsetMs)));
-  
+
         updatePanelMusicTrack(trackKind, (track) => ({
           ...track,
           startOffsetMs: nextStartOffsetMs,
@@ -1540,7 +1540,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         if (!normalized) return;
         nextClips[key] = normalized;
       });
-  
+
       upsertPodcastVideoConfig((cfg) => {
         const baseTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
         let nextGeminiTrack = baseTrack;
@@ -1559,7 +1559,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           });
           nextGeminiTrack = { ...baseTrack, segments: audioNextSegments };
         }
-  
+
         return {
           ...cfg,
           timelineVersion: STUDIO_TIMELINE_VERSION,
@@ -1589,23 +1589,24 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         const idx = sameTrack.findIndex((item) => String(item?.rowId || "").trim() === String(drag.rowId || "").trim());
         const prev = idx > 0 ? sameTrack[idx - 1] : null;
         const minStartMs = prev ? getTimelineClipEndMs(prev) : 0;
-  
+
         const initialStartMs = Math.max(0, Number(drag.initialStartMs || 0));
         const initialTrimInMs = Math.max(0, Number(drag.initialTrimInMs || 0));
         const maxTrimIn = Math.max(0, Number(current.trimOutMs || 0) - minTrimLen);
-  
+
         const nextTrimInRaw = Math.max(0, Math.min(maxTrimIn, snapTimelineMsWithStep(initialTrimInMs + deltaMsRaw, dragStepMs)));
         const trimDeltaMs = nextTrimInRaw - initialTrimInMs;
-  
+
         const nextStartMs = Math.max(minStartMs, snapTimelineMsWithStep(initialStartMs + trimDeltaMs, dragStepMs));
         const actualTrimIn = Math.max(0, Math.min(maxTrimIn, initialTrimInMs + (nextStartMs - initialStartMs)));
-  
+
         const updated = normalizeTimelineClipItem({
           ...current,
           startMs: nextStartMs,
+          durationMode: "manual",
           trimInMs: actualTrimIn
         }, drag.rowId);
-  
+
         if (!updated) return cfg;
         const existingTextClipMap = normalizeOnScreenTextClipsByRowId(cfg?.timelineOnScreenTextClipsByRowId || {});
         const currentTextClip = existingTextClipMap[drag.rowId] || null;
@@ -1663,6 +1664,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         const nextTrimOut = Math.max(minTrimOut, Math.min(sourceDurationMs, snapTimelineMsWithStep(Number(drag.initialTrimOutMs || 0) + deltaMsRaw, dragStepMs)));
         const updatedCurrent = normalizeTimelineClipItem({
           ...current,
+          durationMode: "manual",
           trimOutMs: nextTrimOut
         }, drag.rowId);
         if (!updatedCurrent) return cfg;

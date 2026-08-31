@@ -35,15 +35,16 @@ function getSceneTextApi() {
     : null;
 }
 
-function normalizeSceneTextFields(row = {}) {
+function normalizeSceneTextFields(row = {}, options = {}) {
   const normalize = getSceneTextApi()?.normalizePodcasterSceneTextFields;
-  if (typeof normalize === "function") return { ...row, ...normalize(row) };
+  if (typeof normalize === "function") return { ...row, ...normalize(row, options) };
   const headlineText = String(row?.headlineText ?? row?.onScreenText ?? "").replace(/\s+/g, " ").trim();
-  const captionText = String(row?.captionText || "").replace(/\s+/g, " ").trim();
+  const voiceOverText = String(row?.voiceOverText || row?.text || row?.guion || row?.script || "").replace(/\s+/g, " ").trim();
+  const captionText = String(options?.syncCaptionWithVoiceOver ? voiceOverText : (row?.captionText || "")).replace(/\s+/g, " ").trim();
   const inSceneText = String(row?.inSceneText || "").replace(/\s+/g, " ").trim();
   const overlayMode = new Set(["none", "headline", "captions", "both"]).has(String(row?.overlayMode || ""))
     ? String(row.overlayMode)
-    : (captionText ? "captions" : (headlineText ? "headline" : "none"));
+    : (headlineText && captionText ? "both" : (captionText ? "captions" : (headlineText ? "headline" : "none")));
   return {
     ...row,
     headlineText,
@@ -53,7 +54,8 @@ function normalizeSceneTextFields(row = {}) {
     textSource: new Set(["generated", "manual", "migrated"]).has(String(row?.textSource || ""))
       ? String(row.textSource)
       : "migrated",
-    onScreenText: overlayMode === "captions" ? captionText : (overlayMode === "headline" || overlayMode === "both" ? headlineText : "")
+    onScreenText: overlayMode === "both" ? `${headlineText}\n${captionText}` : (overlayMode === "captions" ? captionText : (overlayMode === "headline" ? headlineText : "")),
+    ...(options?.syncCaptionWithVoiceOver ? { onScreenTextNoSummarize: true } : {})
   };
 }
 
@@ -72,10 +74,11 @@ function updateSingleScriptRow(current, targetRowId, updateRow) {
   const rows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
   const target = String(targetRowId || "").trim();
   if (!target || rows.length === 0) return rows;
-  return rows.map((row, index) => {
-    if (String(row?.id || "").trim() !== target) return row;
-    return updateRow(row, index, rows) || row;
-  });
+  const targetIndex = rows.findIndex((row) => String(row?.id || "").trim() === target);
+  if (targetIndex < 0) return rows;
+  const nextRows = [...rows];
+  nextRows[targetIndex] = updateRow(rows[targetIndex], targetIndex, rows) || rows[targetIndex];
+  return nextRows;
 }
 
 function autoSizeScriptTextarea(textarea) {
@@ -331,7 +334,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
 
   const videoPreset = window.resolveActiveVideoPreset?.(session) || "creative";
   if (isVideo && videoPreset === "creative") {
-    const creativeRow = normalizeSceneTextFields(window.normalizeCreativeRow(row, safeIndex, { videoPreset }));
+    const creativeRow = normalizeSceneTextFields(window.normalizeCreativeRow(row, safeIndex, { videoPreset }), { syncCaptionWithVoiceOver: true });
     const creativeRowEditorVisualNotes = window.resolveVisualNotesEditorValue(row);
     const activeVisualProposal = window.resolveActiveVisualProposal(creativeRow);
     return `
@@ -366,7 +369,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
           <span class="row-field-head">
             <span>Subtítulo</span>
           </span>
-          <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.headlineText || creativeRow.onScreenText || "")}" placeholder="Texto breve en pantalla">
+          <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.voiceOverText || creativeRow.text || creativeRow.guion || creativeRow.script || "")}" placeholder="Se sincroniza automáticamente con Guion" readonly aria-readonly="true" title="Subtítulo sincronizado automáticamente con Guion">
         </label>
         <label class="row-field wide">
           <span>Transición</span>
@@ -412,7 +415,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
             </div>
           `;
       })()}
-          
+
           <!-- SECCIÓN DE PROPUESTAS MULTIPLES (HISTORIAL) -->
           ${(() => {
         const proposals = Array.isArray(creativeRow.visualNotesProposals) ? [...creativeRow.visualNotesProposals] : [];
@@ -539,7 +542,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
           </div>
         `;
     })()}
-        
+
         <!-- SECCIÓN DE PROPUESTAS MULTIPLES (HISTORIAL) -->
         ${(() => {
       const proposals = Array.isArray(row.visualNotesProposals) ? [...row.visualNotesProposals] : [];
@@ -634,7 +637,7 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
   const safeIndex = Number.isFinite(index) && index >= 0 ? index : 0;
   const panelCopy = window.getPanelModeCopy(session);
   const isVideo = panelCopy.videoMode === true;
-  const sceneTextFields = normalizeSceneTextFields(row);
+  const sceneTextFields = normalizeSceneTextFields(row, isVideo ? { syncCaptionWithVoiceOver: true } : {});
   const activeVisualProposal = window.resolveActiveVisualProposal(row);
   const rowId = String(row?.id || "").trim();
   const speaker = String(row?.speaker || "").trim() || "Host A";
@@ -804,7 +807,14 @@ function handleScriptFieldUpdate(event) {
   const baseSessionUpdateOptions = {
     persist: false,
     recordHistory: !isLiveInput,
-    autosaveReason: sessionUpdateReason
+    autosaveReason: sessionUpdateReason,
+    // Scene fields already belong to a normalized session. Mutate only the
+    // selected row both while typing and on commit; thread switching and manual
+    // save synchronize the complete thread when it is actually needed.
+    lightweight: true,
+    syncThread: false,
+    invalidateRuntimeCache: !isLiveInput,
+    touchUpdatedAt: !isLiveInput
   };
   const scheduleConfirmedLocalPersist = () => {
     if (isLiveInput) return;
@@ -986,6 +996,7 @@ function handleScriptFieldUpdate(event) {
         rows: updateSingleScriptRow(current, rowId, (row) => ({
           ...row,
           inSceneText: normalizedInSceneText,
+          inSceneTextEditedStored: true,
           textSource: "manual",
           lastEditedAt: Date.now()
         }))
@@ -994,17 +1005,13 @@ function handleScriptFieldUpdate(event) {
       ...baseSessionUpdateOptions,
       render: false,
       persist: false,
-      markDirty: false,
-      recordHistory: true,
-      syncThread: false,
-      invalidateRuntimeCache: false
+      markDirty: false
     });
     scheduleConfirmedLocalPersist();
     return;
   }
   if (window.isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "headlineText" || field === "captionText" || field === "inSceneText" || field === "overlayMode" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec" || field === "excludeScriptFromVideoPrompt")) {
     const videoPreset = window.resolveActiveVideoPreset(session);
-    const shouldRender = !isLiveInput && !isToggleField;
     window.upsertActiveSession((current) => ({
       ...current,
       script: {
@@ -1015,22 +1022,7 @@ function handleScriptFieldUpdate(event) {
             ? row
             : normalizeSceneTextFields({
               ...row,
-              [field === "onScreenText" ? "headlineText" : field]: value,
-              ...(field === "onScreenText"
-                ? {
-                  captionText: "",
-                  overlayMode: String(value || "").trim() ? "headline" : "none",
-                  onScreenTextNoSummarize: false
-                }
-                : {}),
-              ...((field === "headlineText" || field === "onScreenText") && String(value || "").trim()
-                ? (field === "onScreenText"
-                  ? { overlayMode: "headline" }
-                  : { overlayMode: String(row?.overlayMode || "") === "captions" ? "both" : (String(row?.overlayMode || "") === "both" ? "both" : "headline") })
-                : {}),
-              ...(field === "captionText" && String(value || "").trim()
-                ? { overlayMode: String(row?.overlayMode || "") === "headline" ? "both" : (String(row?.overlayMode || "") === "both" ? "both" : "captions") }
-                : {}),
+              ...(field === "onScreenText" ? {} : { [field]: value }),
               ...(field === "sceneDescription"
                 ? {
                   scenePrompt: value,
@@ -1042,7 +1034,16 @@ function handleScriptFieldUpdate(event) {
                 : {}),
               ...(["headlineText", "captionText", "inSceneText", "overlayMode", "onScreenText"].includes(field)
                 ? {
-                  onScreenTextNoSummarize: field === "captionText",
+                  onScreenTextNoSummarize: true,
+                  textSource: "manual"
+                }
+                : {}),
+              ...(field === "voiceOverText"
+                ? {
+                  text: String(value || "").trim(),
+                  captionText: String(value || "").trim(),
+                  overlayMode: String(row?.headlineText || "").trim() ? "both" : "captions",
+                  onScreenTextNoSummarize: true,
                   textSource: "manual"
                 }
                 : {}),
@@ -1054,13 +1055,13 @@ function handleScriptFieldUpdate(event) {
                 }
                 : {}),
               lastEditedAt: Date.now()
-            })
+            }, { syncCaptionWithVoiceOver: true })
         ))
       }
-    }), { ...baseSessionUpdateOptions, render: shouldRender });
-    if (["headlineText", "captionText", "overlayMode", "onScreenText"].includes(field)) {
+    }), { ...baseSessionUpdateOptions, render: false });
+    if (["voiceOverText", "headlineText", "captionText", "overlayMode", "onScreenText"].includes(field)) {
       const updatedRow = (window.getActiveSession()?.script?.rows || []).find((item) => String(item?.id || "").trim() === rowId) || null;
-      const nextText = String(normalizeSceneTextFields(updatedRow || {}).onScreenText || "").replace(/\s+/g, " ").trim();
+      const nextText = String(normalizeSceneTextFields(updatedRow || {}, { syncCaptionWithVoiceOver: true }).onScreenText || "").replace(/\s+/g, " ").trim();
       if (typeof window.syncOnScreenTextClipVisibilityFromRowText === "function") {
         window.syncOnScreenTextClipVisibilityFromRowText(rowId, nextText, {
           render: false,
@@ -1142,6 +1143,7 @@ function handleScriptFieldUpdate(event) {
 // --- Module Exports & API ---
 const podcasterScriptEditorApi = {
   renderScript,
+  updateSingleScriptRow,
   buildScriptRowEditorMarkup,
   buildInspectorScriptRowMarkup,
   buildBlankScriptRow,

@@ -164,32 +164,41 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     const handleTimelineWheel = (event) => {
       const deltaX = Number(event.deltaX || 0);
       const deltaY = Number(event.deltaY || 0);
+      const hasZoomModifier = event.ctrlKey || event.metaKey;
       const deltaMultiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
         ? 16
         : (event.deltaMode === WheelEvent.DOM_DELTA_PAGE
           ? Math.max(1, els.podcastVideoTimeline.clientWidth)
           : 1);
-      const horizontalDelta = event.shiftKey && Math.abs(deltaX) < Math.abs(deltaY)
+      const isShiftWheelGesture = event.shiftKey && Math.abs(deltaX) < Math.abs(deltaY);
+      const horizontalDelta = isShiftWheelGesture
         ? deltaY
         : deltaX;
-      const isHorizontalGesture = Math.abs(horizontalDelta) >= Math.abs(deltaY)
-        || (event.shiftKey && Math.abs(horizontalDelta) > 0);
+      const horizontalIntentThreshold = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? 0.5 : 0.01;
+      const hasHorizontalIntent = !hasZoomModifier
+        && Math.abs(horizontalDelta) > horizontalIntentThreshold
+        && (isShiftWheelGesture || Math.abs(deltaX) > horizontalIntentThreshold);
 
-      if (!event.ctrlKey && !event.metaKey && isHorizontalGesture && Math.abs(horizontalDelta) > 0.01) {
+      // Trackpads often report a larger vertical component during an intentional
+      // diagonal swipe. Prioritize the real horizontal delta so left and right
+      // gestures remain symmetric instead of routing up-left into vertical scroll.
+      if (hasHorizontalIntent) {
         const maxScrollLeft = Math.max(
           0,
           els.podcastVideoTimeline.scrollWidth - els.podcastVideoTimeline.clientWidth
         );
-        if (maxScrollLeft > 0) {
+        const currentScrollLeft = Math.max(
+          0,
+          Math.min(maxScrollLeft, Number(els.podcastVideoTimeline.scrollLeft || 0))
+        );
+        const targetScrollLeft = Math.max(
+          0,
+          Math.min(maxScrollLeft, currentScrollLeft + (horizontalDelta * deltaMultiplier))
+        );
+        markManualScrollIntent();
+        if (Math.abs(targetScrollLeft - currentScrollLeft) > 0.01) {
           event.preventDefault();
-          markManualScrollIntent();
-          els.podcastVideoTimeline.scrollLeft = Math.max(
-            0,
-            Math.min(
-              maxScrollLeft,
-              els.podcastVideoTimeline.scrollLeft + (horizontalDelta * deltaMultiplier)
-            )
-          );
+          els.podcastVideoTimeline.scrollLeft = targetScrollLeft;
         }
         return;
       }

@@ -270,14 +270,14 @@ function esDocumentoCursoRaiz(docId, data = {}) {
 function normalizeGeminiModelName(model = "") {
     return String(model || "")
         .trim()
-        .replace(/^models\//i, "")
+        .replace(/^.*\/models\//i, "")
         .replace(/:generateContent$/i, "");
 }
 
 function isMoodleSupportedGeminiTextModelName(model = "") {
     const name = normalizeGeminiModelName(model);
     if (!name) return false;
-    if (!/^gemini-(2\.5|3(?:\.(?:1|5))?)/i.test(name)) return false;
+    if (!/^gemini-\d+(?:\.\d+)?/i.test(name)) return false;
     if (/(image|audio|tts|live|embedding|embed|vision|aqa|transcribe|computer|computer-use|cu-)/i.test(name)) return false;
     if (/(?:^|[-])(exp|experimental)(?:[-]|$)/i.test(name)) return false;
     return true;
@@ -301,6 +301,9 @@ function formatGeminiModelOptionLabel(model = "") {
         "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
         "gemini-2.5-flash": "Gemini 2.5 Flash",
         "gemini-2.5-pro": "Gemini 2.5 Pro",
+        "gemini-2.0-flash": "Gemini 2.0 Flash",
+        "gemini-2.0-flash-lite": "Gemini 2.0 Flash Lite",
+        "gemini-2.0-flash-lite-preview": "Gemini 2.0 Flash Lite (Preview)",
         "gemini-3.5-flash": "Gemini 3.5 Flash",
         "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
         "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
@@ -3098,7 +3101,7 @@ onAuthStateChanged(auth, async (user) => {
         listaCursos.innerHTML = `
       <li class="p-4 text-center">
         <p class="text-sm text-gray-600 mb-3">No tienes cursos aún</p>
-        <button id="btnPrimerCurso" 
+        <button id="btnPrimerCurso"
                 class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
           Crear mi primer curso
         </button>
@@ -3394,7 +3397,7 @@ function renderCursoItem(cursoItem) {
                 ` : ''}
             </div>
         </div>
-        
+
         <div class="flex items-center gap-1 ml-2 curso-actions flex-shrink-0">
             <div class="curso-actions-menu">
                 <button type="button" class="icon-btn curso-actions-menu__trigger btn-curso-menu" title="Más acciones" aria-label="Más acciones del curso">
@@ -4173,13 +4176,13 @@ async function cargarUsuariosParaCompartirCurso() {
                             </span>
                         </div>
                         <div class="flex gap-2">
-                            <button class="text-xs text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 btn-dejar-compartir" 
+                            <button class="text-xs text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 btn-dejar-compartir"
                                     data-userid="${user.uid}"
                                     data-username="${user.nombre}"
                                     title="Dejar de compartir">
                                 <i class="fas fa-user-slash"></i>
                             </button>
-                            <button class="text-xs text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 btn-editar-permisos" 
+                            <button class="text-xs text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 btn-editar-permisos"
                                     data-userid="${user.uid}"
                                     data-username="${user.nombre}"
                                     title="Editar permisos">
@@ -4209,7 +4212,7 @@ async function cargarUsuariosParaCompartirCurso() {
             usuariosNoCompartidos.forEach(user => {
                 html += `
                     <label class="flex items-center gap-2 p-2 hover:bg-accent rounded cursor-pointer">
-                        <input type="checkbox" 
+                        <input type="checkbox"
                                class="user-checkbox"
                                data-userid="${user.uid}"
                                data-username="${user.nombre}"
@@ -4323,7 +4326,7 @@ async function mostrarModalEditarPermisos(userId, userName) {
         <div id="modalEditarPermisos" class="modal fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10000]">
             <div class="bg-card border-border w-[90%] max-w-md rounded-xl shadow-2xl p-6">
                 <h3 class="text-lg font-semibold mb-4 text-foreground">Editar permisos</h3>
-                
+
                 <div class="mb-4">
                     <p class="text-sm text-muted-foreground mb-2">
                         Usuario: <span class="text-foreground font-semibold">${userName}</span>
@@ -4331,32 +4334,32 @@ async function mostrarModalEditarPermisos(userId, userName) {
                     <p class="text-xs text-muted-foreground mb-4">
                         Curso: <span class="text-foreground">${curso.nombre}</span>
                     </p>
-                    
+
                     <div class="space-y-3 p-3 bg-accent rounded-md border border-border">
                         <label class="flex items-center">
-                            <input type="checkbox" 
-                                   id="checkEditarPermisos" 
+                            <input type="checkbox"
+                                   id="checkEditarPermisos"
                                    ${permisosActuales.editar ? 'checked' : ''}
                                    class="mr-2">
                             <span class="text-sm text-foreground">Permitir edición</span>
                         </label>
-                        
+
                         <label class="flex items-center">
-                            <input type="checkbox" 
-                                   id="checkCompartirPermisos" 
+                            <input type="checkbox"
+                                   id="checkCompartirPermisos"
                                    ${permisosActuales.compartir ? 'checked' : ''}
                                    class="mr-2">
                             <span class="text-sm text-foreground">Permitir compartir con otros</span>
                         </label>
                     </div>
                 </div>
-                
+
                 <div class="flex justify-end gap-3 mt-6">
                     <button id="btnCancelarEditarPermisos"
                             class="px-3 py-1 text-sm bg-accent text-accent-foreground rounded hover:bg-accent/80 transition-colors">
                         Cancelar
                     </button>
-                    
+
                     <button id="btnGuardarEditarPermisos"
                             class="px-4 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors">
                         Guardar cambios
@@ -5933,20 +5936,20 @@ btnAddTema.addEventListener("click", async () => {
                 <div class="bg-card text-foreground border border-border rounded-lg p-6 w-full max-w-md">
                     <h3 class="text-lg font-semibold mb-4 text-foreground">Nuevo Tema</h3>
                     <p class="text-sm text-muted-foreground mb-2">Curso: ${cursoActivo.nombre}</p>
-                    <input 
-                        type="text" 
-                        id="inputNombreTema" 
+                    <input
+                        type="text"
+                        id="inputNombreTema"
                         placeholder="Nombre del nuevo tema"
                         class="w-full p-2 border border-input bg-background text-foreground rounded mb-4"
                     >
                     <div class="flex justify-end gap-2">
-                        <button 
+                        <button
                             id="btnCancelarTema"
                             class="px-4 py-2 text-accent-foreground bg-accent hover:bg-accent/80 rounded"
                         >
                             Cancelar
                         </button>
-                        <button 
+                        <button
                             id="btnConfirmarTema"
                             class="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
                         >
@@ -6340,21 +6343,21 @@ function renderTemas() {
                     <div id="modalEditTema" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
                         <div class="bg-white rounded-lg p-6 w-full max-w-md">
                             <h3 class="text-lg font-semibold mb-4">Editar Tema</h3>
-                            <input 
-                                type="text" 
-                                id="inputEditTema" 
+                            <input
+                                type="text"
+                                id="inputEditTema"
                                 placeholder="Nuevo nombre del tema"
                                 class="w-full p-2 border border-gray-300 rounded mb-4"
                                 value="${tema.nombre}"
                             >
                             <div class="flex justify-end gap-2">
-                                <button 
+                                <button
                                     id="btnCancelarEditTema"
                                     class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded"
                                 >
                                     Cancelar
                                 </button>
-                                <button 
+                                <button
                                     id="btnConfirmarEditTema"
                                     class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                                 >
@@ -6637,21 +6640,21 @@ function renderTemas() {
                         <div id="modalEditSubtema" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
                             <div class="bg-white rounded-lg p-6 w-full max-w-md">
                                 <h3 class="text-lg font-semibold mb-4">Editar Subtema</h3>
-                                <input 
-                                    type="text" 
-                                    id="inputEditSubtema" 
+                                <input
+                                    type="text"
+                                    id="inputEditSubtema"
                                     placeholder="Nuevo nombre del subtema"
                                     class="w-full p-2 border border-gray-300 rounded mb-4"
                                     value="${sub.nombre}"
                                 >
                                 <div class="flex justify-end gap-2">
-                                    <button 
+                                    <button
                                         id="btnCancelarEditSubtema"
                                         class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded"
                                     >
                                         Cancelar
                                     </button>
-                                    <button 
+                                    <button
                                         id="btnConfirmarEditSubtema"
                                         class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                                     >
@@ -6927,21 +6930,21 @@ function renderTemas() {
                                 <div id="modalEditModulo" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
                                     <div class="bg-white rounded-lg p-6 w-full max-w-md">
                                         <h3 class="text-lg font-semibold mb-4">Editar Módulo</h3>
-                                        <input 
-                                            type="text" 
-                                            id="inputEditModulo" 
+                                        <input
+                                            type="text"
+                                            id="inputEditModulo"
                                             placeholder="Nuevo nombre del módulo"
                                             class="w-full p-2 border border-gray-300 rounded mb-4"
                                             value="${mod.nombre}"
                                         >
                                         <div class="flex justify-end gap-2">
-                                            <button 
+                                            <button
                                                 id="btnCancelarEditModulo"
                                                 class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded"
                                             >
                                                 Cancelar
                                             </button>
-                                            <button 
+                                            <button
                                                 id="btnConfirmarEditModulo"
                                                 class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                                             >
@@ -7773,20 +7776,20 @@ function crearModalSubtema() {
         <div id="modalAddSubtema" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
             <div class="bg-white rounded-lg p-6 w-full max-w-md">
                 <h3 class="text-lg font-semibold mb-4">Nuevo Subtema</h3>
-                <input 
-                    type="text" 
-                    id="inputNombreSubtema" 
+                <input
+                    type="text"
+                    id="inputNombreSubtema"
                     placeholder="Nombre del subtema"
                     class="w-full p-2 border border-gray-300 rounded mb-4"
                 >
                 <div class="flex justify-end gap-2">
-                    <button 
+                    <button
                         id="btnCancelarSubtema"
                         class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded"
                     >
                         Cancelar
                     </button>
-                    <button 
+                    <button
                         id="btnConfirmarSubtema"
                         class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                     >
@@ -8047,7 +8050,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                                 contenedor.dataset.lastSavedHtml = html;
 
                                 // Opcional: No reseteamos el innerHTML aquí para evitar perder el cursor
-                                // contenedor.innerHTML = html; 
+                                // contenedor.innerHTML = html;
 
                                 const spinner = document.getElementById(`spinner-${modId}`);
                                 if (spinner) {
@@ -8339,16 +8342,16 @@ function crearModalInstruccionesSubtema() {
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-                
+
                 <!-- Contenedor de instrucciones -->
                 <div class="flex-1 overflow-y-auto mb-4">
-                    <div id="instruccionesSubtema" 
-                         class="p-4 border border-input rounded min-h-[300px] contenido-editable text-foreground" 
+                    <div id="instruccionesSubtema"
+                         class="p-4 border border-input rounded min-h-[300px] contenido-editable text-foreground"
                          contenteditable="true"
                          data-placeholder="Escribe las instrucciones para este subtema aquí...">
                     </div>
                 </div>
-                
+
                 <!-- Pie del modal -->
                 <div class="flex justify-between items-center pt-4 border-t border-border">
                     <div class="text-xs text-muted-foreground">
@@ -8508,7 +8511,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
     ${esActivo ? 'modulo-activo highlight-pulse' : ''}
     ${mostrarActividadOriginal ? '' : 'modulo-original-oculta'}
     ${mostrarNotasMaestroInline ? '' : 'modulo-notas-maestro-ocultas'}
-    ${mostrarPropuestaActividad ? '' : 'modulo-propuesta-oculta'}" 
+    ${mostrarPropuestaActividad ? '' : 'modulo-propuesta-oculta'}"
     id="modulo-${mod.id}"
     data-modulo-archivado="${mod.archivado ? "true" : "false"}">
 
@@ -8544,7 +8547,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
     ` : ""}
 
     <div class="flex justify-between items-start">
-    
+
         <!-- TÍTULO DEL MÓDULO -->
         <div>
             <p class="font-semibold ${esActivo ? 'text-blue-900' : 'text-gray-800'}">${mod.nombre}</p>
@@ -8659,7 +8662,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
         ${renderBloqueOriginal}
 
         <!-- 🔥 CORRECCIÓN CRUCIAL: Usar esModoLecturaReal en lugar de modoLectura -->
-        <div class="p-3 bg-gray-50 border border-gray-200 rounded modulo-contenido ${!esModoLecturaReal ? 'contenido-editable' : ''}" 
+        <div class="p-3 bg-gray-50 border border-gray-200 rounded modulo-contenido ${!esModoLecturaReal ? 'contenido-editable' : ''}"
              id="contenido-${mod.id}"
              data-modulo-id="${mod.id}"
              contenteditable="${!esModoLecturaReal}">
@@ -12317,20 +12320,20 @@ window.editarModulo = async function (moduloId) {
         <div id="modalEditContenidoModulo" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
             <div class="bg-white rounded-lg p-6 w-full max-w-2xl cb-modal-scroll-80">
                 <h3 class="text-lg font-semibold mb-4">Editar contenido del módulo: ${modulo.nombre}</h3>
-                <textarea 
-                    id="inputEditContenidoModulo" 
+                <textarea
+                    id="inputEditContenidoModulo"
                     placeholder="Contenido HTML del módulo"
                     class="w-full p-3 border border-gray-300 rounded mb-4 font-mono text-sm"
                     rows="15"
                 >${modulo.contenido || ""}</textarea>
                 <div class="flex justify-end gap-2">
-                    <button 
+                    <button
                         id="btnCancelarEditContenidoModulo"
                         class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded"
                     >
                         Cancelar
                     </button>
-                    <button 
+                    <button
                         id="btnConfirmarEditContenidoModulo"
                         class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                     >
@@ -12405,7 +12408,7 @@ window.analizarModulo = async function (moduloId) {
     if (!puedeAnalizar()) {
         mostrarModalAnalisis(`
             <div class="p-4 text-yellow-700 bg-yellow-100 border border-yellow-300 rounded">
-                Estás solicitando análisis demasiado rápido.  
+                Estás solicitando análisis demasiado rápido.
                 Espera 5 segundos antes de volver a analizar.
             </div>
         `);
@@ -12429,7 +12432,7 @@ window.analizarModulo = async function (moduloId) {
         const prompt = `
 Eres un experto en análisis pedagógico, lingüístico y didáctico.
 anliza el módulo en busca de contenido falso, incoherente o contradictorio.
- -Evalúa la coherencia del módulo.  
+ -Evalúa la coherencia del módulo.
  -Verificar datos incorrectos
  -Detectar afirmaciones dudosas
  -Señalar números no sustentados
@@ -12437,13 +12440,13 @@ anliza el módulo en busca de contenido falso, incoherente o contradictorio.
  -Marcar incoherencias
 
 ⚠ INSTRUCCIONES IMPORTANTES:
-- NO devuelvas JSON  
-- NO devuelvas markdown  
+- NO devuelvas JSON
+- NO devuelvas markdown
 - NO uses código ni bloques con \`\`\`html
-- NO uses comillas " "  
-- NO uses llaves {}  
-- NO uses formato de objeto  
-- NO devuelvas text/json ni nada similar  
+- NO uses comillas " "
+- NO uses llaves {}
+- NO uses formato de objeto
+- NO devuelvas text/json ni nada similar
 
 ✔ Devuelve SOLO **HTML puro**, exactamente con esta estructura:
 

@@ -391,11 +391,38 @@ const sessionFingerprintCache = new WeakMap();
 
 function sanitizeSessionForLocalCache(session = null) {
   const source = session && typeof session === "object" ? session : {};
+  const stripInlineRecord = (record = null) => {
+    if (!record || typeof record !== "object") return record;
+    return {
+      ...record,
+      ...(Object.prototype.hasOwnProperty.call(record, "dataUrl") ? { dataUrl: "" } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, "localDataUrl") ? { localDataUrl: "" } : {})
+    };
+  };
+  const stripInlineRecordMap = (value = {}) => Object.fromEntries(
+    Object.entries(value && typeof value === "object" ? value : {}).map(([key, item]) => [key, stripInlineRecord(item)])
+  );
+  const stripInlineRecordListMap = (value = {}) => Object.fromEntries(
+    Object.entries(value && typeof value === "object" ? value : {}).map(([key, list]) => [
+      key,
+      Array.isArray(list) ? list.map((item) => stripInlineRecord(item)) : []
+    ])
+  );
+  // Remove large inline references before JSON.stringify. Stripping them only
+  // after cloning still duplicates and serializes every base64 byte on the UI thread.
+  const sourceForClone = {
+    ...source,
+    speakerReferenceImageMap: stripInlineRecordMap(source.speakerReferenceImageMap || {}),
+    scenarioReferenceImageMap: stripInlineRecordMap(source.scenarioReferenceImageMap || {}),
+    rowReferenceImageMap: stripInlineRecordMap(source.rowReferenceImageMap || {}),
+    rowReferenceVideoMap: stripInlineRecordMap(source.rowReferenceVideoMap || {}),
+    rowReferenceImageListMap: stripInlineRecordListMap(source.rowReferenceImageListMap || {})
+  };
   let clone = null;
   try {
-    clone = JSON.parse(JSON.stringify(source));
+    clone = JSON.parse(JSON.stringify(sourceForClone));
   } catch (_) {
-    clone = { ...source };
+    clone = { ...sourceForClone };
   }
   const stripDataUrl = (record = null) => {
     if (!record || typeof record !== "object") return;
@@ -565,10 +592,32 @@ async function loadCloudSessionsDirect(uid = "", deps = {}) {
       && Array.isArray(sessionData?.script?.rows)
     );
     if (deletedSessionIds.has(String(docSnap.id || "").trim())) return;
+    const rootAcademicMetadata = data.academicMetadata && typeof data.academicMetadata === "object"
+      ? data.academicMetadata
+      : {};
+    const nestedAcademicMetadata = sessionData?.academicMetadata && typeof sessionData.academicMetadata === "object"
+      ? sessionData.academicMetadata
+      : {};
+    const academicMetadata = {
+      ...nestedAcademicMetadata,
+      ...rootAcademicMetadata,
+      nivel: data.nivel || rootAcademicMetadata.nivel || sessionData?.nivel || nestedAcademicMetadata.nivel || "",
+      grado: data.grado || rootAcademicMetadata.grado || sessionData?.grado || nestedAcademicMetadata.grado || "",
+      trimestre: data.trimestre || rootAcademicMetadata.trimestre || sessionData?.trimestre || nestedAcademicMetadata.trimestre || "",
+      unidad: data.unidad || rootAcademicMetadata.unidad || sessionData?.unidad || nestedAcademicMetadata.unidad || "",
+      materia: data.materia || rootAcademicMetadata.materia || sessionData?.materia || nestedAcademicMetadata.materia || "",
+      unitLabel: rootAcademicMetadata.unitLabel || nestedAcademicMetadata.unitLabel || data.academicMetadataUnitLabel || sessionData?.academicMetadataUnitLabel || ""
+    };
     merged.set(docSnap.id, {
       ...(sessionData || {}),
       id: docSnap.id,
       title: data.title || sessionData?.title || "Sin título",
+      nivel: academicMetadata.nivel,
+      grado: academicMetadata.grado,
+      trimestre: academicMetadata.trimestre,
+      unidad: academicMetadata.unidad,
+      materia: academicMetadata.materia,
+      academicMetadata,
       updatedAt: data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()),
       archived: typeof data.archived === "boolean" ? data.archived : sessionData?.archived === true,
       publicar: typeof data.publicar === "boolean" ? data.publicar : sessionData?.publicar === true,
@@ -650,8 +699,102 @@ function mergePodcastVideoConfigForLoad(cloudConfig = null, localConfig = null, 
   }));
 }
 
+function resolveUpdatedAtMs(value = null) {
+  if (value?.toDate && typeof value.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(Number(value?.seconds))) {
+    return (Number(value.seconds) * 1000) + (Number(value.nanoseconds || 0) / 1e6);
+  }
+  return Date.parse(String(value || ""));
+}
+
+function isManualSceneReplacement(entry = null) {
+  const sourceType = String(entry?.sourceType || entry?.replacementSource || "").trim().toLowerCase();
+  return entry?.manuallyReplaced === true || sourceType === "manual-replacement" || sourceType === "manual";
+}
+
+export function mergeMediaMapByEntryUpdatedAt(currentMap = {}, incomingMap = {}) {
+  const current = currentMap && typeof currentMap === "object" ? currentMap : {};
+  const incoming = incomingMap && typeof incomingMap === "object" ? incomingMap : {};
+  const next = {};
+  const keys = new Set([...Object.keys(current), ...Object.keys(incoming)]);
+  keys.forEach((key) => {
+    const currentEntry = current[key];
+    const incomingEntry = incoming[key];
+    if (!currentEntry || typeof currentEntry !== "object") {
+      if (incomingEntry !== undefined) next[key] = incomingEntry;
+      return;
+    }
+    if (!incomingEntry || typeof incomingEntry !== "object") {
+      next[key] = currentEntry;
+      return;
+    }
+    const currentIsManual = isManualSceneReplacement(currentEntry);
+    const incomingIsManual = isManualSceneReplacement(incomingEntry);
+    if (currentIsManual !== incomingIsManual) {
+      next[key] = currentIsManual ? currentEntry : incomingEntry;
+      return;
+    }
+    const currentUpdatedAt = resolveUpdatedAtMs(currentEntry.updatedAt);
+    const incomingUpdatedAt = resolveUpdatedAtMs(incomingEntry.updatedAt);
+    if (Number.isFinite(currentUpdatedAt) && (!Number.isFinite(incomingUpdatedAt) || currentUpdatedAt >= incomingUpdatedAt)) {
+      next[key] = currentEntry;
+      return;
+    }
+    next[key] = incomingEntry;
+  });
+  return next;
+}
+
+export function reconcileDialogueVideoState(currentSession = {}, incomingSession = {}) {
+  const currentDeleted = currentSession?.dialogueVideoDeletedAtMap && typeof currentSession.dialogueVideoDeletedAtMap === "object"
+    ? currentSession.dialogueVideoDeletedAtMap
+    : {};
+  const incomingDeleted = incomingSession?.dialogueVideoDeletedAtMap && typeof incomingSession.dialogueVideoDeletedAtMap === "object"
+    ? incomingSession.dialogueVideoDeletedAtMap
+    : {};
+  const deletedAtMap = { ...currentDeleted };
+  Object.entries(incomingDeleted).forEach(([rowId, value]) => {
+    const currentMs = resolveUpdatedAtMs(deletedAtMap[rowId]);
+    const incomingMs = resolveUpdatedAtMs(value);
+    if (!Number.isFinite(currentMs) || (Number.isFinite(incomingMs) && incomingMs > currentMs)) {
+      deletedAtMap[rowId] = value;
+    }
+  });
+  const dialogueVideoMap = mergeMediaMapByEntryUpdatedAt(
+    currentSession?.dialogueVideoMap || {},
+    incomingSession?.dialogueVideoMap || {}
+  );
+  Object.entries(deletedAtMap).forEach(([rowId, deletedAt]) => {
+    const deletedMs = resolveUpdatedAtMs(deletedAt);
+    const mediaMs = resolveUpdatedAtMs(dialogueVideoMap[rowId]?.updatedAt);
+    if (Number.isFinite(deletedMs) && (!Number.isFinite(mediaMs) || deletedMs >= mediaMs)) {
+      delete dialogueVideoMap[rowId];
+    }
+  });
+  return { dialogueVideoMap, dialogueVideoDeletedAtMap: deletedAtMap };
+}
+
 function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps = {}) {
   const mergeSessionRowsWithFallback = deps.mergeSessionRowsWithFallback || ((primaryRows = [], fallbackRows = []) => primaryRows.length ? primaryRows : fallbackRows);
+  const mergeAcademicMetadataPreferCloud = (cloudSession = null, localSession = null) => {
+    const cloudAcademic = cloudSession?.academicMetadata && typeof cloudSession.academicMetadata === "object" ? cloudSession.academicMetadata : {};
+    const localAcademic = localSession?.academicMetadata && typeof localSession.academicMetadata === "object" ? localSession.academicMetadata : {};
+    const fields = ["nivel", "grado", "trimestre", "unidad", "materia"];
+    const values = Object.fromEntries(fields.map((field) => [
+      field,
+      String(cloudSession?.[field] || cloudAcademic?.[field] || localSession?.[field] || localAcademic?.[field] || "").trim()
+    ]));
+    const unitLabel = String(cloudAcademic.unitLabel || localAcademic.unitLabel || (values.nivel.toLowerCase() === "secundaria" ? "Tema" : "Unidad")).trim();
+    return {
+      ...values,
+      academicMetadata: {
+        ...localAcademic,
+        ...cloudAcademic,
+        ...values,
+        unitLabel
+      }
+    };
+  };
   const chooseNewerByUpdatedAt = (primary = null, secondary = null) => {
     if (!primary) return secondary;
     if (!secondary) return primary;
@@ -667,23 +810,6 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
       ...secondary,
       ...primary
     };
-  };
-  const mergeDialogueAudioMapByEntryUpdatedAt = (primaryMap = {}, secondaryMap = {}) => {
-    const next = {};
-    const keys = new Set([
-      ...Object.keys(primaryMap && typeof primaryMap === "object" ? primaryMap : {}),
-      ...Object.keys(secondaryMap && typeof secondaryMap === "object" ? secondaryMap : {})
-    ]);
-    keys.forEach((key) => {
-      const resolved = chooseNewerByUpdatedAt(
-        primaryMap && typeof primaryMap === "object" ? primaryMap[key] : null,
-        secondaryMap && typeof secondaryMap === "object" ? secondaryMap[key] : null
-      );
-      if (resolved && typeof resolved === "object") {
-        next[key] = resolved;
-      }
-    });
-    return next;
   };
   const mergeRowsByUpdatedAt = (primaryRows = [], secondaryRows = []) => {
     const secondaryById = new Map(
@@ -721,6 +847,7 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const localHasContent = hasLocalSessionContent(localSession);
     const cloudHasContent = hasLocalSessionContent(cloudSession);
     if (localHasContent && !cloudHasContent) {
+      const academicSnapshot = mergeAcademicMetadataPreferCloud(cloudSession, localSession);
       return {
         ...cloudSession,
         ...localSession,
@@ -730,6 +857,7 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
         cloudMeta: cloudSession?.cloudMeta || localSession?.cloudMeta || null,
         archived: preferLocalSessionFlags ? localSession?.archived === true : cloudSession?.archived === true,
         publicar: preferLocalSessionFlags ? localSession?.publicar === true : cloudSession?.publicar === true,
+        ...academicSnapshot,
         isStub: false
       };
     }
@@ -748,18 +876,22 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const resolvedPodcastVideoConfig = preferLocalVideoConfig
       ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
       : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {});
-    
+    const reconciledVideoState = reconcileDialogueVideoState(localSession, cloudSession);
+
+    const academicSnapshot = mergeAcademicMetadataPreferCloud(cloudSession, localSession);
     return {
       ...localSession,
       ...cloudSession,
       archived: preferLocalSessionFlags ? localSession?.archived === true : cloudSession?.archived === true,
       publicar: preferLocalSessionFlags ? localSession?.publicar === true : cloudSession?.publicar === true,
+      ...academicSnapshot,
       dialogueAudioMap: preferLocalDialogueAudioMap
-        ? mergeDialogueAudioMapByEntryUpdatedAt(localSession?.dialogueAudioMap || {}, cloudSession?.dialogueAudioMap || {})
-        : mergeDialogueAudioMapByEntryUpdatedAt(cloudSession?.dialogueAudioMap || {}, localSession?.dialogueAudioMap || {}),
-      dialogueVideoMap: isShallow && localSession?.dialogueVideoMap && Object.keys(localSession.dialogueVideoMap).length > 0 
-        ? localSession.dialogueVideoMap 
-        : mergeRecordMaps(localSession?.dialogueVideoMap || {}, cloudSession?.dialogueVideoMap || {}),
+        ? mergeMediaMapByEntryUpdatedAt(cloudSession?.dialogueAudioMap || {}, localSession?.dialogueAudioMap || {})
+        : mergeMediaMapByEntryUpdatedAt(localSession?.dialogueAudioMap || {}, cloudSession?.dialogueAudioMap || {}),
+      dialogueVideoMap: isShallow && localSession?.dialogueVideoMap && Object.keys(localSession.dialogueVideoMap).length > 0
+        ? localSession.dialogueVideoMap
+        : reconciledVideoState.dialogueVideoMap,
+      dialogueVideoDeletedAtMap: reconciledVideoState.dialogueVideoDeletedAtMap,
       rowReferenceImageMap: isShallow && localSession?.rowReferenceImageMap && Object.keys(localSession.rowReferenceImageMap).length > 0
         ? localSession.rowReferenceImageMap
         : mergeRecordMaps(localSession?.rowReferenceImageMap || {}, cloudSession?.rowReferenceImageMap || {}),
@@ -818,30 +950,49 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
     throw new Error("La sesión no tiene un ID válido.");
   }
   const sessionRef = deps.doc(deps.firestoreDb, "podcaster_sessions", sanitized.id);
-  const existingSnap = await deps.getDoc(sessionRef);
-  const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
-  if (existing && String(existing.ownerId || "").trim() !== uid) {
-    throw new Error("No puedes sobrescribir una sesión de otro usuario.");
-  }
   const sessionUpdatedAt = String(sanitized.updatedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
-  await deps.setDoc(sessionRef, {
-    ownerId: uid,
-    title: sanitized.title,
-    archived: sanitized.archived === true,
-    publicar: sanitized.publicar === true,
-    sessionUpdatedAt,
-    session: sanitized,
-    sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
-    sharedWith: Array.isArray(existing?.sharedWith) ? existing.sharedWith : [],
-    createdAt: existing?.createdAt || deps.serverTimestamp(),
-    updatedAt: deps.serverTimestamp()
-  }, { merge: true });
+  let committedSession = sanitized;
+  const writeSession = (existing = null) => {
+    if (existing && String(existing.ownerId || "").trim() !== uid) {
+      throw new Error("No puedes sobrescribir una sesión de otro usuario.");
+    }
+    const currentSession = existing?.session && typeof existing.session === "object" ? existing.session : {};
+    const reconciledVideoState = reconcileDialogueVideoState(currentSession, sanitized);
+    committedSession = {
+      ...sanitized,
+      ...reconciledVideoState
+    };
+    return {
+      ownerId: uid,
+      title: committedSession.title,
+      archived: committedSession.archived === true,
+      publicar: committedSession.publicar === true,
+      sessionUpdatedAt,
+      session: committedSession,
+      sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
+      sharedWith: Array.isArray(existing?.sharedWith) ? existing.sharedWith : [],
+      createdAt: existing?.createdAt || deps.serverTimestamp(),
+      updatedAt: deps.serverTimestamp()
+    };
+  };
+  if (typeof deps.runTransaction === "function") {
+    await deps.runTransaction(deps.firestoreDb, async (transaction) => {
+      const existingSnap = await transaction.get(sessionRef);
+      const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
+      transaction.set(sessionRef, writeSession(existing), { merge: true });
+    });
+  } else {
+    const existingSnap = await deps.getDoc(sessionRef);
+    const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
+    await deps.setDoc(sessionRef, writeSession(existing), { merge: true });
+  }
   return {
     ok: true,
     sessionId: sanitized.id,
     ownerId: uid,
-    savedAt: typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()
+    savedAt: typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString(),
+    session: committedSession
   };
 }
 
@@ -918,6 +1069,9 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
   }
   const savedAt = String(response?.savedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
+  const committedPayload = response?.session && typeof response.session === "object"
+    ? response.session
+    : payload;
   const localReferenceMedia = {
     speakerReferenceImageMap: target.speakerReferenceImageMap,
     scenarioReferenceImageMap: target.scenarioReferenceImageMap,
@@ -929,7 +1083,7 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
   const nextSessions = getSessions().map((session) => (
     String(session?.id || "").trim() === String(target?.id || "").trim()
       ? {
-        ...payload,
+        ...committedPayload,
         ...localReferenceMedia,
         cloudMeta: {
           ...(session.cloudMeta || {}),
@@ -943,8 +1097,8 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
   persistSessionsToLocalCache(uid, nextSessions, deps, storageAdapter);
   persistSessionSyncMeta(uid, String(target?.id || "").trim(), {
     dirty: false,
-    cloudFingerprint: computeSessionFingerprint(payload, deps),
-    localFingerprint: computeSessionFingerprint(payload, deps),
+    cloudFingerprint: computeSessionFingerprint(committedPayload, deps),
+    localFingerprint: computeSessionFingerprint(committedPayload, deps),
     lastKnownCloudUpdatedAt: savedAt,
     lastManualCloudSaveAt: savedAt
   }, deps, storageAdapter);

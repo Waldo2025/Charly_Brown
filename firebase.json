@@ -32,6 +32,15 @@
     ],
     "headers": [
       {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, must-revalidate"
+          }
+        ]
+      },
+      {
         "source": "**/*.html",
         "headers": [
           {
@@ -45,7 +54,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "public, max-age=300, must-revalidate"
           }
         ]
       },
@@ -54,7 +63,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "public, max-age=300, must-revalidate"
           }
         ]
       },
@@ -63,7 +72,61 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "public, max-age=300, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/version.json",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store"
+          }
+        ]
+      },
+      {
+        "source": "/js/{cache-version-loader,runtime-config-loader,update-banner-loader}.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/{scienceActivities.css,js/scienceActivities.js,js/scienceActivities.bundle.js,js/chromeLayout.js,js/sidebar.js,tailwind-lite.css,sidebar.css,header.css}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "/js/science-*.mjs",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "/js/science-chunks/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "**/*.{woff,woff2,ttf,otf}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
           }
         ]
       },
@@ -72,11 +135,7 @@
         "headers": [
           {
             "key": "Content-Security-Policy",
-            "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://www.google.com https://www.google.com/recaptcha/ https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' blob: http://127.0.0.1:8787 http://localhost:8787 https://cdn.jsdelivr.net https://www.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebase.googleapis.com https://firebasestorage.googleapis.com https://storage.googleapis.com https://content-firebaseappcheck.googleapis.com https://firebaseappcheck.googleapis.com https://gemini-live-proxy-128488238449.us-central1.run.app wss://gemini-live-proxy-128488238449.us-central1.run.app; frame-src 'self' https://www.google.com https://recaptcha.google.com; media-src 'self' blob: data: https:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
-          },
-          {
-            "key": "Cache-Control",
-            "value": "no-store"
+            "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://www.google.com https://www.google.com/recaptcha/ https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' blob: http://127.0.0.1:8787 http://localhost:8787 https://cdn.jsdelivr.net https://www.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebase.googleapis.com https://firebasestorage.googleapis.com https://storage.googleapis.com https://content-firebaseappcheck.googleapis.com https://firebaseappcheck.googleapis.com https://us-central1-charly-brown.cloudfunctions.net https://gemini-live-proxy-128488238449.us-central1.run.app wss://gemini-live-proxy-128488238449.us-central1.run.app; frame-src 'self' https://www.google.com https://recaptcha.google.com; media-src 'self' blob: data: https:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
           },
           {
             "key": "Referrer-Policy",
@@ -155,6 +214,13 @@
         "source": "/api/podcaster/music/generate",
         "function": {
           "functionId": "geminiApi",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/science-activities/**",
+        "function": {
+          "functionId": "scienceActivitiesApi",
           "region": "us-central1"
         }
       },

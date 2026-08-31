@@ -1,0 +1,14 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file
+      - cloud-run/analizar-pdf-worker/Dockerfile
+      - --tag
+      - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/analizar-pdf-worker:latest
+      - .
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/charly-backends/analizar-pdf-worker:latest
+options:
+  machineType: E2_HIGHCPU_8
+timeout: 1800s

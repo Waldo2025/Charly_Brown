@@ -45,6 +45,10 @@ function extractFunction(source, name) {
 function createContext() {
   const context = {
     console,
+    normalizePercent(value, fallback = 100) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : fallback;
+    },
     buildApiUrl(path) {
       return `https://example.test${path}`;
     },
@@ -62,6 +66,9 @@ function createContext() {
         ? `https://example.test/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`
         : String(downloadUrl || "").trim();
     },
+    buildDirectFirebaseMediaReference(downloadUrl, storagePath) {
+      return String(storagePath || downloadUrl || "").trim();
+    },
     window: {
       location: {
         origin: "https://example.test"
@@ -78,6 +85,7 @@ const homeContext = createContext();
   extractConst(homeSource, "HOME_TIMELINE_MIN_CLIP_MS"),
   "resolveStorageAudioUrl",
   "normalizeHomePanelMusicDuckingWhenGeminiPct",
+  "normalizeHomePanelMusicVolume",
   "normalizeHomePanelMusicMutedLoopIndexes",
   "normalizeHomePanelMusicLoopSettings",
   "normalizeHomePanelMusicTrack",

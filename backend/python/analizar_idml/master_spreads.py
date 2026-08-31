@@ -42,6 +42,7 @@ def parse_master_spreads(archive, master_spread_sources=None):
             story_ref = {
                 "storyId": story_id,
                 "frameId": node.get("Self", ""),
+                "layerId": node.get("ItemLayer", ""),
                 "appliedObjectStyle": node.get("AppliedObjectStyle", ""),
                 "fillColor": _normalize_color_ref(node.get("FillColor", "")),
                 "strokeColor": _normalize_color_ref(node.get("StrokeColor", "")),

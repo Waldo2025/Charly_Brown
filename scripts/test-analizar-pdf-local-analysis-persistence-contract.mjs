@@ -45,7 +45,7 @@ assert.match(
 
 assert.match(
   appSource,
-  /putAnalizarPdfCachedAnalysisSession\(session\)/,
+  /putAnalizarPdfCachedAnalysisSession\([^)]*\)/,
   "Los análisis locales pesados deben persistirse en IndexedDB, no depender solo de localStorage."
 );
 

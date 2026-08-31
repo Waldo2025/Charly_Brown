@@ -1,0 +1,16 @@
+{
+  "migrationId": "podcaster-active-trimester-1-2026-08-30",
+  "mode": "dry-run",
+  "projectId": "charly-brown",
+  "startedAt": "2026-08-30T15:19:55.896Z",
+  "completedAt": "2026-08-30T15:20:09.969Z",
+  "stats": {
+    "total": 56,
+    "archived_skipped": 5,
+    "assigned_trimester_1": 0,
+    "synchronized": 0,
+    "unchanged": 51,
+    "failed": 0
+  },
+  "changes": []
+}

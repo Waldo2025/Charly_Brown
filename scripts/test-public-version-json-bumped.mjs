@@ -23,12 +23,12 @@ assert.doesNotMatch(peppermintHtml, /id="analizarPdfJobMeta"/);
 assert.match(peppermintHtml, /<section class="analizar-pdf-hero">[\s\S]*id="analizarPdfEditorialPanel"[\s\S]*<\/section>\s*<section class="analizar-pdf-workspace">/);
 assert.match(peppermintCss, /\.analizar-pdf-hero\s*\{[\s\S]*position:\s*sticky/);
 assert.ok(
-  String(changelog[0] || "").includes("Peppermint Patty")
-    && String(changelog[0] || "").includes("analizar-pdf-meta-value")
-    && String(changelog[0] || "").includes("fallback por texto")
-    && String(changelog[0] || "").includes("swatches no neutros")
-    && String(changelog[0] || "").includes("Black/Paper"),
-  "La nota más reciente debe reflejar color de meta-value por texto y swatch no neutro."
+  notes.some((note) => String(note || "").includes("Peppermint Patty")
+    && String(note || "").includes("analizar-pdf-meta-value")
+    && String(note || "").includes("fallback por texto")
+    && String(note || "").includes("swatches no neutros")
+    && String(note || "").includes("Black/Paper")),
+  "Las notas deben reflejar color de meta-value por texto y swatch no neutro."
 );
 assert.ok(
   notes.some((note) => String(note || "").includes("Peppermint Patty")

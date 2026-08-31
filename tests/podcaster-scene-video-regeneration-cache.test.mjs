@@ -12,9 +12,9 @@ test("scene video regeneration invalidates both previous and new media sources",
   );
 });
 
-test("row media cache invalidation accepts explicit clip sources", () => {
+test("row media cache invalidation deeply collects explicit clip sources", () => {
   assert.match(
     playbackControllerSource,
-    /invalidateRowMediaCache\(rowId = "", session = null, options = \{\}\)[\s\S]*?const explicitClips = \[\][\s\S]*?options\?\.previousClip[\s\S]*?options\?\.nextClip[\s\S]*?const urlsToInvalidate = new Set\(explicitClips\.flatMap\(\(clip\) => collectClipUrls\(clip\)\)\);/m
+    /runRowMediaCacheInvalidation\(rowId = "", session = null, options = \{\}\)[\s\S]*?const explicitClips = \[\][\s\S]*?options\?\.previousClip[\s\S]*?options\?\.nextClip[\s\S]*?const collectClipMediaCandidates = \(clip = null\) => \{[\s\S]*?const visitMediaNode = \(node = null\) => \{[\s\S]*?Object\.values\(node\)\.forEach[\s\S]*?const urlsToInvalidate = new Set\([\s\S]*?collectClipMediaCandidates\(clip\)/m
   );
 });

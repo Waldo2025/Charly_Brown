@@ -98,6 +98,29 @@ test("mergeCloudVsLocalSessions keeps local content when cloud document is empty
   assert.equal(merged.isStub, false);
 });
 
+test("mergeCloudVsLocalSessions keeps cloud academic metadata over a stale local cache", () => {
+  const [merged] = mergeCloudVsLocalSessions([{
+    id: "s1",
+    title: "cloud",
+    updatedAt: "2026-08-30T12:00:00.000Z",
+    isStub: true,
+    trimestre: "1",
+    academicMetadata: { nivel: "", grado: "", trimestre: "1", unidad: "", materia: "", unitLabel: "Unidad" },
+    script: { rows: [] }
+  }], [{
+    id: "s1",
+    title: "local",
+    updatedAt: "2026-08-30T13:00:00.000Z",
+    trimestre: "",
+    academicMetadata: { trimestre: "" },
+    script: { rows: [{ id: "r1", text: "contenido local" }] }
+  }], {});
+
+  assert.equal(merged.trimestre, "1");
+  assert.equal(merged.academicMetadata.trimestre, "1");
+  assert.equal(merged.script.rows[0].text, "contenido local");
+});
+
 test("loadSessionsFromLocalCache recovers full legacy session over scoped empty stub", () => {
   const writes = [];
   const storageAdapter = {

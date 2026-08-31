@@ -10,7 +10,7 @@
   <!-- Incluir Boxicons para los iconos -->
   <link href="vendor/boxicons/boxicons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="crearUnidades.css">
-  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
   <link rel="stylesheet" href="chatbot.css">
   <link rel="stylesheet" href="header.css">
   <!-- Por estas -->
@@ -28,22 +28,19 @@
 </head>
 <body>
 
-  
+
 
   <header class="main-header">
     <div class="header-content">
       <!-- header-content loaded from chromeLayout.js -->
     </div>
-  </header> 
+  </header>
 
- 
-  
-  
-  
+
+
+
+
   <div id="sidebar">
-    <button id="menuToggle" aria-label="Abrir menú">
-      <i class="fas fa-bars"></i>
-    </button>
 
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
@@ -58,8 +55,8 @@
     </div>
     <button class="chatbot-close" id="chatbotClose">&times;</button>
   </div>
- 
-  
+
+
   <div class="chatbot-messages" id="chatbotMessages">
       <!-- Aquí se mostrarán los mensajes -->
   </div>
@@ -68,15 +65,15 @@
       <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
   </div>
  </div>
- 
- 
+
+
 
 
   <!-- Contenedor para el Sidebar y el Header -->
   <div class="main-content">
     <h2>Crear Nueva Unidad</h2>
     <form id="createUnidadForm" class="form-grid">
-      
+
       <!-- Fila 1 -->
       <div class="form-group">
         <label for="nivel">Nivel</label>
@@ -87,22 +84,22 @@
           <option value="Secundaria">Secundaria</option>
         </select>
       </div>
-  
+
       <div class="form-group">
         <label for="grado">Grado</label>
         <select class="selectform" id="grado" name="grado" required></select>
       </div>
-  
+
       <div class="form-group">
         <label for="trimestre">Trimestre</label>
         <select class="selectform" id="trimestre" name="trimestre" required></select>
       </div>
-  
+
       <div class="form-group">
         <label for="unidad">Unidad</label>
         <select class="selectform" id="unidad" name="unidad" required></select>
       </div>
-  
+
       <!-- Fila 2 -->
       <div class="form-group">
         <label for="materia">Materia</label>
@@ -119,12 +116,12 @@
           <option value="Inglés">Inglés</option>
         </select>
       </div>
-  
+
       <div class="form-group" style="flex: 1 1 100%;">
         <label for="nombreUnidad">Nombre de la Unidad</label>
         <input class="selectform" type="text" id="nombreUnidad" name="nombreUnidad" required>
       </div>
-  
+
       <div class="form-group" style="flex: 1 1 50%;">
         <label for="privacidad">Privacidad</label>
         <select class="selectform" id="privacidad" name="privacidad">
@@ -132,14 +129,14 @@
           <option value="Público">Público</option>
         </select>
       </div>
-  
+
       <div class="form-group" style="flex: 1 1 50%; display: flex; align-items: end;">
         <button type="submit" class="btn-crear">Crear Unidad</button>
       </div>
-  
+
     </form>
   </div>
-  
+
 
   </div>
 
@@ -160,8 +157,8 @@
 <script src="vendor/bootstrap-select/bootstrap-select.min.js"></script>
 
   <script type="module" src="js/crearUnidades.js"></script>
-  <script type="module" src="js/chromeLayout.js"></script>
-  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
+  <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
 
 
 <script src="js/update-banner-loader.js" defer></script>

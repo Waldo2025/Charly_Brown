@@ -51,10 +51,10 @@ export function normalizeVideoTableHeaderKey(label = "") {
   if (/\b(subtitulos?|karaoke|captions?|closed captions?|dialogo subtitulado)\b/.test(clean)) {
     return "captionText";
   }
-  if (/\b(texto natural (dentro|integrado|visible)|texto (dentro|integrado) (de|en) (la )?(escena|video)|in scene text)\b/.test(clean)) {
+  if (/\b(texto natural (dentro|integrado|visible)|texto (dentro|integrado) (de|en) (la )?(escena|video)|texto en pantalla|on screen text|onscreen text|in scene text)\b/.test(clean)) {
     return "inSceneText";
   }
-  if (/\b(titular editorial|titular|headline|texto en pantalla|on screen text|onscreen text|rotulo editorial|copy editorial)\b/.test(clean)) {
+  if (/\b(titular editorial|titular|headline|rotulo editorial|copy editorial)\b/.test(clean)) {
     return "headlineText";
   }
   if (/\b(descripcion (?:de (?:la )?)?escena|descripcion escena|descripcion visual|scene description|escenario|locacion|ambientacion|setting)\b/.test(clean)
@@ -133,7 +133,7 @@ function mapArrayRowByLegacyPosition(row = [], siblingRows = []) {
   if (cells.length === 5) {
     mapped.script = cells[0] || "";
     mapped.sceneDescription = cells[1] || "";
-    mapped.headlineText = cells[2] || "";
+    mapped.inSceneText = cells[2] || "";
     mapped.transition = cells[3] || "";
     mapped.visual = cells[4] || "";
     return mapped;
@@ -148,7 +148,7 @@ function mapArrayRowByLegacyPosition(row = [], siblingRows = []) {
   mapped.time = cells[0] || "";
   mapped.script = cells[1] || "";
   mapped.sceneDescription = cells[2] || "";
-  mapped.headlineText = cells[3] || "";
+  mapped.inSceneText = cells[3] || "";
   mapped.transition = cells[4] || "";
   mapped.visual = cells[5] || "";
   return mapped;
@@ -168,35 +168,38 @@ function mapObjectRow(row = {}) {
     headlineText: cleanCell(
       row?.headlineText
       ?? row?.onScreenText
-      ?? row?.textoPantalla
-      ?? row?.textoEnPantalla
       ?? row?.titularEditorial
     ),
     captionText: cleanCell(row?.captionText ?? row?.subtitulos ?? row?.subtitles ?? row?.karaoke),
-    inSceneText: cleanCell(row?.inSceneText ?? row?.textoEnEscena),
+    inSceneText: cleanCell(
+      row?.inSceneText
+      ?? row?.textoEnEscena
+      ?? row?.textoPantalla
+      ?? row?.textoEnPantalla
+    ),
     transition: cleanCell(row?.transition ?? row?.transicion),
     visual: cleanCell(row?.visual ?? row?.elementoVisual ?? row?.visualNotes ?? row?.recursoVisual)
   };
 }
 
 function finalizeMappedRow(mapped = {}, index = 0) {
+  const script = cleanCell(mapped.script) || "Definir voz en off.";
   const sceneDescription = cleanCell(mapped.sceneDescription);
   const visual = cleanCell(mapped.visual);
   const headlineText = cleanCell(mapped.headlineText);
-  const captionText = cleanCell(mapped.captionText);
+  const captionText = script;
   const inSceneText = cleanCell(mapped.inSceneText);
-  const overlayMode = headlineText && captionText
-    ? "both"
-    : (headlineText ? "headline" : (captionText ? "captions" : "none"));
+  const overlayMode = headlineText ? "both" : "captions";
   return {
     time: cleanCell(mapped.time) || `${formatSceneClock(index * 8)}-${formatSceneClock((index + 1) * 8)}`,
-    script: cleanCell(mapped.script) || "Definir voz en off.",
+    script,
     sceneDescription: sceneDescription || visual || "Definir descripción de escena.",
     headlineText,
-    onScreenText: headlineText,
+    onScreenText: headlineText ? `${headlineText}\n${captionText}` : captionText,
     captionText,
     inSceneText,
     overlayMode,
+    onScreenTextNoSummarize: true,
     transition: cleanCell(mapped.transition) || "Corte limpio",
     visual: visual || sceneDescription || "Definir elemento visual."
   };

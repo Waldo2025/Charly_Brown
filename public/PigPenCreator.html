@@ -37,9 +37,6 @@
         </div>
 
         <div id="sidebar">
-            <button id="menuToggle" aria-label="Abrir menú">
-                <i class="fas fa-bars"></i>
-            </button>
             <div class="sidebar-menu">
                 <!-- sidebar-menu loaded from chromeLayout.js -->
             </div>
@@ -75,6 +72,9 @@
                             </button>
                             <button type="button" id="btnExportar" class="er-button er-studio-icon-button" data-er-tooltip="Exportar" aria-label="Exportar" disabled>
                                 <i class="fas fa-file-zipper"></i>
+                            </button>
+                            <button type="button" id="btnCopyAllAnswers" class="er-button er-studio-icon-button" data-er-tooltip="Copiar respuestas de todos los temas" aria-label="Copiar respuestas de todos los temas" disabled>
+                                <i class="fas fa-code" aria-hidden="true"></i>
                             </button>
                             <div class="er-publish-switch-wrap" role="group" aria-label="Publicación del escape room">
                                 <span id="publishSwitchLabel" class="er-publish-switch-label">Borrador</span>
@@ -452,7 +452,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                <iframe id="escapeRoomPreviewFrame" title="Vista previa del escape room" class="er-preview-frame"></iframe>
+                                <iframe id="escapeRoomPreviewFrame" title="Vista previa del escape room" class="er-preview-frame" sandbox="allow-scripts allow-forms allow-modals allow-downloads" allow="fullscreen" allowfullscreen></iframe>
                             </section>
 
                             <section id="resultadoContainer" class="er-json-panel hidden">
@@ -464,6 +464,7 @@
                     </div>
 
                     <aside class="er-inspector-panel er-studio-dock is-open" id="erInspectorPanel" aria-label="Contenido y salas">
+                        <div id="erInspectorResizeHandle" class="er-inspector-resizer" role="separator" aria-label="Redimensionar el subpanel" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="480" aria-valuenow="220" tabindex="0"></div>
                         <div class="er-inspector-tabs" role="tablist" aria-label="Panel del proyecto">
                             <button type="button" class="er-inspector-tab" data-er-inspector-tab="topics" role="tab" aria-selected="false" aria-controls="erInspectorTopicsPanel">Temas</button>
                             <button type="button" class="er-inspector-tab" data-er-inspector-tab="content" role="tab" aria-selected="false" aria-controls="erInspectorContentPanel">Contenido general</button>
@@ -699,6 +700,22 @@
             </div>
         </div>
     </div>
+    <div id="erZipExportModal" class="er-zip-export-modal hidden" role="dialog" aria-modal="true"
+        aria-labelledby="erZipExportTitle" aria-describedby="erZipExportStatus" aria-hidden="true" tabindex="-1">
+        <div class="er-zip-export-card">
+            <div class="er-zip-export-spinner" aria-hidden="true">
+                <span></span>
+                <i class="fas fa-file-zipper"></i>
+            </div>
+            <div class="er-zip-export-copy">
+                <span class="er-zip-export-kicker">Exportación en curso</span>
+                <h2 id="erZipExportTitle">Creando paquete ZIP</h2>
+                <p id="erZipExportStatus" role="status" aria-live="polite" aria-atomic="true">Preparando los archivos del tema…</p>
+            </div>
+            <div class="er-zip-export-progress" aria-hidden="true"><span></span></div>
+            <small>No cierres esta ventana hasta que comience la descarga.</small>
+        </div>
+    </div>
     <input id="activityImageInput" type="file" accept="image/*" hidden>
 
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
@@ -706,7 +723,7 @@
     <script src="js/html-docx.js"></script>
     <script type="module" data-cache-src="js/chromeLayout.js"></script>
     <script type="module" data-cache-src="js/sidebar.js"></script>
-    <script type="module" src="js/PigPenCreator.js"></script>
+    <script type="module" src="js/PigPenCreator.js?v=20260814-copy-topic"></script>
     <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

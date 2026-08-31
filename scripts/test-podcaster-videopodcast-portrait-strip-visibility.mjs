@@ -41,14 +41,26 @@ function extractFunction(name) {
 }
 
 const mockFooter = {
-  style: { display: "" }
+  hidden: false,
+  classList: {
+    values: new Set(["is-footer-collapsed"]),
+    contains(name) {
+      return this.values.has(name);
+    }
+  },
+  style: {
+    display: "none",
+    removeProperty(name) {
+      if (name === "display") this.display = "";
+    }
+  }
 };
 
 const mockPortraitStrip = {
   hidden: false,
   innerHTML: "existing-content",
   closest(selector) {
-    if (selector === ".podcast-studio-footer") {
+    if (selector === ".snoopy-portrait-dock") {
       return mockFooter;
     }
     return null;
@@ -59,6 +71,7 @@ const context = {
   els: {
     podcastPortraitStrip: mockPortraitStrip
   },
+  currentModeVideo: false,
   podcastRenderState: {
     portraitStructureKey: "old-key",
     portraitStructureRenderCount: 0
@@ -72,7 +85,7 @@ const context = {
     return context.activeSession;
   },
   isCurrentModeVideo() {
-    return false;
+    return context.currentModeVideo;
   }
 };
 
@@ -102,8 +115,11 @@ context.renderPodcastPortraitStrip(audioSession);
 if (mockPortraitStrip.hidden !== true) {
   throw new Error("El strip de retratos debería estar oculto en modo podcast de audio.");
 }
-if (mockFooter.style.display !== "none") {
-  throw new Error("El footer contenedor (.podcast-studio-footer) debería estar oculto en modo podcast de audio.");
+if (mockFooter.hidden !== true) {
+  throw new Error("El dock de Retratos debería tener hidden en modo podcast de audio.");
+}
+if (mockFooter.style.display !== "") {
+  throw new Error("El dock debería eliminar cualquier display inline heredado.");
 }
 if (mockPortraitStrip.innerHTML !== "") {
   throw new Error("El strip de retratos debería haberse vaciado.");
@@ -114,9 +130,9 @@ if (context.podcastRenderState.portraitStructureKey !== "") {
 
 console.log("Test Case 1: Audio-only hides footer correctly OK.");
 
-// Case 2: Video Podcast mode is true -> Should set display to "" and hidden to false (it would then proceed to render)
-// (we will check the early check flow)
+// Case 2: Video Podcast mode in the podcast composer -> visible and rendered.
 mockFooter.style.display = "none";
+mockFooter.hidden = true;
 mockPortraitStrip.hidden = true;
 
 const videoSession = {
@@ -146,9 +162,42 @@ context.renderPodcastPortraitStrip(videoSession);
 if (mockPortraitStrip.hidden !== false) {
   throw new Error("El strip de retratos debería estar visible en modo video podcast.");
 }
+if (mockFooter.hidden !== false) {
+  throw new Error("El dock de Retratos debería estar visible en modo video podcast.");
+}
 if (mockFooter.style.display !== "") {
-  throw new Error("El footer contenedor (.podcast-studio-footer) debería estar visible en modo video podcast.");
+  throw new Error("El dock debería limpiar el display inline al volver a video podcast.");
 }
 
 console.log("Test Case 2: Video podcast shows footer correctly OK.");
+
+// Case 3: The video-active switch always wins, even during a transient persisted videopodcast state.
+context.currentModeVideo = true;
+mockPortraitStrip.innerHTML = "video-podcast-content";
+context.renderPodcastPortraitStrip(videoSession);
+
+if (mockFooter.hidden !== true || mockPortraitStrip.hidden !== true) {
+  throw new Error("Retratos debe permanecer oculto cuando Video activo está encendido.");
+}
+if (mockPortraitStrip.innerHTML !== "") {
+  throw new Error("Video activo debería vaciar el contenido del dock oculto.");
+}
+if (!mockFooter.classList.contains("is-footer-collapsed")) {
+  throw new Error("Ocultar por modo no debe borrar la preferencia manual de colapso.");
+}
+
+console.log("Test Case 3: Active video hides a persisted videopodcast dock correctly OK.");
+
+// Case 4: Returning to podcast-with-video restores the dock without changing collapse preference.
+context.currentModeVideo = false;
+context.renderPodcastPortraitStrip(videoSession);
+
+if (mockFooter.hidden !== false || mockPortraitStrip.hidden !== false) {
+  throw new Error("Retratos debería reaparecer al volver a Podcast con video.");
+}
+if (!mockFooter.classList.contains("is-footer-collapsed")) {
+  throw new Error("La preferencia is-footer-collapsed debe conservarse al volver.");
+}
+
+console.log("Test Case 4: Returning to video podcast preserves collapse preference OK.");
 console.log("All portrait strip visibility test cases passed successfully!");

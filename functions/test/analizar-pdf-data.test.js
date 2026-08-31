@@ -38,8 +38,13 @@ test("all migrated data routes are registered behind the stable API contract", (
   };
   registerAnalizarPdfDataRoutes(app);
   assert.deepEqual(routes.sort(), [
+    "GET /api/analizar-pdf/analysis-rules/catalog",
+    "GET /api/analizar-pdf/custom-rules/list",
+    "GET /api/analizar-pdf/sessions/detail",
     "GET /api/analizar-pdf/sessions/list",
     "GET /api/analizar-pdf/style-mappings/list",
+    "POST /api/analizar-pdf/custom-rules/delete",
+    "POST /api/analizar-pdf/custom-rules/save",
     "POST /api/analizar-pdf/sessions/delete",
     "POST /api/analizar-pdf/sessions/save",
     "POST /api/analizar-pdf/style-mappings/activate",

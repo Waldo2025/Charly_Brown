@@ -352,13 +352,17 @@
     return true;
   }
 
+  let initialVersionInfoConsumed = false;
   async function fetchVersionInfo() {
-    const bust = Date.now().toString();
-    const res = await fetch(`${VERSION_URL}?t=${bust}`, { cache: 'no-store' });
-    if (!res.ok) {
-      return { version: '', title: DEFAULT_TITLE, message: DEFAULT_MESSAGE, updates: [] };
+    let data;
+    if (!initialVersionInfoConsumed && window.__CHARLY_VERSION_INFO_PROMISE__) {
+      initialVersionInfoConsumed = true;
+      data = await window.__CHARLY_VERSION_INFO_PROMISE__;
+    } else {
+      data = await fetch(`${VERSION_URL}?t=${Date.now()}`, { cache: 'no-store' })
+        .then((res) => res.ok ? res.json() : {})
+        .catch(() => ({}));
     }
-    const data = await res.json();
     return {
       version: data && data.version ? String(data.version) : '',
       title: data && typeof data.title === 'string' ? data.title : DEFAULT_TITLE,
@@ -466,7 +470,7 @@
     subtree: true
   });
 
-  let lastCheck = 0;
+  let lastCheck = Date.now();
   const MIN_INTERVAL_MS = 60 * 1000;
 
   function scheduleCheck() {

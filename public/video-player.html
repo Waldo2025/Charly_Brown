@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.555"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.833"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -139,6 +139,167 @@
       background: var(--vp-surface) !important;
       border-bottom: 1px solid var(--vp-divider) !important;
       box-shadow: none !important;
+      z-index: 140 !important;
+      overflow: visible !important;
+    }
+
+    .video-player-shell .player-more-menu {
+      z-index: 141 !important;
+    }
+
+    .video-player-shell #btnTogglePlayerMoreMenu > span {
+      display: none !important;
+    }
+
+    .video-player-shell #playerMoreMenuPanel {
+      z-index: 142 !important;
+      color: var(--vp-text) !important;
+      background: var(--vp-surface-raised) !important;
+      border: 1px solid var(--vp-border) !important;
+      box-shadow: var(--vp-shadow) !important;
+    }
+
+    .video-player-shell #playerMoreMenuPanel label,
+    .video-player-shell #playerMoreMenuPanel label > span {
+      color: var(--vp-text-soft) !important;
+    }
+
+    .video-player-shell #playerMoreMenuPanel #playerPlaybackQuality {
+      color: var(--vp-text) !important;
+      background: var(--vp-input) !important;
+      border-color: var(--vp-border) !important;
+    }
+
+    /* Menú contextual compacto: neutraliza los botones cuadrados del header. */
+    .video-player-shell #playerMoreMenuPanel.player-more-menu-panel {
+      top: calc(100% + 10px) !important;
+      right: 0 !important;
+      left: auto !important;
+      width: 260px !important;
+      max-width: calc(100vw - 24px) !important;
+      padding: 10px !important;
+      gap: 6px !important;
+      border-radius: 16px !important;
+      overflow: hidden !important;
+      transform-origin: top right;
+    }
+
+    .video-player-shell #playerMoreMenuPanel[hidden] {
+      display: none !important;
+    }
+
+    .video-player-shell .player-more-menu.is-open #playerMoreMenuPanel {
+      display: grid !important;
+      animation: vp-menu-reveal 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    .video-player-shell #playerMoreMenuPanel > label {
+      margin: 0 !important;
+      padding: 5px 5px 11px !important;
+      display: grid !important;
+      gap: 7px !important;
+      border-bottom: 1px solid var(--vp-divider);
+    }
+
+    .video-player-shell #playerMoreMenuPanel > label > span {
+      padding-inline: 3px;
+      font-size: 0.68rem !important;
+      line-height: 1;
+      font-weight: 800 !important;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .video-player-shell #playerMoreMenuPanel #playerPlaybackQuality {
+      width: 100% !important;
+      min-width: 0 !important;
+      height: 40px !important;
+      margin: 0 !important;
+      padding: 0 34px 0 11px !important;
+      border: 1px solid var(--vp-border) !important;
+      border-radius: 10px !important;
+      font: inherit !important;
+      font-size: 0.82rem !important;
+      font-weight: 650 !important;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .video-player-shell #playerMoreMenuPanel #playerPlaybackQuality:focus-visible {
+      border-color: var(--vp-accent) !important;
+      box-shadow: 0 0 0 3px var(--vp-accent-soft) !important;
+    }
+
+    .video-player-shell #playerMoreMenuPanel > .player-action-btn {
+      width: 100% !important;
+      min-width: 0 !important;
+      height: 44px !important;
+      min-height: 44px !important;
+      margin: 0 !important;
+      padding: 0 11px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 11px !important;
+      color: var(--vp-text-soft) !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 10px !important;
+      text-align: left;
+      box-shadow: none !important;
+    }
+
+    .video-player-shell #playerMoreMenuPanel > .player-action-btn i {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      display: inline-grid !important;
+      place-items: center;
+      color: var(--vp-accent) !important;
+      background: var(--vp-accent-soft);
+      border-radius: 8px;
+      font-size: 0.82rem !important;
+    }
+
+    .video-player-shell #playerMoreMenuPanel > .player-action-btn span {
+      min-width: 0;
+      color: inherit !important;
+      font-size: 0.82rem;
+      line-height: 1;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .video-player-shell #playerMoreMenuPanel > .player-action-btn:is(:hover, :focus-visible) {
+      color: var(--vp-text) !important;
+      background: var(--vp-accent-soft) !important;
+      outline: 0 !important;
+    }
+
+    @keyframes vp-menu-reveal {
+      from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.97);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @media (max-width: 520px) {
+      .video-player-shell #playerMoreMenuPanel.player-more-menu-panel {
+        position: fixed !important;
+        top: 66px !important;
+        right: 12px !important;
+        width: min(280px, calc(100vw - 24px)) !important;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .video-player-shell .player-more-menu.is-open #playerMoreMenuPanel {
+        animation: none;
+      }
     }
 
     .video-player-shell .player-info,
@@ -198,6 +359,7 @@
     }
 
     .video-player-shell.is-preparing-media #playerStage #playerMediaLoadingOverlay {
+      display: flex !important;
       opacity: 1 !important;
       visibility: visible !important;
       pointer-events: auto;
@@ -740,6 +902,7 @@
       border-radius: 0 !important;
       box-shadow: none !important;
       opacity: 1;
+      text-decoration: none !important;
     }
 
     .video-player-shell .player-head-actions .player-action-btn::after {
@@ -780,6 +943,65 @@
     .video-player-shell .player-head-actions .player-action-btn[aria-pressed="true"],
     .video-player-shell #toggleVideoPlayerThemeBtn {
       color: var(--vp-accent) !important;
+    }
+
+    .video-player-shell .player-more-menu-panel .player-action-btn {
+      width: 100% !important;
+      min-width: 0 !important;
+      height: auto !important;
+      min-height: 42px !important;
+      justify-content: flex-start !important;
+      gap: 0.7rem !important;
+      padding: 0.7rem 0.85rem !important;
+      border-radius: 12px !important;
+      background: rgba(255, 255, 255, 0.04) !important;
+    }
+
+    .video-player-shell .player-more-menu-panel .player-action-btn::after {
+      display: none !important;
+    }
+
+    .video-player-shell .player-more-menu-panel .player-action-btn i {
+      width: 18px;
+      text-align: center;
+    }
+
+    .video-player-shell .player-more-menu-panel .player-action-btn span {
+      flex: 1;
+      text-align: left;
+    }
+
+    .video-player-shell .player-more-menu > .player-more-menu-trigger {
+      width: auto !important;
+      min-width: 0 !important;
+      padding-inline: 12px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 0.45rem !important;
+    }
+
+    .video-player-shell .player-more-menu > .player-more-menu-trigger span {
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    .video-player-shell .player-more-menu-panel[hidden] {
+      display: none !important;
+    }
+
+    .video-player-shell .player-more-menu.is-open .player-more-menu-panel {
+      display: grid !important;
+    }
+
+    .video-player-shell .multimedia-player-head {
+      position: relative;
+      z-index: 40;
+      overflow: visible !important;
+    }
+
+    .video-player-shell .player-more-menu {
+      z-index: 41;
     }
 
     .video-player-shell .player-update-badge {
@@ -1827,6 +2049,7 @@
           <i class="fas fa-video"></i>
           <div class="player-titles">
             <strong id="playerTitle">Reproductor</strong>
+            <div id="playerAcademicMeta" class="player-academic-meta" hidden></div>
           </div>
         </div>
         <div class="player-head-actions">
@@ -1834,20 +2057,17 @@
              <i class="fas fa-sync-alt"></i>
              <span>Cambios disponibles</span>
           </div>
+          <div class="player-head-action-group is-home" role="group" aria-label="Navegación principal">
+            <a id="btnVideoPlayerHome" class="player-action-btn" href="home.html"
+              title="Volver a inicio" aria-label="Volver a home">
+              <i class="fas fa-house" aria-hidden="true"></i>
+            </a>
+          </div>
           <div class="player-head-action-group is-theme" role="group" aria-label="Tema del visor">
             <button id="toggleVideoPlayerThemeBtn" class="player-action-btn" type="button"
               title="Activar tema medio" aria-label="Activar tema medio">
               <i class="fas fa-moon" aria-hidden="true"></i>
             </button>
-            <label class="player-quality-control" title="Calidad de reproducción" aria-label="Calidad de reproducción">
-              <i class="fas fa-gauge-high" aria-hidden="true"></i>
-              <select id="playerPlaybackQuality">
-                <option value="auto">Automática</option>
-                <option value="high">Máxima</option>
-                <option value="medium">Media</option>
-                <option value="low">Baja</option>
-              </select>
-            </label>
           </div>
           <div class="player-head-action-group is-media" role="group" aria-label="Medios del visor">
             <button id="btnPurgeVideoCache" class="player-action-btn player-cache-purge-btn" type="button"
@@ -1856,14 +2076,45 @@
               <i class="fas fa-broom" aria-hidden="true"></i>
             </button>
           </div>
-          <div class="player-head-action-group is-view" role="group" aria-label="Exportación y datos">
-            <button id="btnOpenProgressReport" class="player-action-btn" type="button"
-              title="Reporte de producción y revisión" aria-label="Abrir reporte de producción y revisión">
-              <i class="fas fa-chart-column" aria-hidden="true"></i>
+          <div class="player-more-menu player-head-action-group is-overflow" role="group" aria-label="Más opciones">
+            <button id="btnTogglePlayerMoreMenu" class="player-action-btn player-more-menu-trigger" type="button"
+              aria-label="Abrir más opciones" aria-haspopup="menu" aria-expanded="false" aria-controls="playerMoreMenuPanel"
+              title="Más opciones">
+              <i class="fas fa-ellipsis-vertical" aria-hidden="true"></i>
+              <span>Más opciones</span>
             </button>
-            <button id="btnOpenExportModal" class="player-action-btn" title="Exportar Video">
-              <i class="fas fa-file-export"></i>
-            </button>
+            <div id="playerMoreMenuPanel" class="player-more-menu-panel" role="menu" aria-label="Opciones del reproductor" hidden>
+              <label>
+                <span>Calidad</span>
+                <select id="playerPlaybackQuality">
+                  <option value="auto">Automática</option>
+                  <option value="high">Máxima</option>
+                  <option value="medium">Media</option>
+                  <option value="low">Baja</option>
+                </select>
+              </label>
+              <button id="btnOpenProgressReport" class="player-action-btn" type="button"
+                title="Reporte de producción y revisión" aria-label="Abrir reporte de producción y revisión">
+                <i class="fas fa-chart-column" aria-hidden="true"></i>
+                <span>Reporte</span>
+              </button>
+              <button id="btnEditPlayerAcademicData" class="player-action-btn" type="button"
+                title="Asignar datos académicos" aria-label="Asignar datos académicos">
+                <i class="fas fa-tags" aria-hidden="true"></i>
+                <span>Asignar datos</span>
+              </button>
+              <button id="btnOpenPodcasterFromPlayer" class="player-action-btn" type="button"
+                title="Abrir en Podcaster" aria-label="Abrir sesión en Podcaster">
+                <i class="fas fa-cogs" aria-hidden="true"></i>
+                <span>Editar en Podcaster</span>
+              </button>
+              <button id="btnOpenExportModal" class="player-action-btn" type="button" title="Exportar Video">
+                <i class="fas fa-file-export" aria-hidden="true"></i>
+                <span>Exportar</span>
+              </button>
+            </div>
+          </div>
+          <div class="player-head-action-group is-view" role="group" aria-label="Datos de la escena">
             <button id="btnToggleSceneInfo" class="player-action-btn" title="Datos de la escena">
               <i class="fas fa-info-circle"></i>
             </button>
@@ -2459,7 +2710,7 @@
                 <i class="fas fa-save"></i> Guardar Propuesta
               </button>
             </div>
-            
+
             <div class="info-group scene-time-group">
               <span class="info-label">Tiempo Actual</span>
               <span id="infoSceneTime" class="scene-current-time">00:00.0</span>
@@ -2662,6 +2913,48 @@
       </div>
     </section>
   </div>
+  <div id="videoAcademicDataModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-video-academic-data-modal"
+      aria-label="Cerrar asignación de datos académicos"></button>
+    <section class="floating-panel-card session-academic-data-panel" role="dialog" aria-modal="true"
+      aria-label="Asignar datos académicos al video">
+      <header class="timeline-clip-duration-head">
+        <h3>Asignar datos del video</h3>
+        <button id="closeVideoAcademicDataBtn" class="row-icon-btn" type="button" title="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <form id="videoAcademicDataForm" class="session-academic-data-form">
+        <label class="row-field"><span>Nivel</span><select id="videoAcademicLevelSelect" aria-label="Nivel">
+          <option value="">Selecciona un nivel</option><option value="Preescolar">Preescolar</option>
+          <option value="Primaria">Primaria</option><option value="Secundaria">Secundaria</option>
+        </select></label>
+        <label class="row-field"><span>Grado</span><select id="videoAcademicGradeSelect" aria-label="Grado">
+          <option value="">Selecciona un grado</option><option value="Primero">Primero</option>
+          <option value="Segundo">Segundo</option><option value="Tercero">Tercero</option>
+          <option value="Cuarto">Cuarto</option><option value="Quinto">Quinto</option><option value="Sexto">Sexto</option>
+        </select></label>
+        <label class="row-field"><span>Trimestre</span><select id="videoAcademicTermSelect" aria-label="Trimestre">
+          <option value="">Selecciona un trimestre</option><option value="1">Trimestre 1</option>
+          <option value="2">Trimestre 2</option><option value="3">Trimestre 3</option>
+        </select></label>
+        <label class="row-field"><span id="videoAcademicUnitLabel">Unidad</span><select id="videoAcademicUnitSelect" aria-label="Unidad">
+          <option value="">Selecciona una unidad</option><option value="1">Unidad 1</option><option value="2">Unidad 2</option>
+          <option value="3">Unidad 3</option><option value="4">Unidad 4</option><option value="5">Unidad 5</option>
+          <option value="6">Unidad 6</option><option value="7">Unidad 7</option><option value="8">Unidad 8</option>
+          <option value="9">Unidad 9</option><option value="10">Unidad 10</option>
+        </select></label>
+        <label id="videoAcademicSubjectField" class="row-field academic-subject-field" hidden>
+          <span id="videoAcademicSubjectLabel">Materia</span>
+          <select id="videoAcademicSubjectSelect" aria-label="Materia"><option value="">Selecciona una materia</option></select>
+        </label>
+        <div class="timeline-clip-duration-actions">
+          <button id="cancelVideoAcademicDataBtn" class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn" type="button">Cancelar</button>
+          <button id="saveVideoAcademicDataBtn" class="row-icon-btn dialogue-video-directive-action is-primary" type="submit">Guardar</button>
+        </div>
+      </form>
+    </section>
+  </div>
   <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
   <script data-cache-src="podcaster/podcaster-text-render.js"></script>
   <script data-cache-src="podcaster/podcaster-scene-media-render-spec.js"></script>
@@ -2704,6 +2997,40 @@
         const currentTheme = document.documentElement.dataset.videoPlayerTheme || "dark";
         const nextTheme = themes[(themes.indexOf(currentTheme) + 1) % themes.length];
         applyTheme(nextTheme, true);
+      });
+    })();
+  </script>
+  <script>
+    (() => {
+      const menu = document.querySelector(".video-player-shell .player-more-menu");
+      const trigger = document.getElementById("btnTogglePlayerMoreMenu");
+      const panel = document.getElementById("playerMoreMenuPanel");
+      if (!menu || !trigger || !panel || menu.dataset.menuReady === "1") return;
+      menu.dataset.menuReady = "1";
+
+      const setOpen = (open) => {
+        menu.classList.toggle("is-open", open);
+        panel.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+        trigger.setAttribute("aria-label", open ? "Cerrar más opciones" : "Abrir más opciones");
+      };
+
+      trigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(!menu.classList.contains("is-open"));
+      });
+      panel.addEventListener("click", (event) => {
+        if (event.target instanceof Element && event.target.closest("button")) setOpen(false);
+      });
+      document.addEventListener("click", (event) => {
+        if (!menu.contains(event.target)) setOpen(false);
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && menu.classList.contains("is-open")) {
+          setOpen(false);
+          trigger.focus();
+        }
       });
     })();
   </script>

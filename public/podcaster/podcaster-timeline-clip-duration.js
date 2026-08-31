@@ -67,11 +67,11 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
   function resolveOverridePercent(value, fallback = Number.NaN) {
     return value == null ? Number.NaN : toFiniteNumber(value, fallback);
   }
-  
+
   function resolveTimelineClipRestoreTarget(clip = null) {
     return getTimelineClipRestoreTarget(clip);
   }
-  
+
   function setOpen(isOpen = false) {
     const open = Boolean(isOpen) && Boolean(String(timelineClipDurationModalState.rowId || "").trim());
     if (els.timelineClipDurationModal) {
@@ -147,7 +147,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     }
     syncInputs();
   }
-  
+
   function syncInputs(source = "") {
     const rowId = String(timelineClipDurationModalState.rowId || "").trim();
     if (!rowId) return;
@@ -298,7 +298,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
       els.resetTimelineClipDurationBtn.disabled = !restoreTarget.hasCuts;
     }
   }
-  
+
   function applyFromModal() {
     const rowId = String(timelineClipDurationModalState.rowId || "").trim();
     if (!rowId) return;
@@ -316,7 +316,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     const desiredVisualLayoutMode = normalizeTimelineClipVisualLayoutMode(timelineClipDurationModalState.visualLayoutMode);
     const desiredVeoOverridePct = desiredVeoVolumePct;
     const desiredGeminiOverridePct = desiredGeminiVolumePct;
-  
+
     const applyRelateWithPreviousForward = (pivotRowId = "", nextValue = false) => {
       const pivotKey = String(pivotRowId || "").trim();
       if (!pivotKey) return false;
@@ -350,7 +350,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
       scheduleSessionLocalPersist("timeline-clip-relate-ahead");
       return true;
     };
-  
+
     const desiredSec = Math.max(
       timelineClipDurationModalState.minSec,
       Math.min(timelineClipDurationModalState.maxSec, toFiniteNumber(timelineClipDurationModalState.valueSec, timelineClipDurationModalState.maxSec))
@@ -359,7 +359,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
       STUDIO_TIMELINE_MIN_CLIP_MS,
       snapTimelineMs(Math.round(desiredSec * 1000))
     );
-  
+
     // No permitir recortar una escena por debajo del fin de su chip de voz Gemini,
     // porque eso termina truncando el audio en montaje/export.
     const cfg = session ? getPodcastVideoConfig(session) : null;
@@ -381,7 +381,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     const requiredEffectiveMs = segmentForRow
       ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Math.max(0, segmentEndMs - clipStartMsSnapshot)))
       : 0;
-  
+
     let durationChanged = false;
     let volumeChanged = false;
     let preventedGeminiCut = false;
@@ -416,6 +416,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
         ...current,
         sourceDurationMs: Math.max(Number(current?.sourceDurationMs || 0), guardedTrimOutMs),
         trimOutMs: guardedTrimOutMs,
+        durationMode: durationChanged ? "manual" : current?.durationMode,
         veoVolumeOverridePct: desiredVeoOverridePct,
         geminiVolumeOverridePct: desiredGeminiOverridePct,
         visualLayoutMode: desiredVisualLayoutMode
@@ -463,7 +464,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
       syncPodcastStudioInspector(getActiveSession());
     }
   }
-  
+
   function persistVolumeOverrides(options = {}) {
     const rowId = String(timelineClipDurationModalState.rowId || "").trim();
     if (!rowId) return false;
@@ -511,7 +512,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
       try { persistVolumeOverrides({ persist: true }); } catch (_) { }
     }, 900);
   }
-  
+
   function resetFromModal() {
     const rowId = String(timelineClipDurationModalState.rowId || "").trim();
     if (!rowId) return;
@@ -525,6 +526,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     const changed = updateTimelineClipForRow(rowId, (current) => ({
       ...current,
       sourceDurationMs: Math.max(Number(current?.sourceDurationMs || 0), restoreTarget.restoreTrimOutMs),
+      durationMode: "manual",
       trimInMs: restoreTarget.restoreTrimInMs,
       trimOutMs: restoreTarget.restoreTrimOutMs
     }));
@@ -540,7 +542,7 @@ export function createPodcasterTimelineClipDurationApi(deps = {}) {
     syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
     renderPodcastVideoShell(getActiveSession());
   }
-  
+
   function open(rowId = "") {
     const key = String(rowId || "").trim();
     if (!key) return;

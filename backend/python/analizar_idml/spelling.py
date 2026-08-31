@@ -1,7 +1,10 @@
 import re
 import unicodedata
+from .language_profiles import LANGUAGE_PROFILES
 
 from .rae_validator import RAE_2010_UNACCENTED_MONOSYLLABLES, validate_spelling_candidate_with_rae
+
+INLINE_OBJECT_TOKEN = "\uFFFC"
 
 try:
     import enchant
@@ -118,8 +121,15 @@ def _resolve_dictionary(candidates):
 
 
 def _extract_tokens_with_positions(text=""):
-    pattern = r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]{2,}"
+    pattern = r"[^\W\d_][^\W\d_'-]*(?:['-][^\W\d_]+)*"
     return [(match.group(0), match.start()) for match in re.finditer(pattern, str(text or ""))]
+
+
+def _token_touches_inline_object(text="", token="", offset=0):
+    source = str(text or "")
+    start = max(0, int(offset or 0))
+    end = start + len(str(token or ""))
+    return source[max(0, start - 1):start] == INLINE_OBJECT_TOKEN or source[end:end + 1] == INLINE_OBJECT_TOKEN
 
 
 def _compact_alpha(value=""):
@@ -186,25 +196,27 @@ def _is_reliable_local_suggestion(token="", suggestions=None):
     return ""
 
 
-def _find_local_spelling_issues(text_blocks, max_issues=20):
-    es_dict, es_code = _resolve_dictionary(["es_MX", "es", "es_ES"])
-    if es_dict is None:
-        return []
+def _find_local_spelling_issues(text_blocks, max_issues=20, language_code="es-MX"):
+    dictionary, dictionary_code = _resolve_dictionary((LANGUAGE_PROFILES.get(language_code) or {}).get("dictionaries") or [])
+    if dictionary is None:
+        return [], ""
     issues = []
     seen = set()
     for block in text_blocks or []:
         for window in _iter_text_windows(block, window_size=1400):
             text = str(window.get("text") or "")
             for token, offset in _extract_tokens_with_positions(text):
+                if _token_touches_inline_object(text, token, offset):
+                    continue
                 if _should_ignore_local_token(token):
                     continue
-                if es_dict.check(token.lower()):
+                if dictionary.check(token.lower()):
                     continue
-                suggestions = _merge_suggestions(es_dict.suggest(token))
+                suggestions = _merge_suggestions(dictionary.suggest(token))
                 accepted = _is_reliable_local_suggestion(token, suggestions)
                 if not accepted:
                     continue
-                if not validate_spelling_candidate_with_rae(token, accepted):
+                if language_code == "es-MX" and not validate_spelling_candidate_with_rae(token, accepted):
                     continue
                 signature = (
                     str(window.get("pageName") or ""),
@@ -224,15 +236,64 @@ def _find_local_spelling_issues(text_blocks, max_issues=20):
                     "context": _build_context(text, token),
                     "token": token,
                     "replacements": [accepted],
-                    "providers": [es_code or "pyenchant"],
+                    "providers": [dictionary_code or "pyenchant"],
+                    "languageCode": language_code,
                 })
                 if len(issues) >= max_issues:
-                    return issues
-    return issues
+                    return issues, dictionary_code
+    return issues, dictionary_code
 
 
-def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2):
-    issues = _find_local_spelling_issues(text_blocks, max_issues=max_issues)
+def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_issues=20, max_windows_per_story=2, language_code="es-MX"):
+    if language_code == "und":
+        return [], ""
+    issues, dictionary_code = _find_local_spelling_issues(text_blocks, max_issues=max_issues, language_code=language_code)
+    if issues and gemini_verifier is not None and getattr(gemini_verifier, "enabled", False):
+        page_contexts = {}
+        for block in text_blocks or []:
+            page_name = str((block or {}).get("pageName") or "").strip()
+            if not page_name:
+                continue
+            current_page_text = str((block or {}).get("currentPageText") or "").strip()
+            block_text = str((block or {}).get("text") or "").strip()
+            previous_page_text = str((block or {}).get("previousPageText") or "").strip()
+            previous_page_name = str((block or {}).get("previousPageName") or "").strip()
+            context = page_contexts.setdefault(page_name, {
+                "pageName": page_name,
+                "text": "",
+                "blockTexts": [],
+                "previousPageName": previous_page_name,
+                "previousPageText": previous_page_text,
+            })
+            if len(current_page_text) > len(context["text"]):
+                context["text"] = current_page_text
+            if block_text and block_text not in context["blockTexts"]:
+                context["blockTexts"].append(block_text)
+            if len(previous_page_text) > len(context["previousPageText"]):
+                context["previousPageName"] = previous_page_name
+                context["previousPageText"] = previous_page_text
+        for context in page_contexts.values():
+            if not context["text"]:
+                context["text"] = " ".join(context.pop("blockTexts", []))
+            else:
+                context.pop("blockTexts", None)
+        confirmed_ids = gemini_verifier.verify_spelling_candidates(
+            issues,
+            language_code=language_code,
+            page_contexts=page_contexts,
+        )
+        if confirmed_ids is not None:
+            verified_issues = []
+            for index, issue in enumerate(issues):
+                if f"candidate_{index + 1}" not in confirmed_ids:
+                    continue
+                providers = _merge_suggestions(issue.get("providers") or [], ["gemini"])
+                verified_issues.append({
+                    **issue,
+                    "providers": providers,
+                    "geminiVerified": True,
+                })
+            issues = verified_issues
     seen = {
         (
             str(issue.get("storyId") or ""),
@@ -242,9 +303,9 @@ def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_
         for issue in issues
     }
     if len(issues) >= max_issues:
-        return issues
+        return issues, dictionary_code
     if gemini_verifier is None or not getattr(gemini_verifier, "enabled", False):
-        return issues
+        return issues, dictionary_code
 
     processed_windows = 0
     story_windows = {}
@@ -252,7 +313,7 @@ def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_
         story_id = str((block or {}).get("storyId") or "")
         for window in _iter_text_windows(block):
             if processed_windows >= max_windows or len(issues) >= max_issues:
-                return issues
+                return issues, dictionary_code
             current_story_windows = story_windows.get(story_id, 0)
             if current_story_windows >= max_windows_per_story:
                 break
@@ -286,4 +347,4 @@ def find_spelling_issues(text_blocks, gemini_verifier=None, max_windows=10, max_
                 })
                 if len(issues) >= max_issues:
                     return issues
-    return issues
+    return issues, dictionary_code

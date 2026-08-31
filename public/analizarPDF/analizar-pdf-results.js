@@ -2,21 +2,40 @@ import { getRecortableAnchorId, renderRecortableMetaList } from "./analizar-pdf-
 import { hasRenderableAnalysis } from "./analizar-pdf-session-logic.js?v=2026-1.0.10.466";
 
 const railOpenStateByKey = new Map();
-const RAIL_WIDTH_STORAGE_KEY = "analizar-pdf-rail-width";
+const RAIL_WIDTH_STORAGE_KEY = "analizar-pdf-rail-width-v2";
 const RAIL_CATEGORY_VISIBILITY_STORAGE_KEY = "analizar-pdf-rail-category-visibility";
-const DEFAULT_RAIL_WIDTH = 248;
-const MIN_RAIL_WIDTH = 260;
+const DEFAULT_RAIL_WIDTH = 200;
+const MIN_RAIL_WIDTH = 200;
 const MAX_RAIL_WIDTH = 640;
 const RAIL_CATEGORY_FILTERS = [
+  { id: "spelling", label: "Ortografía", defaultVisible: false },
   { id: "orthotypography", label: "Ortotipografía" },
-  { id: "redaction", label: "Propuestas de redacción" },
-  { id: "text-status", label: "Texto fuera o desbordado" },
-  { id: "field-profile", label: "Campo formativo" },
-  { id: "notes", label: "Control de cambios" },
+  { id: "quick-orthotypography", label: "Análisis rápido ortotipográfico" },
+  { id: "redaction", label: "Propuestas de redacción", defaultVisible: false },
+  { id: "text-status", label: "Texto fuera o desbordado", defaultVisible: false },
+  { id: "field-profile", label: "Campo formativo", defaultVisible: false },
+  { id: "notes", label: "Notas" },
+  { id: "tracked-changes", label: "Control de cambios" },
+  { id: "custom-rules", label: "Condiciones personalizadas" },
   { id: "recortables", label: "Recortables / Fichas / Anexos / Videos" },
 ];
+const RAIL_CATEGORY_FILTER_IDS = new Set(RAIL_CATEGORY_FILTERS.map((item) => item.id));
 let railCategoryVisibility = null;
 let railFilterModalOpen = false;
+let activeRailWorkflowFormat = "en_forma";
+let previousRailWorkflowFormat = "";
+const LIBRE_RAIL_CATEGORY_DEFAULTS = {
+  spelling: true,
+  orthotypography: true,
+  "quick-orthotypography": false,
+  redaction: true,
+  "text-status": false,
+  "field-profile": false,
+  notes: true,
+  "tracked-changes": true,
+  "custom-rules": true,
+  recortables: false,
+};
 
 export function escapeHtml(value = "") {
   return String(value || "")
@@ -66,6 +85,8 @@ function buildRailCategoryAttrs(categoryId = "") {
 function isRailCategoryVisible(categoryId = "") {
   const cleanCategoryId = String(categoryId || "").trim();
   if (!cleanCategoryId) return true;
+  // Los grupos que no forman parte del selector permanecen siempre visibles.
+  if (!RAIL_CATEGORY_FILTER_IDS.has(cleanCategoryId)) return true;
   if (!railCategoryVisibility) {
     railCategoryVisibility = readRailCategoryVisibility();
   }
@@ -93,21 +114,55 @@ function resolveUnitRailSwatchName(unidad = "") {
 }
 
 function resolveRailTintHex(entry = {}) {
+  const isValidHex = (value = "") => /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(value || "").trim());
+  if (String(entry?.workflowFormat || "").trim().toLowerCase() === "libre") {
+    const dominantHex = String(entry?.result?.stats?.dominantPageSwatch?.hex || "").trim();
+    if (isValidHex(dominantHex)) return dominantHex;
+  }
+  const cachedHex = String(entry?.railTintHex || "").trim();
+  if (isValidHex(cachedHex)) return cachedHex;
   const targetSwatchName = resolveUnitRailSwatchName(entry?.unidad || entry?.revisionTitle || "");
-  if (!targetSwatchName) return "";
   const swatches = Array.isArray(entry?.result?.stats?.swatchInventory) ? entry.result.stats.swatchInventory : [];
+  const isNeutralSwatch = (swatch = {}) => /^(?:BLACK|PAPER|NONE|REGISTRATION|\[BLACK\]|\[PAPER\]|\[NONE\]|\[REGISTRATION\])$/i
+    .test(String(swatch?.name || swatch?.swatchName || "").trim());
   const normalizedTarget = normalizeRailSwatchName(targetSwatchName);
   const getSwatchName = (swatch = {}) => String(swatch?.name || swatch?.swatchName || "").trim();
-  const exact = swatches.find((swatch) => normalizeRailSwatchName(getSwatchName(swatch)) === normalizedTarget) || null;
-  const loose = exact || swatches.find((swatch) => normalizeRailSwatchName(getSwatchName(swatch)).includes(normalizedTarget)) || null;
-  const hex = String(loose?.hex || "").trim();
-  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : "";
+  const exact = targetSwatchName
+    ? swatches.find((swatch) => normalizeRailSwatchName(getSwatchName(swatch)) === normalizedTarget) || null
+    : null;
+  const loose = exact || (targetSwatchName
+    ? swatches.find((swatch) => normalizeRailSwatchName(getSwatchName(swatch)).includes(normalizedTarget)) || null
+    : null);
+  const extracted = loose
+    || swatches.find((swatch) => isValidHex(swatch?.hex) && !isNeutralSwatch(swatch))
+    || swatches.find((swatch) => isValidHex(swatch?.hex))
+    || null;
+  const hex = String(extracted?.hex || "").trim();
+  return isValidHex(hex) ? hex : "";
+}
+
+function resolveRailTintInk(hex = "") {
+  let value = String(hex || "").trim().replace(/^#/, "");
+  if (value.length === 3) value = value.split("").map((character) => character.repeat(2)).join("");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return "#182034";
+  const [red, green, blue] = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+  const perceivedBrightness = Math.sqrt(
+    (.299 * red * red) + (.587 * green * green) + (.114 * blue * blue)
+  ) / 255;
+  return perceivedBrightness < .64 ? "#ffffff" : "#111827";
+}
+
+function resolveRailTextRelief(ink = "") {
+  return String(ink || "").trim().toLowerCase() === "#ffffff"
+    ? "0 1px 1px rgba(0,0,0,.34),0 0 1px rgba(255,255,255,.12)"
+    : "0 1px 1px rgba(255,255,255,.34),0 0 1px rgba(0,0,0,.16)";
 }
 
 function buildRailTintStyleAttr(hex = "") {
   const cleanHex = String(hex || "").trim();
   if (!cleanHex) return "";
-  return ` style="--analizar-pdf-rail-tint:${escapeHtmlAttr(cleanHex)};"`;
+  const ink = resolveRailTintInk(cleanHex);
+  return ` style="--analizar-pdf-rail-tint:${escapeHtmlAttr(cleanHex)};--analizar-pdf-rail-ink:${ink};--analizar-pdf-rail-text-relief:${resolveRailTextRelief(ink)};"`;
 }
 
 function getRailDisplayTitle(entry = {}) {
@@ -120,15 +175,58 @@ function getRailDisplayTooltip(entry = {}) {
   return fileName && fileName !== title ? `${title} · ${fileName}` : title;
 }
 
+function isProcessedRailEntry(entry = {}) {
+  const status = String(entry?.analysisStatus || "").trim().toLowerCase();
+  if (["uploading", "queued", "processing", "delivering"].includes(status)) {
+    return false;
+  }
+  return hasRenderableAnalysis(entry) || Boolean(entry?.quickAnalysis);
+}
+
 function parseSortableTime(value = "") {
   const timestamp = Date.parse(String(value || "").trim());
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function formatPlaceholderTrimester(value = "") {
+  const cleanValue = String(value || "").trim();
+  const match = cleanValue.match(/(\d+)/);
+  return match ? `Trim ${match[1]}` : cleanValue;
+}
+
+function buildPlaceholderRailTitle(session = null, revision = null) {
+  const info = session?.bibliographicInfo || {};
+  return [info.grado, formatPlaceholderTrimester(info.trimestre), revision?.unidad || info.unidad]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" · ") || String(revision?.title || "Ficha editorial").trim() || "Ficha editorial";
+}
+
+function buildEmptyRailEntry(session = null, revision = null, file = null, revisionIndex = 0, fileIndex = 0) {
+  const revisionTitle = session?.workflowFormat === "libre"
+    ? `Archivo ${revisionIndex + 1}`
+    : (String(revision?.title || revision?.unidad || "Ficha editorial").trim() || "Ficha editorial");
+  const fileTitle = String(file?.documentName || file?.name || "").trim();
+  return {
+    revisionId: String(revision?.id || "").trim(),
+    fileId: String(file?.id || "").trim(),
+    revisionIndex,
+    fileIndex,
+    revisionTitle,
+    railTitle: session?.workflowFormat === "libre" ? revisionTitle : buildPlaceholderRailTitle(session, revision),
+    railTooltip: fileTitle || revisionTitle,
+    fileTitle,
+    unidad: String(revision?.unidad || "").trim(),
+    recortableRole: String(revision?.recortableRole || "").trim(),
+    analysisStatus: String(file?.analysisStatus || "idle").trim(),
+    workflowFormat: String(session?.workflowFormat || "en_forma").trim(),
+    railTintHex: String(file?.railTintHex || "").trim(),
+    isRailPlaceholder: true,
+  };
+}
+
 function buildOrderedRailEntries(session = null, entries = []) {
   const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
-  const activeRevisionId = String(session?.activeRevisionId || "").trim();
-  const activeFileId = String(session?.activeFileId || "").trim();
   const entriesByRevisionId = new Map();
   const anonymousEntries = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -143,11 +241,10 @@ function buildOrderedRailEntries(session = null, entries = []) {
     entriesByRevisionId.set(revisionId, bucket);
   }
   const ordered = [];
-  for (const revision of revisions) {
+  for (const [revisionIndex, revision] of revisions.entries()) {
     const revisionId = String(revision?.id || "").trim();
     if (!revisionId) continue;
     const matches = entriesByRevisionId.get(revisionId) || [];
-    if (!matches.length) continue;
     const orderedMatches = [...matches].sort((left, right) => {
       const leftFileIndex = Number(left?.fileIndex);
       const rightFileIndex = Number(right?.fileIndex);
@@ -161,25 +258,42 @@ function buildOrderedRailEntries(session = null, entries = []) {
       }
       return String(left?.fileTitle || left?.title || "").localeCompare(String(right?.fileTitle || right?.title || ""), "es");
     });
-    for (const match of orderedMatches) {
+    const consumedMatches = new Set();
+    const files = Array.isArray(revision?.files) ? revision.files : [];
+    const revisionFiles = files.length ? files : [null];
+    for (const [fileIndex, file] of revisionFiles.entries()) {
+      const fileId = String(file?.id || "").trim();
+      const matchIndex = orderedMatches.findIndex((entry, index) => {
+        if (consumedMatches.has(index)) return false;
+        const entryFileId = String(entry?.fileId || "").trim();
+        return fileId ? entryFileId === fileId : !entryFileId;
+      });
+      if (matchIndex < 0) {
+        ordered.push(buildEmptyRailEntry(session, revision, file, revisionIndex, fileIndex));
+        continue;
+      }
+      consumedMatches.add(matchIndex);
+      const match = orderedMatches[matchIndex];
       ordered.push({
         ...match,
         revisionTitle: String(revision?.title || match?.revisionTitle || "Revisión").trim(),
         unidad: String(revision?.unidad || match?.unidad || "").trim(),
         recortableRole: String(revision?.recortableRole || match?.recortableRole || "").trim(),
+        isRailPlaceholder: false,
       });
     }
+    orderedMatches.forEach((match, index) => {
+      if (consumedMatches.has(index)) return;
+      ordered.push({
+        ...match,
+        revisionTitle: String(revision?.title || match?.revisionTitle || "Revisión").trim(),
+        unidad: String(revision?.unidad || match?.unidad || "").trim(),
+        recortableRole: String(revision?.recortableRole || match?.recortableRole || "").trim(),
+        isRailPlaceholder: false,
+      });
+    });
   }
-  return [...ordered, ...anonymousEntries].sort((left, right) => {
-    const leftActive = String(left?.revisionId || "").trim() === activeRevisionId
-      && (!activeFileId || String(left?.fileId || "").trim() === activeFileId);
-    const rightActive = String(right?.revisionId || "").trim() === activeRevisionId
-      && (!activeFileId || String(right?.fileId || "").trim() === activeFileId);
-    if (leftActive !== rightActive) {
-      return leftActive ? -1 : 1;
-    }
-    return 0;
-  });
+  return [...ordered, ...anonymousEntries];
 }
 
 export function renderIssues(items = [], emptyLabel = "") {
@@ -701,34 +815,59 @@ function renderConfiguredSwatches(items = []) {
   `;
 }
 
-function renderChangeControlMetaList(activeItems = [], historyItems = []) {
+function renderNotesMetaList(activeItems = [], historyItems = []) {
   const hasActive = Array.isArray(activeItems) && activeItems.length;
   const hasHistory = Array.isArray(historyItems) && historyItems.length;
   if (!hasActive && !hasHistory) {
     return "";
   }
+  const renderNote = (item = {}, label = "Nota") => {
+    const text = String(item?.text || "").trim() || "Sin contenido textual";
+    const author = String(item?.userName || "").trim();
+    const created = String(item?.creationDate || "").trim();
+    const modified = String(item?.modificationDate || "").trim();
+    const meta = [author, created && `Creada: ${created}`, modified && modified !== created ? `Modificada: ${modified}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    const paragraph = String(item?.paragraphText || "").trim();
+    return `<div class="analizar-pdf-change-entry"><p><strong>${escapeHtml(label)}</strong>${meta ? ` · ${escapeHtml(meta)}` : ""}</p><p>${escapeHtml(text)}</p>${paragraph ? `<p><small>Contexto: ${escapeHtml(paragraph)}</small></p>` : ""}</div>`;
+  };
+  return `
+    <div class="analizar-pdf-meta-row is-stack">
+      <span>Notas</span>
+      <div class="analizar-pdf-page-body">
+        ${hasActive ? `<p><strong>Notas activas</strong></p>` : ""}
+        ${activeItems.map((item) => renderNote(item, "Nota")).join("")}
+        ${hasHistory ? `<p><strong>Historial de notas</strong></p>` : ""}
+        ${historyItems.map((item) => renderNote(item, "Nota en cambio rastreado")).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderTrackedChangesMetaList(trackedItems = []) {
+  const hasTracked = Array.isArray(trackedItems) && trackedItems.length;
+  if (!hasTracked) return "";
   return `
     <div class="analizar-pdf-meta-row is-stack">
       <span>Control de cambios</span>
       <div class="analizar-pdf-page-body">
-        ${hasActive ? `<p><strong>Notas activas</strong></p>` : ""}
-        ${activeItems.map((item) => {
-          const text = String(item?.text || "").trim();
-          const userName = String(item?.userName || "").trim();
-          const suffix = userName ? ` · ${userName}` : "";
-          return `<p><strong>Nota</strong>: ${escapeHtml(text)}${escapeHtml(suffix)}</p>`;
-        }).join("")}
-        ${hasHistory ? `<p><strong>Historial de notas</strong></p>` : ""}
-        ${historyItems.map((item) => {
-          const text = String(item?.text || "").trim();
-          const userName = String(item?.userName || "").trim();
+        <p><strong>Cambios rastreados</strong></p>
+        ${trackedItems.map((item) => {
+          const labels = { InsertedText: "Texto insertado", DeletedText: "Texto eliminado", MovedText: "Texto movido" };
           const changeType = String(item?.changeType || "").trim();
-          const suffix = [userName, changeType].filter(Boolean).join(" · ");
-          return `<p><strong>Historial</strong>: ${escapeHtml(text)}${suffix ? ` · ${escapeHtml(suffix)}` : ""}</p>`;
+          const label = labels[changeType] || changeType || "Cambio";
+          const text = String(item?.text || "").trim() || "Sin contenido textual";
+          const meta = [item?.userName, item?.date].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+          return `<div class="analizar-pdf-change-entry"><p><strong>${escapeHtml(label)}</strong>${meta ? ` · ${escapeHtml(meta)}` : ""}</p><p>${escapeHtml(text)}</p></div>`;
         }).join("")}
       </div>
     </div>
   `;
+}
+
+function renderChangeControlMetaList(activeItems = [], historyItems = [], trackedItems = []) {
+  return `${renderNotesMetaList(activeItems, historyItems)}${renderTrackedChangesMetaList(trackedItems)}`;
 }
 
 
@@ -914,7 +1053,8 @@ function renderFolioSignals(page = {}, session = null, options = {}) {
       ${configuredAliasRows}
       ${renderInstructionWorkModesMetaRow(page)}
       <span id="${getNotesAnchorId(page, session)}" class="analizar-pdf-anchor-target" aria-hidden="true"></span>
-      ${renderChangeControlMetaList(page.notes, page.noteHistory)}
+      <span id="${getTrackedChangesAnchorId(page, session)}" class="analizar-pdf-anchor-target" aria-hidden="true"></span>
+      ${renderChangeControlMetaList(page.notes, page.noteHistory, page.trackedChanges)}
       ${renderRecortableMetaList(page)}
       ${renderProblematicTextMetaList("Textos fuera de pantalla", outsideLines, page, { ...options, session })}
       ${renderProblematicTextMetaList("Textos desbordados", overflowLines, page, { ...options, session })}
@@ -948,6 +1088,10 @@ function getTextStatusAnchorId(page = {}, context = {}) {
 }
 
 function getNotesAnchorId(page = {}, context = {}) {
+  return `analizar-pdf-notes-${buildPageAnchorScope(context)}-page-${slugifyAnchorPart(page.pageName || "x")}`;
+}
+
+function getTrackedChangesAnchorId(page = {}, context = {}) {
   return `analizar-pdf-change-control-${buildPageAnchorScope(context)}-page-${slugifyAnchorPart(page.pageName || "x")}`;
 }
 
@@ -992,8 +1136,9 @@ function pageHasReportIssues(page = {}) {
   const recortableCount = Array.isArray(page?.recortableIssues) ? page.recortableIssues.length : 0;
   const noteCount = Array.isArray(page?.notes) ? page.notes.length : 0;
   const noteHistoryCount = Array.isArray(page?.noteHistory) ? page.noteHistory.length : 0;
+  const trackedChangeCount = Array.isArray(page?.trackedChanges) ? page.trackedChanges.length : 0;
   const textStatusTotal = getProblematicTextStatusSummary(page).total || 0;
-  return (orthotypographyCount + spellingCount + recortableCount + noteCount + noteHistoryCount + textStatusTotal) > 0;
+  return (orthotypographyCount + spellingCount + recortableCount + noteCount + noteHistoryCount + trackedChangeCount + textStatusTotal) > 0;
 }
 
 function renderPageApprovalBadge(page = {}) {
@@ -1012,16 +1157,16 @@ function renderRightRail(items = [], context = {}, correctionSelection = {}) {
   const hasItems = Array.isArray(items) && items.length;
   if (!hasItems) {
     return `
-      <aside class="analizar-pdf-ortho-rail">
+      <aside class="analizar-pdf-ortho-rail" aria-label="Accesos rápidos">
         <div class="analizar-pdf-ortho-rail-resizer" data-action="resize-rail" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel derecho"></div>
         <div class="analizar-pdf-ortho-rail-head">
-          <h4>Accesos rápidos</h4>
           <div class="analizar-pdf-inline-actions">
             ${renderRailFilterControl(false)}
             ${renderRailExpandCollapseControls(false)}
             ${renderCorrectionModeToggle(correctionSelection)}
           </div>
         </div>
+        <div class="analizar-pdf-ortho-rail-title">Análisis realizado</div>
         <div class="analizar-pdf-ortho-rail-body">
           <p class="analizar-pdf-empty-state">Sin accesos directos disponibles.</p>
         </div>
@@ -1030,10 +1175,9 @@ function renderRightRail(items = [], context = {}, correctionSelection = {}) {
     `;
   }
   return `
-    <aside class="analizar-pdf-ortho-rail">
+    <aside class="analizar-pdf-ortho-rail" aria-label="Accesos rápidos">
       <div class="analizar-pdf-ortho-rail-resizer" data-action="resize-rail" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel derecho"></div>
       <div class="analizar-pdf-ortho-rail-head">
-        <h4>Accesos rápidos</h4>
         <div class="analizar-pdf-inline-actions">
           ${renderRailFilterControl(true)}
           ${renderRailExpandCollapseControls(true)}
@@ -1041,6 +1185,7 @@ function renderRightRail(items = [], context = {}, correctionSelection = {}) {
           ${renderCorrectionModeToggle(correctionSelection)}
         </div>
       </div>
+      <div class="analizar-pdf-ortho-rail-title">Análisis realizado</div>
       <div class="analizar-pdf-ortho-rail-body">${renderRailGroups(items, context, correctionSelection, "", resolveRailTintHex(context))}</div>
     </aside>
     ${renderRailFilterModal()}
@@ -1053,18 +1198,20 @@ function renderGroupedRightRail(fileEntries = []) {
     return renderRightRail([]);
   }
   const recortableMatchCodes = buildGlobalRecortableMatchCodes(entries);
+  const completedEntries = entries.filter((entry) => entry?.isRailPlaceholder !== true);
+  const correctionEntry = completedEntries[0] || null;
   return `
-    <aside class="analizar-pdf-ortho-rail">
+    <aside class="analizar-pdf-ortho-rail" aria-label="Accesos rápidos">
       <div class="analizar-pdf-ortho-rail-resizer" data-action="resize-rail" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel derecho"></div>
       <div class="analizar-pdf-ortho-rail-head">
-        <h4>Accesos rápidos</h4>
         <div class="analizar-pdf-inline-actions">
           ${renderRailFilterControl(entries.length > 0)}
           ${renderRailExpandCollapseControls(entries.length > 0)}
-          ${renderClearAnalysisButton(entries.length > 0)}
-          ${renderCorrectionModeToggle(entries[0]?.correctionSelection || {})}
+          ${renderClearAnalysisButton(completedEntries.length > 0)}
+          ${renderCorrectionModeToggle(correctionEntry?.correctionSelection || {})}
         </div>
       </div>
+      <div class="analizar-pdf-ortho-rail-title">Análisis realizado</div>
       <div class="analizar-pdf-ortho-rail-body">
         ${entries.map((entry) => {
           const railTitle = getRailDisplayTitle(entry);
@@ -1077,7 +1224,13 @@ function renderGroupedRightRail(fileEntries = []) {
           ].join("::");
           const railTintHex = resolveRailTintHex(entry);
           return `
-          <details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(fileGroupKey)}${buildRailTintStyleAttr(railTintHex)}>
+          <details
+            class="analizar-pdf-ortho-rail-group is-complete ${entry?.isRailPlaceholder === true ? "is-empty" : "has-analysis"}"
+            data-revision-id="${escapeHtmlAttr(String(entry?.revisionId || "").trim())}"
+            data-file-id="${escapeHtmlAttr(String(entry?.fileId || "").trim())}"
+            data-rail-state="${entry?.isRailPlaceholder === true ? "empty" : "complete"}"
+            ${buildRailGroupAttrs(fileGroupKey)}${buildRailTintStyleAttr(railTintHex)}
+          >
             <summary>
               <span
                 class="analizar-pdf-rail-file-title"
@@ -1086,10 +1239,10 @@ function renderGroupedRightRail(fileEntries = []) {
               <span class="analizar-pdf-summary-toggle" aria-hidden="true"></span>
             </summary>
             <div class="analizar-pdf-ortho-file-group">
-              ${Array.isArray(entry?.result?.stats?.pageReports) && entry.result.stats.pageReports.length
+              ${entry?.isRailPlaceholder !== true && Array.isArray(entry?.result?.stats?.pageReports) && entry.result.stats.pageReports.length
                 ? renderRailGroups(entry.result.stats.pageReports, entry, entry?.correctionSelection || {}, fileGroupKey, railTintHex, recortableMatchCodes)
                 : ""}
-              ${renderQuickAnalysisRailGroup(entry.quickAnalysis, entry, fileGroupKey, railTintHex)}
+              ${entry?.isRailPlaceholder === true ? "" : renderQuickAnalysisRailGroup(entry.quickAnalysis, entry, fileGroupKey, railTintHex)}
             </div>
           </details>
         `;
@@ -1102,15 +1255,14 @@ function renderGroupedRightRail(fileEntries = []) {
 
 function renderQuickAnalysisRailGroup(quickAnalysis = null, context = {}, groupKeyPrefix = "", railTintHex = "") {
   const pages = Array.isArray(quickAnalysis?.pages) ? quickAnalysis.pages.filter((page) => Array.isArray(page?.issues) && page.issues.length) : [];
-  if (!quickAnalysis) return "";
-  if (!isRailCategoryVisible("orthotypography")) return "";
+  if (!isRailCategoryVisible("quick-orthotypography")) return "";
   return `
-    <details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::quick-orthotypography`)}${buildRailCategoryAttrs("orthotypography")}${buildRailTintStyleAttr(railTintHex)}>
+    <details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::quick-orthotypography`)}${buildRailCategoryAttrs("quick-orthotypography")}${buildRailTintStyleAttr(railTintHex)}>
       <summary><span>Análisis rápido ortotipográfico</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
       ${pages.length ? `
         <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos del análisis rápido ortotipográfico">
           ${pages.map((page) => `
-            <a class="analizar-pdf-ortho-link" href="#${getQuickOrthotypographyAnchorId(page, context)}">
+            <a class="analizar-pdf-ortho-link" href="#${getQuickOrthotypographyAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
               <span>Página ${escapeHtml(page.pageName || "?")}</span>
               ${renderRailBadge(String((Array.isArray(page?.issues) ? page.issues.length : 0) || 0), "danger")}
             </a>
@@ -1186,28 +1338,45 @@ function renderRailExpandCollapseControls(canToggle = false) {
       aria-label="Abrir solo accesos con cambios o errores"
       data-tooltip="Abrir solo con hallazgos"
     >
-      <i class="fas fa-filter-circle-check" aria-hidden="true"></i>
+      <i class="fas fa-eye" aria-hidden="true"></i>
     </button>
   `;
 }
 
 function readRailCategoryVisibility() {
-  const defaults = Object.fromEntries(RAIL_CATEGORY_FILTERS.map((item) => [item.id, true]));
+  const isLibre = activeRailWorkflowFormat === "libre";
+  const defaults = isLibre
+    ? { ...LIBRE_RAIL_CATEGORY_DEFAULTS }
+    : Object.fromEntries(RAIL_CATEGORY_FILTERS.map((item) => [item.id, item.defaultVisible !== false]));
   if (typeof window === "undefined") return defaults;
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(RAIL_CATEGORY_VISIBILITY_STORAGE_KEY) || "{}");
-    return {
-      ...defaults,
-      ...(parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}),
-    };
+    const storageKey = `${RAIL_CATEGORY_VISIBILITY_STORAGE_KEY}-${isLibre ? "libre" : "en-forma"}`;
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
+    const stored = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return Object.fromEntries(RAIL_CATEGORY_FILTERS.map((item) => [
+      item.id,
+      Object.prototype.hasOwnProperty.call(stored, item.id)
+        ? stored[item.id] !== false
+        : defaults[item.id] !== false,
+    ]));
   } catch (_) {
     return defaults;
   }
 }
 
+// El mismo estado gobierna tanto la visibilidad del rail como el trabajo que
+// debe ejecutar el siguiente análisis. Se devuelve una copia para impedir que
+// otros módulos muten accidentalmente el estado del renderer.
+export function getAnalizarPdfAnalysisCategories() {
+  const visibility = { ...readRailCategoryVisibility() };
+  if (activeRailWorkflowFormat === "libre") visibility.recortables = false;
+  return visibility;
+}
+
 function persistRailCategoryVisibility(visibility = {}) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(RAIL_CATEGORY_VISIBILITY_STORAGE_KEY, JSON.stringify(visibility || {}));
+  const storageKey = `${RAIL_CATEGORY_VISIBILITY_STORAGE_KEY}-${activeRailWorkflowFormat === "libre" ? "libre" : "en-forma"}`;
+  window.localStorage.setItem(storageKey, JSON.stringify(visibility || {}));
 }
 
 function renderRailFilterModal() {
@@ -1221,14 +1390,14 @@ function renderRailFilterModal() {
         <div class="analizar-pdf-rail-filter-head">
           <div>
             <h3 id="analizarPdfRailFilterTitle">Mostrar grupos</h3>
-            <p>Activa solo los accesos que quieres ver en el rail.</p>
+            <p>Activa los grupos que quieres analizar y mostrar. Los desactivados se omitirán en el siguiente análisis.</p>
           </div>
           <button type="button" class="analizar-pdf-icon-btn" data-action="close-rail-filter-modal" aria-label="Cerrar filtro">
             <i class="fas fa-xmark" aria-hidden="true"></i>
           </button>
         </div>
         <div class="analizar-pdf-rail-filter-list">
-          ${RAIL_CATEGORY_FILTERS.map((item) => `
+          ${RAIL_CATEGORY_FILTERS.filter((item) => activeRailWorkflowFormat !== "libre" || item.id !== "recortables").map((item) => `
             <label class="analizar-pdf-rail-filter-option">
               <input
                 type="checkbox"
@@ -1412,7 +1581,8 @@ function formatRailLinkedAssetLabel(item = {}) {
 }
 
 function renderRailGroups(items = [], context = {}, correctionSelection = {}, groupKeyPrefix = "", railTintHex = "", recortableMatchCodes = new Set()) {
-  const recortableDestinationOnly = isRecortableDestinationContext(context);
+  const isLibreWorkflow = activeRailWorkflowFormat === "libre" || String(context?.workflowFormat || "").trim().toLowerCase() === "libre";
+  const recortableDestinationOnly = !isLibreWorkflow && isRecortableDestinationContext(context);
   const groupTintAttr = buildRailTintStyleAttr(railTintHex);
   const pagesWithOrthoIssues = (Array.isArray(items) ? items : []).filter((page) => Array.isArray(page?.orthotypographyIssues) && page.orthotypographyIssues.length);
   const pagesWithSpellingIssues = (Array.isArray(items) ? items : []).filter((page) => Array.isArray(page?.spellingIssues) && page.spellingIssues.length);
@@ -1425,6 +1595,10 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
     const history = Array.isArray(page?.noteHistory) ? page.noteHistory.length : 0;
     return active + history > 0;
   });
+  const pagesWithTrackedChanges = (Array.isArray(items) ? items : [])
+    .filter((page) => Array.isArray(page?.trackedChanges) && page.trackedChanges.length);
+  const pagesWithCustomRules = (Array.isArray(items) ? items : [])
+    .filter((page) => Array.isArray(page?.customRuleIssues) && page.customRuleIssues.length);
   const pagesWithFieldProfile = (Array.isArray(items) ? items : []).filter((page) => Array.isArray(page?.fieldProfiles) && page.fieldProfiles.length);
   const pagesWithRecortables = (Array.isArray(items) ? items : []).filter((page) => {
     const summary = page?.recortableSummary || {};
@@ -1438,7 +1612,7 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
   });
   const recortableRailItems = pagesWithRecortables.flatMap((page) => buildRecortableRailItems(page, recortableMatchCodes));
   const renderRecortablesGroup = (label = "Recortables / Fichas / Anexos / Videos", emptyLabel = "Sin referencias detectadas.") => `
-    <details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::recortables`)}${buildRailCategoryAttrs("recortables")}${groupTintAttr}>
+    <details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::recortables`)}${buildRailCategoryAttrs("recortables")}${groupTintAttr}>
       <summary><span>${label}</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
       ${pagesWithRecortables.length ? `
         <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de recortables, fichas, anexos y videos">
@@ -1446,7 +1620,7 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
             const page = item.page || {};
             const labelText = formatRailLinkedAssetLabel(item);
             return `
-              <a class="analizar-pdf-ortho-link" href="#${getRecortableAnchorId(page, context)}">
+              <a class="analizar-pdf-ortho-link" href="#${getRecortableAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
                 <span>Página ${escapeHtml(page.pageName || "?")}</span>
                 ${item.tone
                   ? renderRailBadge(labelText, item.tone, item.icon, { tooltip: item.tooltip || "" })
@@ -1458,15 +1632,47 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
       ` : `<p class="analizar-pdf-empty-state">${emptyLabel}</p>`}
     </details>
   `;
+  const renderNotesGroup = () => `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::notes`)}${buildRailCategoryAttrs("notes")}${groupTintAttr}>
+    <summary><span>Notas</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
+    ${pagesWithNotes.length ? `
+      <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de notas">
+        ${pagesWithNotes.map((page) => `
+          <a class="analizar-pdf-ortho-link" href="#${getNotesAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
+            <span>Página ${escapeHtml(page.pageName || "?")}</span>
+            ${renderRailBadge(String((Array.isArray(page?.notes) ? page.notes.length : 0) + (Array.isArray(page?.noteHistory) ? page.noteHistory.length : 0)), "warning")}
+          </a>
+        `).join("")}
+      </nav>
+    ` : `<p class="analizar-pdf-empty-state">Sin notas detectadas.</p>`}
+  </details>`;
+  const renderTrackedChangesGroup = () => `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::tracked-changes`)}${buildRailCategoryAttrs("tracked-changes")}${groupTintAttr}>
+    <summary><span>Control de cambios</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
+    ${pagesWithTrackedChanges.length ? `
+      <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de control de cambios">
+        ${pagesWithTrackedChanges.map((page) => `
+          <a class="analizar-pdf-ortho-link" href="#${getTrackedChangesAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
+            <span>Página ${escapeHtml(page.pageName || "?")}</span>
+            ${renderRailBadge(String(page.trackedChanges.length), "warning")}
+          </a>
+        `).join("")}
+      </nav>
+    ` : `<p class="analizar-pdf-empty-state">Sin cambios rastreados detectados.</p>`}
+  </details>`;
+  const renderCustomRulesGroup = () => `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::custom-rules`)}${buildRailCategoryAttrs("custom-rules")}${groupTintAttr}>
+    <summary><span>Condiciones personalizadas</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
+    ${pagesWithCustomRules.length ? `<nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de condiciones personalizadas">
+      ${pagesWithCustomRules.map((page) => `<a class="analizar-pdf-ortho-link" href="#" data-action="show-page-fragments" data-detail-kind="custom-rules" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}"><span>Página ${escapeHtml(page.pageName || "?")}</span>${renderRailBadge(String(page.customRuleIssues.length), "warning")}</a>`).join("")}
+    </nav>` : `<p class="analizar-pdf-empty-state">Sin hallazgos de condiciones personalizadas.</p>`}
+  </details>`;
   if (recortableDestinationOnly) {
     return `
       ${isRailCategoryVisible("recortables") ? renderRecortablesGroup("Recortables / coincidencia origen-destino", "Sin coincidencias registradas.") : ""}
-      ${isRailCategoryVisible("orthotypography") ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::orthotypography`)}${buildRailCategoryAttrs("orthotypography")}${groupTintAttr}>
+      ${isRailCategoryVisible("orthotypography") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::orthotypography`)}${buildRailCategoryAttrs("orthotypography")}${groupTintAttr}>
         <summary><span>Ortotipografía</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
         ${pagesWithOrthoIssues.length ? `
           <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de ortotipografía">
             ${pagesWithOrthoIssues.map((page) => `
-              <a class="analizar-pdf-ortho-link" href="#${getOrthotypographyAnchorId(page, context)}">
+              <a class="analizar-pdf-ortho-link" href="#${getOrthotypographyAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
                 <span>Página ${escapeHtml(page.pageName || "?")}</span>
                 ${renderRailBadge(String(page.orthotypographyIssues.length), "danger")}
               </a>
@@ -1474,39 +1680,42 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
           </nav>
         ` : `<p class="analizar-pdf-empty-state">Sin hallazgos ortotipográficos.</p>`}
       </details>` : ""}
-      ${isRailCategoryVisible("redaction") && pagesWithRedactionIssues.length ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::redaction`)}${buildRailCategoryAttrs("redaction")}${groupTintAttr}>
+      ${isRailCategoryVisible("redaction") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::redaction`)}${buildRailCategoryAttrs("redaction")}${groupTintAttr}>
         <summary><span>Propuestas de redacción</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
-        <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de propuestas de redacción">
+        ${pagesWithRedactionIssues.length ? `<nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de propuestas de redacción">
           ${pagesWithRedactionIssues.map((page) => `
-            <a class="analizar-pdf-ortho-link" href="#${getRedactionAnchorId(page, context)}">
+            <a class="analizar-pdf-ortho-link" href="#${getRedactionAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
               <span>Página ${escapeHtml(page.pageName || "?")}</span>
               ${renderRailBadge(String(page.redactionIssues.length), "suggestion")}
             </a>
           `).join("")}
-        </nav>
+        </nav>` : `<p class="analizar-pdf-empty-state">Sin propuestas de redacción.</p>`}
       </details>` : ""}
-      <details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::spelling`)}${groupTintAttr}>
+      ${isRailCategoryVisible("notes") ? renderNotesGroup() : ""}
+      ${isRailCategoryVisible("tracked-changes") ? renderTrackedChangesGroup() : ""}
+      ${isRailCategoryVisible("custom-rules") ? renderCustomRulesGroup() : ""}
+      ${isRailCategoryVisible("spelling") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::spelling`)}${buildRailCategoryAttrs("spelling")}${groupTintAttr}>
         <summary><span>Ortografía</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
         ${pagesWithSpellingIssues.length ? `
           <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de ortografía">
             ${pagesWithSpellingIssues.map((page) => `
-              <a class="analizar-pdf-ortho-link" href="#${getSpellingAnchorId(page, context)}">
+              <a class="analizar-pdf-ortho-link" href="#${getSpellingAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
                 <span>Página ${escapeHtml(page.pageName || "?")}</span>
                 ${renderRailBadge(String(page.spellingIssues.length), "danger")}
               </a>
             `).join("")}
           </nav>
         ` : `<p class="analizar-pdf-empty-state">Sin hallazgos ortográficos.</p>`}
-      </details>
+      </details>` : ""}
     `;
   }
   return `
-    ${isRailCategoryVisible("orthotypography") ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::orthotypography`)}${buildRailCategoryAttrs("orthotypography")}${groupTintAttr}>
+    ${isRailCategoryVisible("orthotypography") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::orthotypography`)}${buildRailCategoryAttrs("orthotypography")}${groupTintAttr}>
       <summary><span>Ortotipografía</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
       ${pagesWithOrthoIssues.length ? `
         <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de ortotipografía">
           ${pagesWithOrthoIssues.map((page) => `
-            <a class="analizar-pdf-ortho-link" href="#${getOrthotypographyAnchorId(page, context)}">
+            <a class="analizar-pdf-ortho-link" href="#${getOrthotypographyAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
               <span>Página ${escapeHtml(page.pageName || "?")}</span>
               ${renderRailBadge(String(page.orthotypographyIssues.length), "danger")}
             </a>
@@ -1514,23 +1723,36 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
         </nav>
       ` : `<p class="analizar-pdf-empty-state">Sin hallazgos ortotipográficos.</p>`}
     </details>` : ""}
-    ${isRailCategoryVisible("redaction") && pagesWithRedactionIssues.length ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::redaction`)}${buildRailCategoryAttrs("redaction")}${groupTintAttr}>
+    ${isRailCategoryVisible("spelling") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::spelling`)}${buildRailCategoryAttrs("spelling")}${groupTintAttr}>
+      <summary><span>Ortografía</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
+      ${pagesWithSpellingIssues.length ? `
+        <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de ortografía">
+          ${pagesWithSpellingIssues.map((page) => `
+            <a class="analizar-pdf-ortho-link" href="#${getSpellingAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
+              <span>Página ${escapeHtml(page.pageName || "?")}</span>
+              ${renderRailBadge(String(page.spellingIssues.length), "danger")}
+            </a>
+          `).join("")}
+        </nav>
+      ` : `<p class="analizar-pdf-empty-state">Sin hallazgos ortográficos.</p>`}
+    </details>` : ""}
+    ${isRailCategoryVisible("redaction") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::redaction`)}${buildRailCategoryAttrs("redaction")}${groupTintAttr}>
       <summary><span>Propuestas de redacción</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
-      <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de propuestas de redacción">
+      ${pagesWithRedactionIssues.length ? `<nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de propuestas de redacción">
         ${pagesWithRedactionIssues.map((page) => `
-          <a class="analizar-pdf-ortho-link" href="#${getRedactionAnchorId(page, context)}">
+          <a class="analizar-pdf-ortho-link" href="#${getRedactionAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
             <span>Página ${escapeHtml(page.pageName || "?")}</span>
             ${renderRailBadge(String(page.redactionIssues.length), "suggestion")}
           </a>
         `).join("")}
-      </nav>
+      </nav>` : `<p class="analizar-pdf-empty-state">Sin propuestas de redacción.</p>`}
     </details>` : ""}
-    ${isRailCategoryVisible("text-status") ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::text-status`)}${buildRailCategoryAttrs("text-status")}${groupTintAttr}>
+    ${isRailCategoryVisible("text-status") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::text-status`)}${buildRailCategoryAttrs("text-status")}${groupTintAttr}>
       <summary><span>Texto fuera / parcial / desbordado</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
       ${pagesWithTextStatusIssues.length ? `
         <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de texto fuera, parcial o desbordado">
           ${pagesWithTextStatusIssues.map(({ page, summary }) => `
-            <a class="analizar-pdf-ortho-link" href="#${getTextStatusAnchorId(page, context)}">
+            <a class="analizar-pdf-ortho-link" href="#${getTextStatusAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
               <span>Página ${escapeHtml(page.pageName || "?")}</span>
               ${renderRailBadge([
                 summary.outsideCount ? `${summary.outsideCount} fuera` : "",
@@ -1542,14 +1764,14 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
         </nav>
       ` : `<p class="analizar-pdf-empty-state">Sin texto fuera, parcial o desbordado.</p>`}
     </details>` : ""}
-    ${isRailCategoryVisible("field-profile") ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::field-profile`)}${buildRailCategoryAttrs("field-profile")}${groupTintAttr}>
+    ${isRailCategoryVisible("field-profile") ? `<details class="analizar-pdf-ortho-rail-group is-complete"${buildRailGroupAttrs(`${groupKeyPrefix}::field-profile`)}${buildRailCategoryAttrs("field-profile")}${groupTintAttr}>
       <summary><span>Campo formativo</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
       ${pagesWithFieldProfile.length ? `
         <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de campo formativo">
           ${pagesWithFieldProfile.map((page) => {
             const label = String(page?.fieldProfiles?.[0]?.label || "Campo formativo").trim();
             return `
-              <a class="analizar-pdf-ortho-link" href="#${getFieldProfileAnchorId(page, context)}">
+              <a class="analizar-pdf-ortho-link" href="#${getFieldProfileAnchorId(page, context)}" data-action="show-page-fragments" data-page-name="${escapeHtmlAttr(page.pageName || "")}" data-file-id="${escapeHtmlAttr(context.fileId || "")}">
                 <span>Página ${escapeHtml(page.pageName || "?")}</span>
                 <strong>${escapeHtml(label)}</strong>
               </a>
@@ -1558,20 +1780,10 @@ function renderRailGroups(items = [], context = {}, correctionSelection = {}, gr
         </nav>
       ` : `<p class="analizar-pdf-empty-state">Sin campo formativo detectado.</p>`}
     </details>` : ""}
-    ${isRailCategoryVisible("notes") ? `<details class="analizar-pdf-ortho-rail-group"${buildRailGroupAttrs(`${groupKeyPrefix}::notes`)}${buildRailCategoryAttrs("notes")}${groupTintAttr}>
-      <summary><span>Control de cambios</span><span class="analizar-pdf-summary-toggle" aria-hidden="true"></span></summary>
-      ${pagesWithNotes.length ? `
-        <nav class="analizar-pdf-ortho-nav" aria-label="Accesos rápidos de control de cambios">
-          ${pagesWithNotes.map((page) => `
-            <a class="analizar-pdf-ortho-link" href="#${getNotesAnchorId(page, context)}">
-              <span>Página ${escapeHtml(page.pageName || "?")}</span>
-              ${renderRailBadge(String((Array.isArray(page?.notes) ? page.notes.length : 0) + (Array.isArray(page?.noteHistory) ? page.noteHistory.length : 0)), "warning")}
-            </a>
-          `).join("")}
-        </nav>
-      ` : `<p class="analizar-pdf-empty-state">Sin control de cambios detectado.</p>`}
-    </details>` : ""}
-    ${isRailCategoryVisible("recortables") ? renderRecortablesGroup() : ""}
+    ${isRailCategoryVisible("notes") ? renderNotesGroup() : ""}
+    ${isRailCategoryVisible("tracked-changes") ? renderTrackedChangesGroup() : ""}
+    ${isRailCategoryVisible("custom-rules") ? renderCustomRulesGroup() : ""}
+    ${!isLibreWorkflow && isRailCategoryVisible("recortables") ? renderRecortablesGroup() : ""}
   `;
 }
 
@@ -1596,6 +1808,7 @@ function renderSelectableIssueList(kind = "", page = {}, correctionSelection = {
         const issueId = buildCorrectionIssueId(kind, issue);
         const checked = selectedIssueIds.has(issueId);
         const message = String(issue?.message || issue?.reason || JSON.stringify(issue)).trim();
+        const layerName = String(issue?.layerName || "").trim();
         return `
           <li class="analizar-pdf-selectable-issue-item${checked ? " is-selected" : ""}">
             ${checkboxesVisible ? `
@@ -1612,7 +1825,7 @@ function renderSelectableIssueList(kind = "", page = {}, correctionSelection = {
                 <span aria-hidden="true"></span>
               </label>
             ` : ""}
-            <span>${escapeHtml(message)}</span>
+            <span>${escapeHtml(message)}${layerName ? ` <small class="analizar-pdf-inline-badge">Capa: ${escapeHtml(layerName)}</small>` : ""}</span>
           </li>
         `;
       }).join("")}
@@ -1757,10 +1970,12 @@ function renderFilePageReports(fileEntry = {}, index = 0, options = {}) {
 function renderQuickAnalysisIssue(issue = {}) {
   const paragraphText = String(issue?.paragraphText || issue?.context || issue?.excerpt || "").trim();
   const excerpt = String(issue?.excerpt || "").trim();
+  const layerName = String(issue?.layerName || "").trim();
   return `
     <li class="analizar-pdf-selectable-issue-item analizar-pdf-quick-issue-item">
       <div>
         <strong>${escapeHtml(issue?.styleName || "Estilo no detectado")}</strong>
+        ${layerName ? `<span class="analizar-pdf-inline-badge">Capa: ${escapeHtml(layerName)}</span>` : ""}
         <p>${escapeHtml(issue?.message || "Hallazgo ortotipográfico.")}</p>
         <div class="analizar-pdf-quick-paragraph">${renderHighlightedText(paragraphText, excerpt ? [excerpt] : [])}</div>
       </div>
@@ -1803,14 +2018,238 @@ function renderQuickAnalysisReports(fileEntry = {}, index = 0) {
   `;
 }
 
+function groupItemsByLayer(items = []) {
+  const groups = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const layerName = String(item?.layerName || item?.value?.layerName || "").trim() || "Sin capa";
+    const group = groups.get(layerName) || [];
+    group.push(item);
+    groups.set(layerName, group);
+  }
+  return [...groups.entries()];
+}
+
+function renderLayerTabs(items = [], baseId = "layer-tabs", renderGroup = () => "") {
+  const groups = groupItemsByLayer(items);
+  if (!groups.length) return "";
+  const tabsId = `${baseId}-tabs`;
+  return `
+    <div class="analizar-pdf-layer-tabs" data-layer-tabs="${escapeHtmlAttr(tabsId)}">
+      <div class="analizar-pdf-layer-tablist" role="tablist" aria-label="Capas de la página">
+        ${groups.map(([layerName, layerItems], index) => {
+          const tabId = `${tabsId}-tab-${index}`;
+          const panelId = `${tabsId}-panel-${index}`;
+          return `<button id="${escapeHtmlAttr(tabId)}" type="button" class="analizar-pdf-layer-tab${index === 0 ? " is-active" : ""}"
+            role="tab" aria-selected="${index === 0 ? "true" : "false"}" aria-controls="${escapeHtmlAttr(panelId)}"
+            tabindex="${index === 0 ? "0" : "-1"}" data-action="select-layer-tab">
+            <span>${escapeHtml(layerName)}</span><small>${layerItems.length}</small>
+          </button>`;
+        }).join("")}
+      </div>
+      <div class="analizar-pdf-layer-tabpanels">
+        ${groups.map(([layerName, layerItems], index) => {
+          const tabId = `${tabsId}-tab-${index}`;
+          const panelId = `${tabsId}-panel-${index}`;
+          return `<section id="${escapeHtmlAttr(panelId)}" class="analizar-pdf-layer-tabpanel" role="tabpanel"
+            aria-labelledby="${escapeHtmlAttr(tabId)}" ${index === 0 ? "" : "hidden"}>
+            ${renderGroup(layerItems, layerName, index)}
+          </section>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function renderSelectedFragments(selection = null, fileEntries = []) {
+  if (!selection?.pageName) {
+    return `<div class="analizar-pdf-result-card"><p class="analizar-pdf-empty-state">Selecciona una página en Accesos rápidos para ver los fragmentos con error.</p></div>`;
+  }
+  const entry = fileEntries.find((item) => String(item?.fileId || "") === String(selection.fileId || "")) || null;
+  const page = Array.isArray(entry?.result?.stats?.pageReports)
+    ? entry.result.stats.pageReports.find((item) => String(item?.pageName || "") === String(selection.pageName || ""))
+    : null;
+  const quickPage = Array.isArray(entry?.quickAnalysis?.pages)
+    ? entry.quickAnalysis.pages.find((item) => String(item?.pageName || "") === String(selection.pageName || ""))
+    : null;
+  const pageText = String(page?.pageText || Object.values(page?.content || {})
+    .flatMap((items) => Array.isArray(items) ? items : [])
+    .map((item) => String(item?.text || "").trim())
+    .filter(Boolean)
+    .join("\n")).trim();
+  const detailKind = String(selection?.detailKind || "orthotypography").trim().toLowerCase();
+  const pageCardId = `analizar-pdf-page-text-${slugifyAnchorPart(selection.fileId || "file")}-${slugifyAnchorPart(selection.pageName || "page")}-${slugifyAnchorPart(detailKind)}`;
+  const renderFullPageText = () => `
+    <button type="button" class="analizar-pdf-page-text-toggle" data-action="toggle-full-page-text" aria-expanded="false" aria-controls="${escapeHtmlAttr(pageCardId)}">Ver texto completo de la página</button>
+    <article id="${escapeHtmlAttr(pageCardId)}" class="analizar-pdf-full-page-text-card" hidden><h6>Texto completo · Página ${escapeHtml(selection.pageName)}</h6><p>${escapeHtml(pageText || "No hay texto de página disponible.")}</p></article>
+  `;
+  const renderCardHeader = (title = "") => `
+    <div class="analizar-pdf-fragment-card-head">
+      <div class="analizar-pdf-fragment-card-head-copy">
+        <span>${escapeHtml(title)}</span>
+        <small title="${escapeHtmlAttr(entry?.fileTitle || entry?.documentName || "")}">${escapeHtml(entry?.fileTitle || entry?.documentName || "")}</small>
+      </div>
+      <button type="button" class="analizar-pdf-fragment-card-close" data-action="close-quick-detail" aria-label="Cerrar detalle" title="Cerrar">&times;</button>
+    </div>`;
+  if (detailKind === "notes") {
+    const noteItems = [
+      ...(Array.isArray(page?.notes) ? page.notes.map((value) => ({ value, layerName: value?.layerName, source: "active" })) : []),
+      ...(Array.isArray(page?.noteHistory) ? page.noteHistory.map((value) => ({ value, layerName: value?.layerName, source: "history" })) : []),
+    ];
+    const notesContent = renderLayerTabs(noteItems, `${pageCardId}-notes`, (layerItems) => renderNotesMetaList(
+      layerItems.filter((item) => item.source === "active").map((item) => item.value),
+      layerItems.filter((item) => item.source === "history").map((item) => item.value)
+    ));
+    return `
+      <div class="analizar-pdf-fragment-card analizar-pdf-fragment-card--change-control">
+        ${renderCardHeader(`Notas · Página ${selection.pageName}`)}
+        ${notesContent || `<p class="analizar-pdf-empty-state">Esta página no tiene notas disponibles.</p>`}
+        ${renderFullPageText()}
+      </div>`;
+  }
+  if (detailKind === "tracked-changes") {
+    const trackedChangesContent = renderLayerTabs(page?.trackedChanges, `${pageCardId}-tracked-changes`, (layerItems) => renderTrackedChangesMetaList(layerItems));
+    return `
+      <div class="analizar-pdf-fragment-card analizar-pdf-fragment-card--change-control">
+        ${renderCardHeader(`Control de cambios · Página ${selection.pageName}`)}
+        ${trackedChangesContent || `<p class="analizar-pdf-empty-state">Esta página no tiene cambios rastreados disponibles.</p>`}
+        ${renderFullPageText()}
+      </div>`;
+  }
+  if (detailKind === "custom-rules") {
+    const issues = Array.isArray(page?.customRuleIssues) ? page.customRuleIssues : [];
+    const content = issues.length ? `<ul class="analizar-pdf-redaction-list">${issues.map((issue) => `<li class="analizar-pdf-redaction-item"><p><strong>${escapeHtml(issue.ruleName || "Condición personalizada")}</strong> · ${escapeHtml(issue.severity || "warning")}</p><p>${escapeHtml(issue.message || "Condición encontrada")}</p>${issue.context ? `<p><strong>Contexto:</strong> ${escapeHtml(issue.context)}</p>` : ""}${issue.mechanism ? `<p><strong>Mecanismo:</strong> ${escapeHtml(issue.mechanism)}</p>` : ""}${issue.suggestion ? `<p><strong>Sugerencia:</strong> ${escapeHtml(issue.suggestion)}</p>` : ""}</li>`).join("")}</ul>` : `<p class="analizar-pdf-empty-state">Esta página no tiene hallazgos personalizados.</p>`;
+    return `<div class="analizar-pdf-fragment-card analizar-pdf-fragment-card--change-control">${renderCardHeader(`Condiciones personalizadas · Página ${selection.pageName}`)}${content}${renderFullPageText()}</div>`;
+  }
+  if (detailKind === "recortables") {
+    const recortableIssues = Array.isArray(page?.recortableIssues) ? page.recortableIssues : [];
+    const layeredRecortableIssues = groupItemsByLayer(recortableIssues.filter((item) => String(item?.layerName || "").trim()));
+    const recortableTabs = [{
+      layerName: "Resumen",
+      value: { ...page, recortableIssues: recortableIssues.filter((item) => !String(item?.layerName || "").trim()) },
+    }, ...layeredRecortableIssues.map(([layerName, items]) => ({
+      layerName,
+      value: { ...page, recortableSummary: {}, recortableIssues: items },
+    }))];
+    const recortableContent = renderLayerTabs(recortableTabs, `${pageCardId}-recortables`, (layerItems) => renderRecortableMetaList(
+      layerItems[0]?.value || {},
+      { title: "Recortables / Fichas / Anexos / Videos" }
+    ));
+    return `
+      <div class="analizar-pdf-fragment-card analizar-pdf-fragment-card--recortables">
+        ${renderCardHeader(`Referencias editoriales · Página ${selection.pageName}`)}
+        ${recortableContent || `<p class="analizar-pdf-empty-state">Esta página no tiene referencias de recortables, fichas, anexos o videos disponibles.</p>`}
+        ${renderFullPageText()}
+      </div>`;
+  }
+  const issueSourcesByKind = {
+    orthotypography: Array.isArray(page?.orthotypographyIssues) ? page.orthotypographyIssues : [],
+    spelling: Array.isArray(page?.spellingIssues) ? page.spellingIssues : [],
+    "quick-orthotypography": Array.isArray(quickPage?.issues) ? quickPage.issues : [],
+    redaction: Array.isArray(page?.redactionIssues) ? page.redactionIssues : [],
+  };
+  const issueLabelsByKind = {
+    orthotypography: "fragmentos ortotipográficos",
+    spelling: "fragmentos ortográficos",
+    "quick-orthotypography": "hallazgos del análisis rápido",
+    redaction: "propuestas de redacción",
+  };
+  const selectedIssues = issueSourcesByKind[detailKind] || [];
+  const fragments = selectedIssues.map((issue) => ({
+    excerpt: String(issue?.excerpt || issue?.paragraphText || issue?.context || issue?.token || "").trim(),
+    paragraphText: String(issue?.paragraphText || issue?.context || issue?.excerpt || issue?.token || "").trim(),
+    message: String(issue?.message || issue?.reason || issue?.suggestion || "Hallazgo editorial").trim(),
+    layerName: String(issue?.layerName || "").trim(),
+    storyId: String(issue?.storyId || "").trim(),
+    frameId: String(issue?.frameId || "").trim(),
+    code: String(issue?.code || issue?.layoutIssueType || "").trim(),
+    suggestion: String(issue?.suggestion || issue?.replacement || issue?.replacements?.[0] || "").trim(),
+  })).filter((issue) => issue.excerpt);
+  const normalizeFingerprintPart = (value = "") => String(value || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("es");
+  const unique = [...new Map(fragments.map((issue) => {
+    const occurrenceKey = [
+      detailKind,
+      issue.storyId,
+      issue.frameId,
+      issue.layerName,
+      issue.excerpt,
+      issue.paragraphText,
+      issue.code || issue.suggestion || issue.message,
+    ].map(normalizeFingerprintPart).join("::");
+    return [occurrenceKey, issue];
+  })).values()];
+  const issueLabel = issueLabelsByKind[detailKind] || "hallazgos de esta categoría";
+  const issueTabs = renderLayerTabs(unique, `${pageCardId}-issues`, (layerItems, layerName, groupIndex) => `
+    <ul class="analizar-pdf-fragment-list">${layerItems.map((issue, index) => {
+      const issuePageCardId = `${pageCardId}-${groupIndex}-${index}`;
+      return `<li>
+        <small>${escapeHtml(issue.message)}</small>
+        <p class="analizar-pdf-fragment-paragraph">${renderHighlightedText(issue.paragraphText, [issue.excerpt])}</p>
+        <button type="button" class="analizar-pdf-page-text-toggle" data-action="toggle-full-page-text" aria-expanded="false" aria-controls="${escapeHtmlAttr(issuePageCardId)}">Ver texto completo de la página</button>
+        <article id="${escapeHtmlAttr(issuePageCardId)}" class="analizar-pdf-full-page-text-card" hidden><h6>Texto completo · Página ${escapeHtml(selection.pageName)} · ${escapeHtml(layerName)}</h6><p>${escapeHtml(pageText || "No hay texto de página disponible.")}</p></article>
+      </li>`;
+    }).join("")}</ul>
+  `);
+  return `
+    <div class="analizar-pdf-fragment-card">
+      ${renderCardHeader(`Página ${selection.pageName}`)}
+      ${unique.length ? issueTabs : `<p class="analizar-pdf-empty-state">Esta página no tiene ${escapeHtml(issueLabel)} disponibles.</p>`}
+    </div>`;
+}
+
 export function createAnalizarPdfResultsRenderer(deps = {}) {
-  const { el, pageReportsEl, onToggleCorrectionMode, onToggleCorrectionPage, onToggleCorrectionIssue, onClearRailAnalysis, isRailCleared } = deps;
+  const { el, pageReportsEl, railHostEl, onToggleCorrectionMode, onToggleCorrectionPage, onToggleCorrectionIssue, onClearRailAnalysis, isRailCleared } = deps;
+  const railRootEl = railHostEl || pageReportsEl;
+  const fullPageTextModalEl = typeof document !== "undefined" ? document.getElementById("analizarPdfFullPageTextModal") : null;
+  const fullPageTextTitleEl = typeof document !== "undefined" ? document.getElementById("analizarPdfFullPageTextTitle") : null;
+  const fullPageTextContentEl = typeof document !== "undefined" ? document.getElementById("analizarPdfFullPageTextContent") : null;
+  const fullPageTextCloseBtn = typeof document !== "undefined" ? document.getElementById("analizarPdfFullPageTextCloseBtn") : null;
   let auxiliaryPanelsHidden = true;
   let outsideTextHidden = false;
+  let selectedQuickPage = null;
   let activeRailResizeCleanup = null;
   let activeRailMuuriLayouts = [];
   let activeRailLayoutFrame = 0;
   let activeRailLayoutObserver = null;
+  let fullPageTextOpener = null;
+
+  function closeFullPageTextModal({ restoreFocus = true } = {}) {
+    if (!fullPageTextModalEl || fullPageTextModalEl.hidden) return;
+    fullPageTextModalEl.hidden = true;
+    fullPageTextOpener?.setAttribute("aria-expanded", "false");
+    if (restoreFocus && fullPageTextOpener?.isConnected) fullPageTextOpener.focus();
+    fullPageTextOpener = null;
+  }
+
+  function openFullPageTextModal(sourceCard, opener) {
+    if (!fullPageTextModalEl || !fullPageTextTitleEl || !fullPageTextContentEl || !sourceCard) return;
+    const sourceTitle = String(sourceCard.querySelector("h6")?.textContent || "Texto completo").trim();
+    const sourceText = String(sourceCard.querySelector("p")?.textContent || "No hay texto de página disponible.").trim();
+    fullPageTextTitleEl.textContent = sourceTitle;
+    fullPageTextContentEl.textContent = sourceText;
+    fullPageTextOpener = opener || null;
+    fullPageTextOpener?.setAttribute("aria-expanded", "true");
+    fullPageTextModalEl.hidden = false;
+    fullPageTextCloseBtn?.focus();
+  }
+
+  if (fullPageTextModalEl) {
+    fullPageTextModalEl.onclick = (event) => {
+      const closeTrigger = event.target instanceof Element
+        ? event.target.closest('[data-action="close-full-page-text-modal"]')
+        : null;
+      if (!closeTrigger) return;
+      event.preventDefault();
+      closeFullPageTextModal();
+    };
+    fullPageTextModalEl.onkeydown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeFullPageTextModal();
+    };
+  }
 
   function getMuuriConstructor() {
     if (typeof window === "undefined") return null;
@@ -1853,41 +2292,64 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
     activeRailLayoutFrame = window.requestAnimationFrame(refreshRailMasonryLayouts);
   }
 
+  function createRailMasonryLayout(container) {
+    const Muuri = getMuuriConstructor();
+    if (!container || !Muuri || !container.querySelector(":scope > .analizar-pdf-ortho-rail-group")) return null;
+    container.classList.add("is-muuri-rail-grid");
+    const grid = new Muuri(container, {
+      items: ".analizar-pdf-ortho-rail-group",
+      layout: {
+        fillGaps: true,
+        horizontal: false,
+        alignRight: false,
+        alignBottom: false,
+        rounding: true,
+      },
+      layoutDuration: 220,
+      layoutEasing: "cubic-bezier(.22,.61,.36,1)",
+      layoutOnInit: true,
+      layoutOnResize: 80,
+      dragEnabled: false,
+    });
+    activeRailMuuriLayouts.push(grid);
+    activeRailLayoutObserver?.observe(container);
+    return grid;
+  }
+
+  function destroyRailMasonryLayoutFor(container) {
+    if (!container) return;
+    activeRailLayoutObserver?.unobserve(container);
+    const retained = [];
+    activeRailMuuriLayouts.forEach((grid) => {
+      if (grid.getElement?.() !== container) {
+        retained.push(grid);
+        return;
+      }
+      try {
+        grid.destroy();
+      } catch (_) {
+        // El contenedor puede haber sido retirado durante una actualización puntual.
+      }
+    });
+    activeRailMuuriLayouts = retained;
+  }
+
   function initRailMasonryLayouts() {
     destroyRailMasonryLayouts();
-    if (!pageReportsEl || typeof window === "undefined") return;
+    if (!railRootEl || typeof window === "undefined") return;
     const Muuri = getMuuriConstructor();
     if (!Muuri) return;
-    const nestedContainers = Array.from(pageReportsEl.querySelectorAll(".analizar-pdf-ortho-file-group"));
-    const rootContainers = Array.from(pageReportsEl.querySelectorAll(".analizar-pdf-ortho-rail-body"));
+    const nestedContainers = Array.from(railRootEl.querySelectorAll(".analizar-pdf-ortho-file-group"));
+    const rootContainers = Array.from(railRootEl.querySelectorAll(".analizar-pdf-ortho-rail-body"));
     const containers = [...nestedContainers, ...rootContainers]
       .filter((container) => container.querySelector(":scope > .analizar-pdf-ortho-rail-group"));
     if (!containers.length) return;
-    containers.forEach((container) => {
-      container.classList.add("is-muuri-rail-grid");
-      const grid = new Muuri(container, {
-        items: ".analizar-pdf-ortho-rail-group",
-        layout: {
-          fillGaps: true,
-          horizontal: false,
-          alignRight: false,
-          alignBottom: false,
-          rounding: true,
-        },
-        layoutDuration: 220,
-        layoutEasing: "cubic-bezier(.22,.61,.36,1)",
-        layoutOnInit: true,
-        layoutOnResize: 80,
-        dragEnabled: false,
-      });
-      activeRailMuuriLayouts.push(grid);
-    });
     if (typeof ResizeObserver === "function") {
       activeRailLayoutObserver = new ResizeObserver(() => scheduleRailMasonryLayout());
-      const rail = pageReportsEl.querySelector(".analizar-pdf-ortho-rail");
+      const rail = railRootEl.querySelector(".analizar-pdf-ortho-rail");
       if (rail) activeRailLayoutObserver.observe(rail);
-      containers.forEach((container) => activeRailLayoutObserver.observe(container));
     }
+    containers.forEach((container) => createRailMasonryLayout(container));
     scheduleRailMasonryLayout();
   }
 
@@ -1935,9 +2397,9 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
       activeRailResizeCleanup();
       activeRailResizeCleanup = null;
     }
-    if (!pageReportsEl || typeof window === "undefined") return;
+    if (!railRootEl || typeof window === "undefined") return;
     restoreRailWidth();
-    const handle = pageReportsEl.querySelector("[data-action='resize-rail']");
+    const handle = railRootEl.querySelector("[data-action='resize-rail']");
     if (!handle) return;
     const onPointerDown = (event) => {
       if (!canResizeRail()) return;
@@ -1974,10 +2436,178 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
       window.addEventListener("pointerup", finish);
       window.addEventListener("pointercancel", finish);
     };
+    const onDoubleClick = (event) => {
+      if (!canResizeRail()) return;
+      event.preventDefault();
+      applyRailWidth(DEFAULT_RAIL_WIDTH);
+      scheduleRailMasonryLayout();
+    };
     handle.onpointerdown = onPointerDown;
+    handle.ondblclick = onDoubleClick;
+    handle.setAttribute("title", "Doble clic para restaurar el ancho");
     activeRailResizeCleanup = () => {
       handle.onpointerdown = null;
+      handle.ondblclick = null;
     };
+  }
+
+  function toggleFileRailGroup(revisionId = "", fileId = "") {
+    const cleanRevisionId = String(revisionId || "").trim();
+    const cleanFileId = String(fileId || "").trim();
+    if (!cleanRevisionId || !railRootEl) return false;
+
+    const groups = Array.from(railRootEl.querySelectorAll(
+      ".analizar-pdf-ortho-rail-body > details.analizar-pdf-ortho-rail-group.is-complete.has-analysis[data-rail-group-key]"
+    ));
+    const details = groups.find((group) => {
+      const sameRevision = String(group.dataset.revisionId || "").trim() === cleanRevisionId;
+      const sameFile = !cleanFileId || String(group.dataset.fileId || "").trim() === cleanFileId;
+      return sameRevision && sameFile;
+    });
+    if (!details) return false;
+
+    const groupKey = String(details.dataset.railGroupKey || "").trim();
+    const shouldOpen = details.open !== true;
+    if (groupKey) {
+      railOpenStateByKey.set(groupKey, shouldOpen);
+    }
+    details.open = shouldOpen;
+    // Esperar a que <details> confirme su nueva geometría antes de pedir a
+    // Muuri que mida el item evita layouts con una altura intermedia bloqueada.
+    window.requestAnimationFrame(() => scheduleRailMasonryLayout());
+    return shouldOpen;
+  }
+
+  function closeQuickDetail() {
+    selectedQuickPage = null;
+    const quickDetailPanel = pageReportsEl?.closest("#analizarPdfQuickDetailPanel");
+    quickDetailPanel?.classList.remove("is-visible");
+    const quickDetailDescription = quickDetailPanel?.querySelector("#analizarPdfQuickDetailDescription");
+    if (quickDetailDescription) {
+      quickDetailDescription.textContent = "Selecciona una página en Accesos rápidos para ver la información del hallazgo.";
+    }
+    if (pageReportsEl) pageReportsEl.innerHTML = "";
+  }
+
+  function updateQuickDetailDescription(quickDetailPanel = null) {
+    const description = quickDetailPanel?.querySelector("#analizarPdfQuickDetailDescription");
+    if (!description) return;
+    const detailKind = String(selectedQuickPage?.detailKind || "orthotypography").trim().toLowerCase();
+    const descriptions = {
+      notes: "Notas editoriales detectadas en la página seleccionada.",
+      "tracked-changes": "Cambios rastreados detectados en la página seleccionada.",
+      recortables: "Recortables, fichas, anexos y videos detectados en la página seleccionada.",
+    };
+    description.textContent = descriptions[detailKind]
+      || "Fragmentos ortográficos y ortotipográficos de la página seleccionada.";
+  }
+
+  function renderQuickDetailOnly(session = null) {
+    if (!pageReportsEl || pageReportsEl === railRootEl) {
+      render(session);
+      return;
+    }
+    const railCleared = typeof isRailCleared === "function" ? isRailCleared(session) : false;
+    const fallbackSessionEntries = hasRenderableAnalysis(session) ? [session] : [];
+    const fileEntries = railCleared
+      ? []
+      : (Array.isArray(session?.fileResults) && session.fileResults.length
+        ? session.fileResults
+        : fallbackSessionEntries);
+    const railEntries = buildOrderedRailEntries(
+      session,
+      railCleared ? [] : fileEntries.filter((entry) => isProcessedRailEntry(entry))
+    );
+    const quickDetailPanel = pageReportsEl.closest("#analizarPdfQuickDetailPanel");
+    const shouldShow = Boolean(selectedQuickPage?.pageName);
+    quickDetailPanel?.classList.toggle("is-visible", shouldShow);
+    updateQuickDetailDescription(quickDetailPanel);
+    pageReportsEl.innerHTML = shouldShow
+      ? `<div class="analizar-pdf-page-report-shell"><div class="analizar-pdf-page-report-list">${renderSelectedFragments(selectedQuickPage, railEntries)}</div></div>`
+      : "";
+  }
+
+  function resolveRailEntries(session = null) {
+    const railCleared = typeof isRailCleared === "function" ? isRailCleared(session) : false;
+    const fallbackSessionEntries = hasRenderableAnalysis(session) ? [session] : [];
+    const fileEntries = railCleared
+      ? []
+      : (Array.isArray(session?.fileResults) && session.fileResults.length
+        ? session.fileResults
+        : fallbackSessionEntries);
+    return {
+      railCleared,
+      fileEntries,
+      railEntries: buildOrderedRailEntries(
+        session,
+        railCleared ? [] : fileEntries.filter((entry) => isProcessedRailEntry(entry))
+      ),
+    };
+  }
+
+  function updateRailEntry(session = null, revisionId = "", fileId = "") {
+    const cleanRevisionId = String(revisionId || "").trim();
+    const cleanFileId = String(fileId || "").trim();
+    if (!session || !railRootEl || !cleanRevisionId || !cleanFileId) return false;
+
+    const { railEntries } = resolveRailEntries(session);
+    const template = document.createElement("template");
+    template.innerHTML = railEntries.length ? renderGroupedRightRail(railEntries) : renderRightRail([]);
+    const matchesTarget = (details) => (
+      String(details?.dataset?.revisionId || "").trim() === cleanRevisionId
+      && String(details?.dataset?.fileId || "").trim() === cleanFileId
+    );
+    const replacement = Array.from(template.content.querySelectorAll(
+      ".analizar-pdf-ortho-rail-body > details.analizar-pdf-ortho-rail-group[data-revision-id][data-file-id]"
+    )).find(matchesTarget) || null;
+    const current = Array.from(railRootEl.querySelectorAll(
+      ".analizar-pdf-ortho-rail-body > details.analizar-pdf-ortho-rail-group[data-revision-id][data-file-id]"
+    )).find(matchesTarget) || null;
+    if (!replacement || !current) return false;
+
+    railRootEl.__analizarPdfSession = session;
+    const semanticClasses = ["is-complete", "is-empty", "has-analysis"];
+    semanticClasses.forEach((className) => {
+      current.classList.toggle(className, replacement.classList.contains(className));
+    });
+    current.dataset.railState = String(replacement.dataset.railState || "");
+    current.dataset.railGroupKey = String(replacement.dataset.railGroupKey || "");
+    ["--analizar-pdf-rail-tint", "--analizar-pdf-rail-ink", "--analizar-pdf-rail-text-relief"].forEach((property) => {
+      const value = replacement.style.getPropertyValue(property);
+      if (value) current.style.setProperty(property, value);
+    });
+    const currentTitle = current.querySelector(":scope > summary .analizar-pdf-rail-file-title");
+    const replacementTitle = replacement.querySelector(":scope > summary .analizar-pdf-rail-file-title");
+    const currentTitleText = currentTitle?.querySelector(".analizar-pdf-rail-file-title-text");
+    const replacementTitleText = replacementTitle?.querySelector(".analizar-pdf-rail-file-title-text");
+    if (currentTitle && replacementTitle) {
+      currentTitle.dataset.tooltip = String(replacementTitle.dataset.tooltip || "");
+    }
+    if (currentTitleText && replacementTitleText && currentTitleText.textContent !== replacementTitleText.textContent) {
+      currentTitleText.textContent = replacementTitleText.textContent;
+    }
+
+    // Conservar el summary evita cortar el relleno, la sacudida y las partículas
+    // que ya están animándose. Solo cambia el contenido analítico del item destino.
+    const currentBody = current.querySelector(":scope > .analizar-pdf-ortho-file-group");
+    const replacementBody = replacement.querySelector(":scope > .analizar-pdf-ortho-file-group");
+    if (currentBody && replacementBody && currentBody.innerHTML !== replacementBody.innerHTML) {
+      destroyRailMasonryLayoutFor(currentBody);
+      currentBody.innerHTML = replacementBody.innerHTML;
+      currentBody.classList.remove("is-muuri-rail-grid");
+      createRailMasonryLayout(currentBody);
+    }
+    const groupKey = String(current.dataset.railGroupKey || "").trim();
+    if (groupKey) railOpenStateByKey.set(groupKey, current.open === true);
+    bindEvents();
+    scheduleRailMasonryLayout();
+    return true;
+  }
+
+  function updateSessionReference(session = null) {
+    if (el) el.__analizarPdfSession = session;
+    if (pageReportsEl) pageReportsEl.__analizarPdfSession = session;
+    if (railRootEl) railRootEl.__analizarPdfSession = session;
   }
 
   function bindEvents() {
@@ -1989,9 +2619,9 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
         render(session);
       });
     }
-    if (pageReportsEl) {
+    if (railRootEl) {
       bindRailResizeHandle();
-      pageReportsEl.querySelectorAll("details[data-rail-group-key]").forEach((details) => {
+      railRootEl.querySelectorAll("details[data-rail-group-key]").forEach((details) => {
         details.ontoggle = () => {
           const groupKey = String(details.dataset.railGroupKey || "").trim();
           if (groupKey) {
@@ -2000,13 +2630,32 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
           scheduleRailMasonryLayout();
         };
       });
-      pageReportsEl.onclick = (event) => {
+      railRootEl.onclick = (event) => {
         const target = event.target instanceof Element ? event.target.closest("[data-action]") : null;
         const action = String(target?.dataset?.action || "").trim();
         if (!action) return;
+        if (action === "show-page-fragments") {
+          event.preventDefault();
+          const railCategory = target.closest("details[data-rail-category]")?.dataset?.railCategory || "";
+          const selection = {
+            pageName: String(target?.dataset?.pageName || "").trim(),
+            fileId: String(target?.dataset?.fileId || "").trim(),
+            detailKind: String(target?.dataset?.detailKind || railCategory || "orthotypography").trim().toLowerCase(),
+          };
+          const isCurrentSelection = selectedQuickPage
+            && selectedQuickPage.pageName === selection.pageName
+            && selectedQuickPage.fileId === selection.fileId
+            && selectedQuickPage.detailKind === selection.detailKind;
+          selectedQuickPage = isCurrentSelection ? null : selection;
+          const session = railRootEl.__analizarPdfSession || el?.__analizarPdfSession || null;
+          // El detalle vive en un panel independiente: actualizar solo ese nodo
+          // conserva Muuri, los <details> abiertos y cualquier animación activa.
+          renderQuickDetailOnly(session);
+          return;
+        }
         if (action === "toggle-hide-outside-text") {
           outsideTextHidden = !outsideTextHidden;
-          const session = pageReportsEl.__analizarPdfSession || el?.__analizarPdfSession || null;
+          const session = railRootEl.__analizarPdfSession || el?.__analizarPdfSession || null;
           render(session);
           return;
         }
@@ -2024,26 +2673,26 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
         }
         if (action === "open-rail-filter-modal") {
           railFilterModalOpen = true;
-          const session = pageReportsEl.__analizarPdfSession || el?.__analizarPdfSession || null;
+          const session = railRootEl.__analizarPdfSession || el?.__analizarPdfSession || null;
           render(session);
           return;
         }
         if (action === "close-rail-filter-modal") {
           railFilterModalOpen = false;
-          const modal = pageReportsEl.querySelector("[data-rail-filter-modal]");
+          const modal = railRootEl.querySelector("[data-rail-filter-modal]");
           if (modal) modal.hidden = true;
           return;
         }
         if (action === "show-all-rail-categories") {
-          railCategoryVisibility = Object.fromEntries(RAIL_CATEGORY_FILTERS.map((item) => [item.id, true]));
+          railCategoryVisibility = Object.fromEntries(RAIL_CATEGORY_FILTERS.map((item) => [item.id, activeRailWorkflowFormat !== "libre" || item.id !== "recortables"]));
           persistRailCategoryVisibility(railCategoryVisibility);
           railFilterModalOpen = true;
-          const session = pageReportsEl.__analizarPdfSession || el?.__analizarPdfSession || null;
+          const session = railRootEl.__analizarPdfSession || el?.__analizarPdfSession || null;
           render(session);
           return;
         }
         if (action === "toggle-rail-groups") {
-          const groups = Array.from(pageReportsEl.querySelectorAll(".analizar-pdf-ortho-rail details[data-rail-group-key]"));
+          const groups = Array.from(railRootEl.querySelectorAll(".analizar-pdf-ortho-rail details[data-rail-group-key]"));
           const shouldOpen = groups.some((details) => details.open !== true);
           groups.forEach((details) => {
             const groupKey = String(details.dataset.railGroupKey || "").trim();
@@ -2055,7 +2704,7 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
           scheduleRailMasonryLayout();
         }
         if (action === "toggle-rail-nonempty-groups") {
-          const groups = Array.from(pageReportsEl.querySelectorAll(".analizar-pdf-ortho-rail details[data-rail-group-key]"));
+          const groups = Array.from(railRootEl.querySelectorAll(".analizar-pdf-ortho-rail details[data-rail-group-key]"));
           groups.forEach((details) => {
             const groupKey = String(details.dataset.railGroupKey || "").trim();
             const hasLinks = Boolean(details.querySelector(".analizar-pdf-ortho-nav .analizar-pdf-ortho-link"));
@@ -2067,7 +2716,7 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
           scheduleRailMasonryLayout();
         }
       };
-      pageReportsEl.onchange = (event) => {
+      railRootEl.onchange = (event) => {
         const target = event.target instanceof Element ? event.target : null;
         const action = String(target?.dataset?.action || "").trim();
         if (!action) return;
@@ -2096,20 +2745,73 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
           };
           persistRailCategoryVisibility(railCategoryVisibility);
           railFilterModalOpen = true;
-          const session = pageReportsEl.__analizarPdfSession || el?.__analizarPdfSession || null;
+          const session = railRootEl.__analizarPdfSession || el?.__analizarPdfSession || null;
           render(session);
         }
+      };
+    }
+    if (pageReportsEl && pageReportsEl !== railRootEl) {
+      pageReportsEl.onclick = (event) => {
+        const button = event.target instanceof Element ? event.target.closest("[data-action]") : null;
+        if (!button) return;
+        if (button.dataset.action === "close-quick-detail") {
+          event.preventDefault();
+          closeQuickDetail();
+          return;
+        }
+        if (button.dataset.action === "select-layer-tab") {
+          event.preventDefault();
+          const tabs = button.closest("[data-layer-tabs]");
+          if (!tabs) return;
+          tabs.querySelectorAll('[role="tab"]').forEach((tab) => {
+            const active = tab === button;
+            tab.classList.toggle("is-active", active);
+            tab.setAttribute("aria-selected", active ? "true" : "false");
+            tab.tabIndex = active ? 0 : -1;
+            const panel = document.getElementById(String(tab.getAttribute("aria-controls") || ""));
+            if (panel) panel.hidden = !active;
+          });
+          return;
+        }
+        if (button.dataset.action !== "toggle-full-page-text") return;
+        event.preventDefault();
+        const targetId = String(button.getAttribute("aria-controls") || "").trim();
+        const pageCard = targetId ? document.getElementById(targetId) : null;
+        if (!pageCard) return;
+        openFullPageTextModal(pageCard, button);
+      };
+      pageReportsEl.onkeydown = (event) => {
+        const tab = event.target instanceof Element ? event.target.closest('[role="tab"]') : null;
+        if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        const tabs = [...(tab.closest('[role="tablist"]')?.querySelectorAll('[role="tab"]') || [])];
+        if (!tabs.length) return;
+        event.preventDefault();
+        const currentIndex = tabs.indexOf(tab);
+        const nextIndex = event.key === "Home" ? 0
+          : event.key === "End" ? tabs.length - 1
+          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+        tabs[nextIndex]?.click();
+        tabs[nextIndex]?.focus();
       };
     }
   }
 
   function render(session = null) {
+    activeRailWorkflowFormat = session?.workflowFormat === "libre" ? "libre" : "en_forma";
+    if (previousRailWorkflowFormat !== activeRailWorkflowFormat) {
+      previousRailWorkflowFormat = activeRailWorkflowFormat;
+      railCategoryVisibility = readRailCategoryVisibility();
+      if (activeRailWorkflowFormat === "libre") railCategoryVisibility.recortables = false;
+    }
     destroyRailMasonryLayouts();
     if (el) {
       el.__analizarPdfSession = session;
     }
     if (pageReportsEl) {
       pageReportsEl.__analizarPdfSession = session;
+    }
+    if (railRootEl) {
+      railRootEl.__analizarPdfSession = session;
     }
     if (!session) {
       if (el) {
@@ -2118,19 +2820,16 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
       if (pageReportsEl) {
         pageReportsEl.innerHTML = `<div class="analizar-pdf-result-card"><p class="analizar-pdf-empty-state">Todavía no hay reporte por página.</p></div>`;
       }
+      if (railRootEl && railRootEl !== pageReportsEl) {
+        railRootEl.innerHTML = renderRightRail([]);
+      }
+      bindEvents();
       return;
     }
     const result = session.result && typeof session.result === "object" ? session.result : {};
     const summary = session.resultSummary && typeof session.resultSummary === "object" ? session.resultSummary : null;
     const stats = result.stats && typeof result.stats === "object" ? result.stats : {};
-    const railCleared = typeof isRailCleared === "function" ? isRailCleared(session) : false;
-    const fallbackSessionEntries = hasRenderableAnalysis(session) ? [session] : [];
-    const fileEntries = railCleared
-      ? []
-      : (Array.isArray(session.fileResults) && session.fileResults.length ? session.fileResults : fallbackSessionEntries);
-    const railEntries = railCleared
-      ? []
-      : buildOrderedRailEntries(session, fileEntries.filter((entry) => hasRenderableAnalysis(entry)));
+    const { railCleared, fileEntries, railEntries } = resolveRailEntries(session);
     const reportEntries = railCleared ? [] : railEntries.filter((entry) => Array.isArray(entry?.result?.stats?.pageReports) && entry.result.stats.pageReports.length);
     const quickReportEntries = railCleared
       ? []
@@ -2140,24 +2839,23 @@ export function createAnalizarPdfResultsRenderer(deps = {}) {
       el.innerHTML = "";
     }
     if (pageReportsEl) {
+      const quickDetailPanel = pageReportsEl.closest("#analizarPdfQuickDetailPanel");
+      quickDetailPanel?.classList.toggle("is-visible", Boolean(selectedQuickPage?.pageName));
+      updateQuickDetailDescription(quickDetailPanel);
+      const renderedRail = railEntries.length ? renderGroupedRightRail(railEntries) : renderRightRail([]);
       pageReportsEl.innerHTML = `
         <div class="analizar-pdf-page-report-shell">
-          <div class="analizar-pdf-page-report-list">
-            ${reportEntries.length
-              ? reportEntries.map((entry, index) => renderFilePageReports(entry, index, { hideOutsideText: outsideTextHidden })).join("")
-              : ""}
-            ${quickReportEntries.length
-              ? quickReportEntries.map((entry, index) => renderQuickAnalysisReports(entry, index)).join("")
-              : ""}
-            ${!hasAnyPageReport ? `<div class="analizar-pdf-result-card"><p class="analizar-pdf-empty-state">Todavía no hay reporte por página.</p></div>` : ""}
-          </div>
-          ${fileEntries.length ? renderGroupedRightRail(fileEntries) : renderRightRail([])}
+          <div class="analizar-pdf-page-report-list">${renderSelectedFragments(selectedQuickPage, railEntries)}</div>
+          ${railRootEl === pageReportsEl ? renderedRail : ""}
         </div>
       `;
+    }
+    if (railRootEl && railRootEl !== pageReportsEl) {
+      railRootEl.innerHTML = railEntries.length ? renderGroupedRightRail(railEntries) : renderRightRail([]);
     }
     bindEvents();
     initRailMasonryLayouts();
   }
 
-  return { render };
+  return { render, updateRailEntry, updateSessionReference, toggleFileRailGroup, closeQuickDetail };
 }

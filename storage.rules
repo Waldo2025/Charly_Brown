@@ -101,6 +101,20 @@ service firebase.storage {
       allow write: if isOwner(uid) && isSafePublicAsset(allPaths);
     }
 
+    // Imágenes sanitizadas de actividades científicas guardadas por Functions.
+    match /scienceActivities/{uid}/{sessionId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Fallback de imágenes de escape rooms subidas por Functions.
+    // Mantiene acceso público de lectura equivalente a /escaperooms/ para que
+    // preview, sesiones rehidratadas y paquetes exportados puedan renderizarlas.
+    match /unidadesGeneradasAssets/{uid}/{sessionId}/{topicId}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Biblioteca compartida de mindmaps.
     match /mindmap/{allPaths=**} {
       allow read: if true;

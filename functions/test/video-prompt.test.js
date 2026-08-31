@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { buildDialogueVideoPrompt } = require("../src/video-prompt.js");
+const { AVAILABLE_VEO_MODELS, normalizeVeoModel } = require("../src/vertex.js");
 const { normalizeOwnedReferencePath, resolveVertexVideoReferences } = require("../src/ai-jobs.js");
 
 test("maps sceneDescription to appearance and visualNotes to the required action", () => {
@@ -47,6 +48,30 @@ test("voiceOverText is spoken only when script and native dialogue are enabled",
   assert.doesNotMatch(silent.prompt, /No debe llegar a Veo/);
   assert.equal(external.generateAudio, false);
   assert.doesNotMatch(external.prompt, /Ya existe como audio Gemini/);
+});
+
+test("always requests an eight-second Veo source independently of timeline crop", () => {
+  const result = buildDialogueVideoPrompt({
+    requestedDurationSec: 3,
+    durationSec: 3,
+    targetDurationSec: 3
+  });
+
+  assert.equal(result.durationSeconds, 8);
+  assert.match(result.prompt, /polished 8-second video/);
+});
+
+test("preserves every available Vertex Veo model instead of collapsing fast and lite", () => {
+  assert.deepEqual(AVAILABLE_VEO_MODELS, [
+    "veo-3.1-generate-001",
+    "veo-3.1-fast-generate-001",
+    "veo-3.1-lite-generate-001",
+    "veo-3.0-generate-001",
+    "veo-3.0-fast-generate-001",
+    "veo-2.0-generate-001"
+  ]);
+  for (const model of AVAILABLE_VEO_MODELS) assert.equal(normalizeVeoModel(model), model);
+  assert.equal(normalizeVeoModel("veo-3.1-lite-generate-preview"), "veo-3.1-lite-generate-001");
 });
 
 test("accepts only owned session references or public library references", () => {

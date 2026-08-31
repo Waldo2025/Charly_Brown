@@ -33,6 +33,35 @@
   --science-hud-shadow:0 14px 32px rgba(126,74,95,.14),inset 0 0 0 1px rgba(255,255,255,.76);
 }
 
+/* Los encabezados pedagógicos no se recortan: deben envolver y crecer en preview y ZIP. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] :is(
+  .science-question-stage-header h2,
+  .science-micro-level strong,
+  .science-micro-content > h2,
+  .science-micro-concept strong
+) {
+  display:block !important;
+  max-height:none !important;
+  overflow:visible !important;
+  white-space:normal !important;
+  text-overflow:clip !important;
+  overflow-wrap:anywhere !important;
+  -webkit-line-clamp:unset !important;
+  -webkit-box-orient:initial !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-micro-concept {
+  height:auto !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-micro-concept > p {
+  display:block !important;
+  max-height:none !important;
+  overflow:visible !important;
+  -webkit-line-clamp:unset !important;
+  -webkit-box-orient:initial !important;
+}
+
 :where(.sa-game-frame,.science-assessment-host)[data-visual-style="tech-minimal"] {
   --science-hud-accent:#007f92;
   --science-hud-accent-rgb:0,127,146;
@@ -784,6 +813,167 @@
   }
 }
 
+/* Matching is a two-column relation task, never a multiple-choice deck. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-answer-deck.is-matching-question {
+  align-content:start;
+  overflow:auto;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-board {
+  width:min(100%,960px);
+  margin:16px auto 0;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:18px;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column {
+  min-width:0;
+  padding:14px;
+  border:1px solid var(--science-hud-border);
+  border-radius:var(--science-piece-radius);
+  background:var(--science-hud-module);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column h3 {
+  margin:0 0 10px;
+  color:var(--science-hud-muted);
+  font-size:.72rem;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column > div {
+  display:grid;
+  gap:9px;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button {
+  width:100%;
+  min-height:70px;
+  padding:12px;
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr);
+  gap:10px;
+  align-items:center;
+  border:2px solid var(--science-hud-border);
+  border-radius:14px;
+  background:var(--science-hud-panel);
+  color:var(--science-hud-text);
+  text-align:left;
+  cursor:pointer;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button span {
+  display:grid;
+  width:34px;
+  height:34px;
+  place-items:center;
+  border-radius:10px;
+  background:var(--science-hud-accent);
+  color:var(--science-hud-accent-ink);
+  font-weight:900;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button strong {
+  min-width:0;
+  color:inherit;
+  overflow-wrap:anywhere;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button small {
+  grid-column:2;
+  color:var(--science-hud-muted);
+  overflow-wrap:anywhere;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button:is(.is-active,.is-linked) {
+  border-color:var(--science-hud-accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--science-hud-accent) 18%,transparent);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button.is-correct { border-color:var(--science-hud-success); }
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button.is-incorrect { border-color:var(--science-hud-danger); }
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-actions {
+  width:min(100%,960px);
+  margin:14px auto 0;
+  display:flex;
+  gap:14px;
+  align-items:center;
+  justify-content:space-between;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-actions p {
+  margin:0;
+  color:var(--science-hud-muted);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-actions button {
+  min-height:48px;
+  padding:0 22px;
+  border:0;
+  border-radius:999px;
+  background:var(--science-hud-accent);
+  color:var(--science-hud-accent-ink);
+  font-weight:900;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-actions button:disabled { opacity:.42; }
+@media (max-width:700px) {
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-board { grid-template-columns:1fr; }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-actions { align-items:stretch; flex-direction:column; }
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button:is(.is-active,.is-linked) {
+  border-color:var(--matching-pair-color);
+  background:color-mix(in srgb,var(--matching-pair-color) 9%,var(--science-hud-panel));
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--matching-pair-color) 22%,transparent);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button:is(.is-active,.is-linked) span {
+  background:var(--matching-pair-color);
+  color:#fff;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button.is-correct {
+  border-color:var(--science-hud-success);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--science-hud-success) 24%,transparent);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button.is-incorrect {
+  border-color:var(--science-hud-danger);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--science-hud-danger) 22%,transparent);
+}
+
+/* Full-content educational layout: never abbreviate pedagogical copy. */
+:is(.sa-game-frame,.science-assessment-host) :is(
+  .science-micro-level strong,
+  .science-micro-content h2,
+  .science-micro-concept p,
+  .science-micro-example strong,
+  .science-rive-challenge-heading h2,
+  .science-structured-evidence,
+  .science-structured-status span,
+  .science-hologram-header span,
+  .science-rive-result-proof em
+) {
+  display:block !important;
+  max-width:none !important;
+  max-height:none !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  white-space:normal !important;
+  overflow-wrap:anywhere !important;
+  -webkit-line-clamp:unset !important;
+  -webkit-box-orient:initial !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host) :is(.science-micro-mission,.science-micro-visual,.science-micro-content,.science-structured-game) {
+  height:auto !important;
+  max-height:none !important;
+  overflow:visible !important;
+}
+
+/* Cartesian board uses the expected answer domain and keeps edge labels visible. */
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-structured-board {
+  width:100% !important;
+  min-height:clamp(430px,66vh,720px) !important;
+  overflow:visible !important;
+}
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-graph {
+  width:calc(100% - clamp(26px,4vw,54px)) !important;
+  min-height:clamp(360px,58vh,640px) !important;
+  margin-inline:auto !important;
+  overflow:visible !important;
+}
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-graph-tick.is-x:first-of-type {
+  transform:translateX(0) !important;
+}
+
 /* --------------------------------------------------------------------------
    Rive UI presets · motion surfaces + accessible semantic controls
    -------------------------------------------------------------------------- */
@@ -1048,17 +1238,28 @@
   background:linear-gradient(145deg,color-mix(in srgb,var(--science-hud-secondary) 32%,white),color-mix(in srgb,var(--science-hud-secondary) 62%,white)) !important;
 }
 :where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base {
-  min-height:150px;
+  width:100%;
+  max-width:100%;
+  min-height:112px;
   display:flex;
   align-items:center;
   justify-content:center;
+  gap:.16em;
   color:var(--science-hud-text);
-  font-size:clamp(4.6rem,12vw,8rem);
+  font-size:clamp(2.5rem,6vw,4.75rem);
+  line-height:1.08;
+  text-align:center;
   filter:drop-shadow(0 12px 18px rgba(15,31,47,.12));
 }
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base > span { min-width:0;max-width:calc(100% - 78px);overflow-wrap:anywhere; }
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base[data-base-size="medium"] { font-size:clamp(2.1rem,4.8vw,4rem); }
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base[data-base-size="long"] { font-size:clamp(1.55rem,3.5vw,3rem); }
 :where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base sup {
-  min-width:66px;
-  min-height:66px;
+  min-width:clamp(52px,5vw,66px);
+  min-height:clamp(52px,5vw,66px);
+  flex:0 0 auto;
+  font-size:clamp(1.45rem,.42em,2rem);
+  line-height:1;
   color:var(--science-hud-accent) !important;
   -webkit-text-fill-color:var(--science-hud-accent) !important;
   border:2px dashed var(--science-hud-accent) !important;
@@ -1066,6 +1267,7 @@
   background:var(--science-hud-module) !important;
   box-shadow:0 0 0 7px color-mix(in srgb,var(--science-hud-accent) 10%,transparent);
 }
+@media(max-width:560px){:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base{min-height:88px;font-size:clamp(2rem,10vw,3.2rem)}:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base[data-base-size="medium"]{font-size:clamp(1.7rem,8vw,2.7rem)}:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base[data-base-size="long"]{font-size:clamp(1.3rem,6vw,2.1rem)}:where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-exponent-base>span{max-width:calc(100% - 62px)}}
 :where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-structured-game > footer {
   position:sticky !important;
   z-index:4 !important;
@@ -1151,6 +1353,7 @@
     max-height:calc(100% - 24px);
   }
 }
+
 
 @media (prefers-reduced-motion:reduce) {
   :where(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-structured-shell,
@@ -3906,7 +4109,7 @@
   min-height:100% !important;
   margin:0 !important;
   padding:clamp(28px,5vw,76px) !important;
-  align-content:center !important;
+  align-content:start !important;
   border:0 !important;
   border-radius:0 !important;
   background:var(--science-hud-panel) !important;
@@ -4274,9 +4477,14 @@
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-rive-numeric-console .science-rive-mission-carousel {
   position:relative;
   isolation:isolate;
+  flex:0 0 auto;
   width:100%;
-  min-height:clamp(188px,26vh,272px);
-  overflow:hidden;
+  min-height:0;
+  height:auto !important;
+  block-size:auto !important;
+  max-height:none !important;
+  max-block-size:none !important;
+  overflow:visible;
   color:var(--science-hud-text);
   border:1px solid color-mix(in srgb,var(--science-hud-border) 64%,transparent);
   border-radius:20px;
@@ -4284,6 +4492,13 @@
   box-shadow:0 14px 32px color-mix(in srgb,var(--science-hud-text) 10%,transparent);
   touch-action:pan-y;
   cursor:grab;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-structured-game.is-rive-numeric-console > header,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-structured-game.is-rive-numeric-console > .science-structured-status,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-structured-game.is-rive-numeric-console > .science-structured-board,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-structured-game.is-rive-numeric-console > footer {
+  flex-shrink:0;
 }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-rive-numeric-console .science-rive-mission-carousel:active { cursor:grabbing; }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-carousel > canvas {
@@ -4304,10 +4519,14 @@
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-fallback {
   position:relative;
   z-index:1;
-  min-height:inherit;
+  min-height:clamp(188px,26vh,272px);
+  height:auto !important;
+  block-size:auto !important;
+  box-sizing:border-box;
   padding:clamp(18px,3vw,30px);
   display:grid;
-  align-content:center;
+  align-content:start;
+  grid-template-rows:auto auto minmax(min-content,auto) auto;
   gap:10px;
   pointer-events:none;
   transition:opacity .22s ease;
@@ -4393,8 +4612,7 @@
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-pagination b { margin-left:auto; color:var(--science-hud-muted); font-size:.7rem; letter-spacing:.1em; }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-carousel:focus-visible { outline:3px solid color-mix(in srgb,var(--science-hud-accent) 72%,transparent); outline-offset:3px; }
 @media (max-width:760px),(max-height:720px) {
-  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-rive-numeric-console .science-rive-mission-carousel { min-height:206px; }
-  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-fallback { padding:18px; }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-fallback { min-height:206px; padding:18px; }
   :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-rive-mission-nav { padding-inline:9px; font-size:.72rem; }
 }
 @media (prefers-reduced-motion:reduce) {
@@ -4461,7 +4679,9 @@
   margin:0 !important;
   padding:clamp(16px,4vw,54px) !important;
   display:grid !important;
-  align-content:center !important;
+  /* Centering a grid taller than its viewport creates negative overflow that
+     cannot be reached with scrollTop. Questions always start at the real top. */
+  align-content:start !important;
   overflow:auto !important;
   overscroll-behavior:contain;
   border:0 !important;
@@ -4536,21 +4756,23 @@
   box-shadow:inset 0 1px color-mix(in srgb,#fff 70%,transparent),0 14px 34px color-mix(in srgb,var(--science-hud-text) 8%,transparent) !important;
 }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-fill-blank .science-expression {
-  min-height:130px;
-  padding:18px;
+  min-height:0;
+  padding:clamp(16px,2.4vw,28px);
   display:flex;
-  justify-content:center;
-  align-items:center;
-  gap:clamp(8px,1.25vw,16px);
+  flex-wrap:wrap;
+  justify-content:flex-start;
+  align-items:baseline;
+  gap:.38em .48em;
   border:1px solid color-mix(in srgb,var(--science-hud-accent) 46%,transparent);
   border-radius:16px;
   background:var(--science-hud-console);
   color:var(--science-hud-evidence-text);
-  font-size:clamp(1.2rem,2.7vw,2.3rem);
+  font-size:clamp(1rem,1.55vw,1.38rem)!important;
+  line-height:1.55;
   box-shadow:inset 0 0 0 1px color-mix(in srgb,#fff 8%,transparent);
 }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-fill-blank .science-expression :is(span,input) { color:inherit; -webkit-text-fill-color:currentColor; }
-:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-fill-blank .science-expression input { min-width:min(260px,62vw); min-height:58px; border-color:var(--science-hud-accent); background:var(--science-hud-panel); color:var(--science-hud-text); -webkit-text-fill-color:var(--science-hud-text); }
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-fill-blank .science-expression input { flex:0 1 clamp(150px,28vw,260px); width:clamp(150px,28vw,260px); min-width:120px!important; max-width:100%!important; min-height:50px; border-color:var(--science-hud-accent); background:var(--science-hud-panel); color:var(--science-hud-text); -webkit-text-fill-color:var(--science-hud-text); }
 
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-structured-board {
   display:grid !important;
@@ -4585,6 +4807,21 @@
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-slots > li:not(.science-sequence-placeholder) { min-height:54px; padding:8px; border:1px solid color-mix(in srgb,var(--science-hud-accent) 45%,transparent); border-radius:12px; background:var(--science-hud-module); color:var(--science-hud-text); box-shadow:none; }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-slots > li > span { width:30px; height:30px; border-radius:9px; background:var(--science-hud-accent); color:var(--science-hud-console); }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-token-bank-label { grid-column:2; grid-row:1; margin:0; align-self:start; text-align:left; }
+
+/* Keep equation symbols readable on the deliberately light draggable surfaces. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(.science-equation-slots > button,.science-equation-empty-slot,.science-token-bank > button) {
+  color:#142530 !important;
+  -webkit-text-fill-color:#142530 !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(.science-equation-slots,.science-token-bank) :is(button,.is-equation-operator,span,kbd,strong,small) {
+  color:#142530 !important;
+  -webkit-text-fill-color:#142530 !important;
+  opacity:1 !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-equation-empty-slot:empty::after {
+  color:#526773 !important;
+  -webkit-text-fill-color:#526773 !important;
+}
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-bank { grid-column:2; grid-row:2; padding:0 !important; display:grid !important; grid-template-columns:1fr; gap:8px !important; }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-bank > button { width:100%; height:auto !important; min-height:58px !important; padding:10px 12px !important; display:grid !important; grid-template-columns:30px minmax(0,1fr) !important; grid-template-rows:1fr !important; gap:10px !important; text-align:left; }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-bank > button kbd { grid-column:1; grid-row:1; width:26px !important; height:26px !important; display:grid; place-items:center; border-radius:8px; background:color-mix(in srgb,var(--science-hud-accent) 18%,transparent) !important; color:var(--science-hud-accent) !important; font-size:.67rem !important; }
@@ -4593,7 +4830,7 @@
 @media (max-width:760px) {
   :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-structured-board { grid-template-columns:1fr; }
   :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order :is(.science-token-bank-label,.science-sequence-bank) { grid-column:1; grid-row:auto; }
-  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-fill-blank .science-expression { min-height:108px; padding:14px; }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-fill-blank .science-expression { min-height:0; padding:14px; }
 }
 
 /* Sequence Route v2: the board is a vertical mission flow.  Its available
@@ -4627,14 +4864,16 @@
   grid-column:auto;
   grid-row:auto;
   width:100%;
-  max-height:min(34vh,360px);
+  height:auto;
+  min-height:0;
+  max-height:none;
   padding:2px !important;
   display:grid !important;
   grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-auto-rows:max-content;
   align-content:start;
   gap:9px !important;
-  overflow:auto;
-  scrollbar-color:var(--science-hud-accent) transparent;
+  overflow:visible;
 }
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-bank > button {
   width:100%;
@@ -4652,7 +4891,7 @@
   line-height:1.28;
 }
 @media (max-width:680px) {
-  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-bank { grid-template-columns:1fr; max-height:280px; }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .is-sequence-order .science-sequence-bank { grid-template-columns:1fr; max-height:none; }
 }
 @media (max-width:560px) {
   .science-structured-game.is-numeric-answer.has-structured-context.is-rive-numeric-console > header {
@@ -4674,6 +4913,135 @@
 :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .sa-game-mount.is-rive-question > .science-rive-answer-deck:not(.is-keyword-question) .science-rive-answer-card {
   min-height:clamp(94px,15vh,146px);
 }
+
+/* A single themed question-stage contract replaces the legacy launch card. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-shell,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-answer-deck {
+  color:var(--science-hud-text) !important;
+  border-color:var(--science-hud-border) !important;
+  background:
+    radial-gradient(circle at 92% 4%,color-mix(in srgb,var(--science-hud-highlight) 18%,transparent),transparent 34%),
+    var(--science-hud-panel) !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header {
+  width:min(100%,960px);
+  margin:0 auto 14px;
+  padding:clamp(14px,2.3vw,24px);
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px 18px;
+  color:var(--science-hud-text);
+  border:1px solid color-mix(in srgb,var(--science-hud-border) 74%,transparent);
+  border-radius:var(--science-hud-radius);
+  background:var(--science-hud-context);
+  box-shadow:var(--science-piece-shadow);
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header > div {
+  display:grid;
+  gap:3px;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header small {
+  color:var(--science-hud-accent);
+  font-size:.6rem;
+  font-weight:950;
+  letter-spacing:.14em;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header strong,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-progress {
+  color:var(--science-hud-muted);
+  font-size:.66rem;
+  font-weight:850;
+  letter-spacing:.06em;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header h2 {
+  grid-column:1/-1;
+  margin:4px 0 0;
+  color:var(--science-hud-text) !important;
+  -webkit-text-fill-color:var(--science-hud-text) !important;
+  font-size:clamp(1rem,2.1vw,1.55rem);
+  line-height:1.2;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header > p {
+  grid-column:1/-1;
+  margin:0;
+  color:var(--science-hud-muted);
+  font-size:.78rem;
+  line-height:1.45;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-interaction {
+  width:min(100%,960px);
+  margin-inline:auto;
+}
+
+@media (max-width:700px),(max-height:720px) {
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header {
+    margin-bottom:10px;
+    padding:12px;
+  }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header h2 {
+    font-size:clamp(.9rem,4vw,1.12rem);
+  }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-question-stage-header > p {
+    display:none;
+  }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-rive-answer-deck[data-question-type="image-multiple"]
+    .science-question-stage-header > p {
+    display:block !important;
+    margin-top:2px;
+    font-size:clamp(.68rem,2.8vw,.78rem) !important;
+    line-height:1.42 !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    -webkit-line-clamp:unset !important;
+  }
+}
+
+/* Filled equation slots size to their token; placeholders remain uniform. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-equation-slots {
+  align-items:stretch !important;
+  overflow:visible !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-equation-slots > button {
+  width:max-content !important;
+  min-width:clamp(62px,8vw,88px) !important;
+  max-width:100% !important;
+  height:auto !important;
+  min-height:clamp(76px,9vw,98px) !important;
+  padding:12px clamp(16px,2.4vw,28px) !important;
+  flex:0 1 auto !important;
+  white-space:nowrap !important;
+  overflow:visible !important;
+  line-height:1.12 !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-equation-slots > .science-equation-empty-slot {
+  width:clamp(62px,8vw,88px) !important;
+  min-width:clamp(62px,8vw,88px) !important;
+  flex:0 0 auto !important;
+}
+
+@media (max-width:640px) {
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-equation-slots > button {
+    min-width:54px !important;
+    min-height:56px !important;
+    padding:9px 13px !important;
+    font-size:clamp(1rem,5vw,1.3rem) !important;
+  }
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-equation-slots > .science-equation-empty-slot {
+    width:54px !important;
+    min-width:54px !important;
+  }
+}
 @media (max-width:700px),(max-height:720px) {
   :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .sa-game-mount.is-rive-question > .science-rive-answer-deck:not(.is-keyword-question) {
     padding:16px !important;
@@ -4683,3 +5051,998 @@
     grid-template-columns:1fr;
   }
 }
+
+/* Final contrast contract: classic and Rive HUDs always use their theme tokens. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-micro-content {
+  color:var(--science-hud-text) !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] :is(
+  .science-micro-content h2,
+  .science-micro-copy > p,
+  .science-micro-concept p,
+  .science-micro-example strong,
+  .science-micro-example-guidance
+) {
+  color:var(--science-hud-text) !important;
+  -webkit-text-fill-color:var(--science-hud-text) !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] :is(
+  .science-micro-kicker,
+  .science-micro-kicker *,
+  .science-micro-progress,
+  .science-micro-progress span,
+  .science-micro-example small,
+  .science-micro-formula b
+) {
+  color:var(--science-hud-muted) !important;
+  -webkit-text-fill-color:var(--science-hud-muted) !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-micro-progress strong {
+  color:var(--science-hud-accent) !important;
+  -webkit-text-fill-color:var(--science-hud-accent) !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-micro-formula {
+  color:var(--science-hud-text) !important;
+  background:var(--science-hud-module) !important;
+  border-color:color-mix(in srgb,var(--science-hud-border) 70%,transparent) !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-micro-formula code {
+  color:var(--science-hud-accent) !important;
+  -webkit-text-fill-color:var(--science-hud-accent) !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-solar-circuit"] {
+  --science-hud-accent:#f06d1f; --science-hud-accent-rgb:240,109,31;
+  --science-hud-secondary:#149cac; --science-hud-highlight:#ffd34d;
+  --science-hud-text:#173248; --science-hud-muted:#587185; --science-hud-border:#e8a43d;
+  --science-hud-panel:#fff9eb; --science-hud-module:#fff2d3; --science-hud-label:#b94713;
+  --science-hud-context:#e8f8f7; --science-hud-evidence:#173248;
+  --science-hud-evidence-text:#fff8e7; --science-hud-evidence-muted:#bfe8e8;
+  --science-hud-badge-text:#173248; --science-hud-board:#fffdf6;
+  --science-hud-console:#19384d; --science-hud-input:#ffffff;
+  --science-hud-radius:30px; --science-hud-module-radius:22px;
+  --science-hud-shadow:0 24px 56px rgba(23,50,72,.2);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-bio-pulse"] {
+  --science-hud-accent:#8de45f; --science-hud-accent-rgb:141,228,95;
+  --science-hud-secondary:#37c9ad; --science-hud-highlight:#d7f05b;
+  --science-hud-text:#f3fae9; --science-hud-muted:#b9d8c2; --science-hud-border:#4e9274;
+  --science-hud-panel:#173d36; --science-hud-module:#214d43; --science-hud-label:#aaf47c;
+  --science-hud-context:#28594d; --science-hud-evidence:#102d29;
+  --science-hud-evidence-text:#f3fae9; --science-hud-evidence-muted:#b9d8c2;
+  --science-hud-badge-text:#173d36; --science-hud-board:#13352f;
+  --science-hud-console:#0e2925; --science-hud-input:#f5faee;
+  --science-hud-radius:32px; --science-hud-module-radius:26px;
+  --science-hud-shadow:0 24px 58px rgba(9,35,30,.38);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-lunar-blueprint"] {
+  --science-hud-accent:#55b7ff; --science-hud-accent-rgb:85,183,255;
+  --science-hud-secondary:#87d9ff; --science-hud-highlight:#d7f2ff;
+  --science-hud-text:#f4f9ff; --science-hud-muted:#b6cae4; --science-hud-border:#4778b8;
+  --science-hud-panel:#10284f; --science-hud-module:#173763; --science-hud-label:#87d9ff;
+  --science-hud-context:#193d6d; --science-hud-evidence:#091d3b;
+  --science-hud-evidence-text:#f4f9ff; --science-hud-evidence-muted:#b6cae4;
+  --science-hud-badge-text:#10284f; --science-hud-board:#0d2345;
+  --science-hud-console:#081a34; --science-hud-input:#f5f9ff;
+  --science-hud-radius:20px; --science-hud-module-radius:14px;
+  --science-hud-shadow:0 26px 60px rgba(5,21,46,.42);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-volcanic-core"] {
+  --science-hud-accent:#ff7440; --science-hud-accent-rgb:255,116,64;
+  --science-hud-secondary:#ffb238; --science-hud-highlight:#ffe0a3;
+  --science-hud-text:#fff5e7; --science-hud-muted:#d9c1ab; --science-hud-border:#a84d31;
+  --science-hud-panel:#302824; --science-hud-module:#40342e; --science-hud-label:#ff9a62;
+  --science-hud-context:#4b3b32; --science-hud-evidence:#231c19;
+  --science-hud-evidence-text:#fff5e7; --science-hud-evidence-muted:#d9c1ab;
+  --science-hud-badge-text:#2f221c; --science-hud-board:#29211e;
+  --science-hud-console:#1e1816; --science-hud-input:#fff8ed;
+  --science-hud-radius:22px; --science-hud-module-radius:15px;
+  --science-hud-shadow:0 28px 64px rgba(34,20,14,.42);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-prism-glass"] {
+  --science-hud-accent:#245bea; --science-hud-accent-rgb:36,91,234;
+  --science-hud-secondary:#18aeb7; --science-hud-highlight:#ff718c;
+  --science-hud-text:#172644; --science-hud-muted:#5e708d; --science-hud-border:#a8c7e8;
+  --science-hud-panel:rgba(248,252,255,.88); --science-hud-module:rgba(232,246,249,.82);
+  --science-hud-label:#245bea; --science-hud-context:#edf8fa; --science-hud-evidence:#172644;
+  --science-hud-evidence-text:#f8fcff; --science-hud-evidence-muted:#c7d8eb;
+  --science-hud-badge-text:#ffffff; --science-hud-board:#f8fcff;
+  --science-hud-console:#1a3157; --science-hud-input:#ffffff;
+  --science-hud-radius:34px; --science-hud-module-radius:24px;
+  --science-hud-shadow:0 24px 62px rgba(36,91,140,.2);
+}
+/* Graph questions must participate in normal document flow. This final override
+   supersedes legacy compact HUD rows that placed actions over tall boards. */
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot {
+  display:flex !important;
+  flex-direction:column !important;
+  align-items:stretch !important;
+  height:auto !important;
+  min-height:max-content !important;
+  max-height:none !important;
+  overflow:visible !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-structured-board {
+  position:relative !important;
+  display:flex !important;
+  flex:0 0 auto !important;
+  flex-direction:column !important;
+  align-items:stretch !important;
+  gap:clamp(18px,2.4vw,28px) !important;
+  width:100% !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  padding:clamp(20px,3vw,36px) !important;
+  overflow:visible !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-graph {
+  position:relative !important;
+  display:block !important;
+  flex:0 0 clamp(430px,62vh,680px) !important;
+  width:calc(100% - clamp(28px,4vw,56px)) !important;
+  height:clamp(430px,62vh,680px) !important;
+  min-height:430px !important;
+  max-height:none !important;
+  margin:0 auto !important;
+}
+
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-structured-board > p {
+  position:static !important;
+  display:block !important;
+  flex:0 0 auto !important;
+  width:100% !important;
+  height:auto !important;
+  min-height:0 !important;
+  margin:0 !important;
+  overflow:visible !important;
+  white-space:normal !important;
+}
+
+/* Structured boards always size themselves from their complete content. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-board {
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  overflow:visible !important;
+  grid-auto-rows:max-content;
+}
+
+/* Sequence content owns the board height; actions remain in the following row. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-sequence-order .science-structured-board {
+  flex:0 0 auto !important;
+  height:max-content !important;
+  min-height:max-content !important;
+  max-height:none !important;
+  overflow:visible !important;
+  contain:none !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-sequence-order .science-sequence-slots {
+  height:auto !important;
+  min-height:104px;
+  max-height:none !important;
+  overflow:visible !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-sequence-order .science-sequence-bank {
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)) !important;
+  grid-auto-rows:max-content !important;
+  height:max-content !important;
+  min-height:max-content !important;
+  max-height:none !important;
+  overflow:visible !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-sequence-order .science-sequence-bank > button {
+  height:auto !important;
+  min-height:max-content !important;
+  max-height:none !important;
+  white-space:normal !important;
+  overflow:visible !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-sequence-order > footer {
+  position:static !important;
+  inset:auto !important;
+  margin-top:4px;
+  flex:0 0 auto;
+}
+
+:is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot > footer {
+  position:static !important;
+  inset:auto !important;
+  z-index:auto !important;
+  display:grid !important;
+  flex:0 0 auto !important;
+  grid-template-columns:minmax(180px,.8fr) minmax(240px,1.2fr) !important;
+  gap:clamp(14px,2vw,24px) !important;
+  width:100% !important;
+  height:auto !important;
+  min-height:76px !important;
+  margin:clamp(20px,3vw,34px) 0 0 !important;
+  padding:0 !important;
+  transform:none !important;
+}
+
+@media (max-width:720px) {
+  :is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot .science-graph {
+    flex-basis:clamp(360px,58vh,520px) !important;
+    height:clamp(360px,58vh,520px) !important;
+    min-height:360px !important;
+  }
+  :is(.sa-game-frame,.science-assessment-host) .science-structured-game.is-graph-plot > footer {
+    grid-template-columns:1fr !important;
+  }
+}
+/* Contrast guard for visual presets whose gameplay surfaces are intentionally dark. */
+:where(.sa-game-frame,.science-assessment-host):is(
+  [data-visual-style="rive-arcade-matsuri"],
+  [data-visual-style="rive-solar-circuit"],
+  [data-visual-style="rive-bio-pulse"],
+  [data-visual-style="rive-lunar-blueprint"],
+  [data-visual-style="rive-volcanic-core"]
+) {
+  --science-hud-text:#f7fbf5;
+  --science-hud-muted:#c6d9d1;
+}
+
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] :is(
+  .science-rive-answer-deck,
+  .science-rive-matching-board,
+  .science-rive-matching-column,
+  .science-rive-matching-actions,
+  .science-micro-content
+) :is(p,h1,h2,h3,h4,strong,small,b) {
+  color:var(--science-hud-text);
+  -webkit-text-fill-color:var(--science-hud-text);
+}
+
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] :is(
+  .science-rive-answer-heading b,
+  .science-rive-matching-column h3,
+  .science-rive-matching-column button small,
+  .science-rive-matching-actions p,
+  .science-micro-content > p
+) {
+  color:var(--science-hud-muted) !important;
+  -webkit-text-fill-color:var(--science-hud-muted) !important;
+}
+
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-answer-heading span {
+  color:var(--science-hud-accent) !important;
+  -webkit-text-fill-color:var(--science-hud-accent) !important;
+}
+
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-matching-column button span {
+  color:var(--science-hud-accent-ink) !important;
+  -webkit-text-fill-color:var(--science-hud-accent-ink) !important;
+}
+
+/* Multiple-answer questions shared by editor preview and standalone export. */
+:is(.sa-game-frame,.science-assessment-host) .science-multiple-answer-check {
+  display:block;
+  width:min(100%,420px);
+  min-height:56px;
+  margin:20px auto 0;
+  padding:12px 24px;
+  color:#17354a;
+  border:0;
+  border-radius:999px;
+  background:linear-gradient(105deg,#c9f36c,#8ee5cb);
+  box-shadow:0 10px 24px rgba(80,165,142,.22);
+  font:950 1rem/1.2 var(--sa-font,system-ui,sans-serif);
+  cursor:pointer;
+}
+:is(.sa-game-frame,.science-assessment-host) .science-multiple-answer-check:disabled { opacity:.48; cursor:not-allowed; }
+:is(.sa-game-frame,.science-assessment-host) .science-rive-answer-list.is-multiple-select .science-rive-answer-card.is-selected {
+  border-color:#baf34f !important;
+  box-shadow:0 0 0 4px rgba(186,243,79,.2),0 12px 28px rgba(4,22,31,.18) !important;
+}
+
+/* Primary verification command shared by all question mechanics. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+) {
+  position:relative;
+  isolation:isolate;
+  min-height:58px !important;
+  padding:13px 58px 13px 28px !important;
+  overflow:hidden;
+  color:#082a31 !important;
+  -webkit-text-fill-color:#082a31 !important;
+  border:1px solid rgba(188,255,106,.9) !important;
+  border-radius:16px 4px 16px 4px !important;
+  background:linear-gradient(105deg,#c9f66b 0%,#87ead0 58%,#68d8dc 100%) !important;
+  box-shadow:0 7px 0 #217f82,0 15px 30px rgba(17,104,110,.28),inset 0 1px 0 rgba(255,255,255,.8) !important;
+  font:950 clamp(.88rem,1.15vw,1.02rem)/1.15 var(--sa-font,system-ui,sans-serif) !important;
+  letter-spacing:.035em;
+  text-transform:uppercase;
+  cursor:pointer;
+  transform:translateY(0);
+  transition:transform .18s ease,box-shadow .18s ease,filter .18s ease;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+)::before {
+  content:"";
+  position:absolute;
+  z-index:-1;
+  inset:0;
+  background:linear-gradient(115deg,transparent 0 38%,rgba(255,255,255,.48) 48%,transparent 58%);
+  transform:translateX(-120%);
+  transition:transform .55s ease;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+)::after {
+  content:"✓";
+  position:absolute;
+  right:14px;
+  top:50%;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  color:#eaffff;
+  -webkit-text-fill-color:#eaffff;
+  border-radius:9px 2px 9px 2px;
+  background:#0d6570;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.28);
+  transform:translateY(-50%);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+):is(:hover,:focus-visible):not(:disabled) {
+  outline:none;
+  filter:saturate(1.08) brightness(1.03);
+  box-shadow:0 4px 0 #217f82,0 19px 34px rgba(17,104,110,.34),0 0 0 4px rgba(135,234,208,.2) !important;
+  transform:translateY(3px);
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+):is(:hover,:focus-visible):not(:disabled)::before { transform:translateX(120%); }
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+):disabled {
+  color:#5e7475 !important;
+  -webkit-text-fill-color:#5e7475 !important;
+  border-color:#9ebdb8 !important;
+  background:linear-gradient(105deg,#dbe7d2,#c9ddd8) !important;
+  box-shadow:0 4px 0 #8ca6a2 !important;
+  cursor:not-allowed;
+  filter:saturate(.55);
+  opacity:.72 !important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(
+  .science-multiple-answer-check,
+  .science-rive-matching-actions [data-matching-check],
+  .science-structured-game > footer button:last-child
+):disabled::after { content:"…"; background:#78908d; }
+@media(max-width:640px){
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] :is(.science-multiple-answer-check,.science-rive-matching-actions [data-matching-check],.science-structured-game > footer button:last-child){width:100%!important;border-radius:13px 3px 13px 3px!important}
+}
+/* Timeline route redesign: a real connected axis, not a sortable list. */
+.science-structured-game.is-timeline-order .science-structured-board{padding:clamp(16px,2.4vw,28px)!important;overflow:visible!important;background:linear-gradient(145deg,color-mix(in srgb,var(--science-hud-panel,#173f3a) 94%,#fff 6%),color-mix(in srgb,var(--science-hud-console,#0c2625) 88%,transparent))!important}
+.science-timeline{--timeline-axis:var(--science-hud-accent,#54ddd0);--timeline-spark:var(--science-hud-highlight,#baf34f);width:100%!important;display:grid!important;gap:18px!important;color:var(--science-hud-text,#eefdf8)!important}
+.science-timeline>header{min-height:54px!important;padding:10px 14px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;color:var(--science-hud-text,#eefdf8)!important;border:0!important;border-bottom:1px solid color-mix(in srgb,var(--timeline-axis) 34%,transparent)!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+.science-timeline>header span{display:flex;align-items:center;gap:10px;font-size:.76rem;font-weight:1000;letter-spacing:.14em}.science-timeline>header span::before{content:"";width:12px;height:12px;border:3px solid var(--timeline-spark);border-radius:50%;box-shadow:0 0 0 6px color-mix(in srgb,var(--timeline-spark) 16%,transparent),0 0 18px color-mix(in srgb,var(--timeline-spark) 42%,transparent)}
+.science-timeline>header b{color:var(--science-hud-muted,#bad1ca)!important;font-size:.62rem!important;letter-spacing:.12em}
+.science-timeline-track{position:relative!important;width:100%!important;min-height:390px!important;margin:0!important;padding:0 18px!important;display:grid!important;grid-template-columns:repeat(var(--timeline-count,3),minmax(170px,1fr))!important;gap:18px!important;align-items:stretch!important;list-style:none!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:thin;scroll-snap-type:x proximity}
+.science-timeline-track::before{content:""!important;position:absolute!important;z-index:0!important;left:5%!important;right:5%!important;top:50%!important;width:auto!important;height:5px!important;border-radius:999px!important;background:linear-gradient(90deg,var(--timeline-axis),var(--timeline-spark),var(--timeline-axis))!important;box-shadow:0 0 0 1px color-mix(in srgb,var(--timeline-axis) 28%,transparent),0 0 24px color-mix(in srgb,var(--timeline-axis) 40%,transparent)!important;transform:translateY(-50%)}
+.science-timeline-event,.science-timeline-empty{position:relative!important;z-index:1!important;min-width:170px!important;min-height:390px!important;padding:0!important;display:block!important;border:0!important;background:transparent!important;scroll-snap-align:center}
+.science-timeline-event>i,.science-timeline-empty>i{position:absolute!important;z-index:4!important;left:50%!important;top:50%!important;width:34px!important;height:34px!important;margin:0!important;display:grid!important;place-items:center!important;border:6px solid color-mix(in srgb,var(--science-hud-console,#0c2625) 92%,#fff 8%)!important;border-radius:50%!important;background:var(--timeline-spark)!important;box-shadow:0 0 0 3px var(--timeline-axis),0 0 0 9px color-mix(in srgb,var(--timeline-axis) 18%,transparent),0 0 24px color-mix(in srgb,var(--timeline-spark) 34%,transparent)!important;transform:translate(-50%,-50%)!important}
+.science-timeline-event>i::after,.science-timeline-empty>i::after{content:counter(list-item);color:#173047;font:1000 .7rem var(--sa-font,sans-serif)}
+.science-timeline-event article{position:absolute!important;left:0!important;width:100%!important;min-height:138px!important;padding:15px 16px!important;display:grid!important;align-content:start!important;gap:6px!important;color:#173047!important;-webkit-text-fill-color:#173047!important;border:1px solid #b9dedc!important;border-radius:18px!important;background:linear-gradient(150deg,#fff 0%,#eef9f6 100%)!important;box-shadow:0 13px 0 color-mix(in srgb,var(--timeline-axis) 13%,transparent),0 20px 34px rgba(3,26,35,.18)!important}
+.science-timeline-event:nth-child(odd) article{bottom:calc(50% + 35px)!important}.science-timeline-event:nth-child(even) article{top:calc(50% + 35px)!important}
+.science-timeline-event article::after{content:"";position:absolute;left:50%;width:14px;height:14px;background:#eef9f6;border-right:1px solid #b9dedc;border-bottom:1px solid #b9dedc}.science-timeline-event:nth-child(odd) article::after{bottom:-8px;transform:translateX(-50%) rotate(45deg)}.science-timeline-event:nth-child(even) article::after{top:-8px;transform:translateX(-50%) rotate(225deg)}
+.science-timeline-event article small{width:max-content!important;max-width:100%;padding:4px 9px!important;color:#086b66!important;-webkit-text-fill-color:#086b66!important;border-radius:999px!important;background:#d7f7ed!important;font-size:.63rem!important;font-weight:1000!important;letter-spacing:.08em}.science-timeline-event article strong{color:#173047!important;-webkit-text-fill-color:#173047!important;font-size:.95rem!important;line-height:1.2!important}.science-timeline-event article p{margin:0!important;color:#526b76!important;-webkit-text-fill-color:#526b76!important;font-size:.7rem!important;line-height:1.4!important}
+.science-timeline-event>div{position:absolute!important;left:50%!important;z-index:5!important;margin:0!important;display:flex!important;gap:5px!important;transform:translateX(-50%)!important}.science-timeline-event:nth-child(odd)>div{top:calc(50% + 28px)!important}.science-timeline-event:nth-child(even)>div{bottom:calc(50% + 28px)!important}
+.science-timeline-event>div button{width:30px!important;height:28px!important;min-width:30px!important;min-height:28px!important;padding:0!important;display:grid!important;place-items:center!important;color:#173047!important;-webkit-text-fill-color:#173047!important;border:1px solid #b9d7d7!important;border-radius:9px!important;background:#fff!important;box-shadow:0 4px 10px rgba(6,35,45,.14)!important}.science-timeline-event>div button:disabled{opacity:.32!important}
+.science-timeline-empty>span{position:absolute;left:50%;top:calc(50% + 34px);color:var(--science-hud-muted,#bad1ca)!important;-webkit-text-fill-color:var(--science-hud-muted,#bad1ca)!important;font-size:.62rem!important;font-weight:950!important;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;transform:translateX(-50%)}.science-timeline-empty>i{background:var(--science-hud-console,#0c2625)!important;border-style:solid!important}
+.science-timeline-bank{width:100%!important;padding:14px!important;display:grid!important;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))!important;gap:10px!important;border:1px solid color-mix(in srgb,var(--timeline-axis) 24%,transparent)!important;border-radius:18px!important;background:color-mix(in srgb,var(--science-hud-console,#0c2625) 72%,transparent)!important}
+.science-timeline-bank-card{min-height:94px!important;padding:12px 14px!important;display:grid!important;align-content:start!important;gap:4px!important;text-align:left!important;color:#173047!important;-webkit-text-fill-color:#173047!important;border:1px solid #c4dfdd!important;border-radius:14px!important;background:#f8fffd!important;box-shadow:0 6px 0 color-mix(in srgb,var(--timeline-axis) 25%,#b9d7d7),0 12px 20px rgba(4,28,37,.15)!important}.science-timeline-bank-card :is(small,strong,span){color:inherit!important;-webkit-text-fill-color:inherit!important}.science-timeline-bank-card small{color:#08736d!important;-webkit-text-fill-color:#08736d!important;font-size:.62rem!important;font-weight:1000!important}.science-timeline-bank-card strong{font-size:.88rem!important}.science-timeline-bank-card span{color:#526b76!important;-webkit-text-fill-color:#526b76!important;font-size:.68rem!important;line-height:1.35!important}.science-timeline-bank-card.is-used{display:none!important}
+.science-timeline-process .science-timeline-track::before{background:repeating-linear-gradient(90deg,var(--timeline-axis) 0 24px,var(--timeline-spark) 24px 31px)!important}.science-timeline-ideas .science-timeline-event>i{border-radius:9px!important;transform:translate(-50%,-50%) rotate(45deg)!important}.science-timeline-ideas .science-timeline-event>i::after{transform:rotate(-45deg)}
+@media(max-width:700px){.science-timeline>header{align-items:flex-start!important;flex-direction:column!important}.science-timeline-track{min-height:0!important;padding:12px 0 12px 48px!important;display:grid!important;grid-template-columns:1fr!important;gap:18px!important;overflow:visible!important}.science-timeline-track::before{left:17px!important;right:auto!important;top:20px!important;bottom:20px!important;width:5px!important;height:auto!important;transform:none!important}.science-timeline-event,.science-timeline-empty{min-width:0!important;min-height:150px!important}.science-timeline-event>i,.science-timeline-empty>i{left:-31px!important;top:50%!important}.science-timeline-event article,.science-timeline-event:nth-child(odd) article,.science-timeline-event:nth-child(even) article{position:relative!important;top:auto!important;bottom:auto!important;left:auto!important;min-height:0!important}.science-timeline-event article::after{left:-8px!important;top:50%!important;bottom:auto!important;transform:translateY(-50%) rotate(135deg)!important}.science-timeline-event>div,.science-timeline-event:nth-child(odd)>div,.science-timeline-event:nth-child(even)>div{position:relative!important;left:auto!important;top:auto!important;bottom:auto!important;margin-top:10px!important;justify-content:flex-start!important;transform:none!important}.science-timeline-empty>span{left:12px;top:50%;transform:translateY(-50%)}.science-timeline-bank{grid-template-columns:1fr!important}}
+/* Numeric answers use a light input surface, so their value must stay dark. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-numeric-input > input,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-numeric-console input[data-numeric-answer] {
+  color:#142b38!important;
+  -webkit-text-fill-color:#142b38!important;
+  caret-color:#087b74!important;
+  background:#f8fff9!important;
+  opacity:1!important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-numeric-input > input::placeholder,
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-numeric-console input[data-numeric-answer]::placeholder {
+  color:#667c86!important;
+  -webkit-text-fill-color:#667c86!important;
+  opacity:1!important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-numeric-input > input::selection { color:#102a36;background:#9cecdf; }
+/* Fill-in expressions combine dark panels with light input surfaces. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-expression {
+  color:var(--science-hud-text,#eefdf8)!important;
+  -webkit-text-fill-color:var(--science-hud-text,#eefdf8)!important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-expression > :is(span,strong,b,small) {
+  color:var(--science-hud-text,#eefdf8)!important;
+  -webkit-text-fill-color:var(--science-hud-text,#eefdf8)!important;
+  opacity:1!important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-expression input {
+  color:#142b38!important;
+  -webkit-text-fill-color:#142b38!important;
+  caret-color:#087b74!important;
+  background:#fff!important;
+  opacity:1!important;
+}
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"] .science-expression input::placeholder {
+  color:#667c86!important;
+  -webkit-text-fill-color:#667c86!important;
+  opacity:1!important;
+}
+/* Timeline containment: cards participate in layout so the board grows with their copy. */
+.science-structured-game.is-timeline-order{height:auto!important;min-height:100%!important;max-height:none!important;overflow:visible!important;align-content:start!important}
+.science-structured-game.is-timeline-order .science-structured-board{height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;align-content:start!important}
+.science-structured-game.is-timeline-order .science-timeline{height:auto!important;min-height:0!important}
+.science-structured-game.is-timeline-order .science-timeline-track{height:auto!important;min-height:0!important;max-height:none!important;padding:14px 18px 26px!important;align-items:stretch!important;overflow-x:auto!important;overflow-y:visible!important}
+.science-structured-game.is-timeline-order .science-timeline-track::before{top:45px!important;transform:none!important}
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){position:relative!important;min-height:0!important;height:auto!important;padding:0 0 10px!important;display:grid!important;grid-template-rows:62px minmax(150px,auto) auto!important;align-content:start!important;gap:12px!important;overflow:visible!important}
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:relative!important;left:auto!important;top:auto!important;grid-row:1!important;align-self:center!important;justify-self:center!important;margin:0!important;transform:none!important}
+.science-structured-game.is-timeline-order .science-timeline-event article{position:relative!important;inset:auto!important;grid-row:2!important;width:100%!important;min-height:150px!important;height:auto!important;overflow:visible!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{top:auto!important;bottom:auto!important}
+.science-structured-game.is-timeline-order .science-timeline-event article::after{left:50%!important;top:-8px!important;bottom:auto!important;transform:translateX(-50%) rotate(225deg)!important}
+.science-structured-game.is-timeline-order .science-timeline-event>div{position:relative!important;inset:auto!important;grid-row:3!important;align-self:end!important;justify-self:center!important;margin:0!important;transform:none!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{top:auto!important;bottom:auto!important}
+.science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;grid-row:2!important;align-self:center!important;justify-self:center!important;transform:none!important}
+.science-structured-game.is-timeline-order>footer{position:relative!important;inset:auto!important;margin-top:0!important}
+@media(max-width:700px){.science-structured-game.is-timeline-order .science-timeline-track{padding:12px 0 12px 48px!important;overflow:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{left:17px!important;top:20px!important;bottom:20px!important;width:5px!important;height:auto!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){grid-template-columns:1fr!important;grid-template-rows:auto auto!important;gap:8px!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;left:-31px!important;top:50%!important;transform:translateY(-50%)!important}.science-structured-game.is-timeline-order .science-timeline-event article{grid-row:1!important}.science-structured-game.is-timeline-order .science-timeline-event>div{grid-row:2!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:1!important;justify-self:start!important}}
+.science-structured-game.is-timeline-order{margin-top:clamp(68px,8vh,88px)!important}
+.science-structured-game.is-timeline-order .science-timeline-track{min-height:0!important}
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-height:440px!important;grid-template-rows:minmax(150px,1fr) 38px 62px minmax(150px,1fr) 38px!important;gap:8px!important}
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{grid-row:3!important}
+.science-structured-game.is-timeline-order .science-timeline-track::before{top:50%!important;transform:translateY(-50%)!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) article{grid-row:1!important;align-self:end!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd)>div{grid-row:2!important;align-self:center!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) article{grid-row:4!important;align-self:start!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(even)>div{grid-row:5!important;align-self:center!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(odd) article::after{top:auto!important;bottom:-8px!important;transform:translateX(-50%) rotate(45deg)!important}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(even) article::after{top:-8px!important;bottom:auto!important;transform:translateX(-50%) rotate(225deg)!important}
+.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:4!important;align-self:start!important;margin-top:18px}
+@media(max-width:700px){.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-height:0!important;grid-template-rows:auto auto!important}.science-structured-game.is-timeline-order .science-timeline-track::before{top:20px!important;transform:none!important}.science-structured-game.is-timeline-order :is(.science-timeline-event:nth-child(n)) article{grid-row:1!important;align-self:start!important}.science-structured-game.is-timeline-order :is(.science-timeline-event:nth-child(n))>div{grid-row:2!important;align-self:start!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:-8px!important;top:50%!important;bottom:auto!important;transform:translateY(-50%) rotate(135deg)!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:1!important;align-self:center!important;margin-top:0}}
+.science-structured-game.is-timeline-order>header{margin-top:clamp(92px,11vh,128px)!important}
+@media(max-width:700px){.science-structured-game.is-timeline-order>header{margin-top:78px!important}}
+
+/* ZIP export safe area and cross-question contrast. */
+body[data-science-export] .science-structured-game>header{margin-top:clamp(108px,11vh,144px)!important}
+body[data-science-export] .science-structured-board{color:#f4ffe8!important;-webkit-text-fill-color:#f4ffe8!important}
+body[data-science-export] .science-structured-board :is(.science-exponent-base,.science-atom-meter,.science-token-bank-label,.science-sequence-bank-label,.science-timeline-bank-title){color:#f4ffe8!important;-webkit-text-fill-color:#f4ffe8!important;text-shadow:0 1px 1px rgba(0,0,0,.28)}
+body[data-science-export] .science-structured-board :is(button,input,select,textarea,.science-equation-slots,.science-timeline-event article,.science-timeline-bank-card,.science-sequence-item,.science-molecule-equation article){color:#102838!important;-webkit-text-fill-color:#102838!important;text-shadow:none!important}
+body[data-science-export] .science-structured-board input::placeholder{color:#526776!important;-webkit-text-fill-color:#526776!important;opacity:1!important}
+@media(max-width:700px){body[data-science-export] .science-structured-game>header{margin-top:88px!important}}
+
+/* Tokyo Tech uses light gameplay surfaces. Keep their copy dark while allowing
+   briefing/result/graph components to retain their own locally scoped palette. */
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] {
+  --science-hud-text:#142530;
+  --science-hud-muted:#536b75;
+}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] :is(
+  .science-question-stage-header,
+  .science-rive-question-card,
+  .science-rive-answer-deck,
+  .science-rive-answer-card,
+  .science-rive-matching-board,
+  .science-rive-matching-column,
+  .science-structured-board
+) {
+  color:#142530;
+  -webkit-text-fill-color:#142530;
+}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] :is(
+  .science-question-stage-header,
+  .science-rive-question-card,
+  .science-rive-answer-card,
+  .science-rive-matching-column,
+  .science-structured-board
+) :is(h1,h2,h3,h4,p,strong,b,button,label,span,input,textarea,select) {
+  color:#142530;
+  -webkit-text-fill-color:#142530;
+}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] :is(
+  .science-rive-answer-card small,
+  .science-rive-matching-column small,
+  .science-structured-status,
+  .science-structured-status span
+) {
+  color:#536b75;
+  -webkit-text-fill-color:#536b75;
+}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] :is(
+  .science-micro-content,
+  .science-rive-result-content,
+  .science-graph
+) {
+  color:var(--science-hud-text);
+  -webkit-text-fill-color:var(--science-hud-text);
+}
+
+/* Arcade Matsuri renders equation pieces on dark violet cards. */
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-arcade-matsuri"] :is(
+  .science-token-bank button,
+  .science-equation-slots button
+) {
+  color:#fff9e8!important;
+  -webkit-text-fill-color:#fff9e8!important;
+  opacity:1!important;
+  text-shadow:0 1px 0 rgba(0,0,0,.28);
+}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-arcade-matsuri"] :is(
+  .science-token-bank button,
+  .science-equation-slots button
+) :is(span,strong,small,b) {
+  color:inherit!important;
+  -webkit-text-fill-color:inherit!important;
+  opacity:1!important;
+}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-arcade-matsuri"] :is(
+  .science-token-bank button:disabled,
+  .science-equation-slots button:disabled
+) {
+  color:#d8d2ef!important;
+  -webkit-text-fill-color:#d8d2ef!important;
+  opacity:.72!important;
+}
+
+:is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-token-bank > button {
+  color:#fff9e8!important;
+  -webkit-text-fill-color:#fff9e8!important;
+  border-color:#ff4e9a!important;
+  background:linear-gradient(145deg,#393173,#241d54)!important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.16),0 8px 0 #ff4e9a,0 12px 24px rgba(7,4,34,.42)!important;
+  text-shadow:0 1px 1px #090520,0 0 12px rgba(255,226,89,.28)!important;
+  font-weight:1000!important;
+  opacity:1!important;
+}
+
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-board .science-token-bank button,
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-board .science-token-bank button * {
+  --science-hud-text:#fff9e8!important;
+  color:#fff9e8!important;
+  -webkit-text-fill-color:#fff9e8!important;
+  text-decoration-color:#fff9e8!important;
+  opacity:1!important;
+}
+
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-board .science-equation-slots button,
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-board .science-equation-slots button * {
+  color:#fff9e8!important;
+  -webkit-text-fill-color:#fff9e8!important;
+  text-shadow:0 1px 1px #090520,0 0 10px rgba(255,249,232,.2)!important;
+  opacity:1!important;
+}
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-board .science-equation-slots .is-equation-operator,
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-board .science-equation-slots .is-equation-operator * {
+  color:#ffe259!important;
+  -webkit-text-fill-color:#ffe259!important;
+  text-shadow:0 1px 1px #090520,0 0 12px rgba(255,226,89,.48)!important;
+  opacity:1!important;
+}
+
+/* Exponent bases sit directly on the dark Arcade board. Keep their readable
+   foreground independent from generic light-surface span rules. */
+html body :is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-structured-game.is-exponent-placement .science-exponent-base > span {
+  color:#fff9e8!important;
+  -webkit-text-fill-color:#fff9e8!important;
+  text-shadow:0 2px 2px #090520,0 0 18px rgba(255,249,232,.14)!important;
+  opacity:1!important;
+}
+
+/* Timeline flow: keep actions in normal document flow after the item bank. */
+.science-structured-game.is-timeline-order{container-name:science-timeline-question;container-type:inline-size;height:auto!important;min-height:100%!important;max-height:none!important;margin-top:0!important;display:flex!important;flex-direction:column!important;align-content:normal!important;overflow:visible!important}
+.science-structured-game.is-timeline-order>header{margin-top:0!important}.science-structured-game.is-timeline-order .science-structured-board{order:3;height:auto!important;min-height:0!important;max-height:none!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;align-content:normal!important;gap:clamp(16px,2.5cqi,24px)!important;overflow:visible!important;contain:none!important}.science-structured-game.is-timeline-order .science-timeline{order:1;min-height:0!important}.science-structured-game.is-timeline-order :is(.science-token-bank-label,.science-timeline-bank-title){order:2;margin:0!important}.science-structured-game.is-timeline-order .science-timeline-bank{order:3}
+.science-structured-game.is-timeline-order .science-timeline-track{min-height:0!important;height:auto!important;padding:14px 18px 24px!important;align-items:start!important;overflow-x:auto!important;overflow-y:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{top:45px!important;transform:none!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:150px!important;min-height:0!important;height:auto!important;padding:0 0 8px!important;display:grid!important;grid-template-rows:62px minmax(0,auto) auto!important;align-content:start!important;gap:10px!important;overflow:visible!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:relative!important;inset:auto!important;grid-row:1!important;align-self:center!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{position:relative!important;inset:auto!important;grid-row:2!important;align-self:start!important;width:100%!important;min-height:150px!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:50%!important;top:-8px!important;bottom:auto!important;transform:translateX(-50%) rotate(225deg)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{position:relative!important;inset:auto!important;grid-row:3!important;align-self:start!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;grid-row:2!important;align-self:start!important;justify-self:center!important;margin:0!important;transform:none!important}
+.science-structured-game.is-timeline-order>footer{order:4;position:relative!important;inset:auto!important;z-index:1!important;width:100%!important;margin:0!important;padding:0!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important;background:transparent!important;box-shadow:none!important;transform:none!important}.science-structured-game.is-timeline-order>footer>button{width:100%!important;min-width:0!important}
+@container science-timeline-question (max-width:760px){.science-timeline>header{align-items:flex-start!important;flex-direction:column!important}.science-structured-game.is-timeline-order .science-timeline-track{padding:12px 0 12px 48px!important;grid-template-columns:1fr!important;gap:18px!important;overflow:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{left:17px!important;right:auto!important;top:20px!important;bottom:20px!important;width:5px!important;height:auto!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:0!important;grid-template-rows:auto auto!important;gap:8px!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;left:-31px!important;top:50%!important;transform:translateY(-50%)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{grid-row:1!important;min-height:0!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:-8px!important;top:50%!important;transform:translateY(-50%) rotate(135deg)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{grid-row:2!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:1!important;align-self:center!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-bank{grid-template-columns:1fr!important}}
+@container science-timeline-question (max-width:480px){.science-structured-game.is-timeline-order>footer{grid-template-columns:1fr!important}}
+
+/* Final vertical-centering and contrast contract shared by preview and ZIP. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-rive-result-content {
+  justify-content:safe center!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .sa-game-mount.is-rive-question > .science-rive-answer-deck.is-rive-only {
+  display:grid!important;
+  align-content:safe center!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .sa-game-mount.is-rive-question > .science-rive-answer-deck.is-rive-only.is-keyword-question {
+  align-content:safe center!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .sa-game-mount.is-structured-question > .science-structured-game.is-fill-blank {
+  width:100%!important;
+  min-width:100%!important;
+  height:100%!important;
+  min-height:100%!important;
+  margin:0!important;
+  grid-template-rows:auto auto auto auto!important;
+  align-content:safe center!important;
+  overflow:auto!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-fill-blank > header {
+  width:100%!important;
+  margin-top:0!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-fill-blank .science-structured-board {
+  width:100%!important;
+  place-items:center!important;
+  align-content:center!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-sequence-order .science-rive-sequence-route,
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-sequence-order .science-sequence-slots {
+  width:100%!important;
+  max-width:none!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] :is(
+  .science-structured-game.is-sequence-order .science-rive-sequence-route > small,
+  .science-structured-game.is-sequence-order .science-token-bank-label,
+  .science-structured-game.is-equation-build .science-token-bank-label
+) {
+  width:max-content!important;
+  max-width:100%!important;
+  margin:0!important;
+  padding:7px 11px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  gap:7px!important;
+  color:#f3fffd!important;
+  -webkit-text-fill-color:#f3fffd!important;
+  border:1px solid rgba(95,224,210,.46)!important;
+  border-radius:8px!important;
+  background:#123443!important;
+  text-shadow:none!important;
+  opacity:1!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-sequence-order .science-rive-sequence-route > small b {
+  color:#9ee9df!important;
+  -webkit-text-fill-color:#9ee9df!important;
+}
+
+@media (max-width:700px),(max-height:720px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .sa-game-mount.is-structured-question > .science-structured-game.is-fill-blank {
+    padding:12px!important;
+    align-content:safe center!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .sa-game-mount.is-rive-question > .science-rive-answer-deck.is-rive-only,
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .sa-game-mount.is-rive-question > .science-rive-answer-deck.is-rive-only.is-keyword-question {
+    align-content:safe center!important;
+  }
+}
+
+/* Texto pedagógico del ejemplo sin negrita; el rótulo pequeño conserva jerarquía. */
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-micro-example :is(strong,.science-micro-example-guidance) {
+  font-weight:400 !important;
+}
+
+/* Encabezado móvil vertical: primero avance, después el planteamiento del reto. */
+@media (max-width:820px) and (orientation:portrait) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-rive-numeric-console > header.science-structured-question-header {
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:max-content max-content !important;
+    align-items:start !important;
+    gap:10px !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-rive-numeric-console > header.science-structured-question-header
+    > .science-rive-challenge-progress {
+    grid-column:1 !important;
+    grid-row:1 !important;
+    justify-self:start !important;
+    margin:0 !important;
+    order:1 !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-rive-numeric-console > header.science-structured-question-header
+    > .science-rive-challenge-heading {
+    grid-column:1 !important;
+    grid-row:2 !important;
+    width:100% !important;
+    order:2 !important;
+  }
+}
+
+/* El editor puede estrechar el reto aunque la ventana completa siga siendo ancha. */
+:is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+  .science-structured-game.is-rive-numeric-console {
+  container-name:science-question-header;
+  container-type:inline-size;
+}
+@container science-question-header (max-width:820px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-rive-numeric-console > header.science-structured-question-header {
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:max-content max-content !important;
+    align-items:start !important;
+    gap:10px !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-rive-numeric-console > header.science-structured-question-header
+    > .science-rive-challenge-progress {
+    position:relative !important;
+    inset:auto !important;
+    grid-column:1 !important;
+    grid-row:1 !important;
+    justify-self:start !important;
+    margin:0 !important;
+    order:1 !important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-structured-game.is-rive-numeric-console > header.science-structured-question-header
+    > .science-rive-challenge-heading {
+    position:relative !important;
+    inset:auto !important;
+    grid-column:1 !important;
+    grid-row:2 !important;
+    width:100% !important;
+    min-width:0 !important;
+    order:2 !important;
+  }
+}
+
+/* Compact, manual carousel for the teacher-authored experience. */
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-briefing{display:grid;grid-template-columns:1fr;gap:7px;min-width:0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--science-hud-accent) 28%,transparent);border-radius:10px;background:color-mix(in srgb,var(--science-hud-panel) 82%,transparent)}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-track{min-width:0;min-height:54px}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-track article{min-width:0;animation:scienceExperienceSlideIn .2s ease both}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-track article[hidden]{display:none!important}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-briefing small{display:block;margin-bottom:4px;color:var(--science-hud-accent);font-size:.58rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-briefing p{margin:0;color:var(--science-hud-text);font-size:.7rem;font-weight:700;line-height:1.42}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-controls{display:flex;align-items:center;justify-content:flex-end;gap:7px}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-controls>button{width:28px;height:28px;padding:0;border:1px solid color-mix(in srgb,var(--science-hud-accent) 42%,transparent);border-radius:8px;background:transparent;color:var(--science-hud-text);font-size:1.15rem;line-height:1;cursor:pointer}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-controls>button>span{color:inherit!important;-webkit-text-fill-color:currentColor!important;opacity:1!important;text-shadow:0 1px 2px rgba(0,0,0,.24)}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-controls>button:hover,:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-controls>button:focus-visible{border-color:var(--science-hud-accent);background:color-mix(in srgb,var(--science-hud-accent) 14%,transparent);outline:none}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-dots{display:flex;align-items:center;gap:5px}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-dots button{width:7px;height:7px;padding:0;border:0;border-radius:50%;background:color-mix(in srgb,var(--science-hud-text) 30%,transparent);cursor:pointer}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-dots button[aria-selected="true"]{width:18px;border-radius:999px;background:var(--science-hud-accent)}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-controls>[data-experience-status]{min-width:38px;color:color-mix(in srgb,var(--science-hud-text) 78%,var(--science-hud-accent))!important;-webkit-text-fill-color:currentColor!important;font-size:.58rem;font-weight:800;text-align:center}
+@keyframes scienceExperienceSlideIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){:where(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-experience-carousel-track article{animation:none}}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] .science-experience-briefing p,:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] .science-experience-carousel-controls>button{color:#142530!important;-webkit-text-fill-color:#142530!important}
+:where(.sa-game-frame,.science-assessment-host)[data-visual-style="rive-tokyo-tech"] .science-experience-carousel-controls>[data-experience-status]{color:#536b75!important;-webkit-text-fill-color:#536b75!important}
+
+/* Mobile briefing: preserve the complete generated illustration and let the
+   briefing own its vertical scroll. Portrait artwork must never be cropped by
+   the desktop Rive cover treatment. */
+@media (max-width:780px), (pointer:coarse) {
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .sa-assessment-layer.sa-briefing-layer {
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior-y:auto !important;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y !important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .sa-briefing-layer .science-rive-briefing-screen.science-micro-mission {
+    position:relative !important;
+    inset:auto !important;
+    width:100% !important;
+    height:auto !important;
+    min-height:100% !important;
+    max-height:none !important;
+    overflow:visible !important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-rive-briefing-screen.science-micro-mission .science-micro-visual {
+    width:100% !important;
+    height:clamp(300px,125cqi,680px) !important;
+    min-height:300px !important;
+    max-height:72svh !important;
+    display:grid !important;
+    place-items:center !important;
+    overflow:hidden !important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-rive-briefing-screen.science-micro-mission .science-micro-visual
+    :is(.sa-level-hero,.science-level-hero) {
+    position:absolute !important;
+    inset:0 !important;
+    width:100% !important;
+    height:100% !important;
+    object-fit:contain !important;
+    object-position:center center !important;
+    background:color-mix(in srgb,var(--science-hud-secondary) 10%,var(--science-hud-panel)) !important;
+  }
+}
+/* Canonical responsive timeline stack. Keep this final to beat legacy Rive rules. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-structured-board{position:relative!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;gap:20px!important;height:auto!important;min-height:0!important;overflow:visible!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline{order:1!important;position:relative!important;inset:auto!important;width:100%!important;min-height:0!important;display:flex!important;flex-direction:column!important;gap:14px!important;overflow:visible!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-token-bank-label{order:2!important;position:relative!important;inset:auto!important;width:100%!important;margin:4px 0 0!important;display:block!important;text-align:center!important;transform:none!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-bank{order:3!important;position:relative!important;inset:auto!important;width:100%!important;height:auto!important;margin:0!important;transform:none!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer,html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer>button{position:relative!important;inset:auto!important;height:auto!important;margin:0!important;transform:none!important}@container science-timeline-question (max-width:760px){html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline{min-height:196px!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track{min-height:118px!important;padding:14px 10px 22px!important;display:grid!important;grid-template-columns:repeat(var(--timeline-count,3),minmax(142px,1fr))!important;grid-auto-flow:column!important;grid-auto-columns:minmax(142px,1fr)!important;overflow-x:auto!important;overflow-y:hidden!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event){min-height:270px!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-bank{display:grid!important;grid-template-columns:1fr!important;gap:14px!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer{display:grid!important;grid-template-columns:1fr!important;gap:12px!important}}
+@container science-timeline-question (max-width:760px){html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline{min-height:0!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track,html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event){position:relative!important;width:100%!important;min-height:0!important;padding:18px 12px!important;display:grid!important;grid-template-columns:1fr!important;grid-auto-flow:row!important;grid-auto-columns:auto!important;grid-auto-rows:minmax(92px,auto)!important;gap:14px!important;overflow:visible!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track::before{left:50%!important;right:auto!important;top:18px!important;bottom:18px!important;width:5px!important;height:auto!important;transform:translateX(-50%)!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){position:relative!important;width:calc(50% - 38px)!important;min-width:0!important;min-height:92px!important;padding:12px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:8px!important;overflow:visible!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd){justify-self:start!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even){justify-self:end!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;top:50%!important;bottom:auto!important;margin:0!important;transform:translateY(-50%)!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd)>i{left:auto!important;right:-57px!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even)>i{left:-57px!important;right:auto!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;margin:0!important;white-space:normal!important;text-align:center!important;transform:none!important}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-event article{position:relative!important;inset:auto!important;width:100%!important;min-height:0!important;margin:0!important;transform:none!important}}
+.science-structured-game.is-timeline-order .science-timeline{overflow:visible!important}.science-structured-game.is-timeline-order .science-timeline-track{min-height:118px!important;grid-auto-rows:minmax(80px,max-content)!important;overflow-x:auto!important;overflow-y:hidden!important}.science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event){min-height:270px!important}.science-structured-game.is-timeline-order .science-timeline-empty{min-height:80px!important}@container science-timeline-question (max-width:760px){.science-structured-game.is-timeline-order .science-timeline-track,.science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event){min-height:0!important;overflow:visible!important}}
+@container science-timeline-question (max-width:760px){.science-structured-game.is-timeline-order .science-timeline-track,.science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event){min-height:118px!important;padding:14px 10px 22px!important;display:grid!important;grid-template-columns:repeat(var(--timeline-count,3),minmax(142px,1fr))!important;grid-auto-flow:column!important;grid-auto-columns:minmax(142px,1fr)!important;grid-auto-rows:minmax(80px,max-content)!important;gap:12px!important;overflow-x:auto!important;overflow-y:hidden!important}.science-structured-game.is-timeline-order .science-timeline-track::before{left:5%!important;right:5%!important;top:45px!important;bottom:auto!important;width:auto!important;height:5px!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:142px!important;min-height:80px!important;display:grid!important;grid-template-rows:62px minmax(0,auto) auto!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:relative!important;inset:auto!important;grid-row:1!important;justify-self:center!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:2!important;justify-self:center!important;text-align:center!important}}html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer{order:4!important;position:relative!important;inset:auto!important;z-index:1!important;margin:0!important;transform:none!important}
+.science-structured-game.is-timeline-order .science-timeline-track{grid-auto-rows:max-content!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){position:relative!important}
+:is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-token-bank > button:nth-child(even) {
+  border-color:#27ddd8!important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.16),0 8px 0 #27ddd8,0 12px 24px rgba(7,4,34,.42)!important;
+}
+:is(
+  .sa-game-frame[data-visual-style="rive-arcade-matsuri"],
+  .science-assessment-host[data-visual-style="rive-arcade-matsuri"],
+  .sa-game-frame[data-visual-style="arcade-science"],
+  .science-assessment-host[data-visual-style="arcade-science"]
+) .science-token-bank > button :is(span,small,b,strong) {
+  color:#fff9e8!important;
+  -webkit-text-fill-color:#fff9e8!important;
+  opacity:1!important;
+}
+
+/* Introduction flow: generated objectives can be much taller than the short
+   briefing copy used by the original two-column composition. Base the layout
+   on the real preview width and keep every section in document flow. */
+@container sa-briefing-frame (max-width:820px) {
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .sa-assessment-layer.sa-briefing-layer {
+    display:block!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .sa-briefing-layer .science-rive-briefing-screen.science-micro-mission {
+    position:relative!important;
+    inset:auto!important;
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:stretch!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:100%!important;
+    max-height:none!important;
+    overflow:visible!important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .science-rive-briefing-screen.science-micro-mission .science-micro-visual {
+    flex:0 0 auto!important;
+    width:100%!important;
+    height:clamp(240px,58cqi,440px)!important;
+    min-height:240px!important;
+    max-height:none!important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .science-rive-briefing-screen.science-micro-mission .science-micro-content {
+    flex:0 0 auto!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:visible!important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-experience-briefing,
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-experience-carousel-track,
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-experience-carousel-track article {
+    position:relative!important;
+    inset:auto!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:0!important;
+    max-height:none!important;
+    overflow:visible!important;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style]
+    .science-experience-briefing p {
+    overflow-wrap:anywhere;
+  }
+
+  :is(.sa-game-frame,.science-assessment-host)[data-visual-style^="rive-"]
+    .science-rive-briefing-screen .science-micro-concepts {
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+}
+
+@media (max-width:780px) {
+  body[data-science-export] .science-assessment-host >
+    .science-rive-briefing-screen.science-micro-mission {
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:stretch!important;
+    height:auto!important;
+    max-height:none!important;
+    overflow:visible!important;
+  }
+
+  body[data-science-export] .science-rive-briefing-screen.science-micro-mission
+    .science-micro-content {
+    position:relative!important;
+    flex:0 0 auto!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:visible!important;
+  }
+
+  body[data-science-export] .science-rive-briefing-screen
+    .science-micro-concepts {
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+}
+
+/* Final timeline precedence: compact stations and keep controls after the bank. */
+.science-structured-game.is-timeline-order{container-name:science-timeline-question;container-type:inline-size;height:auto!important;min-height:100%!important;max-height:none!important;margin-top:0!important;display:flex!important;flex-direction:column!important;align-content:normal!important;overflow:visible!important}.science-structured-game.is-timeline-order>header{margin-top:0!important}.science-structured-game.is-timeline-order .science-structured-board{order:3;height:auto!important;min-height:0!important;max-height:none!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;align-content:normal!important;gap:clamp(16px,2.5cqi,24px)!important;overflow:visible!important;contain:none!important}.science-structured-game.is-timeline-order .science-timeline{order:1;min-height:0!important}.science-structured-game.is-timeline-order :is(.science-token-bank-label,.science-timeline-bank-title){order:2;margin:0!important}.science-structured-game.is-timeline-order .science-timeline-bank{order:3}.science-structured-game.is-timeline-order .science-timeline-track{min-height:0!important;height:auto!important;padding:14px 18px 24px!important;align-items:start!important;overflow-x:auto!important;overflow-y:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{top:45px!important;transform:none!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:150px!important;min-height:0!important;height:auto!important;padding:0 0 8px!important;display:grid!important;grid-template-rows:62px minmax(0,auto) auto!important;align-content:start!important;gap:10px!important;overflow:visible!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:relative!important;inset:auto!important;grid-row:1!important;align-self:center!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{position:relative!important;inset:auto!important;grid-row:2!important;align-self:start!important;width:100%!important;min-height:150px!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:50%!important;top:-8px!important;bottom:auto!important;transform:translateX(-50%) rotate(225deg)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{position:relative!important;inset:auto!important;grid-row:3!important;align-self:start!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;grid-row:2!important;align-self:start!important;justify-self:center!important;margin:0!important;transform:none!important}.science-structured-game.is-timeline-order>footer{order:4;position:relative!important;inset:auto!important;z-index:1!important;width:100%!important;margin:0!important;padding:0!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important;background:transparent!important;box-shadow:none!important;transform:none!important}.science-structured-game.is-timeline-order>footer>button{width:100%!important;min-width:0!important}
+@container science-timeline-question (max-width:760px){.science-timeline>header{align-items:flex-start!important;flex-direction:column!important}.science-structured-game.is-timeline-order .science-timeline-track{padding:12px 0 12px 48px!important;grid-template-columns:1fr!important;gap:18px!important;overflow:visible!important}.science-structured-game.is-timeline-order .science-timeline-track::before{left:17px!important;right:auto!important;top:20px!important;bottom:20px!important;width:5px!important;height:auto!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){min-width:0!important;grid-template-rows:auto auto!important;gap:8px!important}.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;left:-31px!important;top:50%!important;transform:translateY(-50%)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article{grid-row:1!important;min-height:0!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after{left:-8px!important;top:50%!important;transform:translateY(-50%) rotate(135deg)!important}.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div{grid-row:2!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-empty>span{grid-row:1!important;align-self:center!important;justify-self:start!important}.science-structured-game.is-timeline-order .science-timeline-bank{grid-template-columns:1fr!important}}
+@container science-timeline-question (max-width:480px){.science-structured-game.is-timeline-order>footer{grid-template-columns:1fr!important}}

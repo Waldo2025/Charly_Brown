@@ -6,8 +6,8 @@ const timelineUiSource = readFileSync(new URL("../public/podcaster/podcaster-tim
 
 assert.match(
   podcasterSource,
-  /STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX = -15;/,
-  "El nudge horizontal de subtracks debe ser -15px."
+  /STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX = 0;/,
+  "El nudge horizontal de subtracks debe ser 0px."
 );
 
 assert.match(

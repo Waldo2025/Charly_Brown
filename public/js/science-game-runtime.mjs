@@ -1,3 +1,5 @@
+import { normalizeProcedureSequence } from "./science-assessment-normalization.mjs?v=20260814-procedure-objects-v1";
+
 let PhaserModule = null;
 let AnimeModule = null;
 const EVIDENCE_CHECK_ANIMATION_MS = 2200;
@@ -5,13 +7,21 @@ const GAMEPLAY_FEEDBACK_READING_MS = 4000;
 
 async function loadPhaser() {
   if (PhaserModule) return PhaserModule;
-  const source = globalThis.SCIENCE_PHASER_URL || "../vendor/phaser/phaser.esm.js";
+  if (globalThis.__SCIENCE_EXPORT_PHASER__) {
+    PhaserModule = globalThis.__SCIENCE_EXPORT_PHASER__;
+    return PhaserModule;
+  }
+  const source = globalThis.SCIENCE_PHASER_URL || "../vendor/phaser/phaser.esm.min.js";
   PhaserModule = await import(source);
   return PhaserModule;
 }
 
 async function loadAnime() {
   if (AnimeModule) return AnimeModule;
+  if (globalThis.__SCIENCE_EXPORT_ANIME__) {
+    AnimeModule = globalThis.__SCIENCE_EXPORT_ANIME__;
+    return AnimeModule;
+  }
   const source = globalThis.SCIENCE_ANIME_URL || "../vendor/animejs/anime.esm.min.js";
   AnimeModule = await import(source);
   return AnimeModule;
@@ -62,6 +72,62 @@ async function playScienceProbeEffect(surface) {
 }
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+export function resolveFillBlankSegments(question = {}) {
+  const normalizeBlankMarkers = (value) => String(value)
+    .replace(/\[\s*(?:blank|espacio|hueco)\s*\]/gi, "___")
+    .replace(/\{\{?\s*(?:blank|espacio|hueco)\s*\}?\}/gi, "___")
+    .replace(/_{3,}/g, "___");
+  const splitBlank = (values) => values
+    .flatMap((value) => normalizeBlankMarkers(value).split(/(___)/))
+    .filter((value) => value !== "");
+  const keepSingleBlank = (segments) => {
+    let foundBlank = false;
+    return segments.filter((segment) => {
+      if (segment !== "___") return true;
+      if (foundBlank) return false;
+      foundBlank = true;
+      return true;
+    });
+  };
+  const authored = keepSingleBlank(splitBlank(Array.isArray(question.segments) ? question.segments : []));
+  const authoredBlankIndex = authored.indexOf("___");
+  const authoredCopy = authored.filter((segment) => segment !== "___").join("").replace(/\s+/g, " ").trim();
+  const contextCopy = String(question.context || "").replace(/\s+/g, " ").trim();
+  const prompt = normalizeBlankMarkers(question.prompt || "").replace(/\s+/g, " ").trim();
+  const compactAuthored = authored.join("").replace(/\s+/g, " ").trim();
+  const compactPrompt = prompt.replace(/[?¿]+$/g, "").trim();
+  const inferredPromptFallback = compactAuthored === `${compactPrompt}: ___.`
+    || compactAuthored === `${compactPrompt}: ___`;
+  const legacyContextAtEnd = authoredBlankIndex === authored.length - 1
+    && (authoredCopy.length > 220 || (contextCopy && authoredCopy === contextCopy));
+  if (authoredBlankIndex >= 0 && !legacyContextAtEnd && !inferredPromptFallback) return authored;
+  const expression = normalizeBlankMarkers(question.expression || question.formula || question.equation || "").trim();
+  if (expression.includes("___")) return keepSingleBlank(splitBlank([expression]));
+  if (prompt.includes("___")) return keepSingleBlank(splitBlank([prompt]));
+  const completionMatch = prompt.match(/^completa (?:la|el) (?:oraci[oó]n|enunciado|frase) sobre\s+(.+?)[.?!]*$/i);
+  if (completionMatch) {
+    const subject = completionMatch[1].replace(/[.?!:;\s]+$/g, "").trim();
+    const sentence = subject ? subject.charAt(0).toUpperCase() + subject.slice(1) : "La respuesta correcta";
+    return [`${sentence} es `, "___", "."];
+  }
+  const questionMatch = prompt.match(/^(.*?)(?:[,.;]\s*)?¿?\s*cu[aá]l\s+es\s+(?:el|la)?\s*(.+?)\s*\??$/i);
+  if (questionMatch) {
+    const lead = questionMatch[1].replace(/[¿?.,;:\s]+$/g, "").trim();
+    let answerLabel = questionMatch[2].replace(/[?¿]+$/g, "").trim();
+    let suffix = ".";
+    const unitMatch = answerLabel.match(/^(.*?)\s+en\s+([^,.;?]+)$/i);
+    if (unitMatch) {
+      answerLabel = unitMatch[1].trim();
+      suffix = ` ${unitMatch[2].trim()}.`;
+    }
+    const label = answerLabel ? answerLabel.charAt(0).toUpperCase() + answerLabel.slice(1) : "El resultado";
+    return [lead ? `${lead}. ${label} es ` : `${label} es `, "___", suffix];
+  }
+  const concisePrompt = (prompt || "Completa la expresión").replace(/[?¿]+$/g, "").trim();
+  return [`${concisePrompt}: `, "___", "."];
+}
+
 const readControl = (config, id, fallback) => {
   const control = (config.controls || []).find((item) => item.id === id);
   return Number(control?.value ?? fallback);
@@ -1636,16 +1702,14 @@ class ScienceLabScene {
     }[char]));
     const concise = (value, maxWords = 24, maxCharacters = 180) => {
       const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
-      if (!normalized) return "";
-      let result = normalized.split(" ").slice(0, maxWords).join(" ");
-      if (result.length > maxCharacters) result = result.slice(0, maxCharacters).replace(/\s+\S*$/, "");
-      return result.length < normalized.length ? `${result.replace(/[,:;.-]+$/, "")}…` : result;
+      return normalized;
     };
     const normalize = (value) => String(value ?? "")
       .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
       .replace(/[×∙]/g, "·").replace(/[−–—]/g, "-")
+      .replace(/[\/÷]/g, "÷")
       .replace(/\s+/g, "").toLowerCase();
-    const state = { selected: [], selectedTokenIndexes: [], value: "", points: [], coefficients: [], exponent: "" };
+    const state = { selected: [], selectedTokenIndexes: [], value: "", points: [], coefficients: [], coefficientEdits: new Set(), exponent: "" };
     const typeLabels = {
       "equation-build": "CONSTRUCTOR DE ECUACIONES",
       "fill-blank": "REACTOR DE SÍMBOLOS",
@@ -1653,10 +1717,14 @@ class ScienceLabScene {
       "chemical-balance": "BALANZA MOLECULAR",
       "numeric-answer": "CONSOLA NUMÉRICA",
       "graph-plot": "SONDA CARTESIANA",
-      "sequence-order": "ESTACIONES DE PROCESO"
+      "sequence-order": "ESTACIONES DE PROCESO",
+      "number-line-placement": "RECTA NUMÉRICA"
     };
     const isMinimalRiveNumeric = question.type === "numeric-answer"
       && String(this.configData.visualStyle || "").startsWith("rive-");
+    const structuredHeaderPrompt = question.type === "fill-blank"
+      ? ""
+      : `<h2>${escape(concise(question.prompt, 28, 195))}</h2>`;
     const missionCarouselPages = isMinimalRiveNumeric ? [
       question.context ? { label: "ANTECEDENTE", title: "Situación de misión", body: concise(question.context, 48, 420) } : null,
       Array.isArray(question.given) && question.given.length
@@ -1668,12 +1736,12 @@ class ScienceLabScene {
     overlay.classList.toggle("has-structured-context", Boolean(learningContext));
     overlay.classList.toggle("is-rive-numeric-console", isMinimalRiveNumeric);
     overlay.innerHTML = `
-      <header>
-        <div class="science-rive-challenge-heading">
-          ${isMinimalRiveNumeric ? "" : `<i class="science-rive-challenge-signal" data-science-rive-hud data-rive-artboard="New Artboard" data-rive-state-machine="State Machine 1" data-rive-fit="contain" aria-hidden="true"><canvas></canvas></i>`}
-          <div><small>${typeLabels[question.type] || "RETO STEM"}</small><h2>${escape(concise(question.prompt, 28, 195))}</h2></div>
-        </div>
-        <div class="science-rive-challenge-progress" aria-hidden="true"><i></i><i></i><i></i></div>
+      <header class="science-structured-question-header">
+        ${isMinimalRiveNumeric ? `<div class="science-rive-challenge-heading"><div><small>${typeLabels[question.type] || "RETO STEM"}</small>${structuredHeaderPrompt}</div></div>` : `
+          <i class="science-rive-challenge-signal" data-science-rive-hud data-rive-artboard="New Artboard" data-rive-state-machine="State Machine 1" data-rive-fit="contain" aria-hidden="true"><canvas></canvas></i>
+          <section class="science-structured-question-copy"><small>${typeLabels[question.type] || "RETO STEM"}</small>${structuredHeaderPrompt}</section>
+        `}
+        ${isMinimalRiveNumeric ? `<div class="science-rive-challenge-progress" aria-hidden="true"><i></i><i></i><i></i></div>` : `<span class="science-rive-challenge-progress" aria-hidden="true"><i></i><i></i><i></i></span>`}
       </header>
       ${learningContext}
       <div class="science-structured-status"><span>${isMinimalRiveNumeric ? "Introduce el valor y valida tu cálculo" : "Construye, observa y comprueba"}</span><strong data-structured-progress>0%</strong></div>
@@ -1683,10 +1751,52 @@ class ScienceLabScene {
     const board = overlay.querySelector("[data-structured-board]");
     const check = overlay.querySelector("[data-structured-check]");
     const progress = overlay.querySelector("[data-structured-progress]");
+    const configureFallbackMissionCarousel = (carousel, pages) => {
+      if (!carousel || !Array.isArray(pages) || !pages.length || carousel.dataset.carouselReady === "true") return;
+      carousel.dataset.carouselReady = "true";
+      const previous = carousel.querySelector("[data-rive-carousel-prev]");
+      const next = carousel.querySelector("[data-rive-carousel-next]");
+      const dots = [...carousel.querySelectorAll("[data-rive-carousel-dot]")];
+      const label = carousel.querySelector("[data-rive-carousel-label]");
+      const title = carousel.querySelector("[data-rive-carousel-title]");
+      const body = carousel.querySelector("[data-rive-carousel-body]");
+      const count = carousel.querySelector("[data-rive-carousel-count]");
+      let active = 0;
+      const renderPage = () => {
+        const page = pages[active];
+        if (label) label.textContent = `${String(active + 1).padStart(2, "0")} · ${page.label || "MISIÓN"}`;
+        if (title) title.textContent = page.title || "";
+        if (body) body.textContent = page.body || "";
+        if (count) count.textContent = `${active + 1}/${pages.length}`;
+        dots.forEach((dot, index) => {
+          dot.classList.toggle("is-active", index === active);
+          dot.setAttribute("aria-current", index === active ? "step" : "false");
+        });
+        if (previous) previous.disabled = active === 0;
+        if (next) next.disabled = active === pages.length - 1;
+      };
+      const move = (direction) => {
+        active = Math.max(0, Math.min(pages.length - 1, active + direction));
+        renderPage();
+      };
+      previous?.addEventListener("click", () => move(-1));
+      next?.addEventListener("click", () => move(1));
+      dots.forEach((dot, index) => dot.addEventListener("click", () => { active = index; renderPage(); }));
+      carousel.tabIndex = 0;
+      carousel.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") { event.preventDefault(); move(-1); }
+        if (event.key === "ArrowRight") { event.preventDefault(); move(1); }
+      });
+      renderPage();
+    };
     requestAnimationFrame(() => {
-      globalThis.ScienceRiveHud?.mountAll(overlay);
       const carousel = overlay.querySelector(".science-rive-mission-carousel");
-      if (carousel) globalThis.ScienceRiveHud?.configureMissionCarousel(carousel, missionCarouselPages);
+      if (globalThis.ScienceRiveHud) {
+        globalThis.ScienceRiveHud.mountAll(overlay);
+        if (carousel) globalThis.ScienceRiveHud.configureMissionCarousel(carousel, missionCarouselPages);
+      } else {
+        configureFallbackMissionCarousel(carousel, missionCarouselPages);
+      }
     });
     const buttonList = (items, className = "science-token-bank") =>
       `<div class="${className}" aria-label="Piezas disponibles">${items.map((item, index) => {
@@ -1704,6 +1814,16 @@ class ScienceLabScene {
       }
       return shuffled;
     };
+    const timelineDisplayLabel = (timelineEvent = {}) => {
+      const label = String(timelineEvent.label || "").replace(/\s+/g, " ").trim();
+      if (!label) return "";
+      const revealsPosition = /^(?:(?:paso|step|etapa|fase|momento|evento|estaci[oó]n|station)\s*(?:n(?:[uú]mero|[º°.]?)\s*)?\d+|(?:primer|primero|segundo|tercer|tercero|cuarto|quinto|sexto|s[eé]ptimo|octavo)\s+(?:paso|etapa|fase|momento|evento))\b/i.test(label);
+      return revealsPosition ? "" : label;
+    };
+    const timelineLabelMarkup = (timelineEvent = {}) => {
+      const label = timelineDisplayLabel(timelineEvent);
+      return label ? `<small>${escape(label)}</small>` : "";
+    };
     const fallbackEquationDistractors = (required) => {
       const present = new Set(required.map(String));
       const candidates = ["−", "×", "÷", "0", "1", "x", "y", "x²", "12"];
@@ -1713,10 +1833,26 @@ class ScienceLabScene {
     };
     const graphAxes = (() => {
       const source = question.axes || {};
-      const xMin = Number.isFinite(Number(source.xMin)) ? Number(source.xMin) : -5;
-      const xMaxValue = Number.isFinite(Number(source.xMax)) ? Number(source.xMax) : 5;
-      const yMin = Number.isFinite(Number(source.yMin)) ? Number(source.yMin) : -5;
-      const yMaxValue = Number.isFinite(Number(source.yMax)) ? Number(source.yMax) : 5;
+      const targets = (question.targetPoints || []).filter((point) => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)));
+      const roundedOuterBound = (value, direction) => {
+        if (!Number.isFinite(value) || Math.abs(value) < 1e-9) return 0;
+        const magnitude = 10 ** Math.floor(Math.log10(Math.abs(value)));
+        return (direction < 0 ? Math.floor(value / magnitude) : Math.ceil(value / magnitude)) * magnitude;
+      };
+      const resolveDomain = (key, suppliedMin, suppliedMax) => {
+        const values = targets.map((point) => Number(point[key]));
+        const hasSupplied = Number.isFinite(Number(suppliedMin)) && Number.isFinite(Number(suppliedMax)) && Number(suppliedMax) > Number(suppliedMin);
+        const targetsFit = values.length && hasSupplied && values.every((value) => value >= Number(suppliedMin) && value <= Number(suppliedMax));
+        if (targetsFit) return [Number(suppliedMin), Number(suppliedMax)];
+        if (!values.length) return hasSupplied ? [Number(suppliedMin), Number(suppliedMax)] : [-5, 5];
+        const rawMin = Math.min(...values), rawMax = Math.max(...values), nonNegative = rawMin >= 0;
+        const span = Math.max(1, rawMax - rawMin, Math.abs(rawMax), Math.abs(rawMin));
+        const minimum = nonNegative ? 0 : roundedOuterBound(rawMin - span * .1, -1);
+        const maximum = roundedOuterBound(rawMax + span * .1, 1);
+        return maximum > minimum ? [minimum, maximum] : [minimum, minimum + 10];
+      };
+      const [xMin, xMaxValue] = resolveDomain("x", source.xMin, source.xMax);
+      const [yMin, yMaxValue] = resolveDomain("y", source.yMin, source.yMax);
       return {
         x: String(source.x || "x"),
         y: String(source.y || "y"),
@@ -1768,42 +1904,49 @@ class ScienceLabScene {
     };
 
     if (question.type === "equation-build") {
-      const requiredPieces = Array.isArray(question.correctSequence) ? question.correctSequence.map(String) : [];
-      const availablePieces = [
+      const canonicalToken = (value) => {
+        const token = String(value).trim();
+        if (/^[-−–—]$/.test(token)) return "−";
+        if (/^[\/÷]$/.test(token)) return "÷";
+        if (/^[*×∙·]$/.test(token)) return "×";
+        return token;
+      };
+      const requiredPieces = Array.isArray(question.correctSequence) ? question.correctSequence.map(canonicalToken) : [];
+      const authoredPieces = [
         ...(Array.isArray(question.pieces) ? question.pieces.map(String) : []),
         ...(Array.isArray(question.distractors) ? question.distractors.map(String) : [])
-      ];
+      ].map(canonicalToken);
       const requiredCounts = new Map();
-      const availableCounts = new Map();
       requiredPieces.forEach((token) => requiredCounts.set(token, (requiredCounts.get(token) || 0) + 1));
-      availablePieces.forEach((token) => availableCounts.set(token, (availableCounts.get(token) || 0) + 1));
-      requiredCounts.forEach((count, token) => {
-        for (let index = availableCounts.get(token) || 0; index < count; index += 1) availablePieces.push(token);
+      const remainingRequired = new Map(requiredCounts);
+      const distractorSet = new Set();
+      const distractorPieces = [];
+      authoredPieces.forEach((token) => {
+        const remaining = remainingRequired.get(token) || 0;
+        if (remaining > 0) {
+          remainingRequired.set(token, remaining - 1);
+        } else if (!requiredCounts.has(token) && !distractorSet.has(token)) {
+          distractorSet.add(token);
+          distractorPieces.push(token);
+        }
       });
+      const availablePieces = [...requiredPieces, ...distractorPieces];
       const hasDistractors = availablePieces.length > requiredPieces.length;
       if (!hasDistractors) availablePieces.push(...fallbackEquationDistractors(requiredPieces));
       question.pieces = shuffleTokens(availablePieces);
       board.innerHTML = `<div class="science-equation-workspace"><small>Construye la ecuación completa</small><div class="science-equation-slots" data-slots></div></div><small class="science-token-bank-label">Piezas y operadores disponibles</small>${buttonList(question.pieces)}`;
     } else if (question.type === "fill-blank") {
-      const authoredSegments = Array.isArray(question.segments) ? question.segments.map(String) : [];
-      const expressionSource = String(question.expression || question.formula || question.equation || "").trim();
-      const expressionSegments = expressionSource.includes("___") ? expressionSource.split(/(___)/) : [];
-      const prompt = String(question.prompt || "").trim();
-      const target = prompt.match(/(?:valor|resultado|magnitud)\s+de\s+(.+?)[.?!]?$/i)?.[1]?.trim();
-      const inferredSegments = target
-        ? [`El valor de ${target} es `, "___", "."]
-        : [String(question.context || prompt || "Completa la expresión"), " ", "___"];
-      const displaySegments = authoredSegments.includes("___")
-        ? authoredSegments
-        : (expressionSegments.includes("___") ? expressionSegments : inferredSegments);
+      const displaySegments = resolveFillBlankSegments(question);
       board.innerHTML = `<div class="science-expression">${displaySegments.map((segment) =>
-        segment === "___" ? `<input data-blank autocomplete="off" aria-label="Valor faltante">` : `<span>${escape(segment)}</span>`).join("")}</div>`;
+        segment === "___" ? `<input data-blank autocomplete="off" aria-label="Valor faltante" placeholder="Escribe aquí">` : `<span>${escape(segment)}</span>`).join("")}</div>`;
     } else if (question.type === "exponent-placement") {
-      board.innerHTML = `<div class="science-exponent-base">${escape((question.bases || ["x"])[0])}<sup data-exponent-slot>?</sup></div>${buttonList(question.exponents || [])}`;
+      const exponentBase = String((question.bases || ["x"])[0] ?? "x").trim() || "x";
+      const exponentBaseSize = exponentBase.length > 12 ? "long" : exponentBase.length > 5 ? "medium" : "short";
+      board.innerHTML = `<div class="science-exponent-base" data-base-size="${exponentBaseSize}"><span>${escape(exponentBase)}</span><sup data-exponent-slot>?</sup></div>${buttonList(question.exponents || [])}`;
     } else if (question.type === "chemical-balance") {
       state.coefficients = (question.compounds || []).map(() => 1);
       board.innerHTML = `<div class="science-molecule-equation">${(question.compounds || []).map((compound, index, all) => `
-        <article><div><button type="button" data-coeff="${index}" data-delta="-1">−</button><strong data-coeff-value="${index}">1</strong><button type="button" data-coeff="${index}" data-delta="1">+</button></div><span>${escape(compound.formula)}</span></article>
+        <article><div><button type="button" data-coeff="${index}" data-delta="-1" disabled aria-label="Reducir coeficiente de ${escape(compound.formula)}">−</button><strong data-coeff-value="${index}" aria-live="polite">1</strong><button type="button" data-coeff="${index}" data-delta="1" aria-label="Aumentar coeficiente de ${escape(compound.formula)}">+</button></div><span>${escape(compound.formula)}</span></article>
         ${index < all.length - 1 ? `<b>${compound.side !== all[index + 1].side ? "→" : "+"}</b>` : ""}`).join("")}</div>
         <div class="science-atom-meter"><span>Reactivos</span><i></i><span>Productos</span></div>`;
     } else if (question.type === "numeric-answer") {
@@ -1823,8 +1966,14 @@ class ScienceLabScene {
     } else if (question.type === "graph-plot") {
       board.innerHTML = `<div class="science-graph" data-graph role="application" tabindex="0" aria-label="Plano cartesiano. Eje ${escape(graphAxes.x)} de ${formatGraphNumber(graphAxes.xMin)} a ${formatGraphNumber(graphAxes.xMax)}. Eje ${escape(graphAxes.y)} de ${formatGraphNumber(graphAxes.yMin)} a ${formatGraphNumber(graphAxes.yMax)}.">${graphTicksMarkup()}<output class="science-graph-coordinate" data-graph-coordinate aria-live="polite">Selecciona un punto</output></div>
         <p>Haz clic o toca una intersección para colocar ${(question.targetPoints || []).length || 2} puntos. Las coordenadas se ajustan a la cuadrícula.</p>`;
+    } else if (question.type === "number-line-placement") {
+      const minimum=Number(question.min??-20),maximum=Number(question.max??20),step=Number(question.step||1/Math.max(1,Number(question.denominator||1))),start=Number(question.startValue??0);
+      state.value=String(start);
+      board.innerHTML=`<section class="science-number-line-placement"><output data-number-line-output aria-live="polite">${formatGraphNumber(start)}</output><div class="science-number-line-track" aria-hidden="true"><i style="left:50%"></i><span data-number-line-marker style="left:${(start-minimum)/(maximum-minimum)*100}%"></span></div><input type="range" data-number-line-input min="${minimum}" max="${maximum}" step="${step}" value="${start}" aria-label="Posición seleccionada en la recta numérica"><div><button type="button" data-number-line-step="-1" aria-label="Mover una marca a la izquierda">← Izquierda</button><small>${escape(formatGraphNumber(minimum))} · 0 · ${escape(formatGraphNumber(maximum))}</small><button type="button" data-number-line-step="1" aria-label="Mover una marca a la derecha">Derecha →</button></div></section>`;
     } else if (question.type === "sequence-order") {
-      question.steps = shuffleTokens(question.steps || []);
+      const procedureSequence = normalizeProcedureSequence(question.steps, question.correctOrder);
+      question.correctOrder = procedureSequence.correctOrder;
+      question.steps = shuffleTokens(procedureSequence.steps);
       board.innerHTML = `
         <section class="science-sequence-workspace science-rive-sequence-route" data-rive-question-surface="SequenceRoute">
           <small>RUTA DE PROCEDIMIENTO <b>TOCA PARA AÑADIR</b></small>
@@ -1834,25 +1983,36 @@ class ScienceLabScene {
         </section>
         <small class="science-token-bank-label">Módulos disponibles</small>
         ${buttonList(question.steps, "science-sequence-bank")}`;
+    } else if (question.type === "timeline-order") {
+      question.events = shuffleTokens(Array.isArray(question.events) ? question.events : []);
+      board.innerHTML = `
+        <section class="science-timeline science-timeline-${escape(question.timelineMode || "chronology")}" data-timeline style="--timeline-count:${question.events.length}">
+          <header><span>${question.timelineMode === "process" ? "RUTA DE PROCESO" : question.timelineMode === "ideas" ? "SECUENCIA DE IDEAS" : "LÍNEA CRONOLÓGICA"}</span><b>ARRASTRA O TOCA PARA CONSTRUIR</b></header>
+          <ol class="science-timeline-track" data-sequence data-sequence-drop aria-label="Progresión construida"></ol>
+        </section>
+        <small class="science-token-bank-label">Elementos disponibles</small>
+        <div class="science-timeline-bank">${question.events.map((timelineEvent, index) => `<button type="button" class="science-timeline-bank-card" draggable="true" data-token="${index}" aria-label="Añadir ${escape(timelineEvent.title)}">${timelineLabelMarkup(timelineEvent)}<strong>${escape(timelineEvent.title)}</strong><span>${escape(timelineEvent.description)}</span></button>`).join("")}</div>`;
     }
 
     const updateProgress = () => {
       let total = 1;
       let current = 0;
-      if (["equation-build", "sequence-order"].includes(question.type)) {
+      if (["equation-build", "sequence-order", "timeline-order"].includes(question.type)) {
         total = (question.correctSequence || question.correctOrder || question.pieces || question.steps || []).length || 1;
         current = state.selected.length;
       } else if (question.type === "graph-plot") {
         total = (question.targetPoints || []).length || 2;
         current = state.points.length;
       } else if (question.type === "chemical-balance") {
-        current = state.coefficients.length ? 1 : 0;
+        total = Math.max(1, state.coefficients.length);
+        current = state.coefficientEdits.size;
       } else {
         current = state.value || state.exponent ? 1 : 0;
       }
       const percent = Math.min(100, Math.round(current / total * 100));
       progress.textContent = `${percent}%`;
       overlay.dataset.progress = String(percent);
+      if (question.type === "chemical-balance") overlay.style.setProperty("--chemical-progress", `${percent}%`);
       overlay.querySelectorAll(".science-rive-challenge-progress i").forEach((dot, index, dots) => {
         const threshold = index === 0 ? 1 : Math.ceil((index / Math.max(1, dots.length - 1)) * 100);
         dot.classList.toggle("is-active", percent >= threshold || (index === 0 && percent === 0));
@@ -1885,6 +2045,13 @@ class ScienceLabScene {
       }
       graphElement.setAttribute("aria-label", `Plano cartesiano. ${state.points.length ? `Puntos marcados: ${coordinate?.textContent || ""}.` : "Sin puntos marcados."} Eje ${graphAxes.x} de ${formatGraphNumber(graphAxes.xMin)} a ${formatGraphNumber(graphAxes.xMax)}. Eje ${graphAxes.y} de ${formatGraphNumber(graphAxes.yMin)} a ${formatGraphNumber(graphAxes.yMax)}.`);
     };
+    const updateNumberLine = () => {
+      if (question.type !== "number-line-placement") return;
+      const minimum=Number(question.min??-20),maximum=Number(question.max??20),value=Math.max(minimum,Math.min(maximum,Number(state.value)||0));
+      const marker=overlay.querySelector("[data-number-line-marker]"),output=overlay.querySelector("[data-number-line-output]");
+      if(marker)marker.style.left=`${(value-minimum)/Math.max(.0001,maximum-minimum)*100}%`;
+      if(output)output.textContent=formatGraphNumber(value);
+    };
     const renderSelection = () => {
       if (question.type === "equation-build") {
         const slotCount = Math.max(1, (question.correctSequence || question.pieces || []).length);
@@ -1909,6 +2076,18 @@ class ScienceLabScene {
             </li>`).join("")
           : `<li class="science-sequence-placeholder">Selecciona el primer paso para activar la ruta</li>`;
       }
+      if (question.type === "timeline-order") {
+        const timeline = overlay.querySelector("[data-sequence]");
+        const eventById = new Map((question.events || []).map((event) => [event.id, event]));
+        const total = (question.correctOrder || question.events || []).length;
+        timeline.innerHTML = Array.from({ length: total }, (_, index) => {
+          const id = state.selected[index];
+          const timelineEvent = eventById.get(id);
+          return timelineEvent
+            ? `<li class="science-timeline-event" draggable="true" data-selected-index="${index}"><i aria-hidden="true"></i><article>${timelineLabelMarkup(timelineEvent)}<strong>${escape(timelineEvent.title)}</strong><p>${escape(timelineEvent.description)}</p></article><div><button type="button" data-move-token="${index}" data-direction="-1" ${index === 0 ? "disabled" : ""} aria-label="Mover antes">←</button><button type="button" data-move-token="${index}" data-direction="1" ${index === state.selected.length - 1 ? "disabled" : ""} aria-label="Mover después">→</button><button type="button" data-remove-token="${index}" aria-label="Quitar ${escape(timelineEvent.title)}">×</button></div></li>`
+            : `<li class="science-timeline-empty" data-timeline-slot="${index}"><i aria-hidden="true"></i><span>Estación ${index + 1}</span></li>`;
+        }).join("");
+      }
       overlay.querySelectorAll("[data-token]").forEach((button) => {
         const used = state.selectedTokenIndexes.includes(Number(button.dataset.token));
         const exponentSelected = question.type === "exponent-placement"
@@ -1919,27 +2098,32 @@ class ScienceLabScene {
         button.setAttribute("aria-pressed", exponentSelected ? "true" : "false");
       });
       renderGraphPoints();
+      updateNumberLine();
       updateProgress();
     };
-    const selectToken = (index) => {
-      const source = question.type === "sequence-order"
+    const selectToken = (index, targetPosition = null) => {
+      const source = question.type === "timeline-order"
+        ? question.events || []
+        : question.type === "sequence-order"
         ? question.steps || []
         : question.type === "exponent-placement"
           ? question.exponents || []
           : question.pieces || [];
-      const token = source[index];
+      const sourceItem = source[index];
+      const token = question.type === "timeline-order" ? sourceItem?.id : sourceItem;
       if (token == null) return;
       if (question.type === "exponent-placement") {
         state.exponent = String(token);
         overlay.querySelector("[data-exponent-slot]").textContent = token;
       } else {
-        const maximum = question.type === "sequence-order"
+        const maximum = ["sequence-order", "timeline-order"].includes(question.type)
           ? (question.correctOrder || source).length
           : (question.correctSequence || source).length;
         if (state.selectedTokenIndexes.includes(index)) return;
         if (state.selected.length < maximum) {
-          state.selected.push(String(token));
-          state.selectedTokenIndexes.push(index);
+          const position = Number.isInteger(targetPosition) ? Math.max(0, Math.min(targetPosition, state.selected.length)) : state.selected.length;
+          state.selected.splice(position, 0, String(token));
+          state.selectedTokenIndexes.splice(position, 0, index);
         }
       }
       renderSelection();
@@ -1950,6 +2134,7 @@ class ScienceLabScene {
       if (question.type === "exponent-placement") return normalize(state.exponent) === normalize((question.correctExponents || [])[0]);
       if (question.type === "chemical-balance") return state.coefficients.every((value, index) => value === Number(question.correctCoefficients?.[index]));
       if (question.type === "numeric-answer") return Math.abs(Number(state.value) - Number(question.correctValue)) <= Number(question.tolerance || 0);
+      if (question.type === "number-line-placement") return Math.abs(Number(state.value) - Number(question.targetValue ?? question.correctValue)) <= Number(question.tolerance || 0);
       if (question.type === "graph-plot") {
         const targets = question.targetPoints || [];
         const tolerance = Number(question.tolerance || .5);
@@ -1962,6 +2147,7 @@ class ScienceLabScene {
         });
       }
       if (question.type === "sequence-order") return normalize(state.selected.join("|")) === normalize((question.correctOrder || []).join("|"));
+      if (question.type === "timeline-order") return state.selected.length === (question.correctOrder || []).length && state.selected.every((id, index) => id === question.correctOrder[index]);
       return false;
     };
     const measurements = () => ({
@@ -2011,18 +2197,25 @@ class ScienceLabScene {
         state.exponent = String((question.correctExponents || [])[0] ?? "");
       } else if (question.type === "chemical-balance") {
         state.coefficients = [...(question.correctCoefficients || [])].map(Number);
+        state.coefficientEdits = new Set(state.coefficients.map((_, index) => index));
       } else if (question.type === "numeric-answer") {
         state.value = String(question.correctValue ?? "");
+      } else if (question.type === "number-line-placement") {
+        state.value = String(question.targetValue ?? question.correctValue ?? 0);
       } else if (question.type === "graph-plot") {
         state.points = (question.targetPoints || []).map((point) => ({ ...point }));
         overlay.dataset.reviewPointCount = String(state.points.length);
       } else if (question.type === "sequence-order") {
         state.selected = [...(question.correctOrder || [])].map(String);
+      } else if (question.type === "timeline-order") {
+        state.selected = [...(question.correctOrder || [])].map(String);
+        state.selectedTokenIndexes = state.selected.map((id) => (question.events || []).findIndex((event) => event.id === id));
       } else {
         return false;
       }
       const answerInput = overlay.querySelector("input");
       if (answerInput && state.value !== "") answerInput.value = state.value;
+      if (question.type === "number-line-placement") updateNumberLine();
       const exponentSlot = overlay.querySelector("[data-exponent-slot]");
       if (exponentSlot && state.exponent !== "") exponentSlot.textContent = state.exponent;
       overlay.querySelectorAll("[data-coeff-value]").forEach((element, index) => {
@@ -2045,7 +2238,14 @@ class ScienceLabScene {
       state.points = [];
       state.exponent = "";
       if (question.type === "chemical-balance") state.coefficients = (question.compounds || []).map(() => 1);
+      state.coefficientEdits.clear();
       overlay.querySelectorAll("input").forEach((input) => { input.value = ""; });
+      if (question.type === "number-line-placement") {
+        state.value = String(question.startValue ?? 0);
+        const input = overlay.querySelector("[data-number-line-input]");
+        if (input) input.value = state.value;
+        updateNumberLine();
+      }
       const exponentSlot = overlay.querySelector("[data-exponent-slot]");
       if (exponentSlot) exponentSlot.textContent = "?";
       overlay.querySelectorAll("[data-coeff-value]").forEach((item) => { item.textContent = "1"; });
@@ -2077,15 +2277,29 @@ class ScienceLabScene {
       if (coefficient) {
         const index = Number(coefficient.dataset.coeff);
         state.coefficients[index] = Math.max(1, Math.min(9, state.coefficients[index] + Number(coefficient.dataset.delta)));
-        overlay.querySelector(`[data-coeff-value="${index}"]`).textContent = state.coefficients[index];
+        state.coefficientEdits.add(index);
+        const valueElement = overlay.querySelector(`[data-coeff-value="${index}"]`);
+        valueElement.textContent = state.coefficients[index];
+        valueElement.classList.remove("is-updated");
+        requestAnimationFrame(() => valueElement.classList.add("is-updated"));
+        const decrement = overlay.querySelector(`[data-coeff="${index}"][data-delta="-1"]`);
+        const increment = overlay.querySelector(`[data-coeff="${index}"][data-delta="1"]`);
+        if (decrement) decrement.disabled = state.coefficients[index] <= 1;
+        if (increment) increment.disabled = state.coefficients[index] >= 9;
         updateProgress();
+      }
+      const numberLineStep = event.target.closest("[data-number-line-step]");
+      if (numberLineStep) {
+        const input=overlay.querySelector("[data-number-line-input]");
+        if (input) { input.stepUp(Number(numberLineStep.dataset.numberLineStep)); state.value=input.value; updateNumberLine(); updateProgress(); }
       }
       if (event.target.closest("[data-structured-check]")) finish();
       if (event.target.closest("[data-structured-clear]")) clear();
     };
     const onInput = (event) => {
-      if (event.target.matches("[data-blank],[data-numeric-answer]")) {
+      if (event.target.matches("[data-blank],[data-numeric-answer],[data-number-line-input]")) {
         state.value = event.target.value;
+        if (question.type === "number-line-placement") updateNumberLine();
         updateProgress();
       }
     };
@@ -2114,6 +2328,27 @@ class ScienceLabScene {
     const completion = new Promise((resolve) => { resolver = resolve; });
     overlay.addEventListener("click", onClick);
     overlay.addEventListener("input", onInput);
+    const timelineBank = overlay.querySelector(".science-timeline-bank");
+    let timelinePointerStart = null;
+    timelineBank?.addEventListener("pointerdown", (event) => {
+      const token = event.target.closest(".science-timeline-bank-card[data-token]");
+      if (!token || token.disabled) return;
+      timelinePointerStart = {
+        pointerId: event.pointerId,
+        token: Number(token.dataset.token),
+        x: event.clientX,
+        y: event.clientY
+      };
+    });
+    timelineBank?.addEventListener("pointerup", (event) => {
+      if (!timelinePointerStart || timelinePointerStart.pointerId !== event.pointerId) return;
+      const movement = Math.hypot(event.clientX - timelinePointerStart.x, event.clientY - timelinePointerStart.y);
+      const tokenIndex = timelinePointerStart.token;
+      timelinePointerStart = null;
+      if (movement > 12 || event.target.closest(".science-timeline-bank-card[data-token]") == null) return;
+      selectToken(tokenIndex);
+    });
+    timelineBank?.addEventListener("pointercancel", () => { timelinePointerStart = null; });
     graph?.addEventListener("pointerdown", onGraphPointer);
     window.addEventListener("keydown", onKey);
     overlay.addEventListener("dragstart", (event) => {
@@ -2146,7 +2381,11 @@ class ScienceLabScene {
       }
       const tokenValue = event.dataTransfer.getData("application/x-science-token")
         || event.dataTransfer.getData("text/plain");
-      if (tokenValue !== "") selectToken(Number(tokenValue));
+      if (tokenValue !== "") {
+        const timelineSlot = event.target.closest("[data-timeline-slot],[data-selected-index]");
+        const targetPosition = timelineSlot ? Number(timelineSlot.dataset.timelineSlot ?? timelineSlot.dataset.selectedIndex) : null;
+        selectToken(Number(tokenValue), targetPosition);
+      }
     });
     this.questionMiniGameCleanup = cleanup;
     renderSelection();
@@ -2170,10 +2409,10 @@ class ScienceLabScene {
     } else if (["keyword", "key-word", "word", "palabra", "palabra-clave"].includes(rawQuestionType)) {
       question.type = "keyword";
     } else {
-      const supported = ["multiple", "matching", "keyword", "equation-build", "fill-blank", "exponent-placement", "chemical-balance", "numeric-answer", "graph-plot", "sequence-order"];
+      const supported = ["multiple", "matching", "keyword", "equation-build", "fill-blank", "exponent-placement", "chemical-balance", "numeric-answer", "graph-plot", "sequence-order", "timeline-order", "number-line-placement"];
       question.type = supported.includes(rawQuestionType) ? rawQuestionType : "multiple";
     }
-    if (["equation-build", "fill-blank", "exponent-placement", "chemical-balance", "numeric-answer", "graph-plot", "sequence-order"].includes(question.type)) {
+    if (["equation-build", "fill-blank", "exponent-placement", "chemical-balance", "numeric-answer", "graph-plot", "sequence-order", "timeline-order", "number-line-placement"].includes(question.type)) {
       return this.playStructuredQuestionGame(payload, question);
     }
     const profile = payload.profile || question.gameplay || question.animation || {};
@@ -3565,6 +3804,11 @@ const RUNTIME_VISUAL_STYLES = {
   "rive-kawaii-signal": { sky: "#e9fbf8", ground: "#70d9ca", accent: "#ff708f", visualMode: "soft" },
   "rive-tokyo-tech": { sky: "#eef3f2", ground: "#2e3d48", accent: "#19cce2", visualMode: "technical" },
   "rive-arcade-matsuri": { sky: "#17143f", ground: "#352b68", accent: "#ffd84d", visualMode: "cosmic" },
+  "rive-solar-circuit": { sky: "#fff4d8", ground: "#18354b", accent: "#ff8a24", visualMode: "technical" },
+  "rive-bio-pulse": { sky: "#e8f5dc", ground: "#173d36", accent: "#7ddf64", visualMode: "natural" },
+  "rive-lunar-blueprint": { sky: "#dcecff", ground: "#10284f", accent: "#4aa8ff", visualMode: "cosmic" },
+  "rive-volcanic-core": { sky: "#f6dfbf", ground: "#302824", accent: "#ff713d", visualMode: "technical" },
+  "rive-prism-glass": { sky: "#eef8ff", ground: "#d9edf2", accent: "#245bea", visualMode: "soft" },
   "kawaii-lab": { sky: "#dff7f4", ground: "#8fd5c8", accent: "#ff7d88", visualMode: "soft" },
   "tech-minimal": { sky: "#f4f7f8", ground: "#9eabb4", accent: "#00a9bd", visualMode: "technical" },
   "arcade-science": { sky: "#101936", ground: "#39406d", accent: "#ffcf3f", visualMode: "pixel" },
@@ -3629,37 +3873,88 @@ class RiveScienceGameRuntime {
     const rawType = String(question.type || "multiple").trim().toLowerCase();
     const aliases = { match: "matching", pairing: "matching", pair: "matching", emparejamiento: "matching", relation: "matching", relationship: "matching", "key-word": "keyword", word: "keyword", palabra: "keyword", "palabra-clave": "keyword" };
     question.type = aliases[rawType] || rawType;
-    const structuredTypes = ["equation-build", "fill-blank", "exponent-placement", "chemical-balance", "numeric-answer", "graph-plot", "sequence-order"];
+    const structuredTypes = ["equation-build", "fill-blank", "exponent-placement", "chemical-balance", "numeric-answer", "graph-plot", "sequence-order", "timeline-order", "number-line-placement"];
     if (structuredTypes.includes(question.type)) {
       return ScienceLabScene.prototype.playStructuredQuestionGame.call(this, payload, question);
     }
-    return this.playChoiceQuestion(question);
+    return this.playChoiceQuestion(question, payload);
   }
 
-  playChoiceQuestion(question) {
+  playChoiceQuestion(question, payload = {}) {
     this.cancelQuestionGame();
+    if (["multiple", "image-multiple"].includes(question.type) && Array.isArray(question.options) && question.options.length > 1) {
+      const originalOptions = [...question.options];
+      const legacyCorrect = Number.isInteger(Number(question.correct))
+        ? Math.max(0, Math.min(originalOptions.length - 1, Number(question.correct)))
+        : Math.max(0, originalOptions.findIndex((option) => {
+          const value = typeof option === "object" ? option?.text ?? option?.label ?? option?.value : option;
+          return String(value) === String(question.correct ?? question.correctAnswer ?? question.answer ?? "");
+        }));
+      const declaredCorrectAnswers = [...new Set((Array.isArray(question.correctAnswers) && question.correctAnswers.length ? question.correctAnswers : [legacyCorrect])
+        .map(Number)
+        .filter((index) => Number.isInteger(index) && index >= 0 && index < originalOptions.length))];
+      const shuffledOptions = originalOptions.map((option, sourceIndex) => ({ option, sourceIndex }));
+      const randomIndex = (maximum) => {
+        if (maximum <= 1) return 0;
+        if (globalThis.crypto?.getRandomValues) {
+          const sample = new Uint32Array(1);
+          globalThis.crypto.getRandomValues(sample);
+          return sample[0] % maximum;
+        }
+        return Math.floor(Math.random() * maximum);
+      };
+      for (let index = shuffledOptions.length - 1; index > 0; index -= 1) {
+        const target = randomIndex(index + 1);
+        [shuffledOptions[index], shuffledOptions[target]] = [shuffledOptions[target], shuffledOptions[index]];
+      }
+      if (shuffledOptions.every((entry, index) => entry.sourceIndex === index)) {
+        const offset = 1 + randomIndex(shuffledOptions.length - 1);
+        shuffledOptions.push(...shuffledOptions.splice(0, offset));
+      }
+      question.options = shuffledOptions.map((entry) => entry.option);
+      question.correctAnswers = declaredCorrectAnswers.map((sourceIndex) => shuffledOptions.findIndex((entry) => entry.sourceIndex === sourceIndex)).sort((a, b) => a - b);
+      question.correct = question.correctAnswers[0];
+    }
     this.mount.classList.add("is-rive-question");
     const startedAt = performance.now();
     const normalize = (value) => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ").toLowerCase();
-    const rawOptions = question.type === "matching"
-      ? (question.pairs || []).map((pair) => pair?.right).filter(Boolean)
-      : (question.options || []).map((option) => typeof option === "object" ? option.text ?? option.label ?? option.value : option).filter(Boolean);
+    const matchingPairs = (question.pairs || question.matches || []).map((pair) => Array.isArray(pair)
+      ? { left: String(pair[0] ?? "").trim(), right: String(pair[1] ?? "").trim() }
+      : {
+        left: String(pair?.left ?? pair?.term ?? pair?.concept ?? "").trim(),
+        right: String(pair?.right ?? pair?.definition ?? pair?.match ?? "").trim()
+      }).filter((pair) => pair.left && pair.right);
+    const rawOptions = (question.options || []).map((option) => typeof option === "object" ? option.text ?? option.label ?? option.value : option).filter(Boolean);
     const options = rawOptions.length ? rawOptions.slice(0, 4) : ["Hipótesis A", "Hipótesis B", "Hipótesis C"];
     const marked = (question.options || []).findIndex((option) => option && typeof option === "object" && (option.correct === true || option.isCorrect === true));
     const declared = Number.isInteger(question.correct) ? question.correct : Number.isInteger(question.correctIndex) ? question.correctIndex : marked;
-    const correct = declared >= 0 && declared < options.length ? declared : 0;
+    const correctAnswers = [...new Set((Array.isArray(question.correctAnswers) && question.correctAnswers.length ? question.correctAnswers : [declared >= 0 ? declared : 0])
+      .map(Number)
+      .filter((index) => Number.isInteger(index) && index >= 0 && index < options.length))].sort((a, b) => a - b);
+    const correct = correctAnswers[0] ?? 0;
     let settled = false;
     let attempts = 0;
     let resolveCompletion;
     const completion = new Promise((resolve) => { resolveCompletion = resolve; });
     const panel = document.createElement("section");
     panel.className = "science-rive-answer-deck is-rive-only";
+    panel.dataset.questionType = question.type;
     panel.setAttribute("role", "group");
-    panel.setAttribute("aria-label", "Opciones de respuesta");
-    const finish = async (index, answer) => {
+    panel.setAttribute("aria-label", question.type === "image-multiple" ? "Imagen señalada y opciones de respuesta" : "Opciones de respuesta");
+    const progress = payload.progress || {};
+    const typeLabels = { multiple: "OPCIÓN MÚLTIPLE", "image-multiple": "IMAGEN SEÑALADA", matching: "EMPAREJAMIENTO", keyword: "PALABRA CLAVE" };
+    const context = String(question.context || question.goal || "").trim();
+    const observationGuide = String(question.observationGuide || "").trim();
+    const imageSource = String(question.visual?.imageDataUrl || question.visual?.imageUrl || question.visual?.imageSrc || "").trim();
+    const visualMarkup = question.type === "image-multiple"
+      ? `<figure class="science-image-question ${imageSource ? "" : "is-missing"}">${imageSource ? `<img src="${this.escape(imageSource)}" alt="${this.escape(question.visual?.alt || "Ilustración científica con un elemento señalado")}">` : "<figcaption>No se pudo cargar la imagen necesaria para responder.</figcaption>"}</figure>`
+      : "";
+    if (question.type === "image-multiple" && !imageSource) panel.classList.add("is-visual-unavailable");
+    const stageHeader = `<header class="science-question-stage-header"><div><small>${this.escape(typeLabels[question.type] || "RETO CIENTÍFICO")}</small><strong>Nivel ${Number(progress.level) || Number(question.levelIndex) + 1 || 1} · Pregunta ${Number(progress.question) || Number(question.questionIndex) + 1 || 1}</strong></div><span class="science-question-stage-progress">${Number(progress.question) || Number(question.questionIndex) + 1 || 1}/${Number(progress.questionsPerLevel) || 1}</span><h2>${this.escape(question.prompt || "Resuelve el reto científico")}</h2>${context ? `<p>${this.escape(context)}</p>` : ""}${observationGuide ? `<p class="science-question-observation-guide"><strong>Cómo analizar:</strong> ${this.escape(observationGuide)}</p>` : ""}${visualMarkup}</header>`;
+    const finish = async (index, answer, forcedCorrect = null) => {
       if (settled) return;
       settled = true;
-      const isCorrect = index === correct;
+      const isCorrect = typeof forcedCorrect === "boolean" ? forcedCorrect : index === correct;
       await playScienceProbeEffect(panel);
       cleanup();
       resolveCompletion({ completed: true, correct: isCorrect, response: answer, attempts, durationMs: Math.round(performance.now() - startedAt), renderer: "rive" });
@@ -3678,7 +3973,7 @@ class RiveScienceGameRuntime {
         .map((value) => value.trim())
         .filter(Boolean);
       panel.classList.add("is-keyword-question");
-      panel.innerHTML = `<div class="science-rive-answer-heading"><span>ESCRIBE LA PALABRA CLAVE</span><b>COMPRUEBA TU HIPÓTESIS</b><i class="science-keyword-rive-signal" data-science-rive-hud data-rive-artboard="New Artboard" data-rive-state-machine="State Machine 1" data-rive-fit="contain" aria-hidden="true"><canvas></canvas></i></div><form class="science-keyword-game-console"><label class="science-keyword-game-label">Tu respuesta<input class="science-keyword-game-input" autocomplete="off" placeholder="Palabra clave…"></label><button class="science-keyword-game-submit" type="submit">Comprobar</button></form>`;
+      panel.innerHTML = `${stageHeader}<div class="science-rive-answer-heading"><span>ESCRIBE LA PALABRA CLAVE</span><b>COMPRUEBA TU HIPÓTESIS</b><i class="science-keyword-rive-signal" data-science-rive-hud data-rive-artboard="New Artboard" data-rive-state-machine="State Machine 1" data-rive-fit="contain" aria-hidden="true"><canvas></canvas></i></div><form class="science-keyword-game-console"><label class="science-keyword-game-label">Tu respuesta<input class="science-keyword-game-input" autocomplete="off" placeholder="Palabra clave…"></label><button class="science-keyword-game-submit" type="submit">Comprobar</button></form>`;
       panel.querySelector("form").addEventListener("submit", (event) => {
         event.preventDefault();
         const input = panel.querySelector("input");
@@ -3693,10 +3988,112 @@ class RiveScienceGameRuntime {
         if (!input || settled) return false;
         input.value = String(accepted[0] || ""); attempts += 1; finish(correct, input.value); return true;
       };
+    } else if (question.type === "matching") {
+      panel.classList.add("is-matching-question");
+      const shuffledRights = matchingPairs.map((pair, sourceIndex) => ({ text: pair.right, sourceIndex }));
+      const randomIndex = (maximum) => {
+        if (maximum <= 1) return 0;
+        if (globalThis.crypto?.getRandomValues) {
+          const sample = new Uint32Array(1);
+          globalThis.crypto.getRandomValues(sample);
+          return sample[0] % maximum;
+        }
+        return Math.floor(Math.random() * maximum);
+      };
+      for (let index = shuffledRights.length - 1; index > 0; index -= 1) {
+        const target = randomIndex(index + 1);
+        [shuffledRights[index], shuffledRights[target]] = [shuffledRights[target], shuffledRights[index]];
+      }
+      if (shuffledRights.length > 1 && shuffledRights.every((item, index) => item.sourceIndex === index)) {
+        const offset = 1 + randomIndex(shuffledRights.length - 1);
+        shuffledRights.push(...shuffledRights.splice(0, offset));
+      }
+      panel.innerHTML = `${stageHeader}<div class="science-rive-answer-heading"><span>RELACIONA CADA PAREJA</span><b>SELECCIONA UN CONCEPTO Y DESPUÉS SU RESPUESTA</b></div><div class="science-rive-matching-board"><section class="science-rive-matching-column" aria-label="Conceptos"><h3>Conceptos</h3><div data-matching-left-list>${matchingPairs.map((pair, index) => `<button type="button" data-matching-left="${index}"><span>${index + 1}</span><strong>${this.escape(pair.left)}</strong><small data-matching-link>Sin relacionar</small></button>`).join("")}</div></section><section class="science-rive-matching-column" aria-label="Respuestas"><h3>Respuestas</h3><div data-matching-right-list>${shuffledRights.map((item, index) => `<button type="button" data-matching-right="${item.sourceIndex}"><span>${String.fromCharCode(65 + index)}</span><strong>${this.escape(item.text)}</strong></button>`).join("")}</div></section></div><div class="science-rive-matching-actions"><p data-matching-status aria-live="polite">Selecciona el primer concepto.</p><button type="button" data-matching-check disabled>Comprobar emparejamiento</button></div>`;
+      const assignments = new Map();
+      const pairColors = ["#0678f9", "#e64980", "#7c3aed", "#009b72", "#d97706", "#db3a34"];
+      let activeLeft = null;
+      const leftButtons = [...panel.querySelectorAll("[data-matching-left]")];
+      const rightButtons = [...panel.querySelectorAll("[data-matching-right]")];
+      const statusNode = panel.querySelector("[data-matching-status]");
+      const checkButton = panel.querySelector("[data-matching-check]");
+      const renderAssignments = () => {
+        leftButtons.forEach((button, leftIndex) => {
+          const rightIndex = assignments.get(leftIndex);
+          const linked = Number.isInteger(rightIndex);
+          const colored = linked || activeLeft === leftIndex;
+          button.classList.toggle("is-active", activeLeft === leftIndex);
+          button.classList.toggle("is-linked", linked);
+          if (colored) button.style.setProperty("--matching-pair-color", pairColors[leftIndex % pairColors.length]);
+          else button.style.removeProperty("--matching-pair-color");
+          const link = button.querySelector("[data-matching-link]");
+          if (link) link.textContent = linked ? matchingPairs[rightIndex].right : "Sin relacionar";
+        });
+        rightButtons.forEach((button) => {
+          const rightIndex = Number(button.dataset.matchingRight);
+          const linkedEntry = [...assignments.entries()].find(([, assignedRight]) => assignedRight === rightIndex);
+          const linked = Boolean(linkedEntry);
+          button.classList.toggle("is-linked", linked);
+          if (linked) button.style.setProperty("--matching-pair-color", pairColors[linkedEntry[0] % pairColors.length]);
+          else button.style.removeProperty("--matching-pair-color");
+        });
+        checkButton.disabled = assignments.size !== matchingPairs.length;
+      };
+      leftButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          if (settled) return;
+          activeLeft = Number(button.dataset.matchingLeft);
+          statusNode.textContent = `Ahora selecciona la respuesta para ${matchingPairs[activeLeft].left}.`;
+          renderAssignments();
+        });
+      });
+      rightButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          if (settled) return;
+          if (!Number.isInteger(activeLeft)) {
+            statusNode.textContent = "Primero selecciona un concepto de la columna izquierda.";
+            return;
+          }
+          const rightIndex = Number(button.dataset.matchingRight);
+          for (const [leftIndex, assignedRight] of assignments) {
+            if (assignedRight === rightIndex) assignments.delete(leftIndex);
+          }
+          assignments.set(activeLeft, rightIndex);
+          statusNode.textContent = `Relación ${assignments.size} de ${matchingPairs.length} guardada.`;
+          activeLeft = null;
+          renderAssignments();
+        });
+      });
+      checkButton.addEventListener("click", () => {
+        if (settled || assignments.size !== matchingPairs.length) return;
+        attempts += 1;
+        const responses = matchingPairs.map((pair, leftIndex) => {
+          const rightIndex = assignments.get(leftIndex);
+          return { left: pair.left, right: matchingPairs[rightIndex]?.right || "", correct: rightIndex === leftIndex };
+        });
+        const isCorrect = responses.every((response) => response.correct);
+        leftButtons.forEach((button, index) => button.classList.add(assignments.get(index) === index ? "is-correct" : "is-incorrect"));
+        rightButtons.forEach((button) => { button.disabled = true; });
+        leftButtons.forEach((button) => { button.disabled = true; });
+        checkButton.disabled = true;
+        statusNode.textContent = isCorrect ? "Todas las relaciones son correctas." : "Hay relaciones que no corresponden.";
+        finish(0, responses, isCorrect);
+      });
+      renderAssignments();
+      this.questionReviewCorrectAnswer = () => {
+        if (settled || !matchingPairs.length) return false;
+        assignments.clear();
+        matchingPairs.forEach((_, index) => assignments.set(index, index));
+        renderAssignments();
+        attempts += 1;
+        finish(0, matchingPairs.map((pair) => ({ left: pair.left, right: pair.right, correct: true })), true);
+        return true;
+      };
     } else {
-      const title = question.type === "matching" ? question.pairs?.[0]?.left || question.prompt : question.prompt;
-      panel.innerHTML = `<div class="science-rive-answer-heading"><span>${this.escape(title || "Selecciona una hipótesis")}</span><b>TOCA · HAZ CLIC · USA TAB</b></div><div class="science-rive-answer-list"></div>`;
+      const allowsMultiple = correctAnswers.length > 1;
+      panel.innerHTML = `${stageHeader}<div class="science-rive-answer-heading"><span>${allowsMultiple ? "SELECCIONA TODAS LAS HIPÓTESIS CORRECTAS" : "SELECCIONA UNA HIPÓTESIS"}</span><b>TOCA · HAZ CLIC · USA TAB</b></div><div class="science-rive-answer-list ${allowsMultiple ? "is-multiple-select" : ""}"></div>${allowsMultiple ? '<button type="button" class="science-multiple-answer-check" data-multiple-answer-check disabled>Comprobar respuestas</button>' : ""}`;
       const list = panel.querySelector(".science-rive-answer-list");
+      const selectedAnswers = new Set();
+      const checkAnswers = panel.querySelector("[data-multiple-answer-check]");
       options.forEach((option, index) => {
         const button = document.createElement("button");
         button.type = "button";
@@ -3705,8 +4102,16 @@ class RiveScienceGameRuntime {
         button.innerHTML = `<i class="science-rive-answer-surface" data-science-rive-hud data-rive-artboard="New Artboard" data-rive-state-machine="State Machine 1" data-rive-fit="contain" aria-hidden="true"><canvas></canvas></i><span class="science-rive-answer-badge">${String.fromCharCode(65 + index)}</span><strong>${this.escape(option)}</strong><small>Probar esta hipótesis</small>`;
         button.addEventListener("click", () => {
           if (settled) return;
+          if (allowsMultiple) {
+            if (selectedAnswers.has(index)) selectedAnswers.delete(index);
+            else selectedAnswers.add(index);
+            button.classList.toggle("is-selected", selectedAnswers.has(index));
+            button.setAttribute("aria-pressed", String(selectedAnswers.has(index)));
+            checkAnswers.disabled = selectedAnswers.size === 0;
+            return;
+          }
           attempts += 1;
-          const isCorrect = index === correct;
+          const isCorrect = correctAnswers.includes(index);
           list.querySelectorAll("button").forEach((candidate) => { candidate.disabled = true; candidate.classList.toggle("is-muted", candidate !== button); });
           button.classList.add("is-selected", isCorrect ? "is-correct" : "is-incorrect");
           globalThis.ScienceRiveHud?.setState(button.querySelector("[data-science-rive-hud]"), isCorrect ? "correct" : "incorrect");
@@ -3714,15 +4119,48 @@ class RiveScienceGameRuntime {
         });
         list.append(button);
       });
+      checkAnswers?.addEventListener("click", () => {
+        if (settled || !selectedAnswers.size) return;
+        attempts += 1;
+        const selected = [...selectedAnswers].sort((a, b) => a - b);
+        const isCorrect = selected.length === correctAnswers.length && selected.every((value, index) => value === correctAnswers[index]);
+        list.querySelectorAll("button").forEach((candidate) => {
+          const index = Number(candidate.dataset.riveAnswer);
+          candidate.disabled = true;
+          if (selectedAnswers.has(index)) candidate.classList.add(correctAnswers.includes(index) ? "is-correct" : "is-incorrect");
+          else candidate.classList.add("is-muted");
+        });
+        checkAnswers.disabled = true;
+        finish(selected[0] ?? -1, selected.map((index) => options[index]), isCorrect);
+      });
       this.questionReviewCorrectAnswer = () => {
+        if (settled) return false;
+        if (allowsMultiple) {
+          selectedAnswers.clear();
+          correctAnswers.forEach((index) => selectedAnswers.add(index));
+          attempts += 1;
+          finish(correct, correctAnswers.map((index) => options[index]), true);
+          return true;
+        }
         const card = panel.querySelector(`[data-rive-answer="${correct}"]`);
-        if (!card || settled) return false;
-        attempts += 1; card.click(); return true;
+        if (!card) return false;
+        card.click(); return true;
       };
     }
+    const resetQuestionStageScroll = () => {
+      this.mount.scrollTop = 0;
+      this.mount.scrollLeft = 0;
+      panel.scrollTop = 0;
+      panel.scrollLeft = 0;
+    };
+    resetQuestionStageScroll();
     this.mount.append(panel);
+    resetQuestionStageScroll();
     this.questionMiniGameCleanup = cleanup;
-    requestAnimationFrame(() => globalThis.ScienceRiveHud?.mountAll(panel));
+    requestAnimationFrame(() => {
+      resetQuestionStageScroll();
+      globalThis.ScienceRiveHud?.mountAll(panel);
+    });
     return completion;
   }
 }
@@ -3732,6 +4170,7 @@ export async function createScienceGame(mount, controlsMount, config, hooks = {}
   const controlsTarget = typeof controlsMount === "string" ? document.querySelector(controlsMount) : controlsMount;
   if (!target) throw new Error("No se encontró el contenedor de la simulación.");
   target.innerHTML = "";
+  target.dataset.visualStyle = config.visualStyle || "kawaii-lab";
   if (controlsTarget) controlsTarget.innerHTML = "";
 
   if (String(config.visualStyle || "").startsWith("rive-")) {
@@ -3769,7 +4208,6 @@ export async function createScienceGame(mount, controlsMount, config, hooks = {}
       accent: styleProfile.accent
     }
   };
-  target.dataset.visualStyle = config.visualStyle || "kawaii-lab";
   const labScene = new ScienceLabScene(Phaser, styledConfig, hooks);
   const targetWidth = Math.max(320, target.clientWidth || globalThis.innerWidth || 960);
   const coarsePointer = globalThis.matchMedia?.("(pointer: coarse)")?.matches === true;
@@ -3794,6 +4232,7 @@ export async function createScienceGame(mount, controlsMount, config, hooks = {}
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     input: {
       activePointers: 2,
+      windowEvents: false,
       touch: { capture: true }
     },
     scene: labScene.sceneConfig()

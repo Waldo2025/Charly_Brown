@@ -70,6 +70,9 @@ const context = {
       ? `https://example.test/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`
       : String(downloadUrl || "").trim();
   },
+  buildDirectFirebaseMediaReference(downloadUrl, storagePath) {
+    return String(storagePath || downloadUrl || "").trim();
+  },
   window: {
     location: {
       origin: "https://example.test"
@@ -84,6 +87,7 @@ vm.createContext(context);
   extractConst("HOME_TIMELINE_MIN_CLIP_MS"),
   "resolveStorageAudioUrl",
   "normalizeHomePanelMusicDuckingWhenGeminiPct",
+  "normalizeHomePanelMusicVolume",
   "normalizeHomePanelMusicMutedLoopIndexes",
   "normalizeHomePanelMusicLoopSettings",
   "normalizeHomePanelMusicTrack",
@@ -171,8 +175,8 @@ if (cfg.sourceItems[0].volume !== 77 || cfg.sourceItems[0].duckingWhenGeminiPct 
   throw new Error("Home debe respetar overrides de volumen y ducking del track subido activo.");
 }
 
-if (!String(cfg.sourceItems[1].sourceUrl || "").includes("/api/assets/proxy-media?url=")) {
-  throw new Error("Home debe resolver gs:// a proxy-media por URL para segmentos reconstruidos.");
+if (String(cfg.sourceItems[1].sourceUrl || "") !== "gs://bucket/audio-2.mp3") {
+  throw new Error("Home debe conservar gs:// para resolver el audio directamente con Firebase Storage.");
 }
 
 const sceneBackgroundFactor = 1.25;

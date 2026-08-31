@@ -1,6 +1,23 @@
 {
   "indexes": [
     {
+      "collectionGroup": "MarcieEditorialCalendar",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "publishAtUtc", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "MarcieEditorialCalendar",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sessionId", "order": "ASCENDING" },
+        { "fieldPath": "audience", "order": "ASCENDING" },
+        { "fieldPath": "publishAtUtc", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "audioTranslate",
       "queryScope": "COLLECTION",
       "fields": [

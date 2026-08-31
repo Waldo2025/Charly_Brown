@@ -16,10 +16,9 @@ const extractSelectOptions = (source, selectId) => {
   return Array.from(match[0].matchAll(/<option value="([^"]*)">/g), (optionMatch) => optionMatch[1]);
 };
 
-assert.match(htmlSource, /id="analizarPdfCreateTemplateFromFileBtn"/, "El hero debe incluir botón para crear plantilla desde archivo.");
-assert.match(htmlSource, /id="analizarPdfCreateTemplatesFromAllBtn"/, "El hero debe incluir botón para crear plantillas desde todas las fichas.");
-assert.match(htmlSource, /id="analizarPdfQuickAnalyzeAllBtn"/, "El hero debe incluir botón de análisis rápido.");
-assert.match(htmlSource, /id="analizarPdfCreateDefaultRevisionsBtn"/, "El hero debe incluir botón para crear fichas base.");
+assert.match(htmlSource, /id="analizarPdfAnalysisRulesBtn"/, "El hero debe incluir acceso a las condiciones del análisis.");
+assert.match(htmlSource, /id="analizarPdfChooseFolderBtn"/, "El hero debe permitir elegir una carpeta Collect.");
+assert.match(htmlSource, /id="analizarPdfAnalyzeAllBtn"/, "El hero debe incluir la acción de analizar todas las fichas.");
 assert.match(htmlSource, /id="analizarPdfDefaultRevisionsModal"/, "Crear fichas base debe abrir un modal de configuración global.");
 assert.match(htmlSource, /id="analizarPdfDefaultSourceTypeInput"[\s\S]*<option value="idml">IDML<\/option>/, "El modal de fichas base debe usar Formato IDML por default.");
 assert.match(htmlSource, /id="analizarPdfDefaultBookTypeInput"/, "El modal de fichas base debe pedir Tipo.");
@@ -47,19 +46,18 @@ const heroActionsMatch = htmlSource.match(
   /<div class="analizar-pdf-composer-actions analizar-pdf-hero-actions">([\s\S]*?)<\/div>\s*<\/div>\s*<\/header>/,
 );
 assert.ok(heroActionsMatch, "El hero debe conservar el contenedor de acciones.");
-const heroActionGroups = Array.from(
-  heroActionsMatch[1].matchAll(/<div class="analizar-pdf-hero-action-group"[^>]*>([\s\S]*?)<\/div>/g),
-).map((match) => Array.from(match[1].matchAll(/id="([^"]+)"/g), (idMatch) => idMatch[1]));
+const heroActionIds = Array.from(heroActionsMatch[1].matchAll(/id="([^"]+)"/g), (match) => match[1]);
 assert.deepEqual(
-  heroActionGroups,
+  heroActionIds,
   [
-    ["analizarPdfMappingsBtn"],
-    ["analizarPdfCreateTemplateFromFileBtn", "analizarPdfCreateTemplatesFromAllBtn"],
-    ["analizarPdfCreateDefaultRevisionsBtn", "analizarPdfAddRevisionBtn"],
-    ["analizarPdfQuickAnalyzeAllBtn", "analizarPdfAnalyzeAllBtn"],
-    ["analizarPdfSaveBtn"],
+    "analizarPdfFolderInput",
+    "analizarPdfThemeToggleBtn",
+    "analizarPdfEditGlobalTemplateBtn",
+    "analizarPdfAnalysisRulesBtn",
+    "analizarPdfChooseFolderBtn",
+    "analizarPdfAnalyzeAllBtn",
   ],
-  "Los botones del hero deben mantener grupos y orden DOM accesible.",
+  "Los controles del hero deben mantener un orden DOM accesible.",
 );
 assert.doesNotMatch(appSource, /analizar-pdf-[\w-]+\.js\?v=2026-1\.0\.10\.422/, "analizar-pdf-app.js no debe importar módulos internos con cache-buster viejo.");
 
@@ -83,7 +81,7 @@ assert.match(appSource, /getPollingStageLabel/, "El polling debe mostrar la etap
 assert.match(appSource, /Procesando estructura, estilos y hallazgos/, "El spinner debe indicar cuando el análisis procesa estructura, estilos y hallazgos.");
 assert.match(appSource, /Guardando copia local del IDML|Usando copia guardada del IDML/, "El spinner debe indicar si usa copia local o guardada del IDML.");
 assert.match(appSource, /buildTemplateCreationTargets:resolved/, "La creación masiva debe registrar targets y omitidos para diagnosticar fichas no detectadas.");
-assert.match(appSource, /resolveDefaultRevisionUnitCountByTrimester[\s\S]*trimestre 2[\s\S]*return 6[\s\S]*trimestre 1[\s\S]*trimestre 3[\s\S]*return 7/, "Las fichas base deben calcular unidades por trimestre: T1/T3=7, T2=6.");
+assert.match(appSource, /function resolveDefaultRevisionUnitCount[\s\S]*Math\.max\(1, Math\.min\(10/, "Las fichas base deben aceptar una cantidad de unidades configurable entre 1 y 10.");
 assert.match(appSource, /openDefaultRevisionsModal/, "El botón de fichas base debe abrir modal previo.");
 assert.match(appSource, /handleCreateDefaultRevisions\(collectDefaultRevisionsConfigFromDom\(\)\)/, "La confirmación del modal debe crear fichas base con datos globales.");
 assert.match(appSource, /draft\.sourceType = "idml"/, "Crear fichas base debe dejar la sesión en formato IDML.");
@@ -137,7 +135,7 @@ assert.match(resultsSource, /getRailDisplayTitle/, "El renderer del rail debe re
 assert.match(resultsSource, /railTooltip/, "El nombre real del archivo debe quedar disponible como tooltip del rail.");
 assert.match(resultsSource, /data-action="toggle-rail-groups"/, "El rail debe incluir un único botón para expandir o contraer todos los grupos.");
 assert.match(resultsSource, /data-action="toggle-rail-nonempty-groups"/, "El rail debe incluir un botón para abrir solo grupos con cambios o errores.");
-assert.match(resultsSource, /\{ id: "redaction", label: "Propuestas de redacción" \}/, "El filtro del rail debe incluir Propuestas de redacción.");
+assert.match(resultsSource, /\{ id: "redaction", label: "Propuestas de redacción"[^}]*\}/, "El filtro del rail debe incluir Propuestas de redacción.");
 assert.match(resultsSource, /function getRedactionAnchorId/, "El renderer debe crear anchors propios para propuestas de redacción.");
 assert.match(resultsSource, /pagesWithRedactionIssues/, "El rail debe agrupar páginas con propuestas de redacción.");
 assert.match(resultsSource, /renderRedactionSuggestionList/, "El reporte por página debe renderizar propuestas de redacción separadas.");
@@ -170,8 +168,8 @@ assert.match(cssSource, /analizar-pdf-ortho-rail-group[\s\S]*break-inside:\s*avo
 assert.match(cssSource, /analizar-pdf-ortho-file-group[\s\S]*columns:\s*148px/, "Los summaries internos del rail deben fluir en columnas al ampliar el panel.");
 assert.match(cssSource, /analizar-pdf-default-revisions-grid input,[\s\S]*analizar-pdf-default-revisions-grid select[\s\S]*height:\s*42px/, "Los campos del modal Crear fichas base deben usar la misma altura que la ficha editorial.");
 assert.match(cssSource, /#analizarPdfMappingsModal \.analizar-pdf-modal-card\s*\{[\s\S]*width:\s*min\(1680px,\s*96vw\)/, "El modal de mapeos debe ser más ancho que el modal general.");
-assert.match(cssSource, /analizar-pdf-biblio-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(7,\s*minmax\(92px,\s*1fr\)\)/, "La ficha editorial debe usar una grilla compacta de 7 columnas.");
-assert.match(cssSource, /label\[for="analizarPdfBookTypeInput"\][\s\S]*order:\s*1/, "La ficha editorial debe ordenar Tipo como primer campo visual.");
-assert.match(cssSource, /label\[for="analizarPdfFileInput"\][\s\S]*order:\s*12[\s\S]*grid-column:\s*span 2/, "El campo Archivo debe moverse después de metadatos y ocupar dos columnas.");
+assert.match(cssSource, /analizar-pdf-biblio-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)[\s\S]*grid-template-areas:/, "La ficha editorial debe usar una grilla compacta de 6 columnas con áreas explícitas.");
+assert.match(cssSource, /label\[for="analizarPdfBookTypeInput"\]\s*\{\s*grid-area:\s*type;/, "La ficha editorial debe asignar Tipo a su área visual.");
+assert.match(cssSource, /analizar-pdf-biblio-file-cell\s*\{[\s\S]*grid-area:\s*file;/, "El campo Archivo debe ocupar el área file de la grilla.");
 
 console.log("Analizar PDF quick analysis contract OK.");

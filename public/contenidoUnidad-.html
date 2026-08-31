@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <!-- Bootstrap Select CSS -->
     <link rel="stylesheet" href="vendor/bootstrap-select/bootstrap-select.min.css">
-  
+
     <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
 
     <script src="vendor/marked/marked.umd.js"></script>
@@ -32,7 +32,7 @@
     <script src="vendor/pdfjs/pdf.min.js"></script>
 
     <link rel="stylesheet" href="contenidoUnidad.css">
-    <link rel="stylesheet" href="sidebar.css">
+    <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
     <link rel="stylesheet" href="chatbot.css">
     <link rel="stylesheet" href="header.css">
 
@@ -46,15 +46,12 @@
     <div class="header-content">
       <!-- header-content loaded from chromeLayout.js -->
     </div>
-  </header> 
+  </header>
 
-  
+
 
   <div id="sidebar">
-    <button id="menuToggle" aria-label="Abrir menú">
-      <i class="fas fa-bars"></i>
-    </button>
-  
+
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
     </div>
@@ -68,8 +65,8 @@
     </div>
     <button class="chatbot-close" id="chatbotClose">&times;</button>
   </div>
- 
-  
+
+
   <div class="chatbot-messages" id="chatbotMessages">
       <!-- Aquí se mostrarán los mensajes -->
   </div>
@@ -78,7 +75,7 @@
       <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
   </div>
  </div>
- 
+
 
 
 
@@ -158,7 +155,7 @@
           <div  id="analizarBtn" title="A partir de una lectura existente">
             <i class="fas fa-microscope" ></i> <span class="btn-title">Analizar Lectura</span>
 
-          </div>        
+          </div>
 
           <!-- Botón para generar la lectura original -->
           <div id="analisisLecturaNueva" title="A partir de cero">
@@ -169,41 +166,41 @@
 
         <div class="acordeon-container">
 
-    
+
 
           <button class="acordeon-btn">📖 Área de Lectura y Materiales</button>
           <div class="acordeon-panel">
-        
-       
+
+
               <div class="form-group mt-3" style="margin-bottom: 1rem;">
                 <label for="temaInput2"><strong>Tema específico a desarrollar (opcional):</strong></label>
                 <input type="text" id="temaInput2" class="form-control" placeholder="Ej. El sistema solar, La biodiversidad, etc.">
               </div>
-        
+
             <label for="lecturaOriginal"><strong>Lectura (opcional):</strong></label>
             <div id="lecturaOriginal" contenteditable="true" class="editor-zona"></div>
-        
+
             <label for="temarioTexto"><strong>Temario (o similar):</strong></label>
             <div id="temarioTexto" contenteditable="true" class="editor-zona"></div>
-        
+
             <label for="rubricaTexto"><strong>Contextualización Pedagógica (o similar):</strong></label>
             <div id="rubricaTexto" contenteditable="true" class="editor-zona"></div>
-        
+
             <div id="drop-area">
               <p>Arrastra o haz clic para subir una imagen (Secuencia y alcance, Fichas, Anexos)</p>
               <input type="file" id="imagenRubrica" accept="image/*" hidden />
             </div>
-        
+
           </div>
-        
+
         </div>
-        
+
         <div id="botonContinuarLecturaContainer" style="display:none; text-align:center; margin-top:1rem;">
           <button id="continuarGeneracionBtnLectura" class="btn btn-warning">
             ➡️ Continuar Generando Lectura
           </button>
         </div>
-      
+
         <div class="acordeon-container">
 
             <button class="acordeon-btn">Análisis Profesional</button>
@@ -220,14 +217,14 @@
           </div>
         </div>
 
- 
+
 
             <!-- Parámetros -->
         <div class="acordeon-container">
 
           <button class="acordeon-btn">⚙️ Parámetros de la Lectura</button>
           <div class="acordeon-panel">
-        
+
             <div class="parametrosLectura">
               <label for="generoSelect"><strong>Género literario:</strong></label>
               <select id="generoSelect" class="form-select mb-2">
@@ -301,7 +298,7 @@
                 <option value="Cuentos de Realidad Aumentada">Cuentos de Realidad Aumentada</option>
                 <option value="Novela Experimental">Novela Experimental</option>
               </select>
-            
+
 
               <label for="tonoSelect"><strong>Emoción/Tono:</strong></label>
               <select id="tonoSelect" class="form-select mb-2">
@@ -337,7 +334,7 @@
                   <!-- Se llenará con JS -->
                 </select>
               </div>
-      
+
               <div class="form-group" id="competenciasContainer" style="display: none;">
                 <label for="competenciasSelect"><strong>Competencias / Secciones:</strong></label>
                 <select id="competenciasSelect" class="form-select mb-3" multiple>
@@ -345,13 +342,13 @@
                 </select>
                 <small class="text-muted">Puedes seleccionar varias con Ctrl o Cmd.</small>
               </div>
-      
+
               <div class="form-group mt-3">
                 <label for="temaInput"><strong>Tema específico a desarrollar (opcional):</strong></label>
                 <input type="text" id="temaInput" class="form-control" placeholder="Ej. El sistema solar, La biodiversidad, etc.">
               </div>
-      
-      
+
+
 
               <!-- Opciones adicionales -->
               <div class="opciones-extra mt-3">
@@ -362,28 +359,28 @@
               </div>
 
             </div>
-        
+
           </div>
-        
+
         </div>
 
 
 
         <div class="generarbtn">
           <div id="generarSugerenciasBtn">
-            <i class="fas fa-lightbulb"></i><span class="btn-title"> Generar Sugerencias</span> 
+            <i class="fas fa-lightbulb"></i><span class="btn-title"> Generar Sugerencias</span>
           </div>
 
 
           <div  id="generarLecturaBtn" >
             <i class="fas fa-wand-magic"title=""></i> <span class="btn-title">Generar lectura</span>
-          </div>    
-        </div>   
+          </div>
+        </div>
 
 
 
       </section>
-   
+
 
 
 
@@ -438,7 +435,7 @@
       </div>
 
 
-    </div> 
+    </div>
   </div>
 </div>
 
@@ -454,31 +451,31 @@
       <div id="listaLecturas"></div>
     </div>
   </div>
-  
+
   <div id="modalCompartirLectura" class="modal">
     <div class="modal-content">
       <span class="close" id="cerrarModalCompartirLecturaBtn">&times;</span>
       <h4>¿Con quién deseas compartir esta lectura?</h4>
-  
-  
+
+
       <label for="selectUsuarios">Selecciona usuarios específicos:</label>
       <select id="emailCompartirLectura" class="form-select mt-2" multiple></select>
-  
+
       <button id="btnCompartirUsuario" class="btn btn-primary w-100 mt-2">Compartir con usuario</button>
     </div>
   </div>
-  
+
 
 
   <!--  =================
-  Modal para ver lecturas completas 
+  Modal para ver lecturas completas
   ================= -->
 
 
 <div id="lecturaModal" class="modal">
   <div class="modal-content">
     <div class="modal-header" style="position: relative;">
-      
+
       <!-- Botón "X" para cerrar -->
       <button id="cerrarModalBtnTop" style="
         position: absolute;
@@ -501,15 +498,15 @@
     <div class="modal-actions">
       <div id="guardarCambiosBtn" class="btn" tabindex="0" style="cursor: pointer;">
         <i class="fas fa-save"></i> <span class="btn-title">Guardar</span>
-      </div> 
+      </div>
 
       <div id="exportarModalInDesignBtn">
         <i class="fas fa-microscope" title=""></i> <span class="btn-title">InDesign</span>
-      </div>  
+      </div>
 
       <div id="cerrarModalBtn">
         <i class="fas fa-microscope" title=""></i> <span class="btn-title">Cerrar</span>
-      </div>  
+      </div>
     </div>
   </div>
 </div>
@@ -542,13 +539,13 @@
   <div class="panel-header">
     <h2>Genera tu MindMap</h2>
     <button id="cerrarPanelGuardadas" class="btn-cerrar">&times;</button>
-    
+
     <!-- Íconos de acción -->
     <div class="panel-actions">
       <button id="nuevoMindMapBtn" class="btn-icon" title="Nuevo MindMap">
         <i class="fas fa-project-diagram"></i>
       </button>
-  
+
       <label for="inputMultipleImagenes" class="btn-icon" title="Nueva palabra (Subir PNG)">
         <i class="fas fa-upload"></i>
       </label>
@@ -570,9 +567,9 @@
 
     </div>
 
- 
+
   </div>
-  
+
   <!-- Caja de texto para pegar el cuento -->
   <div id="areaNuevoMindmap" style="display:none; margin-top: 1rem;">
     <strong>Pega tu cuento o texto:</strong>
@@ -589,7 +586,7 @@
 
   </div>
 
-  
+
   <!-- Resultado del MindMap generado -->
   <div id="resultadoMindmap" style="margin-top: 1rem;"></div>
 </div>
@@ -728,13 +725,13 @@
     <button id="cerrarGeneradorImagenes" style="background: transparent; border: none; font-size: 1.2rem;">&times;</button>
   </div>
   <div id="generadorImagenesContainer"></div>
-  
+
   <!-- 📸 Galería de imágenes guardadas - Actualizado -->
   <div class="galeria-container">
-    <div id="galeriaImagenesGuardadas" 
-         style="display: grid; 
-                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); 
-                gap: 1rem; 
+    <div id="galeriaImagenesGuardadas"
+         style="display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 1rem;
                 padding: 0.5rem;
                 overflow-y: auto;"></div>
   </div>
@@ -787,7 +784,7 @@
       <option value="14">14</option>
       <option value="15">15</option>
     </select>
-    
+
 
     <div style="margin-top: 1rem; text-align: right;">
       <button id="cancelarCompartirBtn">Cancelar</button>
@@ -818,7 +815,7 @@
 <script src="js/html-docx.js"></script>
 <script src="vendor/vanilla-tilt/vanilla-tilt.min.js"></script>
 
-<script src="vendor/prism/prism.js"></script>  
+<script src="vendor/prism/prism.js"></script>
 
 <script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
 <script src="vendor/trumbowyg/plugins/trumbowyg.fontsize.min.js"></script>
@@ -833,8 +830,8 @@
 
 
 <script type="module" src="js/contenidoUnidad.js"></script>
-<script type="module" src="js/chromeLayout.js"></script>
-  <script type="module" src="js/sidebar.js"></script>
+<script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
+  <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
 <script type="module" src="js/chatbot.js"></script>
 <script type="module" src="js/generarImagenes.js"></script>
 

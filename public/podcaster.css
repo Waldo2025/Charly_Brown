@@ -15990,11 +15990,9 @@ body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal {
   }
 
   .podcast-video-transport {
-    position: fixed;
-    left: 8px;
-    right: 8px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
-    z-index: 30;
+    position: relative;
+    inset: auto;
+    z-index: auto;
     max-height: none;
     overflow: visible;
     border-radius: 18px;
@@ -16053,14 +16051,12 @@ body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal {
   }
 
   .podcast-studio-footer {
-    position: fixed;
-    left: 8px;
-    right: 8px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-    z-index: 25;
+    position: relative;
+    inset: auto;
+    z-index: auto;
     gap: 10px;
     padding: 10px 12px 12px;
-    max-height: 30vh;
+    max-height: min(20dvh, 120px);
     overflow-y: auto;
     overflow-x: hidden;
     border-radius: 18px;
@@ -17511,7 +17507,7 @@ body :is(#podcastVideoShell, #creativeVideoShell) :is(
 }
 
 /* Structured transport: tools, timeline zoom, playback/settings/status, output. */
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
+body #creativeVideoShell .podcast-video-transport {
   box-sizing: border-box;
   display: grid !important;
   grid-template-columns: auto minmax(180px, 250px) minmax(0, 1fr) auto;
@@ -17530,19 +17526,19 @@ body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
   box-shadow: none !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
+body #creativeVideoShell
   .podcast-video-transport
   > .podcast-video-transport-group.is-left {
   grid-area: tools;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
+body #creativeVideoShell
   .podcast-video-transport
   > .podcast-timeline-footer-zoom {
   grid-area: timeline-zoom;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
+body #creativeVideoShell
   .podcast-video-transport
   > .podcast-video-transport-group.is-middle {
   grid-area: center;
@@ -17570,7 +17566,7 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   margin: 0 !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport-bundle {
+body #creativeVideoShell .podcast-video-transport-bundle {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -17584,17 +17580,17 @@ body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport-bundl
   box-shadow: none !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
+body #creativeVideoShell
   .podcast-video-transport
   > .is-left,
-body :is(#podcastVideoShell, #creativeVideoShell)
+body #creativeVideoShell
   .podcast-video-transport
   > .podcast-timeline-footer-zoom {
   padding-right: 14px !important;
   border-right: 1px solid var(--pod-border) !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-timeline-footer-summary {
+body #creativeVideoShell .podcast-timeline-footer-summary {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -17606,14 +17602,14 @@ body :is(#podcastVideoShell, #creativeVideoShell) .podcast-timeline-footer-summa
 }
 
 @media (max-width: 1320px) {
-  body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
+  body #creativeVideoShell .podcast-video-transport {
     grid-template-columns: auto minmax(160px, 220px) minmax(0, 1fr);
     grid-template-areas:
       "tools timeline-zoom output"
       "center center center";
   }
 
-  body :is(#podcastVideoShell, #creativeVideoShell)
+  body #creativeVideoShell
     .podcast-video-transport
     > .podcast-video-transport-group.is-middle {
     grid-template-columns: auto auto minmax(220px, 1fr);
@@ -19955,191 +19951,109 @@ body :is(#podcastVideoShell, #creativeVideoShell) :is(
 }
 
 /*
- * Canonical timeline footer layout.
- * Sections: tools | timeline zoom | playback + view + status | output.
+ * Canonical Snoopy shell: header, scrollable workspace, portraits and transport.
+ * The transport is the last row and never depends on fixed viewport offsets.
  */
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
+.snoopy-editor-modal {
+  container: snoopy-editor / inline-size;
+}
+
+.snoopy-editor-workspace-shell {
   box-sizing: border-box;
-  display: flex !important;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: flex-start;
-  width: 100%;
-  min-height: 52px;
-  margin: 0;
-  padding: 6px 10px !important;
-  column-gap: 10px !important;
-  row-gap: 0 !important;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-tools {
-  flex: 0 0 auto;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-zoom {
-  flex: 0 1 180px;
-  width: clamp(120px, 14vw, 180px);
-  min-width: 120px;
-  max-width: 180px;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-primary {
   display: grid !important;
-  grid-template-columns: max-content max-content minmax(0, 1fr);
-  align-items: center;
-  justify-content: stretch;
-  gap: 12px;
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  margin-left: 0 !important;
-  margin-inline-start: 0 !important;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-output {
-  flex: 0 0 auto;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
-  box-sizing: border-box;
-  min-width: 0;
-  min-height: 34px;
-  margin: 0 !important;
-  padding: 0 6px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  :is(.is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
-  border-inline-start: 1px solid var(--pod-border) !important;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-tools,
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-output {
-  display: flex !important;
-  align-items: center;
-  gap: 4px;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-output {
-  justify-content: flex-end;
-  margin-inline-start: 0 !important;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-zoom {
-  display: grid !important;
-  grid-template-columns: 16px minmax(100px, 1fr) 16px;
-  align-items: center;
-  gap: 8px;
+  grid-template-areas:
+    "editor-header"
+    "editor-workspace"
+    "editor-portraits"
+    "editor-transport";
+  grid-template-rows: max-content minmax(0, 1fr) auto max-content;
   width: 100%;
+  height: 100dvh !important;
+  min-height: 100dvh !important;
+  max-height: 100dvh !important;
+  padding-block-end: 0 !important;
+  gap: 0 !important;
+  overflow: hidden !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-zoom
-  .podcast-timeline-ruler-zoom-inner {
-  width: 100% !important;
-  min-width: 100px;
-  margin: 0 auto !important;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-zoom
-  .podcast-timeline-zoom-range {
-  width: 100% !important;
+.snoopy-editor-workspace-shell > .floating-panel-head {
+  grid-area: editor-header;
   min-width: 0;
-  margin: 0 !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-primary {
-  position: static !important;
+.snoopy-editor-workspace-shell > .snoopy-editor-workspace {
+  grid-area: editor-workspace;
+  min-width: 0;
+  min-height: 0;
+  height: 100% !important;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.snoopy-editor-workspace-shell > .snoopy-portrait-dock {
+  grid-area: editor-portraits;
+}
+
+.snoopy-editor-workspace-shell > .snoopy-transport-grid {
+  grid-area: editor-transport;
+}
+
+.snoopy-portrait-dock {
+  position: relative !important;
   inset: auto !important;
-  transform: none !important;
+  z-index: auto !important;
   display: grid !important;
-  grid-template-columns: repeat(3, max-content);
-  align-items: center;
-  justify-content: center;
-  justify-items: center;
-  gap: 12px;
-  flex: 1 1 auto;
+  grid-template-rows: max-content minmax(0, 1fr) max-content;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: min(26dvh, 220px);
+  margin: 0 !important;
+  padding: 7px 10px !important;
+  gap: 5px !important;
+  overflow: hidden !important;
+  border-radius: 0 !important;
+}
+
+.snoopy-portrait-dock[hidden] {
+  display: none !important;
+}
+
+.snoopy-portrait-dock .podcast-studio-footer-header {
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 5px;
+  flex-wrap: nowrap;
+}
+
+.snoopy-portrait-dock .podcast-studio-footer-title {
   width: auto;
   min-width: 0;
-  margin: 0 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-primary
-  > :is(.is-playback, .is-view-controls, .is-summary) {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
+.snoopy-portrait-dock .podcast-portrait-strip {
   min-width: 0;
-  min-height: 30px;
-  margin: 0 !important;
-  padding: 0 6px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  min-height: 0;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-primary
-  > :is(.is-playback, .is-view-controls, .is-summary) {
-  border-inline-start: 1px solid var(--pod-border) !important;
+.snoopy-portrait-dock.is-footer-collapsed {
+  grid-template-rows: max-content 0 0;
+  max-height: 42px;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-primary
-  > .is-summary {
-  flex: 0 0 auto;
-  width: max-content;
-  justify-self: center;
-  justify-content: center;
-  gap: 8px;
+.podcast-stage-fullscreen-controls-host {
+  container: snoopy-editor / inline-size;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > .is-primary
-  > :is(.is-playback, .is-view-controls) {
-  width: max-content !important;
-  max-width: max-content;
-  justify-self: start;
-  flex: 0 0 auto;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  :is(.row-icon-btn, .timeline-mode-btn) {
+/* Shared compact controls used by the canonical transport grid below. */
+.snoopy-transport-grid :is(.row-icon-btn, .timeline-mode-btn) {
   min-width: 30px;
   height: 30px;
   margin: 0 !important;
@@ -20151,29 +20065,19 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   box-shadow: none !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  .row-icon-btn {
+.snoopy-transport-grid .row-icon-btn {
   width: 30px;
   padding: 0 !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  :is(.row-icon-btn, .timeline-mode-btn):hover,
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  :is(.row-icon-btn, .timeline-mode-btn):focus-visible,
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  :is(.row-icon-btn, .timeline-mode-btn).is-active {
+.snoopy-transport-grid :is(.row-icon-btn, .timeline-mode-btn):hover,
+.snoopy-transport-grid :is(.row-icon-btn, .timeline-mode-btn):focus-visible,
+.snoopy-transport-grid :is(.row-icon-btn, .timeline-mode-btn).is-active {
   color: var(--pod-accent);
   background: var(--pod-accent-soft) !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  .studio-speed-wrap select {
+.snoopy-transport-grid .studio-speed-wrap select {
   height: 30px;
   margin: 0;
   padding: 0 8px;
@@ -20184,101 +20088,41 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   box-shadow: none;
 }
 
-@media (max-width: 760px) {
-  body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
-    display: flex !important;
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    gap: 4px !important;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-tools {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-output {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-zoom {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    max-width: none;
-    border-inline-start: 0 !important;
-    border-top: 1px solid var(--pod-border) !important;
-    padding-top: 6px !important;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-primary {
-    display: grid !important;
-    grid-template-columns: max-content max-content minmax(240px, 1fr);
-    align-items: center;
-    gap: 12px;
-    min-width: max-content;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-primary
-    > .is-playback {
-    grid-column: 1;
-    grid-row: 3;
-    border-inline-start: 0 !important;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-primary
-    > .is-view-controls {
-    grid-column: 2;
-    grid-row: 3;
-  }
-
-  body :is(#podcastVideoShell, #creativeVideoShell)
-    .podcast-video-transport
-    > .is-primary
-    > .is-summary {
-    grid-column: 1 / -1 !important;
-    grid-row: 4;
-    justify-content: center;
-    border-inline-start: 0 !important;
-    border-top: 1px solid var(--pod-border) !important;
-    padding-top: 6px !important;
-  }
-}
 
 /*
- * Single-grid timeline footer.
+ * Canonical responsive timeline footer grid.
  * Every functional section is a direct grid item; groups use flex only.
  */
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
+.snoopy-transport-grid {
+  position: relative !important;
+  inset: auto !important;
+  z-index: auto;
+  box-sizing: border-box;
   display: grid !important;
   grid-template-columns:
-    repeat(4, minmax(0, 1fr))
     max-content
+    minmax(148px, 184px)
+    max-content
+    max-content
+    minmax(110px, 1fr)
     max-content !important;
   grid-template-areas: "tools zoom playback view summary output";
   align-items: center;
   justify-content: stretch;
-  gap: 0 clamp(8px, 1vw, 18px) !important;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  gap: 0 !important;
+  width: 100% !important;
+  min-width: 0;
+  min-height: 52px;
+  max-height: none;
+  margin: 0 !important;
+  padding: 6px 10px max(6px, env(safe-area-inset-bottom, 0px)) !important;
+  overflow: visible;
+  border-radius: 0 0 18px 18px !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
   box-sizing: border-box;
   display: flex !important;
@@ -20287,7 +20131,7 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   min-width: 0;
   min-height: 34px;
   margin: 0 !important;
-  padding: 0 8px !important;
+  padding: 0 10px !important;
   gap: 4px;
   border: 0 !important;
   border-inline-start: 1px solid var(--pod-border) !important;
@@ -20296,31 +20140,22 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   box-shadow: none !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls) {
-  width: 100% !important;
-  max-width: none;
-  justify-content: center;
-}
-
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport > .is-tools {
+.snoopy-transport-grid > .is-tools {
   grid-area: tools;
   padding-left: 0 !important;
   border-inline-start: 0 !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport > .is-zoom {
+.snoopy-transport-grid > .is-zoom {
   grid-area: zoom;
   justify-self: stretch;
   justify-content: center;
   width: 100% !important;
   min-width: 0;
-  max-width: none;
+  max-width: 184px;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-zoom
   .podcast-timeline-ruler-zoom-inner {
   flex: 0 1 140px;
@@ -20329,24 +20164,21 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   margin: 0 !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-tools
   > .podcast-video-transport-bundle.is-tools {
   justify-content: center;
   gap: 14px;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-tools
   > .podcast-video-transport-bundle.is-tools
   > * + * {
   position: relative;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-tools
   > .podcast-video-transport-bundle.is-tools
   > * + *::before {
@@ -20361,21 +20193,18 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   pointer-events: none;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
-  .podcast-tools-generate-group {
+.snoopy-transport-grid .podcast-tools-generate-group {
   display: inline-flex;
   align-items: center;
   gap: 2px;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport > .is-playback {
+.snoopy-transport-grid > .is-playback {
   grid-area: playback;
   justify-content: center;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-playback
   .podcast-playback-time-status {
   display: inline-flex;
@@ -20388,8 +20217,7 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   white-space: nowrap;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-playback
   #podcastStudioTrackTitle {
   color: var(--pod-muted);
@@ -20398,8 +20226,7 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   letter-spacing: 0.04em;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-playback
   #podcastStudioTrackHeadTime {
   min-width: 58px;
@@ -20409,40 +20236,236 @@ body :is(#podcastVideoShell, #creativeVideoShell)
   text-align: center;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport > .is-view-controls {
+.snoopy-transport-grid > .is-view-controls {
   grid-area: view;
   justify-content: center;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport > .is-summary {
+.snoopy-transport-grid > .is-summary {
   grid-area: summary;
   justify-self: stretch;
   justify-content: center;
   width: 100% !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell)
-  .podcast-video-transport
+.snoopy-transport-grid
   > .is-summary
   .podcast-timeline-view-toggle {
   padding-inline-start: 0 !important;
   border-inline-start: 0 !important;
 }
 
-body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport > .is-output {
+.snoopy-transport-grid > .is-output {
   grid-area: output;
   justify-content: flex-end;
   padding-right: 0 !important;
 }
 
-@media (max-width: 980px) {
-  body :is(#podcastVideoShell, #creativeVideoShell) .podcast-video-transport {
-    grid-template-columns:
-      repeat(4, minmax(250px, 1fr))
-      max-content
-      max-content !important;
-    min-width: max-content;
-    justify-content: start;
+.podcast-stage-fullscreen-controls-host > .snoopy-transport-grid.is-attached-to-stage-fullscreen {
+  border-radius: 14px !important;
+}
+
+.snoopy-editor-workspace-shell.is-reel-mode > .snoopy-transport-grid {
+  margin: 0 !important;
+}
+
+@container snoopy-editor (max-width: 1320px) and (min-width: 769px) {
+  .snoopy-transport-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    grid-template-areas:
+      "tools tools tools zoom zoom zoom"
+      "playback playback playback view summary output";
+    gap: 0 !important;
+  }
+
+  .snoopy-transport-grid
+    > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+    width: 100% !important;
+    min-height: 38px;
+    padding: 3px 10px !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-tools, .is-playback) {
+    border-inline-start: 0 !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-zoom, .is-view-controls, .is-summary, .is-output) {
+    border-inline-start: 1px solid var(--pod-border) !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-playback, .is-view-controls, .is-summary, .is-output) {
+    border-block-start: 1px solid var(--pod-border) !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-tools, .is-zoom, .is-playback, .is-summary) {
+    justify-content: center;
+  }
+
+  .snoopy-transport-grid > .is-zoom {
+    max-width: none;
+  }
+
+  .snoopy-transport-grid > .is-view-controls {
+    justify-content: flex-start;
+  }
+}
+
+@container snoopy-editor (max-width: 768px) {
+  .snoopy-editor-workspace-shell > .snoopy-editor-workspace {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .snoopy-transport-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content !important;
+    grid-template-areas:
+      "tools tools tools"
+      "zoom zoom zoom"
+      "playback playback playback"
+      "view summary output";
+    gap: 0 !important;
+    min-height: 0;
+    padding: 4px 8px max(4px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .snoopy-transport-grid
+    > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 34px;
+    flex-wrap: nowrap;
+    padding: 2px 6px !important;
+    border-inline-start: 0 !important;
+    border-block-start: 0 !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+    border-block-start: 1px solid var(--pod-border) !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-summary, .is-output) {
+    border-inline-start: 1px solid var(--pod-border) !important;
+  }
+
+  .snoopy-transport-grid > :is(.is-tools, .is-zoom, .is-playback) {
+    justify-content: center;
+  }
+
+  .snoopy-transport-grid > .is-zoom {
+    justify-self: stretch;
+    max-width: none;
+  }
+
+  .snoopy-transport-grid > .is-view-controls {
+    justify-content: flex-start;
+  }
+
+  .snoopy-transport-grid > .is-summary {
+    justify-content: center;
+  }
+
+  .snoopy-transport-grid > .is-output {
+    justify-content: flex-end;
+    padding-right: 0 !important;
+  }
+
+  .snoopy-transport-grid > .is-view-controls :is(.studio-speed-wrap, .studio-speed-wrap select) {
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: 0;
+  }
+}
+
+@container snoopy-editor (max-width: 420px) {
+  .snoopy-transport-grid {
+    padding-inline: 4px !important;
+  }
+
+  .snoopy-transport-grid
+    > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+    gap: 2px;
+    padding-inline: 2px !important;
+  }
+
+  .snoopy-transport-grid > .is-tools > .podcast-video-transport-bundle.is-tools {
+    gap: 10px;
+  }
+}
+
+@supports not (container-type: inline-size) {
+  @media (max-width: 1320px) and (min-width: 769px) {
+    .snoopy-transport-grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+      grid-template-areas:
+        "tools tools tools zoom zoom zoom"
+        "playback playback playback view summary output";
+      gap: 0 !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+      width: 100% !important;
+      min-height: 38px;
+      padding: 3px 10px !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-tools, .is-playback) {
+      border-inline-start: 0 !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-zoom, .is-view-controls, .is-summary, .is-output) {
+      border-inline-start: 1px solid var(--pod-border) !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-playback, .is-view-controls, .is-summary, .is-output) {
+      border-block-start: 1px solid var(--pod-border) !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .snoopy-editor-workspace-shell > .snoopy-editor-workspace {
+      overflow: auto;
+    }
+
+    .snoopy-transport-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content !important;
+      grid-template-areas:
+        "tools tools tools"
+        "zoom zoom zoom"
+        "playback playback playback"
+        "view summary output";
+      gap: 0 !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-tools, .is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+      width: 100% !important;
+      min-height: 34px;
+      padding: 2px 6px !important;
+      border-inline-start: 0 !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-zoom, .is-playback, .is-view-controls, .is-summary, .is-output) {
+      border-block-start: 1px solid var(--pod-border) !important;
+    }
+
+    .snoopy-transport-grid > :is(.is-summary, .is-output) {
+      border-inline-start: 1px solid var(--pod-border) !important;
+    }
+  }
+}
+
+@media (max-height: 600px) {
+  .snoopy-portrait-dock {
+    max-height: min(20dvh, 120px);
+    padding-block: 4px !important;
+    gap: 2px !important;
+  }
+
+  .snoopy-portrait-dock .podcast-studio-footer-header {
+    padding-bottom: 2px;
+  }
+
+  .snoopy-portrait-dock .podcast-studio-note {
+    display: none;
   }
 }
 
@@ -23368,6 +23391,26 @@ body:not(.is-snoopy-editor-light-theme):not(.is-snoopy-editor-mid-theme) .sessio
   margin: 0 6px 2px;
 }
 
+.sessions-rail-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.sessions-rail-filter-divider {
+  width: 1px;
+  height: 16px;
+  flex: 0 0 1px;
+  margin: 0 2px;
+  background: color-mix(in srgb, var(--pod-border) 72%, transparent 28%);
+}
+
+.sessions-rail .sessions-term-filter-chip.is-active {
+  color: var(--pod-accent);
+  background: color-mix(in srgb, var(--pod-accent-soft) 82%, transparent 18%);
+}
+
 .sessions-rail .sessions-filter-chip {
   min-height: 25px;
   padding: 5px 8px;
@@ -23889,5 +23932,552 @@ body.is-resizing-composer-shell * {
   .chat-stage .composer-shell button:hover > i,
   .chat-stage .composer-shell button:focus-visible > i {
     transform: none;
+  }
+}
+
+.session-academic-data-panel .session-academic-data-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1rem;
+  padding: 1.35rem 1.35rem 1.5rem;
+}
+
+.session-academic-data-panel .session-academic-data-form .row-field {
+  margin: 0;
+}
+
+.session-academic-data-panel .session-academic-data-form .timeline-clip-duration-actions {
+  grid-column: 1 / -1;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 720px) {
+  .session-academic-data-panel .session-academic-data-form {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+}
+
+.academic-subject-field {
+  grid-column: 1 / -1;
+}
+
+/* Session rail advanced filters */
+.sessions-rail .sessions-advanced-filter-btn {
+  position: relative;
+}
+
+.sessions-filter-active-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--pod-surface);
+  border-radius: 999px;
+  background: var(--pod-accent);
+  opacity: 0;
+  transform: scale(.5);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.sessions-advanced-filter-btn.is-active .sessions-filter-active-dot {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.sessions-filter-panel {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 42px);
+  overflow: hidden;
+}
+
+.sessions-filter-form {
+  overflow-y: auto;
+}
+
+.sessions-filter-form .row-field {
+  min-width: 0;
+  margin: 0;
+}
+
+.sessions-filter-form .row-field > span:first-child {
+  color: var(--pod-muted);
+  font-size: .7rem;
+  font-weight: 650;
+}
+
+.sessions-filter-form :is(input, select) {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--pod-border);
+  border-radius: 9px;
+  background: var(--pod-surface-2);
+  color: var(--pod-text);
+  font-size: .78rem;
+  outline: none;
+}
+
+.sessions-filter-form :is(input, select):focus-visible {
+  border-color: var(--pod-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pod-accent) 18%, transparent 82%);
+}
+
+.sessions-filter-search-control {
+  position: relative;
+  display: block;
+}
+
+.sessions-filter-search-control > i {
+  position: absolute;
+  top: 50%;
+  left: .72rem;
+  z-index: 1;
+  color: var(--pod-muted);
+  font-size: .72rem;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.sessions-filter-search-control > input {
+  padding: .5rem .75rem .5rem 2rem;
+}
+
+.sessions-filter-fields {
+  display: contents;
+}
+
+.sessions-filter-query-field,
+.sessions-filter-options-hint,
+.sessions-filter-actions {
+  grid-column: 1 / -1;
+}
+
+.sessions-filter-options-hint {
+  min-height: 1rem;
+  margin: -.25rem 0 0;
+  color: var(--pod-muted);
+  font-size: .68rem;
+}
+
+.sessions-filter-actions {
+  margin-top: 0;
+  padding-top: .85rem;
+  border-top: 1px solid var(--pod-border);
+}
+
+.sessions-filter-actions #clearSessionFiltersBtn {
+  margin-right: auto;
+}
+
+@media (max-width: 560px) {
+  .sessions-filter-panel {
+    width: min(420px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+  }
+
+  .sessions-filter-fields {
+    display: contents;
+  }
+
+  .sessions-filter-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sessions-filter-actions #clearSessionFiltersBtn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sessions-filter-active-dot {
+    transition: none;
+  }
+}
+
+/* Snoopy shortcut guide — non-modal, anchored to the editor header. */
+.snoopy-shortcut-guide-trigger {
+  position: relative;
+}
+
+.snoopy-shortcut-guide-trigger.is-active {
+  color: #dff6ff !important;
+  border-color: rgba(94, 213, 255, .68) !important;
+  background: rgba(14, 165, 233, .3) !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, .13), 0 9px 24px rgba(14, 165, 233, .22) !important;
+}
+
+.snoopy-shortcut-guide-trigger-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid rgba(224, 247, 255, .82);
+  border-radius: 50%;
+  color: #05263b;
+  background: #7dd3fc;
+  font: 800 8px/1 system-ui, sans-serif;
+  box-shadow: 0 2px 7px rgba(2, 132, 199, .38);
+  pointer-events: none;
+}
+
+.snoopy-shortcut-guide {
+  --shortcut-guide-bg: rgba(19, 25, 36, .96);
+  --shortcut-guide-bg-soft: rgba(35, 45, 61, .82);
+  --shortcut-guide-border: rgba(148, 210, 237, .22);
+  --shortcut-guide-text: #f3f8fc;
+  --shortcut-guide-muted: #a9b9c9;
+  position: fixed;
+  z-index: 13050;
+  width: min(390px, calc(100vw - 24px));
+  padding: 15px;
+  overflow: visible;
+  isolation: isolate;
+  color: var(--shortcut-guide-text);
+  border: 1px solid var(--shortcut-guide-border);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 90% -15%, rgba(56, 189, 248, .23), transparent 42%),
+    linear-gradient(145deg, var(--shortcut-guide-bg), rgba(12, 17, 27, .97));
+  box-shadow: 0 26px 70px rgba(2, 6, 23, .52), inset 0 1px 0 rgba(255, 255, 255, .08);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
+.snoopy-shortcut-guide[hidden] {
+  display: none !important;
+}
+
+.snoopy-shortcut-guide::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: var(--shortcut-guide-caret-x, calc(100% - 28px));
+  width: 13px;
+  height: 13px;
+  border-top: 1px solid var(--shortcut-guide-border);
+  border-left: 1px solid var(--shortcut-guide-border);
+  background: var(--shortcut-guide-bg);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.snoopy-shortcut-guide-glow {
+  position: absolute;
+  z-index: -1;
+  inset: 10px 22px auto;
+  height: 46px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, .17);
+  filter: blur(25px);
+  pointer-events: none;
+}
+
+.snoopy-shortcut-guide-head,
+.snoopy-shortcut-guide-footer,
+.snoopy-shortcut-guide-eyebrow,
+.snoopy-shortcut-guide-combos,
+.snoopy-shortcut-guide-combo,
+.snoopy-shortcut-guide-nav,
+.snoopy-shortcut-guide-dots {
+  display: flex;
+  align-items: center;
+}
+
+.snoopy-shortcut-guide-head {
+  min-height: 28px;
+  gap: 9px;
+}
+
+.snoopy-shortcut-guide-eyebrow {
+  gap: 8px;
+  margin-right: auto;
+  color: #9bdfff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.snoopy-shortcut-guide-eyebrow i {
+  font-size: 13px;
+}
+
+.snoopy-shortcut-guide-counter {
+  color: var(--shortcut-guide-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.snoopy-shortcut-guide-close,
+.snoopy-shortcut-guide-nav,
+.snoopy-shortcut-guide-dot {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.snoopy-shortcut-guide-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--shortcut-guide-muted);
+}
+
+.snoopy-shortcut-guide-close:hover {
+  color: var(--shortcut-guide-text);
+  background: rgba(255, 255, 255, .08);
+}
+
+.snoopy-shortcut-guide-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 13px;
+  margin-top: 12px;
+  min-height: 168px;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 16px;
+  background: linear-gradient(145deg, var(--shortcut-guide-bg-soft), rgba(17, 24, 39, .7));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+.snoopy-shortcut-guide-visual {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgba(125, 211, 252, .28);
+  border-radius: 15px;
+  color: #dff6ff;
+  background: linear-gradient(145deg, rgba(14, 165, 233, .33), rgba(99, 102, 241, .22));
+  box-shadow: 0 10px 24px rgba(14, 165, 233, .16), inset 0 1px 0 rgba(255, 255, 255, .13);
+}
+
+.snoopy-shortcut-guide-visual i {
+  font-size: 20px;
+}
+
+.snoopy-shortcut-guide-copy h4 {
+  margin: 2px 0 6px;
+  color: var(--shortcut-guide-text);
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.snoopy-shortcut-guide-copy p {
+  margin: 0;
+  color: var(--shortcut-guide-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.snoopy-shortcut-guide-combos {
+  grid-column: 1 / -1;
+  align-self: end;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  min-height: 33px;
+}
+
+.snoopy-shortcut-guide-combo {
+  gap: 5px;
+}
+
+.snoopy-shortcut-guide-combo[data-alternative="true"]::before {
+  content: "o";
+  margin-right: 2px;
+  color: var(--shortcut-guide-muted);
+  font-size: 10px;
+}
+
+.snoopy-shortcut-guide-combo kbd {
+  min-width: 30px;
+  padding: 7px 9px;
+  border: 1px solid rgba(186, 230, 253, .28);
+  border-bottom-color: rgba(186, 230, 253, .45);
+  border-radius: 9px;
+  color: #e8f8ff;
+  background: rgba(3, 12, 25, .62);
+  box-shadow: 0 3px 0 rgba(2, 6, 23, .74), inset 0 1px 0 rgba(255, 255, 255, .1);
+  font: 700 11px/1 system-ui, sans-serif;
+  text-align: center;
+}
+
+.snoopy-shortcut-guide-plus {
+  color: var(--shortcut-guide-muted);
+  font-size: 10px;
+}
+
+.snoopy-shortcut-guide-progress {
+  height: 2px;
+  margin: 11px 3px 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .16);
+}
+
+.snoopy-shortcut-guide-progress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #818cf8);
+  box-shadow: 0 0 8px rgba(56, 189, 248, .45);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.snoopy-shortcut-guide-footer {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snoopy-shortcut-guide-nav {
+  justify-content: center;
+  gap: 7px;
+  min-width: 82px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 210, 237, .14);
+  border-radius: 10px;
+  color: var(--shortcut-guide-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.snoopy-shortcut-guide-nav.is-next {
+  color: #e6f8ff;
+  border-color: rgba(56, 189, 248, .28);
+  background: rgba(14, 165, 233, .18);
+}
+
+.snoopy-shortcut-guide-nav:hover:not(:disabled) {
+  color: var(--shortcut-guide-text);
+  border-color: rgba(125, 211, 252, .42);
+  background: rgba(56, 189, 248, .13);
+}
+
+.snoopy-shortcut-guide-nav:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.snoopy-shortcut-guide-dots {
+  justify-content: center;
+  gap: 5px;
+}
+
+.snoopy-shortcut-guide-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .36);
+  transition: width 180ms ease, background-color 180ms ease;
+}
+
+.snoopy-shortcut-guide-dot.is-active {
+  width: 18px;
+  background: #58c7f3;
+}
+
+.snoopy-shortcut-guide :is(button, [tabindex]):focus-visible {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 2px;
+}
+
+body.is-snoopy-editor-mid-theme .snoopy-shortcut-guide {
+  --shortcut-guide-bg: rgba(43, 49, 58, .97);
+  --shortcut-guide-bg-soft: rgba(61, 69, 80, .86);
+  --shortcut-guide-border: rgba(191, 219, 232, .24);
+}
+
+body.is-snoopy-editor-light-theme .snoopy-shortcut-guide {
+  --shortcut-guide-bg: rgba(250, 252, 255, .98);
+  --shortcut-guide-bg-soft: rgba(239, 246, 252, .94);
+  --shortcut-guide-border: rgba(51, 113, 148, .23);
+  --shortcut-guide-text: #182331;
+  --shortcut-guide-muted: #5f7183;
+  box-shadow: 0 24px 58px rgba(29, 57, 78, .24), inset 0 1px 0 #fff;
+}
+
+body.is-snoopy-editor-light-theme .snoopy-shortcut-guide-card {
+  background: linear-gradient(145deg, var(--shortcut-guide-bg-soft), rgba(255, 255, 255, .96));
+}
+
+body.is-snoopy-editor-light-theme .snoopy-shortcut-guide-combo kbd {
+  color: #16364b;
+  border-color: rgba(48, 112, 148, .25);
+  background: #fff;
+  box-shadow: 0 3px 0 rgba(105, 135, 154, .26), inset 0 1px 0 #fff;
+}
+
+@media (max-width: 768px) {
+  .snoopy-shortcut-guide {
+    inset: auto 12px max(12px, env(safe-area-inset-bottom)) 12px !important;
+    width: auto;
+    max-height: min(510px, calc(100dvh - 24px));
+    overflow-y: auto;
+    border-radius: 20px;
+  }
+
+  .snoopy-shortcut-guide::before {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .snoopy-shortcut-guide {
+    padding: 13px;
+  }
+
+  .snoopy-shortcut-guide-card {
+    grid-template-columns: 44px minmax(0, 1fr);
+    min-height: 158px;
+    padding: 13px;
+  }
+
+  .snoopy-shortcut-guide-visual {
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+  }
+
+  .snoopy-shortcut-guide-copy h4 {
+    margin-top: 0;
+    font-size: 14px;
+  }
+
+  .snoopy-shortcut-guide-copy p {
+    font-size: 11px;
+  }
+
+  .snoopy-shortcut-guide-combo kbd {
+    min-width: 27px;
+    padding: 6px 7px;
+    font-size: 10px;
+  }
+
+  .snoopy-shortcut-guide-nav {
+    min-width: 72px;
+    padding-inline: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snoopy-shortcut-guide,
+  .snoopy-shortcut-guide *,
+  .snoopy-shortcut-guide-trigger {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
   }
 }

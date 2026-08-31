@@ -29,9 +29,19 @@ export function createPodcasterSessionRailApi(deps = {}) {
     SESSION_ACADEMIC_GRADE_OPTIONS,
     SESSION_ACADEMIC_TERM_OPTIONS,
     SESSION_ACADEMIC_UNIT_OPTIONS,
+    saveSessionAcademicMetadata,
+    loadSessionAcademicMetadata,
+    resolveAcademicUnitLabel,
+    resolveAcademicUnitOptions,
+    resolveAcademicSubjectOptions,
+    academicMetadataIsEmpty,
+    mergeAcademicMetadataIntoEntity,
+    matchesAcademicMetadataFilters,
+    buildAcademicMetadataSummary,
     upsertSessionById,
     updateDoc,
     doc,
+    getDoc,
     firestoreDb,
     serverTimestamp,
     shareSessionWithUser,
@@ -48,6 +58,44 @@ export function createPodcasterSessionRailApi(deps = {}) {
 
   const sessionRailStatusCache = new Map();
   let lastSessionListMarkup = null;
+
+  const EMPTY_ADVANCED_FILTERS = Object.freeze({
+    query: "",
+    nivel: "",
+    grado: "",
+    trimestre: "",
+    unidad: ""
+  });
+
+  function normalizeSearchText(value = "") {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("es")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeAdvancedFilters(filters = null) {
+    const source = filters && typeof filters === "object" ? filters : {};
+    return {
+      query: String(source.query || "").replace(/\s+/g, " ").trim(),
+      nivel: String(source.nivel || "").trim(),
+      grado: String(source.grado || "").trim(),
+      trimestre: String(source.trimestre || "").trim(),
+      unidad: String(source.unidad || "").trim()
+    };
+  }
+
+  function getAdvancedFilters() {
+    const normalized = normalizeAdvancedFilters(state.sessionRailAdvancedFilters);
+    state.sessionRailAdvancedFilters = normalized;
+    return normalized;
+  }
+
+  function hasAdvancedFilters(filters = getAdvancedFilters()) {
+    return Object.values(normalizeAdvancedFilters(filters)).some(Boolean);
+  }
 
   function getSessionRailStatus(session = null) {
     const sessionId = String(session?.id || "").trim();
@@ -156,6 +204,52 @@ export function createPodcasterSessionRailApi(deps = {}) {
     versions.style.setProperty("--session-versions-height", `${contentHeight}px`);
   }
 
+  function syncSessionAcademicUnitUi(session = null) {
+    if (!els.sessionAcademicUnitLabel || !els.sessionAcademicUnitSelect) return;
+    const level = String(session?.nivel || els.sessionAcademicLevelSelect?.value || "").trim();
+    const unitLabel = typeof resolveAcademicUnitLabel === "function"
+      ? resolveAcademicUnitLabel(level)
+      : (String(level).toLowerCase() === "secundaria" ? "Tema" : "Unidad");
+    els.sessionAcademicUnitLabel.textContent = unitLabel;
+    els.sessionAcademicUnitSelect.setAttribute("aria-label", unitLabel);
+    const placeholder = els.sessionAcademicUnitSelect.querySelector("option[value='']");
+    if (placeholder) placeholder.textContent = `Selecciona ${unitLabel.toLowerCase()}`;
+    const options = typeof resolveAcademicUnitOptions === "function"
+      ? resolveAcademicUnitOptions(level)
+      : Array.from({ length: 10 }, (_, index) => ({ value: String(index + 1), label: `${unitLabel} ${index + 1}` }));
+    els.sessionAcademicUnitSelect.querySelectorAll("option:not([value=''])").forEach((option, index) => {
+      const nextOption = options[index];
+      option.textContent = nextOption ? nextOption.label : option.textContent;
+      option.value = nextOption ? nextOption.value : option.value;
+    });
+  }
+
+  function syncSessionAcademicSubjectUi(session = null) {
+    const fieldEl = els.sessionAcademicSubjectField || null;
+    const labelEl = els.sessionAcademicSubjectLabel || null;
+    const selectEl = els.sessionAcademicSubjectSelect || null;
+    if (!fieldEl || !labelEl || !selectEl) return;
+    const level = String(session?.nivel || els.sessionAcademicLevelSelect?.value || "").trim();
+    const grade = String(session?.grado || els.sessionAcademicGradeSelect?.value || "").trim();
+    const isSecondary = level.toLowerCase() === "secundaria";
+    fieldEl.hidden = !isSecondary;
+    if (!isSecondary) {
+      selectEl.value = "";
+      selectEl.innerHTML = `<option value="">Selecciona una materia</option>`;
+      return;
+    }
+    const options = typeof resolveAcademicSubjectOptions === "function"
+      ? resolveAcademicSubjectOptions(level, grade)
+      : [];
+    const currentValue = String(session?.materia || selectEl.value || "").trim();
+    labelEl.textContent = "Materia";
+    selectEl.setAttribute("aria-label", "Materia");
+    selectEl.innerHTML = `<option value="">Selecciona una materia</option>${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}`;
+    if (options.some((option) => option.value === currentValue)) {
+      selectEl.value = currentValue;
+    }
+  }
+
   function renderSessionThreadList(session = null) {
     const threads = ensureSessionThreadsForRail(session);
     if (!threads.length) return "";
@@ -209,6 +303,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
               <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
               <button type="button" data-action="rename-session" data-session-id="${escapeHtml(session.id)}">Editar nombre</button>
               <button type="button" data-action="assign-session-data" data-session-id="${escapeHtml(session.id)}">Asignar datos</button>
+              <button type="button" data-action="toggle-session-publication" data-session-id="${escapeHtml(session.id)}">${session.publicar === true ? "Desactivar publicación" : "Publicar sesión"}</button>
               <button type="button" data-action="share-session" data-session-id="${escapeHtml(session.id)}">Compartir sesión</button>
               <button type="button" data-action="${session.archived === true ? "restore-session" : "archive-session"}" data-session-id="${escapeHtml(session.id)}">${session.archived === true ? "Desarchivar" : "Archivar"}</button>
               <button type="button" data-action="delete-session" data-session-id="${escapeHtml(session.id)}">Eliminar</button>
@@ -236,14 +331,190 @@ export function createPodcasterSessionRailApi(deps = {}) {
     return "podcast";
   }
 
+  function getSessionsForAdvancedFilterOptions() {
+    const activeFilter = getSessionRailFilterValue(state.sessionRailFilter);
+    const showArchived = state.showArchivedSessions === true;
+    return state.sessions.filter((session) => {
+      if ((session.archived === true) !== showArchived) return false;
+      return activeFilter === "all" || getSessionRailType(session) === activeFilter;
+    });
+  }
+
+  function sessionMatchesAdvancedFilters(session = null, filters = getAdvancedFilters()) {
+    const normalized = normalizeAdvancedFilters(filters);
+    const expectedTitle = normalizeSearchText(normalized.query);
+    if (expectedTitle) {
+      const searchableTitle = normalizeSearchText([
+        session?.title,
+        session?.script?.episodeTitle
+      ].filter(Boolean).join(" "));
+      if (!searchableTitle.includes(expectedTitle)) return false;
+    }
+    const hasAcademicFilter = [normalized.nivel, normalized.grado, normalized.trimestre, normalized.unidad].some(Boolean);
+    if (!hasAcademicFilter) return true;
+    const metadata = getSessionAcademicMetadata(session);
+    if (typeof matchesAcademicMetadataFilters === "function") {
+      return matchesAcademicMetadataFilters(metadata, {
+        nivel: normalized.nivel || "all",
+        grado: normalized.grado || "all",
+        trimestre: normalized.trimestre || "all",
+        unidad: normalized.unidad || "all",
+        materia: "all"
+      });
+    }
+    return ["nivel", "grado", "trimestre", "unidad"].every((field) => (
+      !normalized[field] || String(metadata?.[field] || "").trim() === normalized[field]
+    ));
+  }
+
+  function setFilterSelectOptions(select, values = [], placeholder = "Todos", preferredOrder = [], formatLabel = null) {
+    if (!select) return;
+    const currentValue = String(select.value || "").trim();
+    const order = new Map(preferredOrder.map((value, index) => [String(value), index]));
+    const uniqueValues = Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)))
+      .sort((left, right) => {
+        const leftIndex = order.has(left) ? order.get(left) : Number.MAX_SAFE_INTEGER;
+        const rightIndex = order.has(right) ? order.get(right) : Number.MAX_SAFE_INTEGER;
+        return leftIndex - rightIndex || left.localeCompare(right, "es", { numeric: true });
+      });
+    select.replaceChildren();
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = placeholder;
+    select.append(emptyOption);
+    uniqueValues.forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = typeof formatLabel === "function" ? formatLabel(value) : value;
+      select.append(option);
+    });
+    select.value = uniqueValues.includes(currentValue) ? currentValue : "";
+  }
+
+  function populateAdvancedFilterOptions() {
+    const sessions = getSessionsForAdvancedFilterOptions();
+    const level = String(els.sessionFilterLevelSelect?.value || "").trim();
+    const grade = String(els.sessionFilterGradeSelect?.value || "").trim();
+    const term = String(els.sessionFilterTermSelect?.value || "").trim();
+    const metadataRows = sessions.map((session) => getSessionAcademicMetadata(session));
+    const levelValues = metadataRows.map((metadata) => metadata?.nivel || "").filter(Boolean);
+    setFilterSelectOptions(
+      els.sessionFilterLevelSelect,
+      levelValues.length > 0 ? levelValues : SESSION_ACADEMIC_LEVEL_OPTIONS,
+      "Todos los niveles",
+      SESSION_ACADEMIC_LEVEL_OPTIONS
+    );
+    if (level && els.sessionFilterLevelSelect) els.sessionFilterLevelSelect.value = level;
+    const rowsForGrade = metadataRows.filter((metadata) => !level || metadata.nivel === level);
+    const gradeValues = rowsForGrade.map((metadata) => metadata?.grado || "").filter(Boolean);
+    setFilterSelectOptions(
+      els.sessionFilterGradeSelect,
+      gradeValues.length > 0 ? gradeValues : SESSION_ACADEMIC_GRADE_OPTIONS,
+      "Todos los grados",
+      SESSION_ACADEMIC_GRADE_OPTIONS
+    );
+    if (grade && els.sessionFilterGradeSelect?.querySelector(`option[value="${CSS.escape(grade)}"]`)) {
+      els.sessionFilterGradeSelect.value = grade;
+    }
+    const selectedGrade = String(els.sessionFilterGradeSelect?.value || "").trim();
+    const rowsForTerm = rowsForGrade.filter((metadata) => !selectedGrade || metadata.grado === selectedGrade);
+    const termValues = rowsForTerm.map((metadata) => metadata?.trimestre || "").filter(Boolean);
+    setFilterSelectOptions(
+      els.sessionFilterTermSelect,
+      termValues.length > 0 ? termValues : SESSION_ACADEMIC_TERM_OPTIONS,
+      "Todos los trimestres",
+      SESSION_ACADEMIC_TERM_OPTIONS
+    );
+    if (term && els.sessionFilterTermSelect?.querySelector(`option[value="${CSS.escape(term)}"]`)) {
+      els.sessionFilterTermSelect.value = term;
+    }
+    const selectedTerm = String(els.sessionFilterTermSelect?.value || "").trim();
+    const rowsForUnit = rowsForTerm.filter((metadata) => !selectedTerm || metadata.trimestre === selectedTerm);
+    const unitValues = rowsForUnit.map((metadata) => metadata?.unidad || "").filter(Boolean);
+    const unitLabel = typeof resolveAcademicUnitLabel === "function"
+      ? resolveAcademicUnitLabel(level)
+      : (level.toLowerCase() === "secundaria" ? "Tema" : "Unidad");
+    if (els.sessionFilterUnitLabel) els.sessionFilterUnitLabel.textContent = level ? unitLabel : "Tema / Unidad";
+    setFilterSelectOptions(
+      els.sessionFilterUnitSelect,
+      unitValues.length > 0 ? unitValues : SESSION_ACADEMIC_UNIT_OPTIONS,
+      level ? `Todos los ${unitLabel.toLowerCase()}s` : "Todos los temas / unidades",
+      SESSION_ACADEMIC_UNIT_OPTIONS,
+      (value) => `${level ? unitLabel : "Tema / Unidad"} ${value}`
+    );
+    if (els.sessionFilterOptionsHint) {
+      const modeLabel = state.showArchivedSessions === true ? "archivadas" : "activas";
+      els.sessionFilterOptionsHint.textContent = `${sessions.length} ${sessions.length === 1 ? "sesión" : "sesiones"} ${modeLabel} disponibles para filtrar.`;
+    }
+  }
+
+  function readAdvancedFilterForm() {
+    return normalizeAdvancedFilters({
+      query: els.sessionFilterQueryInput?.value,
+      nivel: els.sessionFilterLevelSelect?.value,
+      grado: els.sessionFilterGradeSelect?.value,
+      trimestre: els.sessionFilterTermSelect?.value,
+      unidad: els.sessionFilterUnitSelect?.value
+    });
+  }
+
+  function writeAdvancedFilterForm(filters = EMPTY_ADVANCED_FILTERS) {
+    const normalized = normalizeAdvancedFilters(filters);
+    if (els.sessionFilterQueryInput) els.sessionFilterQueryInput.value = normalized.query;
+    populateAdvancedFilterOptions();
+    if (els.sessionFilterLevelSelect) els.sessionFilterLevelSelect.value = normalized.nivel;
+    populateAdvancedFilterOptions();
+    if (els.sessionFilterGradeSelect) els.sessionFilterGradeSelect.value = normalized.grado;
+    populateAdvancedFilterOptions();
+    if (els.sessionFilterTermSelect) els.sessionFilterTermSelect.value = normalized.trimestre;
+    populateAdvancedFilterOptions();
+    if (els.sessionFilterUnitSelect) els.sessionFilterUnitSelect.value = normalized.unidad;
+  }
+
+  function syncAdvancedFilterButtonUi() {
+    if (!els.openSessionFiltersBtn) return;
+    const isActive = hasAdvancedFilters();
+    els.openSessionFiltersBtn.classList.toggle("is-active", isActive);
+    els.openSessionFiltersBtn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    els.openSessionFiltersBtn.setAttribute("aria-label", isActive ? "Abrir filtros de sesiones; hay filtros activos" : "Abrir filtros de sesiones");
+    els.openSessionFiltersBtn.setAttribute("title", isActive ? "Filtros activos" : "Filtrar sesiones");
+  }
+
+  function setAdvancedFilterModalOpen(isOpen = false, options = {}) {
+    if (!els.sessionFiltersModal) return;
+    const nextOpen = Boolean(isOpen);
+    if (nextOpen) {
+      writeAdvancedFilterForm(getAdvancedFilters());
+      els.sessionFiltersModal.hidden = false;
+      requestAnimationFrame(() => els.sessionFilterQueryInput?.focus());
+      return;
+    }
+    els.sessionFiltersModal.hidden = true;
+    if (options.restoreFocus !== false) els.openSessionFiltersBtn?.focus();
+  }
+
+  function clearAdvancedFilters() {
+    state.sessionRailAdvancedFilters = { ...EMPTY_ADVANCED_FILTERS };
+    writeAdvancedFilterForm(EMPTY_ADVANCED_FILTERS);
+    renderSessions();
+  }
+
   function syncFilterUi() {
     if (!els.sessionsRailFilter) return;
     const activeFilter = getSessionRailFilterValue(state.sessionRailFilter);
+    const activeTerm = getAdvancedFilters().trimestre;
     els.sessionsRailFilter.querySelectorAll("[data-filter]").forEach((button) => {
       const filter = getSessionRailFilterValue(button.dataset.filter);
       const isActive = filter === activeFilter;
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+    els.sessionsRailFilter.querySelectorAll("[data-term-filter]").forEach((button) => {
+      const term = String(button.dataset.termFilter || "").trim();
+      const isActive = Boolean(term) && term === activeTerm;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      button.setAttribute("aria-label", `${isActive ? "Quitar filtro" : "Filtrar"} por Trimestre ${term}`);
     });
   }
 
@@ -266,10 +537,13 @@ export function createPodcasterSessionRailApi(deps = {}) {
     const visibleSessions = state.sessions.filter((session) => {
       const isArchived = session.archived === true;
       if (showArchived !== isArchived) return false;
-      if (activeFilter === "all") return true;
-      return getSessionRailType(session) === activeFilter;
+      if (activeFilter !== "all" && getSessionRailType(session) !== activeFilter) return false;
+      return sessionMatchesAdvancedFilters(session);
     });
-    const nextMarkup = visibleSessions.map((session) => renderSessionCard(session, activeId)).join("") || `<div class="session-list-empty">${showArchived ? "No hay sesiones archivadas." : "No hay sesiones activas."}</div>`;
+    const emptyMessage = hasAdvancedFilters()
+      ? "No hay sesiones que coincidan con los filtros."
+      : (showArchived ? "No hay sesiones archivadas." : "No hay sesiones activas.");
+    const nextMarkup = visibleSessions.map((session) => renderSessionCard(session, activeId)).join("") || `<div class="session-list-empty">${emptyMessage}</div>`;
     els.sessionList.classList.toggle("is-archived-view", showArchived);
     const didUpdate = nextMarkup !== lastSessionListMarkup;
     if (didUpdate) {
@@ -281,6 +555,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
     });
     syncFilterUi();
     syncArchivedToggleUi();
+    syncAdvancedFilterButtonUi();
     onSessionsRendered?.({ didUpdate, visibleSessions });
   }
 
@@ -444,9 +719,60 @@ export function createPodcasterSessionRailApi(deps = {}) {
   }
 
   function bindEvents() {
+    if (els.openSessionFiltersBtn && els.openSessionFiltersBtn.dataset.sessionRailBound !== "true") {
+      els.openSessionFiltersBtn.dataset.sessionRailBound = "true";
+      els.openSessionFiltersBtn.addEventListener("click", () => setAdvancedFilterModalOpen(true));
+    }
+
+    if (els.sessionFiltersModal && els.sessionFiltersModal.dataset.sessionRailBound !== "true") {
+      els.sessionFiltersModal.dataset.sessionRailBound = "true";
+      els.sessionFiltersModal.addEventListener("click", (event) => {
+        if (event.target.closest("[data-action='close-session-filters-modal']")) {
+          setAdvancedFilterModalOpen(false);
+        }
+      });
+      els.closeSessionFiltersBtn?.addEventListener("click", () => setAdvancedFilterModalOpen(false));
+      els.cancelSessionFiltersBtn?.addEventListener("click", () => setAdvancedFilterModalOpen(false));
+      els.clearSessionFiltersBtn?.addEventListener("click", clearAdvancedFilters);
+      els.sessionFiltersForm?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        state.sessionRailAdvancedFilters = readAdvancedFilterForm();
+        renderSessions();
+        setAdvancedFilterModalOpen(false);
+      });
+      els.sessionFilterLevelSelect?.addEventListener("change", () => {
+        if (els.sessionFilterGradeSelect) els.sessionFilterGradeSelect.value = "";
+        if (els.sessionFilterUnitSelect) els.sessionFilterUnitSelect.value = "";
+        populateAdvancedFilterOptions();
+      });
+      els.sessionFilterGradeSelect?.addEventListener("change", () => {
+        if (els.sessionFilterUnitSelect) els.sessionFilterUnitSelect.value = "";
+        populateAdvancedFilterOptions();
+      });
+      els.sessionFilterTermSelect?.addEventListener("change", populateAdvancedFilterOptions);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && els.sessionFiltersModal?.hidden === false) {
+          event.preventDefault();
+          setAdvancedFilterModalOpen(false);
+        }
+      });
+    }
+
     if (els.sessionsRailFilter && els.sessionsRailFilter.dataset.sessionRailBound !== "true") {
       els.sessionsRailFilter.dataset.sessionRailBound = "true";
       els.sessionsRailFilter.addEventListener("click", (event) => {
+        const termButton = event.target.closest("[data-term-filter]");
+        if (termButton) {
+          const requestedTerm = String(termButton.dataset.termFilter || "").trim();
+          if (!SESSION_ACADEMIC_TERM_OPTIONS.includes(requestedTerm)) return;
+          const currentFilters = getAdvancedFilters();
+          state.sessionRailAdvancedFilters = {
+            ...currentFilters,
+            trimestre: currentFilters.trimestre === requestedTerm ? "" : requestedTerm
+          };
+          renderSessions();
+          return;
+        }
         const button = event.target.closest("[data-filter]");
         if (!button) return;
         const nextFilter = getSessionRailFilterValue(button.dataset.filter);
@@ -514,7 +840,13 @@ export function createPodcasterSessionRailApi(deps = {}) {
           event.preventDefault();
           event.stopPropagation();
           closeMenus();
-          setAcademicDataModalOpen(sessionId);
+          void setAcademicDataModalOpen(sessionId);
+        }
+        if (action.dataset.action === "toggle-session-publication") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeMenus();
+          await toggleSessionPublication(sessionId);
         }
         if (action.dataset.action === "archive-session") {
           event.preventDefault();
@@ -558,13 +890,56 @@ export function createPodcasterSessionRailApi(deps = {}) {
     }
   }
 
-  function setAcademicDataModalOpen(sessionId = "") {
+  async function setAcademicDataModalOpen(sessionId = "") {
     if (!els.sessionAcademicDataModal) return;
     const cleanId = String(sessionId || "").trim();
     const isOpen = Boolean(cleanId);
-    const targetSession = isOpen
+    let targetSession = isOpen
       ? state.sessions.find((session) => String(session?.id || "").trim() === cleanId) || null
       : null;
+    if (isOpen) {
+      let storedMetadata = null;
+      if (typeof loadSessionAcademicMetadata === "function") {
+        try {
+          storedMetadata = await loadSessionAcademicMetadata(cleanId);
+        } catch (error) {
+          console.warn("[Podcaster] Error al cargar metadatos académicos desde colección:", error);
+        }
+      }
+
+      if (storedMetadata) {
+        const mergedSession = upsertSessionById(
+          cleanId,
+          (current) => mergeAcademicMetadataIntoEntity(current || targetSession || { id: cleanId }, storedMetadata),
+          { render: false }
+        );
+        if (mergedSession) {
+          targetSession = mergedSession;
+        } else if (targetSession) {
+          targetSession = mergeAcademicMetadataIntoEntity(targetSession, storedMetadata);
+        } else {
+          targetSession = mergeAcademicMetadataIntoEntity({ id: cleanId }, storedMetadata);
+        }
+      } else if (!targetSession && typeof getDoc === "function" && typeof doc === "function") {
+        try {
+          const sessionRef = doc(firestoreDb, "podcaster_sessions", cleanId);
+          const sessionSnap = await getDoc(sessionRef);
+          if (sessionSnap.exists()) {
+            const data = sessionSnap.data() || {};
+            targetSession = mergeAcademicMetadataIntoEntity(
+              {
+                id: cleanId,
+                ...(data || {})
+              },
+              data
+            );
+            upsertSessionById(cleanId, () => targetSession, { render: false });
+          }
+        } catch (error) {
+          console.warn("[Podcaster] No se pudo hidratar sesión para el modal académico:", error);
+        }
+      }
+    }
     const metadata = getSessionAcademicMetadata(targetSession);
     els.sessionAcademicDataModal.hidden = !isOpen;
     els.sessionAcademicDataModal.dataset.sessionId = cleanId;
@@ -572,6 +947,8 @@ export function createPodcasterSessionRailApi(deps = {}) {
     if (els.sessionAcademicGradeSelect) els.sessionAcademicGradeSelect.value = metadata.grado;
     if (els.sessionAcademicTermSelect) els.sessionAcademicTermSelect.value = metadata.trimestre;
     if (els.sessionAcademicUnitSelect) els.sessionAcademicUnitSelect.value = metadata.unidad;
+    syncSessionAcademicUnitUi(metadata);
+    syncSessionAcademicSubjectUi(metadata);
   }
 
   async function saveAcademicData(sessionId = "") {
@@ -581,12 +958,22 @@ export function createPodcasterSessionRailApi(deps = {}) {
       nivel: normalizeSessionAcademicField(els.sessionAcademicLevelSelect?.value, SESSION_ACADEMIC_LEVEL_OPTIONS),
       grado: normalizeSessionAcademicField(els.sessionAcademicGradeSelect?.value, SESSION_ACADEMIC_GRADE_OPTIONS),
       trimestre: normalizeSessionAcademicField(els.sessionAcademicTermSelect?.value, SESSION_ACADEMIC_TERM_OPTIONS),
-      unidad: normalizeSessionAcademicField(els.sessionAcademicUnitSelect?.value, SESSION_ACADEMIC_UNIT_OPTIONS)
+      unidad: normalizeSessionAcademicField(els.sessionAcademicUnitSelect?.value, SESSION_ACADEMIC_UNIT_OPTIONS),
+      materia: ""
     };
-    const updatedSession = upsertSessionById(cleanId, (current) => ({
-      ...current,
-      ...nextMetadata
-    }), {
+    const subjectOptions = typeof resolveAcademicSubjectOptions === "function"
+      ? resolveAcademicSubjectOptions(nextMetadata.nivel, nextMetadata.grado)
+      : [];
+    nextMetadata.materia = normalizeSessionAcademicField(
+      els.sessionAcademicSubjectSelect?.value,
+      subjectOptions.map((option) => option.value)
+    );
+    if (String(nextMetadata.nivel || "").trim().toLowerCase() !== "secundaria") {
+      nextMetadata.materia = "";
+    }
+    syncSessionAcademicUnitUi(nextMetadata);
+    syncSessionAcademicSubjectUi(nextMetadata);
+    const updatedSession = upsertSessionById(cleanId, (current) => mergeAcademicMetadataIntoEntity(current || { id: cleanId }, nextMetadata), {
       render: cleanId === state.activeSessionId,
       persist: true,
       markDirty: true,
@@ -596,37 +983,62 @@ export function createPodcasterSessionRailApi(deps = {}) {
       setAcademicDataModalOpen("");
       return;
     }
-    const cloudMeta = updatedSession?.cloudMeta || {};
-    const canPatchCloud = !updatedSession?.isStub
-      && Boolean(resolveCurrentUid())
-      && (
-        String(cloudMeta?.savedAt || "").trim()
-        || String(cloudMeta?.ownerId || "").trim()
-      );
-    if (!canPatchCloud) {
-      setAcademicDataModalOpen("");
-      setGenerationStatus("Datos asignados", "Guarda la sesión para subirlos a Firebase.");
-      return;
-    }
-    const sessionUpdatedAt = String(updatedSession.updatedAt || nowIso()).trim() || nowIso();
     try {
-      await updateDoc(doc(firestoreDb, "podcaster_sessions", cleanId), {
-        ...nextMetadata,
-        sessionUpdatedAt,
-        updatedAt: serverTimestamp(),
-        "session.nivel": nextMetadata.nivel,
-        "session.grado": nextMetadata.grado,
-        "session.trimestre": nextMetadata.trimestre,
-        "session.unidad": nextMetadata.unidad,
-        "session.updatedAt": sessionUpdatedAt
-      });
-      if (updatedSession?.cloudMeta && typeof updatedSession.cloudMeta === "object") {
-        updatedSession.cloudMeta.savedAt = sessionUpdatedAt;
+      if (typeof saveSessionAcademicMetadata === "function") {
+        await saveSessionAcademicMetadata(cleanId, nextMetadata, {
+          entityType: "session",
+          snapshotTargets: [{
+            ref: doc(firestoreDb, "podcaster_sessions", cleanId)
+          }]
+        });
+      } else {
+        const sessionUpdatedAt = String(updatedSession.updatedAt || nowIso()).trim() || nowIso();
+        await updateDoc(doc(firestoreDb, "podcaster_sessions", cleanId), {
+          ...nextMetadata,
+          academicMetadata: {
+            ...nextMetadata,
+            unitLabel: typeof resolveAcademicUnitLabel === "function"
+              ? resolveAcademicUnitLabel(nextMetadata.nivel)
+              : (String(nextMetadata.nivel).toLowerCase() === "secundaria" ? "Tema" : "Unidad")
+          },
+          academicMetadataUpdatedAt: sessionUpdatedAt,
+          updatedAt: serverTimestamp(),
+          academicMetadataUpdatedAtIso: sessionUpdatedAt
+        });
       }
       setAcademicDataModalOpen("");
       setGenerationStatus("Datos asignados", "is-live");
     } catch (error) {
       addChatMessage("system", `No se pudieron guardar los datos académicos (${error.message}).`);
+      setGenerationStatus("Error", "");
+    }
+  }
+
+  async function toggleSessionPublication(sessionId = "") {
+    const cleanId = String(sessionId || "").trim();
+    if (!cleanId) return;
+    const session = state.sessions.find((item) => String(item?.id || "").trim() === cleanId) || null;
+    if (!session) return;
+    const nextPublished = session.publicar !== true;
+    const updatedAt = nowIso();
+    try {
+      upsertSessionById(cleanId, (current) => ({
+        ...current,
+        publicar: nextPublished
+      }), {
+        render: true,
+        persist: true,
+        markDirty: true,
+        autosaveReason: "session-publication-toggle"
+      });
+      await updateDoc(doc(firestoreDb, "podcaster_sessions", cleanId), {
+        publicar: nextPublished,
+        updatedAt: serverTimestamp(),
+        sessionUpdatedAt: updatedAt
+      });
+      setGenerationStatus(nextPublished ? "Sesión publicada" : "Sesión desactivada", "is-live");
+    } catch (error) {
+      addChatMessage("system", `No se pudo cambiar la publicación de la sesión (${error.message}).`);
       setGenerationStatus("Error", "");
     }
   }
@@ -645,8 +1057,14 @@ export function createPodcasterSessionRailApi(deps = {}) {
     deleteSession,
     setAcademicDataModalOpen,
     saveAcademicData,
+    syncSessionAcademicUnitUi,
+    syncSessionAcademicSubjectUi,
     expandSession,
     isSessionExpanded,
-    getFilterValue: getSessionRailFilterValue
+    getFilterValue: getSessionRailFilterValue,
+    normalizeSearchText,
+    sessionMatchesAdvancedFilters,
+    setAdvancedFilterModalOpen,
+    clearAdvancedFilters
   };
 }

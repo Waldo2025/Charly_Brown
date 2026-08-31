@@ -94,7 +94,8 @@ function installCommonMiddleware(app, { service }) {
         "X-File-Name",
         "X-Mapping-Id",
         "X-Use-Stored-Source",
-        "X-Local-Analysis-Context"
+        "X-Local-Analysis-Context",
+        "X-Analysis-Categories"
       ].join(","));
       res.setHeader("Access-Control-Max-Age", "3600");
     }

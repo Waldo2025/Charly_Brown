@@ -1,22 +1,21 @@
-import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_GOOGLE_API_BASE = "https://charly-brown.web.app/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
 const DEFAULT_GEMINI_API_BASE = "/api";
+const DEFAULT_MARCIE_API_BASE = "https://us-central1-charly-brown.cloudfunctions.net/geminiApi";
 const DEFAULT_VEO_API_BASE = "/api";
 const DEFAULT_EXPORT_API_BASE = "/api";
 
 function getAlternateLocalApiUrl(url = "") {
   const finalUrl = String(url || "").trim();
-  
+
   if (finalUrl.startsWith("http://127.0.0.1:8787")) {
     return finalUrl.replace("http://127.0.0.1:8787", "http://localhost:8787");
   }
   if (finalUrl.startsWith("http://localhost:8787")) {
     return finalUrl.replace("http://localhost:8787", "http://127.0.0.1:8787");
   }
-  
+
   return "";
 }
 
@@ -43,6 +42,13 @@ export function getRemoteApiBase() {
     window.__CHARLY_CONFIG__?.geminiApiBaseUrl
     || window.__CHARLY_CONFIG__?.remoteApiBaseUrl
     || DEFAULT_GEMINI_API_BASE
+  ).trim().replace(/\/+$/, "");
+}
+
+export function getMarcieApiBase() {
+  return String(
+    window.__CHARLY_CONFIG__?.marcieApiBaseUrl
+    || DEFAULT_MARCIE_API_BASE
   ).trim().replace(/\/+$/, "");
 }
 
@@ -103,7 +109,7 @@ export function resolveApiBase() {
   const host = String(window.location.hostname || "").toLowerCase();
   const port = String(window.location.port || "");
   const isLocalHost = isLocalHostRuntime();
-  
+
   if (isLocalHost) {
     if (configured && isLoopbackApiBase(configured) && window.__CHARLY_CONFIG__?.useLocalApi === true) {
       return configured.replace(/\/+$/, "");
@@ -112,7 +118,7 @@ export function resolveApiBase() {
     if (port === "8787" && window.__CHARLY_CONFIG__?.useLocalApi === true) return "/api";
     return DEFAULT_GOOGLE_API_BASE;
   }
-  
+
   if (configured) {
     const sanitized = configured.replace(/\/+$/, "");
     return sanitized;
@@ -168,6 +174,16 @@ export function buildApiUrlPreferRemote(path = "") {
   return buildApiUrl(input);
 }
 
+export function buildMarcieApiUrl(path = "") {
+  const input = String(path || "").trim();
+  if (/^https?:\/\//i.test(input)) return input;
+  const configured = getConfiguredApiBase();
+  if (isLocalHostRuntime() && window.__CHARLY_CONFIG__?.useLocalApi === true && configured && isLoopbackApiBase(configured)) {
+    return buildApiUrlFromBase(configured, input);
+  }
+  return buildApiUrlFromBase(getMarcieApiBase(), input);
+}
+
 export function buildVeoApiUrl(path = "") {
   const input = String(path || "").trim();
   if (!input) return getVeoApiBase();
@@ -204,7 +220,11 @@ export async function getAuthHeaders(extra = {}) {
 }
 
 async function getAuthHeadersWithRefresh(extra = {}, forceRefresh = false) {
-  const auth = getAuth();
+  const [{ getAuth }, { getDefaultFirebaseApp }] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js"),
+    import("./firebase-default-app.js")
+  ]);
+  const auth = getAuth(getDefaultFirebaseApp());
   const user = auth.currentUser;
   if (!user) throw new Error("AUTH_REQUIRED");
   const token = await user.getIdToken(forceRefresh);
@@ -252,12 +272,12 @@ async function parseResponseDetailSafe(response) {
 }
 
 export async function authFetch(url, options = {}) {
-  if (!hasAvailableApiBase()) {
+  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
+  if (!sameOrigin && !hasAvailableApiBase()) {
     const error = new Error("Backend de producción no configurado.");
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
   const finalUrl = sameOrigin ? buildSameOriginApiUrl(url) : (auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url));
   const baseHeaders = { ...(requestOptions.headers || {}) };
   const buildRequestInit = async (forceRefresh = false) => {
@@ -280,12 +300,12 @@ export async function authFetch(url, options = {}) {
 }
 
 export async function authFetchJson(url, options = {}) {
-  if (!hasAvailableApiBase()) {
+  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
+  if (!sameOrigin && !hasAvailableApiBase()) {
     const error = new Error("Backend de producción no configurado.");
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const { auth = true, preferRemote = false, sameOrigin = false, ...requestOptions } = options || {};
   const finalUrl = sameOrigin ? buildSameOriginApiUrl(url) : (auth ? (preferRemote ? buildApiUrlPreferRemote(url) : buildApiUrl(url)) : buildApiUrl(url));
   const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};

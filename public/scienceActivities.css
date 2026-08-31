@@ -283,6 +283,17 @@ body.sa-shell { margin: 0; color: var(--sa-text) !important; font-family: var(--
 
 .sa-form { display: grid; gap: 11px; }
 .sa-field { display: flex; flex-direction: column; gap: 5px; }
+.sa-page [hidden],.sa-session-setup-modal [hidden]{display:none!important}
+.sa-simulator-segmented,.science-sim-segmented{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:4px;border:1px solid var(--sim-line,var(--sa-line));border-radius:14px;background:color-mix(in srgb,var(--sim-bg,var(--sa-panel)) 82%,black 18%)}
+.sa-simulator-segmented label,.science-sim-segmented label{position:relative;margin:0;padding:0!important;border:0!important;background:transparent!important}
+.sa-simulator-segmented input,.science-sim-segmented input{position:absolute;inline-size:1px!important;block-size:1px;opacity:0}
+.sa-simulator-segmented span,.science-sim-segmented span{min-height:42px;display:grid!important;place-items:center;margin:0!important;border-radius:10px;color:var(--sim-text,var(--sa-text))!important;-webkit-text-fill-color:var(--sim-text,var(--sa-text))!important;font-size:1.05rem!important;font-weight:950;cursor:pointer;opacity:1!important}
+.sa-simulator-segmented input:checked+span,.science-sim-segmented input:checked+span{background:linear-gradient(110deg,var(--sim-accent,var(--sa-accent)),var(--sim-secondary,var(--sa-secondary)));color:var(--sim-bg,#07131f)!important;-webkit-text-fill-color:var(--sim-bg,#07131f)!important}
+.sa-simulator-segmented input:focus-visible+span,.science-sim-segmented input:focus-visible+span{outline:3px solid var(--sim-secondary,var(--sa-secondary));outline-offset:3px}
+.science-sim-control{padding:12px 14px;border:1px solid var(--sim-line);border-radius:14px;background:color-mix(in srgb,var(--sim-panel) 94%,transparent)}
+.science-sim-control>span{margin-bottom:9px;display:flex;justify-content:space-between;gap:10px;color:var(--sim-text)!important;-webkit-text-fill-color:var(--sim-text)!important;font-size:.74rem;font-weight:850;opacity:1!important}
+.science-sim-control>span>b{color:var(--sim-text)!important;-webkit-text-fill-color:var(--sim-text)!important;opacity:1!important}
+.science-sim-control output{color:var(--sim-accent)!important;-webkit-text-fill-color:var(--sim-accent)!important;white-space:nowrap;opacity:1!important}
 .sa-field > span, .sa-section-label { color: var(--sa-muted) !important; font-size: .62rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 .sa-field input, .sa-field select, .sa-field textarea {
   width: 100%;
@@ -430,7 +441,7 @@ body.sa-shell { margin: 0; color: var(--sa-text) !important; font-family: var(--
 .science-rive-game-copy small { color: #168f9d; font-size: .67rem; font-weight: 1000; letter-spacing: .14em; }
 .science-rive-game-copy strong { font: 900 clamp(1.35rem, 3.2vw, 2.45rem) var(--sa-display); }
 .science-rive-game-copy span { color: #55707d; font-size: .92rem; line-height: 1.5; }
-.sa-game-mount.is-rive-game-runtime .science-rive-answer-deck { position: absolute; z-index: 3; inset: 0; display: grid; align-content: center; padding: clamp(16px, 4vw, 54px); overflow: auto; background: rgba(239,250,250,.9); }
+.sa-game-mount.is-rive-game-runtime .science-rive-answer-deck { position: absolute; z-index: 3; inset: 0; display: grid; align-content: start; padding: clamp(16px, 4vw, 54px); overflow: auto; background: rgba(239,250,250,.9); }
 .sa-game-mount.is-rive-game-runtime .science-rive-answer-list { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); max-width: 960px; width: 100%; margin: 18px auto 0; }
 .sa-game-mount.is-rive-game-runtime .science-rive-answer-card { min-height: 205px; }
 .sa-game-mount.is-rive-game-runtime .science-keyword-game-console { position: relative; inset: auto; width: min(100%, 560px); margin: 20px auto 0; }
@@ -791,20 +802,47 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .science-structured-game.is-numeric-answer .science-structured-status span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .science-structured-game.is-numeric-answer .science-structured-status strong { flex:0 0 auto; line-height:1; }
 .science-structured-game.is-numeric-answer .science-structured-board { min-height:112px; padding:14px 18px; }
-.science-structured-board { min-height:220px; padding:clamp(16px,3vw,32px); display:grid; place-items:center; align-content:center; gap:22px; border:1px solid #bedde4; border-radius:24px; background:rgba(255,255,255,.78); box-shadow:inset 0 0 50px rgba(79,203,194,.09); }
+.science-structured-board { height:auto; min-height:0; max-height:none; padding:clamp(16px,3vw,32px); display:grid; place-items:center; align-content:center; gap:22px; overflow:visible; border:1px solid #bedde4; border-radius:24px; background:rgba(255,255,255,.78); box-shadow:inset 0 0 50px rgba(79,203,194,.09); }
 .science-token-bank,.science-sequence-bank { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
 .science-token-bank button,.science-sequence-bank button,.science-equation-slots button { min-width:72px; min-height:52px; padding:10px 15px; color:#20334b; border:2px solid #ff9aa8; border-radius:14px; background:#fffaf0; box-shadow:0 7px 0 #f4cbd0; font:900 1rem var(--sa-font); cursor:grab; }
 .science-token-bank kbd,.science-sequence-bank kbd { margin-right:8px; color:#168d8a; }
 .science-equation-slots { min-height:68px; padding:8px; display:flex; flex-wrap:wrap; justify-content:center; gap:8px; border-bottom:3px solid #5fd8cd; }
-.science-expression { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:12px; font-size:clamp(1.6rem,5vw,3.7rem); font-weight:1000; }
-.science-expression input { min-width:170px; max-width:330px; padding:12px; color:#20334b; border:3px solid #5fd8cd; border-radius:14px; background:#fff; font:900 1.4rem var(--sa-font); }
-.science-exponent-base { font-size:clamp(4rem,13vw,9rem); font-weight:1000; }
-.science-exponent-base sup { display:inline-grid; min-width:60px; min-height:60px; place-items:center; color:#db5872; border:3px dashed #ff8295; border-radius:14px; background:#fff; font-size:.38em; }
+.science-structured-game.is-fill-blank{grid-template-rows:auto auto minmax(0,auto) auto;align-content:start!important;overflow:visible!important}
+.science-structured-game.is-fill-blank .science-structured-board{min-height:0!important;padding:clamp(14px,2.2vw,26px)!important;place-items:stretch!important;align-content:start!important;overflow:visible!important}
+.science-expression{width:100%;min-height:0!important;padding:clamp(16px,2.4vw,28px)!important;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:flex-start;gap:.38em .48em;font-size:clamp(1rem,1.55vw,1.38rem)!important;line-height:1.55;font-weight:850;overflow-wrap:anywhere}
+.science-expression>span{display:inline;min-width:0;white-space:pre-wrap}
+.science-expression input{flex:0 1 clamp(150px,28vw,260px);width:clamp(150px,28vw,260px);min-width:120px!important;max-width:100%!important;min-height:50px;padding:9px 12px;color:#20334b;border:3px solid #5fd8cd;border-radius:12px;background:#fff;font:850 1rem var(--sa-font)}
+.science-structured-game.is-fill-blank>footer{position:relative!important;inset:auto!important;z-index:2;width:100%;margin:0!important;padding:0!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;transform:none!important}
+.science-structured-game.is-fill-blank>footer button{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;min-height:48px!important;margin:0!important;transform:none!important}
+@media(max-width:560px){.science-expression{font-size:1rem!important}.science-expression input{flex-basis:100%;width:100%}.science-structured-game.is-fill-blank>footer{grid-template-columns:1fr}}
+.science-structured-game.is-exponent-placement .science-structured-board{min-height:0;padding:clamp(18px,3vw,34px);align-content:center;overflow:hidden}
+.science-exponent-base{width:100%;max-width:100%;min-height:112px;display:flex;align-items:center;justify-content:center;gap:.16em;color:inherit;font-size:clamp(2.5rem,6vw,4.75rem);line-height:1.08;font-weight:1000;text-align:center}
+.science-exponent-base>span{min-width:0;max-width:calc(100% - 78px);overflow-wrap:anywhere}
+.science-exponent-base[data-base-size="medium"]{font-size:clamp(2.1rem,4.8vw,4rem)}
+.science-exponent-base[data-base-size="long"]{font-size:clamp(1.55rem,3.5vw,3rem)}
+.science-exponent-base sup{display:inline-grid;min-width:clamp(52px,5vw,66px);min-height:clamp(52px,5vw,66px);flex:0 0 auto;place-items:center;color:#db5872;border:3px dashed #ff8295;border-radius:14px;background:#fff;font-size:clamp(1.45rem,.42em,2rem);line-height:1}
+@media(max-width:560px){.science-exponent-base{min-height:88px;font-size:clamp(2rem,10vw,3.2rem)}.science-exponent-base[data-base-size="medium"]{font-size:clamp(1.7rem,8vw,2.7rem)}.science-exponent-base[data-base-size="long"]{font-size:clamp(1.3rem,6vw,2.1rem)}.science-exponent-base>span{max-width:calc(100% - 62px)}}
 .science-molecule-equation { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:12px; }
 .science-molecule-equation article { padding:13px; text-align:center; border:2px solid #79d9d0; border-radius:17px; background:#fff; }
 .science-molecule-equation article span { display:block; margin-top:8px; font-size:1.45rem; font-weight:1000; }
 .science-molecule-equation article button { width:34px; height:34px; border:0; border-radius:50%; background:#ff9aa8; font-weight:1000; cursor:pointer; }
 .science-molecule-equation article strong { display:inline-block; min-width:30px; font-size:1.2rem; }
+.science-molecule-equation article [data-coeff-value] {
+  min-width:38px!important;
+  color:#173047!important;
+  -webkit-text-fill-color:#173047!important;
+  font-size:1.45rem!important;
+  font-weight:1000!important;
+  text-align:center;
+  opacity:1!important;
+}
+.science-molecule-equation article [data-coeff-value].is-updated { animation:sa-coefficient-pop .28s cubic-bezier(.2,.9,.3,1.35); }
+.science-molecule-equation article [data-coeff] { color:#fff!important;-webkit-text-fill-color:#fff!important;touch-action:manipulation; }
+.science-molecule-equation article [data-coeff]:disabled { cursor:not-allowed;filter:grayscale(.55);opacity:.38!important; }
+.science-atom-meter { color:var(--science-hud-text,#eefdf8)!important;-webkit-text-fill-color:var(--science-hud-text,#eefdf8)!important; }
+.science-atom-meter i { position:relative;overflow:hidden;background:rgba(255,255,255,.14)!important; }
+.science-atom-meter i::after { content:"";position:absolute;inset:0 auto 0 0;width:var(--chemical-progress,0%);background:linear-gradient(90deg,var(--science-hud-accent,#54ddd0),var(--science-hud-highlight,#baf34f));transition:width .28s ease; }
+@keyframes sa-coefficient-pop { 45% { transform:scale(1.35);color:#0b8179;-webkit-text-fill-color:#0b8179; } }
 .science-numeric-console {
   --science-console-accent: var(--sa-game-accent, #45e0cf);
   position:relative;
@@ -1022,7 +1060,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .science-structured-game { padding:9px; gap:8px; }
   .science-structured-game header { padding:11px; display:block; }
   .science-structured-game header button { margin-top:8px; }
-  .science-structured-board { min-height:250px; padding:12px; }
+  .science-structured-board { height:auto; min-height:0; max-height:none; padding:12px; }
   .science-structured-game.is-numeric-answer { grid-template-rows:auto 22px auto auto auto; }
   .science-structured-game.is-numeric-answer.has-structured-context { grid-template-rows:auto auto 22px auto auto auto; }
   .science-structured-game.is-numeric-answer .science-structured-status { height:22px; min-height:22px; font-size:.68rem; }
@@ -1671,6 +1709,40 @@ body.sa-resizing-panel { cursor: col-resize !important; user-select: none !impor
   }
 }
 
+/* Final portrait timeline axis. */
+@container science-timeline-question (max-width:760px){
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline{min-height:0!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track{position:relative!important;min-height:0!important;padding:18px 12px!important;display:grid!important;grid-template-columns:1fr!important;grid-auto-flow:row!important;grid-auto-rows:minmax(92px,auto)!important;gap:14px!important;overflow:visible!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track::before{left:50%!important;right:auto!important;top:18px!important;bottom:18px!important;width:5px!important;height:auto!important;transform:translateX(-50%)!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){position:relative!important;width:calc(50% - 38px)!important;min-width:0!important;min-height:92px!important;padding:12px!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:visible!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd){justify-self:start!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even){justify-self:end!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;top:50%!important;bottom:auto!important;margin:0!important;transform:translateY(-50%)!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd)>i{left:auto!important;right:-57px!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even)>i{left:-57px!important;right:auto!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;margin:0!important;white-space:normal!important;text-align:center!important;transform:none!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-token-bank-label{order:2!important;position:relative!important;inset:auto!important;margin-top:12px!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-bank{order:3!important;position:relative!important;inset:auto!important;display:grid!important;grid-template-columns:1fr!important;gap:14px!important}
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer{order:4!important;position:relative!important;inset:auto!important;display:grid!important;grid-template-columns:1fr!important;gap:12px!important;margin:0!important;transform:none!important}
+}
+
+/* Final portrait timeline axis — must remain the last timeline rule. */
+@container science-timeline-question (max-width:760px){
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline{min-height:0!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track,html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event){position:relative!important;width:100%!important;min-height:0!important;padding:18px 12px!important;display:grid!important;grid-template-columns:1fr!important;grid-auto-flow:row!important;grid-auto-columns:auto!important;grid-auto-rows:minmax(92px,auto)!important;gap:14px!important;overflow:visible!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track::before{left:50%!important;right:auto!important;top:18px!important;bottom:18px!important;width:5px!important;height:auto!important;transform:translateX(-50%)!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty){position:relative!important;width:calc(50% - 38px)!important;min-width:0!important;min-height:92px!important;padding:12px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:8px!important;overflow:visible!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd){justify-self:start!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even){justify-self:end!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i{position:absolute!important;top:50%!important;bottom:auto!important;margin:0!important;transform:translateY(-50%)!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd)>i{left:auto!important;right:-57px!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even)>i{left:-57px!important;right:auto!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-empty>span{position:relative!important;inset:auto!important;margin:0!important;white-space:normal!important;text-align:center!important;transform:none!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-token-bank-label{order:2!important;position:relative!important;inset:auto!important;margin-top:12px!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-bank{order:3!important;position:relative!important;inset:auto!important;display:grid!important;grid-template-columns:1fr!important;gap:14px!important}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer{order:4!important;position:relative!important;inset:auto!important;display:grid!important;grid-template-columns:1fr!important;gap:12px!important;margin:0!important;transform:none!important}
+}
+
 .sa-page .sa-inspector-tabs {
   position: sticky;
   z-index: 8;
@@ -1678,7 +1750,7 @@ body.sa-resizing-panel { cursor: col-resize !important; user-select: none !impor
   margin: -3px -12px 13px;
   padding: 8px 9px;
   display: grid;
-  grid-template-columns: repeat(4,minmax(0,1fr));
+  grid-template-columns: repeat(5,minmax(0,1fr));
   gap: 4px;
   border-bottom: 1px solid var(--sa-line);
   background: rgba(24,34,46,.96);
@@ -1708,6 +1780,55 @@ body.sa-resizing-panel { cursor: col-resize !important; user-select: none !impor
 .sa-page .sa-inspector [hidden] { display: none !important; }
 .sa-page .sa-content-editor[data-inspector-group="editor"] { padding-top: 0; margin-top: 0; border-top: 0; }
 .sa-page .sa-content-editor [data-editor-pane] > .sa-inspector-heading:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+.sa-page .science-preview-start {
+  --preview-start-accent:#63ead5;
+  --preview-start-highlight:#c8ff4d;
+  --preview-start-title-color:#f4fbff;
+  --preview-start-card-bg:linear-gradient(120deg,rgba(11,38,52,.97),rgba(11,25,39,.9));
+  --preview-start-card-border:rgba(158,234,222,.42);
+  --preview-start-card-shadow:0 24px 70px rgba(0,8,18,.42);
+  position:absolute;
+  z-index:12000;
+  inset:0;
+  padding:clamp(18px,4vw,42px);
+  display:grid;
+  place-items:stretch;
+  overflow:auto;
+  color:#f4fbff;
+  background:radial-gradient(circle at 78% 18%,rgba(99,234,213,.2),transparent 30%),linear-gradient(145deg,#071521,#102d3b 58%,#152334);
+}
+.sa-page .science-preview-start-card {
+  min-height:100%;
+  padding:clamp(22px,4vw,52px);
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  gap:clamp(18px,3vh,34px);
+  border:1px solid var(--preview-start-card-border);
+  border-radius:clamp(18px,3vw,34px);
+  background:var(--preview-start-card-bg);
+  box-shadow:var(--preview-start-card-shadow);
+}
+.sa-page .science-preview-start-card>header{display:flex;align-items:center;gap:12px;min-width:0}
+.sa-page .science-preview-start-card>header>span{width:38px;height:38px;display:grid;place-items:center;flex:0 0 38px;border-radius:50%;color:#09252d;background:var(--preview-start-accent)}
+.sa-page .science-preview-start-card small{color:#9eeade;font:800 .68rem/1.4 var(--sa-font);letter-spacing:.1em;text-transform:uppercase}
+.sa-page .science-preview-start-card main{min-height:0;overflow:auto;padding-right:6px}
+.sa-page .science-preview-start-card h1{max-width:18ch;margin:0 0 20px;color:var(--preview-start-title-color);font:800 clamp(1.8rem,5vw,4rem)/1.02 var(--sa-font);letter-spacing:-.035em;text-wrap:balance}
+.sa-page .science-preview-start-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;max-width:980px}
+.sa-page .science-preview-start-info section{min-width:0;padding:16px;border:1px solid rgba(158,234,222,.25);border-radius:16px;background:rgba(4,23,35,.48)}
+.sa-page .science-preview-start-info p,.sa-page .science-preview-start-info ol{margin:7px 0 0;color:#c7dce5;font:600 clamp(.82rem,1.5vw,1rem)/1.5 var(--sa-font)}
+.sa-page .science-preview-start-info ol{padding-left:1.3rem}.sa-page .science-preview-start-info li+li{margin-top:7px}
+.sa-page .science-preview-start-card>footer{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.sa-page .science-preview-start-card>footer button{min-height:54px;padding:14px 22px;display:inline-flex;align-items:center;gap:12px;border:1px solid #efffc7;border-radius:12px;color:#09252d;background:var(--preview-start-highlight);box-shadow:0 9px 0 rgba(36,130,123,.42);font:900 .96rem/1 var(--sa-font);cursor:pointer}
+.sa-page .science-preview-start-card>footer>small{text-transform:none;letter-spacing:.02em;color:#8da8b5}
+.sa-page .sa-game-frame[data-visual-style*="kawaii"] .science-preview-start{--preview-start-accent:#ff9fbd;--preview-start-highlight:#ffd166;background:radial-gradient(circle at 80% 18%,rgba(255,209,102,.24),transparent 28%),linear-gradient(145deg,#261832,#4b2952)}
+.sa-page .sa-game-frame[data-visual-style*="arcade"] .science-preview-start{--preview-start-accent:#ff4e9a;--preview-start-highlight:#ffe259;background:radial-gradient(circle at 82% 20%,rgba(255,78,154,.24),transparent 30%),linear-gradient(145deg,#080523,#151044 62%,#29104d)}
+.sa-page .sa-game-frame:is([data-visual-style*="kawaii"],[data-visual-style*="pastel"],[data-visual-style*="storybook"]) .science-preview-start{--preview-start-title-color:#fff7fc;--preview-start-card-bg:linear-gradient(135deg,rgba(67,35,75,.98),rgba(43,24,55,.95));--preview-start-card-border:rgba(255,209,226,.48);--preview-start-card-shadow:0 24px 70px rgba(37,11,47,.5)}
+.sa-page .sa-game-frame[data-visual-style*="arcade"] .science-preview-start{--preview-start-title-color:#fff4a8;--preview-start-card-bg:linear-gradient(135deg,rgba(17,12,61,.98),rgba(36,13,69,.96));--preview-start-card-border:rgba(255,226,89,.55);--preview-start-card-shadow:8px 8px 0 rgba(255,78,154,.28)}
+.sa-page .sa-game-frame:is([data-visual-style*="tech"],[data-visual-style*="tokyo"],[data-visual-style*="neon"]) .science-preview-start{--preview-start-title-color:#effcff;--preview-start-card-bg:linear-gradient(135deg,rgba(5,28,43,.98),rgba(8,18,39,.96));--preview-start-card-border:rgba(56,217,255,.48);--preview-start-card-shadow:0 24px 70px rgba(0,9,25,.55)}
+.sa-page .sa-game-frame:is([data-visual-style*="eco"],[data-visual-style*="bio"]) .science-preview-start{--preview-start-title-color:#efffe8;--preview-start-card-bg:linear-gradient(135deg,rgba(14,48,40,.98),rgba(9,30,33,.96));--preview-start-card-border:rgba(137,227,157,.48);--preview-start-card-shadow:0 24px 70px rgba(4,24,20,.5)}
+.sa-page .sa-game-frame[data-visual-style*="ocean"] .science-preview-start{--preview-start-title-color:#e8fbff;--preview-start-card-bg:linear-gradient(135deg,rgba(5,49,70,.98),rgba(7,27,48,.96));--preview-start-card-border:rgba(96,220,239,.5);--preview-start-card-shadow:0 24px 70px rgba(0,22,43,.52)}
+@media(max-width:720px){.sa-page .science-preview-start{padding:0}.sa-page .science-preview-start-card{border:0;border-radius:0;padding:24px 18px}.sa-page .science-preview-start-info{grid-template-columns:1fr}.sa-page .science-preview-start-card>footer{display:grid}.sa-page .science-preview-start-card>footer button{width:100%;justify-content:center}}
 
 /* Preguntas integradas visualmente con el mundo Phaser activo. */
 .sa-page .sa-game-frame[data-simulation-type] .sa-assessment-layer:not(.sa-briefing-layer):not(.is-result) {
@@ -1858,6 +1979,127 @@ body.sa-resizing-panel { cursor: col-resize !important; user-select: none !impor
   .science-hologram-message p { transform:none !important; opacity:1 !important; }
   .science-hologram-scan { display:none !important; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* Pregunta visual: evidencia completa, sin recorte, antes de las opciones A-D. */
+.sa-page .science-image-question {
+  width: 100%;
+  margin: clamp(14px, 2.5cqi, 24px) 0 0;
+  padding: clamp(8px, 1.5cqi, 14px);
+  border: 1px solid color-mix(in srgb, var(--sa-accent, #21b8bd) 58%, transparent);
+  border-radius: clamp(16px, 2.5cqi, 28px);
+  background: color-mix(in srgb, var(--sa-surface, #fff) 92%, transparent);
+  box-shadow: 0 16px 38px rgba(15, 34, 52, .12);
+  overflow: hidden;
+}
+.sa-page .science-image-question img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(52vh, 620px);
+  object-fit: contain;
+  object-position: center;
+  border-radius: calc(clamp(16px, 2.5cqi, 28px) - 7px);
+}
+.sa-page .science-image-question.is-missing {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  color: #a62935;
+  text-align: center;
+}
+.sa-page .science-rive-answer-deck.is-visual-unavailable .science-rive-answer-card,
+.sa-page .science-rive-answer-deck.is-visual-unavailable [data-assessment-answer] {
+  pointer-events: none;
+  opacity: .45;
+}
+.sa-page .sa-visual-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.sa-page .sa-visual-question-actions button,
+.sa-page .sa-visual-question-actions .sa-file-action {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--sa-accent, #21b8bd) 62%, transparent);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.sa-page .sa-visual-question-editor { position:relative; }
+.sa-page .sa-visual-question-editor.is-regenerating::before {
+  content:"";
+  position:absolute;
+  z-index:8;
+  inset:0;
+  border-radius:16px;
+  background:rgba(226,237,246,.76);
+  backdrop-filter:blur(3px);
+}
+.sa-page .sa-visual-question-editor.is-regenerating::after {
+  content:"Generando nueva imagen";
+  position:absolute;
+  z-index:9;
+  left:50%;
+  top:50%;
+  min-width:210px;
+  padding:52px 18px 16px;
+  color:#173047;
+  border:1px solid #9fded8;
+  border-radius:18px;
+  background:#fff;
+  box-shadow:0 18px 46px rgba(28,69,91,.2);
+  font-weight:900;
+  text-align:center;
+  transform:translate(-50%,-50%);
+}
+.sa-page .sa-inline-spinner,
+.sa-page .sa-visual-question-editor.is-regenerating .science-image-question::after {
+  width:20px;
+  height:20px;
+  display:inline-block;
+  flex:0 0 auto;
+  border:3px solid rgba(20,143,138,.22);
+  border-top-color:#148f8a;
+  border-radius:50%;
+  animation:sa-image-spinner .72s linear infinite;
+}
+.sa-page .sa-visual-question-editor.is-regenerating .science-image-question::after {
+  content:"";
+  position:absolute;
+  z-index:10;
+  left:50%;
+  top:calc(50% - 20px);
+  width:28px;
+  height:28px;
+  margin:-14px 0 0 -14px;
+  border-width:4px;
+}
+.sa-page .sa-visual-question-actions button.is-loading { cursor:wait; }
+@keyframes sa-image-spinner { to { transform:rotate(360deg); } }
+
+/* Tall questions must begin at the real scroll origin instead of being vertically centered. */
+.sa-page .sa-game-mount.is-rive-game-runtime .science-rive-answer-deck,
+.sa-page .sa-game-mount.is-rive-game-runtime .science-rive-answer-deck.is-rive-only {
+  align-content:start !important;
+  justify-content:stretch;
+  overflow-y:auto !important;
+  overscroll-behavior:contain;
+  overflow-anchor:none;
+  scroll-behavior:auto;
+  scroll-padding-top:clamp(16px,4vw,54px);
+}
+.sa-page .science-rive-answer-deck[data-question-type="image-multiple"] .science-question-stage-header h2,
+.sa-page .science-rive-answer-deck[data-question-type="image-multiple"] .science-question-stage-header p {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
 }
 
 /* Result state owns the whole frame; legacy gameplay surfaces must not bleed through. */
@@ -2163,7 +2405,7 @@ body.sa-resizing-panel { cursor: col-resize !important; user-select: none !impor
     gap:7px;
   }
   .sa-page .sa-stage-kicker { font-size:.55rem; }
-  .sa-page .sa-stage h1 { max-width:100%; overflow:hidden; font-size:.9rem; text-overflow:ellipsis; white-space:nowrap; }
+  .sa-page .sa-stage h1 { max-width:100%; overflow:visible; font-size:.9rem; line-height:1.2; text-overflow:clip; white-space:normal; overflow-wrap:anywhere; }
   .sa-page .sa-stage-actions { gap:4px; }
   .sa-page .sa-stage-actions .sa-status { display:none; }
   .sa-page .sa-stage-actions .sa-icon-button { width:40px; height:40px; }
@@ -2266,7 +2508,7 @@ body.sa-resizing-panel { cursor: col-resize !important; user-select: none !impor
   .sa-page .sa-inspector-tabs {
     top:0;
     margin:0 0 12px;
-    grid-template-columns:repeat(4,minmax(68px,1fr));
+    grid-template-columns:repeat(5,minmax(68px,1fr));
     overflow-x:auto;
     scrollbar-width:none;
   }
@@ -4711,3 +4953,794 @@ body.sa-shell[data-sa-theme] .sa-page .sa-session-menu button:hover {
     transition: none;
   }
 }
+
+/* Phaser scientific simulator */
+.science-simulator-host{position:relative;overflow:hidden;min-height:100%}.science-phaser-simulator{--sim-accent:#56e0d0;--sim-secondary:#ffd166;--sim-line:rgba(137,205,221,.2);position:absolute;z-index:40;inset:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;gap:14px;padding:clamp(16px,2.2vw,30px);overflow:auto;color:#effcff;background:radial-gradient(circle at 15% 10%,color-mix(in srgb,var(--sim-accent) 18%,transparent),transparent 30%),linear-gradient(145deg,#07131f,#0c2132 58%,#07131f);font-family:var(--sa-font,"Nunito",sans-serif)}.science-phaser-simulator[data-visual-style*="kawaii"]{--sim-secondary:#ff9fbd}.science-phaser-simulator[data-visual-style*="tokyo"],.science-phaser-simulator[data-visual-style*="tech"]{--sim-accent:#38d9ff;--sim-secondary:#c8ff4d}.science-phaser-simulator[data-visual-style*="arcade"]{--sim-accent:#ff4f9a;--sim-secondary:#ffe14f}.science-phaser-simulator[data-visual-style*="bio"],.science-phaser-simulator[data-visual-style*="eco"]{--sim-accent:#55e39d;--sim-secondary:#d8ff63}.science-phaser-simulator[data-visual-style*="volcanic"],.science-phaser-simulator[data-visual-style*="neon"]{--sim-accent:#ff704d;--sim-secondary:#ffd35c}.science-sim-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.science-sim-header small,.science-sim-telemetry>small,.science-sim-objective small{color:var(--sim-accent);font-size:.68rem;font-weight:950;letter-spacing:.14em;text-transform:uppercase}.science-sim-header h2{margin:5px 0 3px;color:#f5fdff;font-size:clamp(1.25rem,2.3vw,2.15rem);line-height:1.08}.science-sim-header p{max-width:780px;margin:0;color:#a9c3d1;font-size:clamp(.78rem,1vw,.94rem);line-height:1.48}.science-sim-status{min-width:max-content;padding:9px 13px;display:flex;align-items:center;gap:8px;border:1px solid var(--sim-line);border-radius:999px;background:rgba(4,16,26,.68);color:#b7cad4;font-size:.72rem;font-weight:900}.science-sim-status i{width:9px;height:9px;border-radius:50%;background:#718999}.science-sim-status.is-running i{background:var(--sim-accent);box-shadow:0 0 16px var(--sim-accent)}.science-sim-status.is-success i{background:#c8ff4d}.science-sim-grid{min-height:460px;display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,300px);gap:14px}.science-sim-viewport{position:relative;min-height:440px;overflow:hidden;border:1px solid var(--sim-line);border-radius:22px;background:#07131f}.science-sim-viewport canvas{width:100%!important;height:100%!important;opacity:1!important;pointer-events:none}.science-sim-chart-label{position:absolute;z-index:2;left:44px;bottom:25.5%;color:#7793a3;font-size:.56rem;font-weight:900;letter-spacing:.12em;pointer-events:none}.science-sim-telemetry{padding:20px;display:flex;flex-direction:column;border:1px solid var(--sim-line);border-radius:22px;background:linear-gradient(160deg,rgba(17,48,67,.96),rgba(7,23,35,.96))}.science-sim-telemetry>strong{margin:15px 0 2px;color:#fff;font-size:clamp(2rem,3.8vw,3.8rem);font-variant-numeric:tabular-nums;line-height:1}.science-sim-telemetry>span{color:var(--sim-accent);font-weight:900}.science-sim-telemetry>code{margin-top:18px;padding:12px;border:1px solid var(--sim-line);border-radius:12px;background:rgba(3,13,21,.58);color:#d8edf5;white-space:normal}.science-sim-objective{margin-top:auto;padding-top:18px;display:grid;gap:7px;border-top:1px solid var(--sim-line)}.science-sim-objective b{color:#f5fbff;font-size:.84rem}.science-sim-objective progress{width:100%;height:8px;accent-color:var(--sim-accent)}.science-sim-objective span{color:#8ea8b7;font-size:.7rem}.science-sim-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.science-sim-controls label{padding:12px 14px;border:1px solid var(--sim-line);border-radius:14px;background:rgba(11,34,49,.92)}.science-sim-controls label>span{margin-bottom:9px;display:flex;justify-content:space-between;gap:10px;color:#dcebf1;font-size:.74rem;font-weight:850}.science-sim-controls output{color:var(--sim-accent);white-space:nowrap}.science-sim-controls input{width:100%;accent-color:var(--sim-accent)}.science-sim-actions{display:flex;gap:9px;flex-wrap:wrap}.science-sim-actions button{min-height:44px;padding:9px 17px;border:1px solid var(--sim-line);border-radius:12px;background:#102a3c;color:#e9f8fd;font-weight:900;cursor:pointer}.science-sim-actions button.is-primary{border-color:transparent;background:linear-gradient(110deg,var(--sim-accent),var(--sim-secondary));color:#07131f}.science-sim-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}@media(max-width:760px){.science-phaser-simulator{position:relative;min-height:100%;padding:12px}.science-sim-header{display:grid}.science-sim-grid{grid-template-columns:1fr;min-height:0}.science-sim-viewport{min-height:420px}.science-sim-telemetry{min-height:250px}.science-sim-actions{display:grid;grid-template-columns:1fr}.science-sim-actions button{width:100%}}@media(prefers-reduced-motion:reduce){.science-phaser-simulator *{animation:none!important;transition:none!important}}
+
+/* Complete visual-style color contract for simulator */
+.science-phaser-simulator{color:var(--sim-text);background:radial-gradient(circle at 15% 10%,color-mix(in srgb,var(--sim-accent) 20%,transparent),transparent 30%),radial-gradient(circle at 86% 88%,color-mix(in srgb,var(--sim-secondary) 14%,transparent),transparent 28%),linear-gradient(145deg,var(--sim-bg),var(--sim-bg-2) 58%,var(--sim-bg))}
+.science-sim-header h2{color:var(--sim-text)}.science-sim-header p{color:var(--sim-muted)}.science-sim-status{border-color:color-mix(in srgb,var(--sim-line) 80%,transparent);background:color-mix(in srgb,var(--sim-panel) 88%,transparent);color:var(--sim-muted)}.science-sim-viewport{border-color:var(--sim-line);background:var(--sim-bg);box-shadow:0 20px 60px color-mix(in srgb,var(--sim-bg) 72%,transparent)}.science-sim-chart-label{color:var(--sim-muted)}.science-sim-telemetry{border-color:var(--sim-line);background:linear-gradient(160deg,color-mix(in srgb,var(--sim-panel) 96%,white 4%),color-mix(in srgb,var(--sim-bg) 92%,black 8%))}.science-sim-telemetry>strong,.science-sim-objective b{color:var(--sim-text)}.science-sim-telemetry>code{border-color:var(--sim-line);background:color-mix(in srgb,var(--sim-bg) 84%,black 16%);color:var(--sim-text)}.science-sim-objective{border-color:var(--sim-line)}.science-sim-objective span{color:var(--sim-muted)}.science-sim-controls label{border-color:var(--sim-line);background:color-mix(in srgb,var(--sim-panel) 94%,transparent)}.science-sim-controls label>span{color:var(--sim-text)}.science-sim-actions button{border-color:var(--sim-line);background:var(--sim-panel);color:var(--sim-text)}.science-sim-actions button.is-primary{background:linear-gradient(110deg,var(--sim-accent),var(--sim-secondary));color:var(--sim-bg)}
+
+/* Simulator layout repair v2: stable flow and protected contrast */
+.sa-game-frame .science-phaser-simulator{display:flex!important;flex-direction:column;align-items:stretch;gap:16px;isolation:isolate}
+.sa-game-frame .science-sim-header{flex:0 0 auto;margin:0}
+.sa-game-frame .science-sim-grid{flex:0 0 auto;width:100%;height:clamp(560px,58vw,720px);min-height:560px;align-items:stretch}
+.sa-game-frame .science-sim-viewport,.sa-game-frame .science-sim-telemetry{height:100%;min-height:0;box-sizing:border-box}
+.sa-game-frame .science-sim-telemetry{overflow:auto;overscroll-behavior:contain}
+.sa-game-frame .science-sim-controls{position:relative;z-index:3;flex:0 0 auto;width:100%;margin:0;grid-template-columns:repeat(2,minmax(0,1fr))}
+.sa-game-frame .science-sim-actions{position:relative;z-index:3;flex:0 0 auto;margin:0;padding-bottom:2px}
+.sa-game-frame .science-sim-header h2,.sa-game-frame .science-sim-header p,.sa-game-frame .science-sim-status,.sa-game-frame .science-sim-status span,.sa-game-frame .science-sim-telemetry strong,.sa-game-frame .science-sim-telemetry span,.sa-game-frame .science-sim-objective b,.sa-game-frame .science-sim-objective span,.sa-game-frame .science-sim-controls label span,.sa-game-frame .science-sim-actions button{opacity:1!important;text-shadow:none!important;-webkit-text-fill-color:currentColor!important}
+.sa-game-frame .science-sim-header h2,.sa-game-frame .science-sim-telemetry strong,.sa-game-frame .science-sim-objective b,.sa-game-frame .science-sim-controls label span{color:var(--sim-text)!important}
+.sa-game-frame .science-sim-header p,.sa-game-frame .science-sim-status,.sa-game-frame .science-sim-objective span{color:var(--sim-muted)!important}
+.sa-game-frame .science-sim-header small,.sa-game-frame .science-sim-telemetry>small,.sa-game-frame .science-sim-telemetry>span,.sa-game-frame .science-sim-objective small,.sa-game-frame .science-sim-controls output{color:var(--sim-accent)!important;-webkit-text-fill-color:var(--sim-accent)!important}
+.sa-game-frame .science-sim-telemetry>code{color:var(--sim-text)!important;-webkit-text-fill-color:var(--sim-text)!important}
+.sa-game-frame .science-sim-actions button{color:var(--sim-text)!important}
+.sa-game-frame .science-sim-actions button.is-primary{color:var(--sim-bg)!important;-webkit-text-fill-color:var(--sim-bg)!important}
+@media(max-width:900px){.sa-game-frame .science-sim-grid{height:auto;min-height:0;grid-template-columns:1fr}.sa-game-frame .science-sim-viewport{height:clamp(440px,70vw,620px)}.sa-game-frame .science-sim-telemetry{height:auto;min-height:340px;overflow:visible}.sa-game-frame .science-sim-controls{grid-template-columns:1fr}}
+
+/* Simulator interaction and intrinsic viewport sizing v3 */
+.sa-game-frame .science-sim-grid{height:auto!important;min-height:0!important;align-items:stretch}
+.sa-game-frame .science-sim-viewport{height:auto!important;min-height:clamp(320px,36vw,520px)!important;aspect-ratio:16/10}
+.sa-game-frame .science-sim-telemetry{height:auto!important;min-height:clamp(320px,36vw,520px)!important}
+.sa-game-frame .science-sim-controls,.sa-game-frame .science-sim-controls label,.sa-game-frame .science-sim-controls input,.sa-game-frame .science-sim-actions,.sa-game-frame .science-sim-actions button{pointer-events:auto!important}
+.sa-game-frame .science-sim-actions button.is-active{border-color:var(--sim-accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--sim-accent) 20%,transparent),0 0 24px color-mix(in srgb,var(--sim-accent) 25%,transparent)}
+.sa-game-frame .science-sim-controls input:focus-visible{outline:3px solid var(--sim-secondary)!important;outline-offset:4px}
+.sa-game-frame .science-sim-segmented input:checked+span{color:var(--sim-bg)!important;-webkit-text-fill-color:var(--sim-bg)!important}
+.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"]{container-type:inline-size}.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-controls{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-control{min-width:0;padding:7px 9px;border-radius:11px}.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-control>span{margin-bottom:4px;font-size:.66rem}.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-segmented span{min-height:34px!important;font-size:.86rem!important}.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-control input[type="range"]{min-height:24px}@container(min-width:1024px){.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-controls{grid-template-columns:repeat(6,minmax(0,1fr))}}@media(max-width:700px){.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:430px){.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-controls{grid-template-columns:1fr}}
+
+/* Factorización de trinomios: tablero exacto dibujado con DOM, sin imágenes generadas. */
+.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"]{container-type:inline-size}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-grid{grid-template-columns:minmax(0,1fr) minmax(230px,280px)}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-viewport{min-height:520px;background:linear-gradient(145deg,color-mix(in srgb,var(--sim-panel) 72%,var(--sim-bg)),var(--sim-bg))}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-viewport canvas{opacity:0!important}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-controls{grid-template-columns:repeat(6,minmax(0,1fr));gap:7px}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-control{min-width:0;padding:8px 10px;border:1px solid var(--sim-line);border-radius:12px;background:var(--sim-panel)}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-control>span{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px;color:var(--sim-text);font-size:.7rem;font-weight:900}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-control input[type="range"]{width:100%;min-height:26px;accent-color:var(--sim-accent)}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"].is-factor-challenge .science-sim-control:not([data-sim-control="factorMode"]){display:none}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"].is-factor-challenge .science-sim-controls{grid-template-columns:minmax(240px,360px)}
+.science-factor-board{position:absolute;z-index:8;inset:0;display:grid;grid-template-rows:auto 1fr auto auto;gap:12px;padding:clamp(12px,2vw,22px);overflow:auto;color:var(--sim-text);background:radial-gradient(circle at 12% 8%,color-mix(in srgb,var(--sim-accent) 14%,transparent),transparent 34%)}.science-factor-equation{display:grid;gap:3px}.science-factor-equation small{color:var(--sim-accent);font-size:.66rem;font-weight:950;letter-spacing:.13em}.science-factor-equation strong{font-size:clamp(1.35rem,3vw,2.35rem);line-height:1.12}.science-factor-equation span{color:var(--sim-muted);font-size:.78rem;font-weight:800}.science-factor-workspace{position:relative;display:grid;grid-template-columns:52px minmax(0,1fr);grid-template-rows:36px minmax(260px,1fr);gap:7px}.science-factor-side{display:grid;place-items:center;color:var(--sim-secondary);font-size:.78rem;font-weight:950}.science-factor-side-top{grid-column:2}.science-factor-side-left{grid-row:2;writing-mode:vertical-rl;rotate:180deg}.science-factor-box{grid-column:2;grid-row:2;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1.25fr 1fr;gap:6px;padding:7px;border:2px solid var(--sim-accent);border-radius:17px;background:color-mix(in srgb,var(--sim-bg) 82%,transparent);box-shadow:0 0 0 5px color-mix(in srgb,var(--sim-accent) 9%,transparent)}.science-factor-cell{min-width:0;min-height:88px;padding:10px;display:grid;place-content:center;gap:4px;border:1px dashed color-mix(in srgb,var(--sim-muted) 62%,transparent);border-radius:12px;background:color-mix(in srgb,var(--sim-panel) 88%,transparent);color:var(--sim-text);text-align:center;font:inherit}.science-factor-cell span{font-size:clamp(1rem,2.2vw,1.45rem);font-weight:950}.science-factor-cell small{color:var(--sim-muted);font-size:.62rem;font-weight:850}.science-factor-cell b{font-size:.7rem}.science-factor-cell.is-positive{border-style:solid;border-color:var(--sim-accent);background:linear-gradient(145deg,color-mix(in srgb,var(--sim-accent) 24%,var(--sim-panel)),var(--sim-panel))}.science-factor-cell.is-negative{border-style:double;border-width:4px;border-color:var(--sim-secondary);background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--sim-secondary) 22%,var(--sim-panel)) 0 9px,var(--sim-panel) 9px 18px)}.science-factor-challenge{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(240px,1.4fr) minmax(250px,1fr) auto;gap:8px;align-items:stretch}.science-factor-step,.science-factor-tray,.science-factor-selectors{padding:8px;border:1px solid var(--sim-line);border-radius:12px;background:var(--sim-panel)}.science-factor-step{display:grid;gap:5px}.science-factor-step label,.science-factor-selectors label{color:var(--sim-muted);font-size:.66rem;font-weight:900}.science-factor-step>div{display:flex;gap:5px}.science-factor-step input,.science-factor-step button,.science-factor-selectors select,.science-factor-assist{min-height:44px;border:1px solid var(--sim-line);border-radius:9px;background:var(--sim-bg);color:var(--sim-text);font:inherit;font-weight:850}.science-factor-step input{min-width:0;width:76px;padding:7px}.science-factor-step button,.science-factor-assist{padding:7px 10px;cursor:pointer}.science-factor-tray{display:flex;gap:6px;align-items:center;overflow-x:auto}.science-factor-tray button{min-width:92px;min-height:52px;padding:6px;border:2px solid var(--sim-accent);border-radius:10px;background:var(--sim-bg);color:var(--sim-text);font:inherit;cursor:grab}.science-factor-tray button.is-negative{border-style:double;border-width:4px;border-color:var(--sim-secondary);background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--sim-secondary) 18%,var(--sim-bg)) 0 7px,var(--sim-bg) 7px 14px)}.science-factor-tray button[aria-pressed="true"]{outline:3px solid var(--sim-secondary);outline-offset:2px}.science-factor-tray small{display:block;color:var(--sim-muted);font-size:.55rem}.science-factor-selectors{display:grid;grid-template-columns:1fr 1fr;gap:6px}.science-factor-selectors label{display:grid;gap:4px}.science-factor-selectors select{width:100%;padding:6px}.science-factor-assist{align-self:stretch;background:linear-gradient(135deg,color-mix(in srgb,var(--sim-accent) 25%,var(--sim-panel)),var(--sim-panel))}.science-factor-result{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;border:1px solid var(--sim-line);border-radius:12px;background:var(--sim-panel);font-size:clamp(.85rem,1.5vw,1.15rem)}.science-factor-result strong{color:var(--sim-accent)}.science-factor-feedback{min-height:22px;margin:0;color:var(--sim-secondary);font-size:.72rem;font-weight:850}.science-factor-board :is(button,input,select):focus-visible{outline:3px solid #fff;outline-offset:3px}
+@container(max-width:850px){.science-factor-challenge{grid-template-columns:1fr 1fr}.science-factor-assist{min-height:48px}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}@container(max-width:540px){.science-factor-board{padding:10px}.science-factor-workspace{grid-template-columns:34px 1fr;grid-template-rows:28px minmax(260px,1fr)}.science-factor-challenge{grid-template-columns:1fr}.science-factor-selectors{grid-template-columns:1fr 1fr}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-controls{grid-template-columns:1fr 1fr}}@media(max-width:900px){.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-grid{grid-template-columns:1fr}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-viewport{min-height:620px}.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-telemetry{min-height:250px}}@media(max-width:520px){.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-sim-viewport{min-height:800px}.science-factor-box{grid-template-rows:1fr 1fr}.science-factor-cell{min-height:105px}}
+@media(max-width:900px){.sa-game-frame .science-sim-viewport,.sa-game-frame .science-sim-telemetry{min-height:340px!important;aspect-ratio:auto}}
+
+/* Simulator viewport fit v4: fit the complete desktop lab in one screen. */
+.sa-game-frame .science-phaser-simulator{--science-sim-preview-x:clamp(22px,3vw,46px);--science-sim-preview-y:clamp(24px,3.5vh,50px);gap:12px!important;padding:max(var(--science-sim-preview-y),env(safe-area-inset-top)) max(var(--science-sim-preview-x),env(safe-area-inset-right)) max(var(--science-sim-preview-y),env(safe-area-inset-bottom)) max(var(--science-sim-preview-x),env(safe-area-inset-left))!important}
+.science-sim-asset-warning{margin:0;padding:9px 13px;border:1px solid color-mix(in srgb,#f7ba55 55%,transparent);border-radius:12px;color:#ffe7b0;background:color-mix(in srgb,#8a5414 32%,var(--sim-bg));font-size:.75rem;font-weight:800}.science-phaser-simulator.has-generated-scene .science-sim-viewport{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--sim-accent) 24%,transparent),0 18px 44px rgba(0,0,0,.28)}
+.sa-simulator-visual-editor{margin-top:18px;display:grid;gap:10px}.sa-simulator-background-preview{position:relative;min-height:128px;margin:0;display:grid;place-items:center;overflow:hidden;border:1px solid var(--sa-border,#d4dde2);border-radius:16px;background:#07131f;color:#9db8c7}.sa-simulator-background-preview img{width:100%;height:150px;display:block;object-fit:cover}.sa-simulator-visual-action{min-height:42px;border:1px solid var(--sa-accent,#167f92);border-radius:11px;background:var(--sa-accent,#167f92);color:#fff;font-weight:900;cursor:pointer}.sa-simulator-layer-list{display:grid;gap:7px}.sa-simulator-layer-list article{min-width:0;padding:8px;display:grid;grid-template-columns:48px minmax(0,1fr) 36px;align-items:center;gap:9px;border:1px solid var(--sa-border,#d4dde2);border-radius:12px;background:var(--sa-panel,#fff)}.sa-simulator-layer-thumb{width:48px;height:48px;display:grid;place-items:center;overflow:hidden;border-radius:10px;background:#0a2131;color:#58dced}.sa-simulator-layer-thumb img{width:100%;height:100%;object-fit:contain}.sa-simulator-layer-list article div{min-width:0;display:grid}.sa-simulator-layer-list strong,.sa-simulator-layer-list small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sa-simulator-layer-list small{color:var(--sa-muted,#667985)}.sa-simulator-layer-list button{width:36px;height:36px;border:1px solid var(--sa-border,#d4dde2);border-radius:9px;background:transparent;color:inherit;cursor:pointer}.sa-simulator-visual-warning{margin:0;padding:9px;border-radius:10px;color:#764b0b;background:#fff3d2;font-size:.75rem;font-weight:750;line-height:1.4}
+.sa-game-frame .science-sim-header{align-items:flex-start!important;gap:14px!important}
+.sa-game-frame .science-sim-status{align-self:flex-start!important;width:max-content!important;min-width:0!important;min-height:36px!important;height:auto!important;padding:7px 11px!important;line-height:1!important;white-space:nowrap!important}
+.sa-game-frame .science-sim-controls{gap:8px!important}
+.sa-game-frame .science-sim-controls label{padding:8px 12px!important}
+.sa-game-frame .science-sim-controls label>span{margin-bottom:5px!important}
+.sa-game-frame .science-sim-actions button{min-height:40px!important;padding:7px 15px!important}
+@media(min-width:901px){
+  .sa-game-frame .science-sim-grid{height:clamp(320px,52dvh,580px)!important;max-height:580px!important}
+  .sa-game-frame .science-sim-viewport,.sa-game-frame .science-sim-telemetry{height:100%!important;min-height:0!important;max-height:580px!important;aspect-ratio:auto!important}
+  .sa-game-frame .science-sim-telemetry{padding:clamp(14px,1.5vw,20px)!important}
+  .sa-game-frame .science-sim-telemetry>strong{margin:10px 0 2px!important;font-size:clamp(2rem,3vw,3.2rem)!important}
+  .sa-game-frame .science-sim-telemetry>code{margin-top:12px!important;padding:9px 11px!important}
+  .sa-game-frame .science-sim-objective{padding-top:12px!important}
+}
+@media(min-width:901px) and (max-height:820px){
+  .sa-game-frame .science-sim-grid{height:clamp(300px,48dvh,430px)!important}
+  .sa-game-frame .science-sim-viewport,.sa-game-frame .science-sim-telemetry{max-height:430px!important}
+  .sa-game-frame .science-sim-header h2{font-size:clamp(1.15rem,2vw,1.75rem)!important}
+  .sa-game-frame .science-sim-header p{line-height:1.3!important}
+}
+@media(max-width:900px){.sa-game-frame .science-sim-viewport{width:100%!important;height:auto!important;min-height:0!important;aspect-ratio:16/9!important}.sa-game-frame .science-sim-telemetry{height:auto!important;min-height:300px!important;aspect-ratio:auto!important}}
+
+/* Simulator viewport sync v5: Phaser always occupies the resized preview panel. */
+.sa-game-frame .science-phaser-simulator{container-type:inline-size}
+.sa-game-frame .science-sim-grid{height:auto!important;min-height:0!important;max-height:none!important;align-items:stretch!important}
+.sa-game-frame .science-sim-viewport{width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;aspect-ratio:16/9!important;align-self:start!important}
+@media(min-width:901px){.sa-game-frame .science-sim-telemetry{height:100%!important;min-height:0!important;max-height:none!important}}
+/* Narrow simulator layout: react to the editor panel, not to the whole app window. */
+@container(max-width:900px){
+  .sa-game-frame .science-sim-grid{width:100%!important;grid-template-columns:minmax(0,1fr)!important;grid-template-areas:"viewport" "telemetry"!important}
+  .sa-game-frame .science-sim-viewport{grid-area:viewport;width:100%!important;min-width:0!important;max-width:none!important;justify-self:stretch!important}
+  .sa-game-frame .science-sim-telemetry{grid-area:telemetry;width:100%!important;min-width:0!important;max-width:none!important;height:auto!important;min-height:300px!important;justify-self:stretch!important;aspect-ratio:auto!important}
+  .sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-controls{width:100%!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-control{width:100%!important;min-width:0!important;box-sizing:border-box!important}
+  .sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-actions{width:100%!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  .sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-actions button{width:100%!important;max-width:none!important;box-sizing:border-box!important}
+}
+/* Compact two-state switch used by simulator segmented controls. */
+.sa-game-frame .science-sim-segmented{position:relative;isolation:isolate;width:min(100%,240px);height:36px;min-height:36px;max-height:36px;box-sizing:border-box;grid-template-columns:repeat(2,minmax(0,1fr));gap:0!important;padding:3px!important;border:1px solid color-mix(in srgb,var(--sim-line) 78%,var(--sim-accent) 22%)!important;border-radius:999px!important;background:color-mix(in srgb,var(--sim-bg) 86%,var(--sim-panel) 14%)!important;box-shadow:inset 0 1px 4px rgba(0,0,0,.28)}
+.sa-game-frame .science-sim-segmented::before{content:"";position:absolute;z-index:-1;inset-block:3px;inset-inline-start:3px;width:calc(50% - 3px);border-radius:999px;background:linear-gradient(110deg,var(--sim-accent),var(--sim-secondary));box-shadow:0 3px 10px color-mix(in srgb,var(--sim-accent) 30%,transparent);transition:transform .2s ease}
+.sa-game-frame .science-sim-segmented:has(label:last-child input:checked)::before{transform:translateX(100%)}
+.sa-game-frame .science-sim-segmented>label{position:relative!important;min-width:0!important;min-height:0!important;margin:0!important;padding:0!important;border:0!important;border-radius:999px!important;background:transparent!important;box-shadow:none!important}
+.sa-game-frame .science-sim-segmented>label>span{min-height:28px!important;padding:0 10px!important;border-radius:999px!important;background:transparent!important;color:var(--sim-text)!important;-webkit-text-fill-color:var(--sim-text)!important;font-size:.72rem!important;font-weight:900!important;line-height:1!important;white-space:nowrap}
+.sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-segmented>label>span{min-height:28px!important;font-size:.72rem!important}
+.sa-game-frame .science-sim-segmented input:checked+span{background:transparent!important;color:var(--sim-bg)!important;-webkit-text-fill-color:var(--sim-bg)!important}
+.sa-game-frame .science-sim-segmented:has(input:focus-visible){outline:3px solid var(--sim-secondary);outline-offset:3px}
+@container(max-width:560px){
+  .sa-game-frame .science-sim-header{display:grid!important;grid-template-columns:minmax(0,1fr)!important;align-items:start!important}
+  .sa-game-frame .science-sim-status{justify-self:start!important}
+  .sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-controls{grid-template-columns:minmax(0,1fr)!important}
+  .sa-game-frame .science-phaser-simulator[data-simulator-model="number-line"] .science-sim-actions{grid-template-columns:minmax(0,1fr)!important}
+  .sa-game-frame .science-sim-segmented{width:min(100%,220px)}
+}
+@media(prefers-reduced-motion:reduce){.sa-game-frame .science-sim-segmented::before{transition:none}}
+.science-sim-viewport>canvas{position:absolute!important;inset:0!important;display:block!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;margin:0!important;transform:none!important}
+.science-number-line-vector{position:absolute!important;z-index:2!important;inset:0!important;display:block!important;width:100%!important;height:100%!important;overflow:visible;pointer-events:none;shape-rendering:geometricPrecision;text-rendering:optimizeLegibility}
+
+/* Android fullscreen scroll: the fullscreen frame itself owns vertical panning. */
+@media (max-width:900px), (pointer:coarse) {
+  .sa-page .sa-game-frame:is(:fullscreen, :-webkit-full-screen) {
+    width:100vw!important;
+    height:100dvh!important;
+    min-height:100dvh!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    overscroll-behavior-y:contain;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+  }
+  .sa-page .sa-game-frame:is(:fullscreen, :-webkit-full-screen) > .sa-game-mount,
+  .sa-page .sa-game-frame:is(:fullscreen, :-webkit-full-screen) > .sa-game-mount.science-simulator-host {
+    position:relative!important;
+    inset:auto!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:100dvh!important;
+    overflow:visible!important;
+    touch-action:pan-y;
+  }
+  .sa-page .sa-game-frame:is(:fullscreen, :-webkit-full-screen) .science-phaser-simulator {
+    position:relative!important;
+    inset:auto!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:100dvh!important;
+    overflow:visible!important;
+    touch-action:pan-y;
+  }
+  .sa-page .sa-game-frame:is(:fullscreen, :-webkit-full-screen) :is(.science-sim-header,.science-sim-grid,.science-sim-telemetry,.science-sim-controls,.science-sim-actions) {
+    touch-action:pan-y;
+  }
+  .sa-page .sa-game-frame:is(:fullscreen, :-webkit-full-screen) .science-sim-controls input[type="range"] {
+    touch-action:pan-y;
+  }
+}
+/* Initial session setup and autosave status */
+.sa-save-status{margin-inline-start:auto;color:var(--sa-muted,#60708a);font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.sa-save-status[data-state="saving"]{color:#1677d2}.sa-save-status[data-state="saved"]{color:#27845f}.sa-save-status[data-state="pending"]{color:#b46b00}.sa-save-status[data-state="error"]{color:#c4474f}
+body.sa-session-setup-pending .sa-summary,body.sa-session-setup-pending .sa-workspace{visibility:hidden;pointer-events:none}
+.sa-session-setup-modal{--sa-session-accent:#6d5ce7;--sa-session-accent-2:#ff809f;position:fixed;inset:0;z-index:10040;display:none;place-items:center;padding:clamp(12px,3vw,36px);background:radial-gradient(circle at 12% 18%,color-mix(in srgb,var(--sa-session-accent) 28%,transparent),transparent 34%),radial-gradient(circle at 88% 82%,color-mix(in srgb,var(--sa-session-accent-2) 24%,transparent),transparent 36%),rgba(12,24,40,.84);backdrop-filter:blur(18px)}
+.sa-session-setup-modal[data-experience-mode="simulator"]{--sa-session-accent:#078da7;--sa-session-accent-2:#55d5a5}
+.sa-session-setup-modal.show{display:grid}
+.sa-session-setup-dialog{width:min(760px,100%);max-height:calc(100dvh - clamp(24px,6vw,72px));display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;color:#17243a;background:linear-gradient(145deg,#f9fcff 0%,#eef7f5 58%,#fff7ef 100%);border:1px solid color-mix(in srgb,var(--sa-session-accent) 52%,#d7e8e6);border-radius:30px;box-shadow:0 34px 100px rgba(0,0,0,.38)}
+.sa-session-setup-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:clamp(22px,4vw,38px) clamp(22px,5vw,48px) 20px;border-bottom:1px solid rgba(83,143,151,.2)}
+.sa-session-setup-header>div>span{color:var(--sa-session-accent);font-size:.76rem;font-weight:900;letter-spacing:.18em;text-transform:uppercase}.sa-session-setup-header h2{margin:8px 0 6px;font-size:clamp(1.55rem,4vw,2.35rem);line-height:1.05}.sa-session-setup-header p{max-width:590px;margin:0;color:#5a6980;line-height:1.5}
+.sa-session-setup-header button{flex:0 0 42px;width:42px;height:42px;border:1px solid rgba(34,72,91,.18);border-radius:14px;background:rgba(255,255,255,.72);color:#17243a}
+.sa-session-setup-body{min-height:0;overflow:auto;padding:24px clamp(22px,5vw,48px) 10px;scroll-padding-bottom:110px;scrollbar-gutter:stable}.sa-session-setup-body .sa-form{display:grid;gap:18px}.sa-session-setup-body [hidden]{display:none!important}.sa-session-setup-body .sa-brief-footer{position:sticky;bottom:0;z-index:3;margin:24px -4px 0;padding:18px 4px 8px;background:linear-gradient(180deg,transparent,#f1f8f5 30%)}.sa-session-setup-body .sa-generate-button{width:100%;color:#102237!important;-webkit-text-fill-color:#102237!important;background:linear-gradient(105deg,var(--sa-session-accent),var(--sa-session-accent-2))!important}
+.sa-session-setup-modal .sa-field>span,.sa-session-setup-modal .sa-section-label{color:#65758b!important;-webkit-text-fill-color:#65758b!important}.sa-session-setup-modal .sa-field>small{color:#66778c!important;-webkit-text-fill-color:#66778c!important}.sa-session-setup-modal .sa-field :is(input,select,textarea){color:#17243a!important;-webkit-text-fill-color:#17243a!important;background:#fff!important;background-color:#fff!important;border-color:#8aa0bd!important;caret-color:#17243a;color-scheme:light;opacity:1!important}.sa-session-setup-modal .sa-field :is(input,select,textarea):hover{background:#fbfdff!important;border-color:#647fa5!important}.sa-session-setup-modal .sa-field :is(input,select,textarea):focus{background:#fff!important;border-color:var(--sa-session-accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--sa-session-accent) 18%,transparent)!important}.sa-session-setup-modal .sa-field :is(input,textarea)::placeholder{color:#708096!important;-webkit-text-fill-color:#708096!important;opacity:1!important}.sa-session-setup-modal .sa-field select option{color:#17243a!important;background:#fff!important}.sa-session-setup-modal #simulatorProfileDescription{color:#17243a!important;-webkit-text-fill-color:#17243a!important}.sa-session-setup-modal .sa-experience-generate{color:#fff!important;-webkit-text-fill-color:#fff!important;background:#33465c}
+.sa-session-back{justify-self:start;margin:10px clamp(22px,5vw,48px) 22px;padding:10px 0;border:0;background:transparent;color:#52647a;font-weight:800}.sa-session-back i{margin-inline-end:8px}
+@media(max-width:640px){.sa-session-setup-modal{padding:0}.sa-session-setup-dialog{width:100%;max-height:100dvh;min-height:100dvh;border:0;border-radius:0}.sa-session-setup-header{padding-top:max(22px,env(safe-area-inset-top))}.sa-session-setup-body .sa-form-row{grid-template-columns:1fr}.sa-save-status{display:none}}
+.sa-simulator-visual-choices{--sim-choice-accent:var(--sa-cyan,#38d9ff);--sim-choice-bg:color-mix(in srgb,var(--sim-choice-accent) 5%,var(--sa-panel,#18212c));--sim-choice-card:color-mix(in srgb,var(--sim-choice-accent) 4%,var(--sa-panel-2,#252d39));--sim-choice-input:var(--sa-panel-3,#323945);--sim-choice-text:var(--sa-text,#f1f5f9);--sim-choice-muted:var(--sa-muted,#a7b0c0);--sim-choice-line:color-mix(in srgb,var(--sim-choice-accent) 30%,var(--sa-line,rgba(203,213,225,.18)));min-width:0;margin:0;padding:clamp(14px,2vw,18px);border:1px solid var(--sim-choice-line);border-radius:18px;background:linear-gradient(145deg,var(--sim-choice-bg),color-mix(in srgb,var(--sim-choice-accent) 8%,var(--sim-choice-bg)));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--sim-choice-text) 7%,transparent),0 14px 34px rgba(0,0,0,.12)}
+.sa-simulator-visual-choices legend{padding:0 8px;color:var(--sim-choice-text);-webkit-text-fill-color:var(--sim-choice-text);font-size:.68rem;font-weight:950;letter-spacing:.1em;text-transform:uppercase}
+.sa-simulator-visual-choices>small{display:block;margin-top:12px;color:var(--sim-choice-muted);-webkit-text-fill-color:var(--sim-choice-muted);font-size:.68rem;line-height:1.5}
+.sa-session-setup-body .sa-simulator-visual-choices .sa-form-row{margin:0}
+.sa-simulator-choice-grid{align-items:start}.sa-simulator-choice-column{min-width:0;display:grid;align-content:start;gap:10px}.sa-simulator-choice-column>.sa-field{min-width:0;margin:0}.sa-simulator-custom-choice[hidden]{display:none!important}.sa-simulator-custom-choice{padding:11px;border:1px dashed color-mix(in srgb,var(--sim-choice-accent) 58%,var(--sim-choice-line));border-radius:12px;background:color-mix(in srgb,var(--sim-choice-accent) 7%,var(--sim-choice-card))}.sa-simulator-custom-choice>span{color:var(--sim-choice-text)!important;-webkit-text-fill-color:var(--sim-choice-text)!important}.sa-simulator-custom-choice>small{color:var(--sim-choice-muted)!important;-webkit-text-fill-color:var(--sim-choice-muted)!important;line-height:1.4}.sa-page .sa-simulator-custom-choice input,.sa-session-setup-modal .sa-simulator-custom-choice input{color:var(--sim-choice-text)!important;-webkit-text-fill-color:var(--sim-choice-text)!important;border-color:var(--sim-choice-line)!important;background:var(--sim-choice-input)!important}.sa-page .sa-simulator-custom-choice input::placeholder,.sa-session-setup-modal .sa-simulator-custom-choice input::placeholder{color:var(--sim-choice-muted)!important;-webkit-text-fill-color:var(--sim-choice-muted)!important;opacity:.82!important}
+.sa-simulator-variable-section{margin-top:16px;padding-top:16px;border-top:1px solid var(--sim-choice-line)}
+.sa-simulator-variable-section>header{margin-bottom:12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.sa-simulator-variable-section>header>div{min-width:0;display:grid;gap:3px}.sa-simulator-variable-section>header span{color:var(--sim-choice-text);-webkit-text-fill-color:var(--sim-choice-text);font-size:.76rem;font-weight:950;letter-spacing:.08em;text-transform:uppercase}.sa-simulator-variable-section>header small{color:var(--sim-choice-muted);-webkit-text-fill-color:var(--sim-choice-muted);font-size:.7rem}.sa-simulator-variable-section>header output{padding:5px 9px;border:1px solid var(--sim-choice-line);border-radius:999px;color:var(--sim-choice-accent);-webkit-text-fill-color:var(--sim-choice-accent);background:color-mix(in srgb,var(--sim-choice-accent) 11%,var(--sim-choice-card));font-size:.68rem;font-weight:900;white-space:nowrap}
+.sa-simulator-variable-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.sa-simulator-variable-card{min-width:0;padding:12px;display:grid;align-content:start;gap:9px;border:1px solid var(--sim-choice-line);border-radius:14px;background:linear-gradient(145deg,color-mix(in srgb,var(--sim-choice-text) 3%,var(--sim-choice-card)),var(--sim-choice-card));box-shadow:0 8px 20px rgba(0,0,0,.1)}.sa-simulator-variable-card>span:first-child{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.sa-simulator-variable-card b{min-width:0;color:var(--sim-choice-text);-webkit-text-fill-color:var(--sim-choice-text);font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sa-simulator-variable-card em{color:var(--sim-choice-muted);-webkit-text-fill-color:var(--sim-choice-muted);font-size:.62rem;font-style:normal;white-space:nowrap}.sa-simulator-variable-card>small{color:var(--sim-choice-muted);-webkit-text-fill-color:var(--sim-choice-muted);font-size:.65rem;line-height:1.4}.sa-simulator-variable-input{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}.sa-page .sa-simulator-variable-input input,.sa-session-setup-modal .sa-simulator-variable-input input{width:100%;min-width:0;height:42px;padding:7px 10px!important;color:var(--sim-choice-text)!important;-webkit-text-fill-color:var(--sim-choice-text)!important;border:1px solid var(--sim-choice-line)!important;border-radius:10px!important;background:var(--sim-choice-input)!important;box-shadow:inset 0 1px 2px rgba(0,0,0,.16)!important;color-scheme:inherit;font:inherit;font-weight:850}.sa-page .sa-simulator-variable-input input:hover,.sa-session-setup-modal .sa-simulator-variable-input input:hover{border-color:color-mix(in srgb,var(--sim-choice-accent) 60%,var(--sim-choice-line))!important;background:color-mix(in srgb,var(--sim-choice-accent) 5%,var(--sim-choice-input))!important}.sa-page .sa-simulator-variable-input input:focus,.sa-session-setup-modal .sa-simulator-variable-input input:focus{outline:none;border-color:var(--sim-choice-accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--sim-choice-accent) 18%,transparent)!important}.sa-simulator-variable-input i{min-width:34px;color:var(--sim-choice-accent);-webkit-text-fill-color:var(--sim-choice-accent);font-size:.68rem;font-style:normal;font-weight:950;text-align:center}
+.sa-session-setup-modal .sa-simulator-visual-choices{--sim-choice-accent:var(--sa-session-accent,#078da7);--sim-choice-bg:#f5fbfb;--sim-choice-card:#fff;--sim-choice-input:#fff;--sim-choice-text:#17243a;--sim-choice-muted:#66778c;--sim-choice-line:color-mix(in srgb,var(--sa-session-accent,#078da7) 34%,#b9cad6)}
+@media(max-width:640px){.sa-simulator-variable-choices{grid-template-columns:1fr}.sa-simulator-variable-section>header{align-items:flex-start}.sa-simulator-variable-card>span:first-child{align-items:flex-start;flex-direction:column;gap:2px}}
+@media(min-width:721px){body.sa-shell[data-sa-theme] .sa-page .sa-brief>.sa-form{padding-bottom:clamp(132px,18vh,178px)}}
+/* Equation/sequence pieces use a light surface even inside dark HUD themes. */
+.sa-game-frame [data-visual-style] button.is-equation-value,
+.science-assessment-host[data-visual-style] button.is-equation-value {
+  color:#17243a !important;
+  -webkit-text-fill-color:#17243a !important;
+}
+.sa-game-frame [data-visual-style] button.is-equation-value :is(span,strong,small),
+.science-assessment-host[data-visual-style] button.is-equation-value :is(span,strong,small) {
+  color:#17243a !important;
+  -webkit-text-fill-color:#17243a !important;
+  text-shadow:none !important;
+}
+.sa-game-frame [data-visual-style] button.is-equation-value kbd,
+.science-assessment-host[data-visual-style] button.is-equation-value kbd {
+  color:#17342d !important;
+  -webkit-text-fill-color:#17342d !important;
+  background:#dff4d8 !important;
+}
+.sa-game-frame [data-visual-style] button.is-equation-value:disabled,
+.science-assessment-host[data-visual-style] button.is-equation-value:disabled {
+  opacity:.64 !important;
+}
+/* Sequence slots sit on dark runtime surfaces in premium HUD themes. */
+.sa-game-frame [data-visual-style] .science-sequence-slots > li:not(.science-sequence-placeholder),
+.science-assessment-host[data-visual-style] .science-sequence-slots > li:not(.science-sequence-placeholder) {
+  color:#f7fbf5 !important;
+  -webkit-text-fill-color:#f7fbf5 !important;
+}
+.sa-game-frame [data-visual-style] .science-sequence-slots > li:not(.science-sequence-placeholder) > strong,
+.science-assessment-host[data-visual-style] .science-sequence-slots > li:not(.science-sequence-placeholder) > strong {
+  color:#f7fbf5 !important;
+  -webkit-text-fill-color:#f7fbf5 !important;
+  text-shadow:none !important;
+}
+.sa-game-frame [data-visual-style] .science-sequence-slots > li > span,
+.science-assessment-host[data-visual-style] .science-sequence-slots > li > span,
+.sa-game-frame [data-visual-style] .science-sequence-slots > li button,
+.science-assessment-host[data-visual-style] .science-sequence-slots > li button {
+  color:#173142 !important;
+  -webkit-text-fill-color:#173142 !important;
+}
+/* Matching responds to the preview's available width, not only to the browser viewport. */
+.sa-game-frame [data-visual-style] .science-rive-matching-board,
+.science-assessment-host[data-visual-style] .science-rive-matching-board {
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)) !important;
+}
+.sa-game-frame [data-visual-style] :is([data-matching-left-list],[data-matching-right-list]),
+.science-assessment-host[data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) {
+  min-width:0;
+  width:100%;
+}
+.sa-game-frame [data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) button,
+.science-assessment-host[data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) button {
+  grid-template-columns:42px minmax(0,1fr) !important;
+  min-width:0;
+}
+.sa-game-frame [data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) button :is(strong,small),
+.science-assessment-host[data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) button :is(strong,small) {
+  min-width:0;
+  word-break:normal !important;
+  overflow-wrap:break-word !important;
+  hyphens:none;
+}
+@media(max-width:520px) {
+  .sa-game-frame [data-visual-style] .science-rive-matching-column,
+  .science-assessment-host[data-visual-style] .science-rive-matching-column { padding:10px !important; }
+  .sa-game-frame [data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) button,
+  .science-assessment-host[data-visual-style] :is([data-matching-left-list],[data-matching-right-list]) button { padding:10px !important; }
+}
+
+/* Manual multi-answer editing and accessible preview. */
+.sa-answer-editor input[name="correctAssessmentAnswer"] { accent-color:#0878f9; }
+.sa-check-multiple-answers {
+  min-height:48px;
+  margin:14px auto 0;
+  padding:10px 20px;
+  display:block;
+  color:#17354a;
+  border:0;
+  border-radius:999px;
+  background:linear-gradient(105deg,#c9f36c,#8ee5cb);
+  font-weight:900;
+}
+.sa-answer-options.is-multiple-select button.is-selected {
+  border-color:#baf34f;
+  box-shadow:0 0 0 4px rgba(186,243,79,.2);
+}
+
+/* Compact tech-minimal actions for the active question. */
+.sa-question-delete-row{margin:-2px 0 12px;padding:6px 7px 6px 10px;min-height:46px;display:flex;align-items:center;justify-content:space-between;gap:8px;color:#657890;border:1px solid rgba(154,174,194,.72);border-radius:11px;background:linear-gradient(135deg,rgba(255,255,255,.54),rgba(232,240,247,.4));font-size:.7rem;font-weight:850}
+.sa-question-position{min-width:0;display:flex;align-items:baseline;gap:5px;white-space:nowrap}
+.sa-question-position strong{color:#243c50;font-size:.76rem;font-weight:950;letter-spacing:.01em}
+.sa-question-position small{color:#718397;font-size:.65rem;font-weight:850}
+.sa-question-points{margin:0 0 14px;padding:12px;border:1px solid rgba(70,135,171,.32);border-radius:13px;background:linear-gradient(145deg,rgba(236,247,253,.9),rgba(224,239,249,.64));box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+.sa-question-points-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;color:#29475c;font-size:.69rem}
+.sa-question-points-heading>span{display:inline-flex;align-items:center;gap:6px;font-weight:850}
+.sa-question-points-heading i{color:#db9d1e}
+.sa-question-points-heading output{color:#147b94;font-size:.64rem;font-weight:850;text-align:right}
+.sa-question-points-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.sa-question-points-grid .sa-field{margin:0}
+.sa-question-points-distribute{width:100%;min-height:36px;margin-top:9px;border:1px solid rgba(30,117,151,.34);border-radius:9px;background:rgba(255,255,255,.66);color:#246079;font-family:inherit;font-size:.62rem;font-weight:800;line-height:1.2;cursor:pointer}
+.sa-question-points-distribute:hover{background:#fff;border-color:rgba(30,117,151,.58)}
+.sa-question-action-group{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex:0 0 auto}
+.sa-question-action-group>button{height:34px;min-width:34px;padding:0 9px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;font:inherit;font-size:.68rem;font-weight:950;cursor:pointer;transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease}
+.sa-question-action-group>button:hover:not(:disabled){box-shadow:0 3px 10px rgba(28,69,101,.12)}
+.sa-question-action-group>button:focus-visible{outline:3px solid rgba(45,126,247,.24);outline-offset:2px}
+.sa-question-action-group>button:disabled{cursor:not-allowed;filter:grayscale(.35);opacity:.5;box-shadow:none}
+.sa-question-regenerate-button{color:#1965a8;border:1px solid #9bc5eb;background:rgba(240,248,255,.92)}
+.sa-question-regenerate-button:hover:not(:disabled){color:#0c4f8d;border-color:#4b96d8;background:#fff}
+.sa-question-delete-button{width:34px;padding:0;color:#a02d46;border:1px solid transparent;background:transparent}
+.sa-question-delete-button:hover:not(:disabled){color:#fff;border-color:#bd3a55;background:#bd3a55}
+@media(max-width:560px){.sa-question-delete-row{min-height:54px}.sa-question-action-group>button{height:44px;min-width:44px}.sa-question-delete-button{width:44px}.sa-question-points-grid{grid-template-columns:1fr}.sa-question-points-heading{align-items:flex-start;flex-direction:column}.sa-question-points-heading output{text-align:left}}
+
+:is(.sa-game-frame[data-visual-style="rive-arcade-matsuri"],.sa-game-frame[data-visual-style="arcade-science"]) .science-structured-game.is-exponent-placement .science-exponent-base>span{color:#fff9e8!important;-webkit-text-fill-color:#fff9e8!important;text-shadow:0 2px 2px #090520,0 0 18px rgba(255,249,232,.14)!important;opacity:1!important}
+
+/* Timeline question editor. */
+.sa-timeline-editor{display:grid;gap:12px}.sa-timeline-editor>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.sa-timeline-editor>header div{display:grid;gap:3px}.sa-timeline-editor>header small{color:#657890}.sa-timeline-editor>header button{min-height:38px;padding:8px 13px;border:0;border-radius:10px;background:#b9ed54;color:#183548;font-weight:900}
+.sa-timeline-editor-list{display:grid;gap:10px}.sa-timeline-editor-item{position:relative;padding:12px 10px 12px 48px;display:grid;grid-template-columns:minmax(90px,.55fr) minmax(130px,1fr);gap:9px;border:1px solid #b7c8d8;border-radius:16px;background:rgba(255,255,255,.48)}.sa-timeline-editor-position{position:absolute;left:10px;top:12px;width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:#173548;color:#bff45a;font-weight:950}.sa-timeline-editor-item label{display:grid;gap:4px}.sa-timeline-editor-item label small{color:#61748b;font-size:.66rem;font-weight:900}.sa-timeline-editor-item :is(input,textarea){width:100%;min-width:0;padding:9px;color:#152b3b;border:1px solid #aebfd0;border-radius:9px;background:#fff;font:inherit}.sa-timeline-editor-item .is-description{grid-column:1/-1}.sa-timeline-editor-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:6px}.sa-timeline-editor-actions button{width:34px;height:32px;border:1px solid #aebfd0;border-radius:8px;background:#edf3f7;color:#173548;font-weight:950}.sa-timeline-editor-actions button:last-child{color:#a6314a;background:#fff0f2}@media(max-width:560px){.sa-timeline-editor-item{grid-template-columns:1fr}.sa-timeline-editor-item .is-description{grid-column:auto}.sa-timeline-editor>header{align-items:stretch;flex-direction:column}}
+
+/* Timeline flow: the controls always follow the available-element bank. */
+.science-structured-game.is-timeline-order {
+  container-name:science-timeline-question;
+  container-type:inline-size;
+  height:auto!important;
+  min-height:100%!important;
+  max-height:none!important;
+  margin-top:0!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-content:normal!important;
+  overflow:visible!important;
+}
+.science-structured-game.is-timeline-order>header { margin-top:0!important; }
+.science-structured-game.is-timeline-order .science-structured-board {
+  order:3;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:stretch!important;
+  align-content:normal!important;
+  gap:clamp(16px,2.5cqi,24px)!important;
+  overflow:visible!important;
+  contain:none!important;
+}
+.science-structured-game.is-timeline-order .science-timeline { order:1; min-height:0!important; }
+.science-structured-game.is-timeline-order .science-token-bank-label,
+.science-structured-game.is-timeline-order .science-timeline-bank-title { order:2; margin:0!important; }
+.science-structured-game.is-timeline-order .science-timeline-bank { order:3; }
+.science-structured-game.is-timeline-order .science-timeline-track {
+  min-height:0!important;
+  height:auto!important;
+  padding:14px 18px 24px!important;
+  align-items:start!important;
+  overflow-x:auto!important;
+  overflow-y:visible!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-track::before {
+  top:45px!important;
+  transform:none!important;
+}
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) {
+  min-width:150px!important;
+  min-height:0!important;
+  height:auto!important;
+  padding:0 0 8px!important;
+  display:grid!important;
+  grid-template-rows:62px minmax(0,auto) auto!important;
+  align-content:start!important;
+  gap:10px!important;
+  overflow:visible!important;
+}
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i {
+  position:relative!important;
+  inset:auto!important;
+  grid-row:1!important;
+  align-self:center!important;
+  justify-self:center!important;
+  margin:0!important;
+  transform:none!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article {
+  position:relative!important;
+  inset:auto!important;
+  grid-row:2!important;
+  align-self:start!important;
+  width:100%!important;
+  min-height:150px!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after {
+  left:50%!important;
+  top:-8px!important;
+  bottom:auto!important;
+  transform:translateX(-50%) rotate(225deg)!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div {
+  position:relative!important;
+  inset:auto!important;
+  grid-row:3!important;
+  align-self:start!important;
+  justify-self:center!important;
+  margin:0!important;
+  transform:none!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-empty>span {
+  position:relative!important;
+  inset:auto!important;
+  grid-row:2!important;
+  align-self:start!important;
+  justify-self:center!important;
+  margin:0!important;
+  transform:none!important;
+}
+.science-structured-game.is-timeline-order>footer {
+  order:4;
+  position:relative!important;
+  inset:auto!important;
+  z-index:1!important;
+  width:100%!important;
+  margin:0!important;
+  padding:0!important;
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  gap:12px!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  transform:none!important;
+}
+.science-structured-game.is-timeline-order>footer>button { width:100%!important; min-width:0!important; }
+
+@container science-timeline-question (max-width:760px) {
+  .science-timeline>header { align-items:flex-start!important; flex-direction:column!important; }
+  .science-structured-game.is-timeline-order .science-timeline-track {
+    padding:12px 0 12px 48px!important;
+    grid-template-columns:1fr!important;
+    gap:18px!important;
+    overflow:visible!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-track::before {
+    left:17px!important;
+    right:auto!important;
+    top:20px!important;
+    bottom:20px!important;
+    width:5px!important;
+    height:auto!important;
+  }
+  .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) {
+    min-width:0!important;
+    grid-template-rows:auto auto!important;
+    gap:8px!important;
+  }
+  .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i {
+    position:absolute!important;
+    left:-31px!important;
+    top:50%!important;
+    transform:translateY(-50%)!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article {
+    grid-row:1!important;
+    min-height:0!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n) article::after {
+    left:-8px!important;
+    top:50%!important;
+    transform:translateY(-50%) rotate(135deg)!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-event:nth-child(n)>div {
+    grid-row:2!important;
+    justify-self:start!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-empty>span {
+    grid-row:1!important;
+    align-self:center!important;
+    justify-self:start!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-bank { grid-template-columns:1fr!important; }
+}
+@container science-timeline-question (max-width:480px) {
+  .science-structured-game.is-timeline-order>footer { grid-template-columns:1fr!important; }
+}
+.science-structured-game.is-timeline-order .science-timeline-track { grid-auto-rows:max-content!important; }
+.science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) { position:relative!important; }
+
+/* Timeline containment: horizontal scrolling must never crop stations vertically. */
+.science-structured-game.is-timeline-order .science-timeline { overflow:visible!important; }
+.science-structured-game.is-timeline-order .science-timeline-track {
+  min-height:118px!important;
+  grid-auto-rows:minmax(80px,max-content)!important;
+  overflow-x:auto!important;
+  overflow-y:hidden!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event) {
+  min-height:270px!important;
+}
+.science-structured-game.is-timeline-order .science-timeline-empty {
+  min-height:80px!important;
+}
+@container science-timeline-question (max-width:760px) {
+  .science-structured-game.is-timeline-order .science-timeline-track,
+  .science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event) {
+    min-height:118px!important;
+    padding:14px 10px 22px!important;
+    display:grid!important;
+    grid-template-columns:repeat(var(--timeline-count,3),minmax(142px,1fr))!important;
+    grid-auto-flow:column!important;
+    grid-auto-columns:minmax(142px,1fr)!important;
+    grid-auto-rows:minmax(80px,max-content)!important;
+    gap:12px!important;
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-track::before {
+    left:5%!important;
+    right:5%!important;
+    top:45px!important;
+    bottom:auto!important;
+    width:auto!important;
+    height:5px!important;
+  }
+  .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) {
+    min-width:142px!important;
+    min-height:80px!important;
+    display:grid!important;
+    grid-template-rows:62px minmax(0,auto) auto!important;
+  }
+  .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i {
+    position:relative!important;
+    inset:auto!important;
+    grid-row:1!important;
+    justify-self:center!important;
+    transform:none!important;
+  }
+  .science-structured-game.is-timeline-order .science-timeline-empty>span {
+    grid-row:2!important;
+    justify-self:center!important;
+    text-align:center!important;
+  }
+}
+
+/* Portrait timeline: central vertical axis with alternating stations. */
+@container science-timeline-question (max-width:760px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline {
+    min-height:0!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track,
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event) {
+    position:relative!important;
+    width:100%!important;
+    min-height:0!important;
+    padding:18px 12px!important;
+    display:grid!important;
+    grid-template-columns:1fr!important;
+    grid-auto-flow:row!important;
+    grid-auto-columns:auto!important;
+    grid-auto-rows:minmax(92px,auto)!important;
+    gap:14px!important;
+    overflow:visible!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track::before {
+    left:50%!important;
+    right:auto!important;
+    top:18px!important;
+    bottom:18px!important;
+    width:5px!important;
+    height:auto!important;
+    transform:translateX(-50%)!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty) {
+    position:relative!important;
+    width:calc(50% - 38px)!important;
+    min-width:0!important;
+    min-height:92px!important;
+    padding:12px!important;
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:center!important;
+    justify-content:center!important;
+    gap:8px!important;
+    overflow:visible!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd) {
+    justify-self:start!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even) {
+    justify-self:end!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty)>i {
+    position:absolute!important;
+    top:50%!important;
+    bottom:auto!important;
+    margin:0!important;
+    transform:translateY(-50%)!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(odd)>i {
+    left:auto!important;
+    right:-57px!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order :is(.science-timeline-event,.science-timeline-empty):nth-child(even)>i {
+    left:-57px!important;
+    right:auto!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-empty>span {
+    position:relative!important;
+    inset:auto!important;
+    margin:0!important;
+    white-space:normal!important;
+    text-align:center!important;
+    transform:none!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-event article {
+    position:relative!important;
+    inset:auto!important;
+    width:100%!important;
+    min-height:0!important;
+    margin:0!important;
+    transform:none!important;
+  }
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer {
+  order:4!important;
+  position:relative!important;
+  inset:auto!important;
+  z-index:1!important;
+  margin:0!important;
+  transform:none!important;
+}
+
+/* Canonical responsive timeline stack. Keep this final to override legacy HUD rules. */
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-structured-board {
+  position:relative!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:stretch!important;
+  gap:20px!important;
+  height:auto!important;
+  min-height:0!important;
+  overflow:visible!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline {
+  order:1!important;
+  position:relative!important;
+  inset:auto!important;
+  width:100%!important;
+  min-height:0!important;
+  display:flex!important;
+  flex-direction:column!important;
+  gap:14px!important;
+  overflow:visible!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-token-bank-label {
+  order:2!important;
+  position:relative!important;
+  inset:auto!important;
+  width:100%!important;
+  margin:4px 0 0!important;
+  display:block!important;
+  text-align:center!important;
+  transform:none!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-bank {
+  order:3!important;
+  position:relative!important;
+  inset:auto!important;
+  width:100%!important;
+  height:auto!important;
+  margin:0!important;
+  transform:none!important;
+}
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer,
+html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer>button {
+  position:relative!important;
+  inset:auto!important;
+  height:auto!important;
+  margin:0!important;
+  transform:none!important;
+}
+@container science-timeline-question (max-width:760px) {
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline {
+    min-height:196px!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track {
+    min-height:118px!important;
+    padding:14px 10px 22px!important;
+    display:grid!important;
+    grid-template-columns:repeat(var(--timeline-count,3),minmax(142px,1fr))!important;
+    grid-auto-flow:column!important;
+    grid-auto-columns:minmax(142px,1fr)!important;
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-track:has(.science-timeline-event) {
+    min-height:270px!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order .science-timeline-bank {
+    display:grid!important;
+    grid-template-columns:1fr!important;
+    gap:14px!important;
+  }
+  html body :is(.sa-game-frame,.science-assessment-host)[data-visual-style] .science-structured-game.is-timeline-order>footer {
+    display:grid!important;
+    grid-template-columns:1fr!important;
+    gap:12px!important;
+  }
+}
+
+/* Factorización: paso explícito para separar el término medio. */
+.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-factor-challenge{grid-template-columns:minmax(140px,.7fr) minmax(235px,1.1fr) minmax(230px,1.35fr) minmax(230px,1fr) auto}
+.science-factor-middle{display:grid;gap:5px;padding:8px;border:1px solid var(--sim-line);border-radius:12px;background:var(--sim-panel)}
+.science-factor-middle>label{color:var(--sim-muted);font-size:.66rem;font-weight:900}
+.science-factor-middle>div{display:grid;grid-template-columns:minmax(52px,1fr) auto minmax(52px,1fr) auto minmax(72px,auto);align-items:center;gap:5px}
+.science-factor-middle input,.science-factor-middle button{min-width:0;min-height:44px;padding:6px;border:1px solid var(--sim-line);border-radius:9px;background:var(--sim-bg);color:var(--sim-text);font:inherit;font-weight:850}
+.science-factor-middle span{color:var(--sim-text);font-weight:900}
+@container(max-width:850px){.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-factor-challenge{grid-template-columns:1fr 1fr}}
+@container(max-width:540px){.science-phaser-simulator[data-simulator-model="quadratic-factorization-rectangle"] .science-factor-challenge{grid-template-columns:1fr}.science-factor-middle>div{grid-template-columns:1fr auto 1fr auto}.science-factor-middle button{grid-column:1/-1}}
+.sa-question-copy-editor{display:grid;gap:12px;margin:14px 0;padding:14px;border:1px solid color-mix(in srgb,var(--sa-accent,#58aaff) 32%,transparent);border-radius:16px;background:color-mix(in srgb,var(--sa-panel,#232a34) 82%,transparent)}
+.sa-inspector-subheading{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--sa-text,#eef5fb);font-weight:800;font-size:.82rem;letter-spacing:.02em}
+.sa-inspector-subheading i{color:var(--sa-accent,#58aaff)}
+
+/* Session rail groups and command-style multi-selection. */
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group{min-width:0;margin:3px 0 6px;padding:3px;border:1px solid color-mix(in srgb,var(--sa-line) 78%,transparent);border-radius:10px;background:color-mix(in srgb,var(--sa-panel-2) 42%,transparent)}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading>button{min-width:0;height:30px;padding:0 6px;display:grid;grid-template-columns:10px 14px minmax(0,1fr) auto;align-items:center;gap:5px;border:0;border-radius:7px;background:transparent;color:var(--sa-text);cursor:pointer;text-align:left}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading>button:hover,body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading>button:focus-visible{background:var(--sa-panel-2);outline:none}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading>button .fa-folder{color:var(--sa-accent,#58aaff)}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading strong{min-width:0;overflow:hidden;color:var(--sa-text);font-size:.65rem;font-weight:850;text-overflow:ellipsis;white-space:nowrap}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-heading small{min-width:18px;color:var(--sa-muted);font-size:.55rem;text-align:center}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-chevron{color:var(--sa-muted);font-size:.52rem;transition:transform 150ms ease}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group.is-collapsed .sa-session-group-chevron{transform:rotate(-90deg)}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-actions{display:flex;align-items:center;gap:1px;opacity:0;transition:opacity 140ms ease}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group:hover .sa-session-group-actions,body.sa-shell[data-sa-theme] .sa-page .sa-session-group:focus-within .sa-session-group-actions{opacity:1}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-actions button{width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:var(--sa-muted);font-size:.58rem;cursor:pointer}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-actions button:hover,body.sa-shell[data-sa-theme] .sa-page .sa-session-group-actions button:focus-visible{background:var(--sa-panel-2);color:var(--sa-text);outline:none}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-group-items{display:grid;gap:2px;padding:2px 0 0 10px}
+body.sa-shell[data-sa-theme] .sa-page .sa-session{position:relative}
+body.sa-shell[data-sa-theme] .sa-page .sa-session strong{padding-left:0}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-item.is-selected{background:color-mix(in srgb,var(--sa-accent,#58aaff) 15%,var(--sa-panel-2))!important;box-shadow:inset 3px 0 0 var(--sa-accent,#58aaff)!important}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-item.is-selected .sa-session strong{color:var(--sa-text)!important;font-weight:800}
+
+/* Pantalla inicial: contraste estable dentro del preview y adaptación al ancho real del visor. */
+body.sa-shell[data-sa-theme] .sa-page #sciencePreviewStartTitle {
+  color:var(--preview-start-title-color,#f4fbff) !important;
+  -webkit-text-fill-color:var(--preview-start-title-color,#f4fbff) !important;
+  opacity:1 !important;
+  text-shadow:none !important;
+}
+body.sa-shell[data-sa-theme] .sa-page .science-preview-start-card {
+  border-color:var(--preview-start-card-border) !important;
+  background:var(--preview-start-card-bg) !important;
+  box-shadow:var(--preview-start-card-shadow) !important;
+}
+body.sa-shell[data-sa-theme] .sa-page .science-preview-start-card small {
+  color:#9eeade !important;
+  -webkit-text-fill-color:#9eeade !important;
+  opacity:1 !important;
+}
+body.sa-shell[data-sa-theme] .sa-page .science-preview-start-info :is(p,ol,li) {
+  color:#d8eaf1 !important;
+  -webkit-text-fill-color:#d8eaf1 !important;
+  font-weight:400 !important;
+  opacity:1 !important;
+  text-shadow:none !important;
+}
+body.sa-shell[data-sa-theme] .sa-page .science-preview-start-info li::marker {
+  color:var(--preview-start-accent) !important;
+}
+body.sa-shell[data-sa-theme] .sa-page .science-preview-start-card > footer > small {
+  color:#a8bfca !important;
+  -webkit-text-fill-color:#a8bfca !important;
+}
+
+@container sa-briefing-frame (max-width:720px) {
+  .sa-page .science-preview-start { padding:0; }
+  .sa-page .science-preview-start-card {
+    min-width:0;
+    padding:24px 18px;
+    border:0;
+    border-radius:0;
+  }
+  .sa-page .science-preview-start-card > main {
+    min-width:0;
+    padding-right:3px;
+  }
+  .sa-page .science-preview-start-info {
+    width:100%;
+    max-width:none;
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+  .sa-page .science-preview-start-card > footer {
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+  }
+  .sa-page .science-preview-start-card > footer button {
+    width:100%;
+    justify-content:center;
+  }
+}
+
+@media (orientation:portrait) and (max-width:900px) {
+  .sa-page .science-preview-start-info {
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+}
+
+/* Las cinco pestañas permanecen en una sola fila, incluso en el inspector estrecho. */
+body.sa-shell[data-sa-theme] .sa-page .sa-inspector-tabs {
+  grid-template-columns:repeat(5,minmax(0,1fr)) !important;
+  grid-auto-flow:row;
+}
+@media (max-width:640px) {
+  body.sa-shell[data-sa-theme] .sa-page .sa-inspector-tabs {
+    grid-template-columns:repeat(5,minmax(56px,1fr)) !important;
+    overflow-x:auto;
+    overflow-y:hidden;
+  }
+  body.sa-shell[data-sa-theme] .sa-page .sa-inspector-tabs button {
+    min-width:0;
+    white-space:nowrap;
+  }
+}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-item.active{background:color-mix(in srgb,var(--sa-accent,#58aaff) 20%,var(--sa-panel-2))!important;box-shadow:none!important}
+body.sa-shell[data-sa-theme] .sa-page .sa-session-item.active:hover,body.sa-shell[data-sa-theme] .sa-page .sa-session-item.active:focus-within{background:color-mix(in srgb,var(--sa-accent,#58aaff) 24%,var(--sa-panel-2))!important}
+body.sa-shell[data-sa-theme] .sa-page .sa-session:focus-visible{outline:2px solid var(--sa-accent,#58aaff);outline-offset:-2px}
+@media(max-width:720px){body.sa-shell[data-sa-theme] .sa-page .sa-session-group{flex:0 0 min(88vw,330px)}body.sa-shell[data-sa-theme] .sa-page .sa-session-group-items{padding-left:4px}}
+@media(prefers-reduced-motion:reduce){body.sa-shell[data-sa-theme] .sa-page .sa-session-group-chevron,body.sa-shell[data-sa-theme] .sa-page .sa-session-group-actions,body.sa-shell[data-sa-theme] .sa-page .sa-session-item{transition:none}}

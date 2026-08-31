@@ -16,6 +16,7 @@ const MAX_UPLOAD_BYTES = Object.freeze({
   "library-image": 10 * 1024 * 1024,
   "library-music": 24 * 1024 * 1024
 });
+const MAX_SUPPORT_GRAPHIC_BYTES = 10 * 1024 * 1024;
 
 function sanitizeSegment(value = "", fallback = "asset") {
   const clean = String(value || "")
@@ -101,6 +102,31 @@ function buildStoragePath({ uploadId, uid, kind, sessionId, rowId, fileName, con
   const folder = kind === "music" ? "music" : "videos";
   const rowPrefix = kind === "music" ? "" : `${rowId}-`;
   return `podcaster/sessions/${sessionId}/owners/${sanitizeSegment(uid, "user")}/${folder}/${rowPrefix}${uploadId}-${safeName}.${ext}`;
+}
+
+function validateSupportGraphicUploadRequest(body = {}, uid = "") {
+  const userPathPrefix = `unidadesGeneradasAssets/${sanitizeSegment(uid || "", "user")}/`;
+  const path = String(body.path || "").trim().replace(/^\/+/, "");
+  const mimeType = String(body.mimeType || "image/png").trim().toLowerCase();
+  const dataBase64 = String(body.dataBase64 || "").trim();
+  const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  if (!path || !path.startsWith(userPathPrefix) || path.includes("..")) {
+    throw Object.assign(new Error("invalid_storage_path"), { status: 400 });
+  }
+  if (!/^image\//i.test(mimeType)) {
+    throw Object.assign(new Error("invalid_upload_content_type"), { status: 400 });
+  }
+  const expectedLength = Math.max(0, Math.floor(dataBase64.length * 3 / 4));
+  if (!dataBase64 || !/^[A-Za-z0-9+\/=\s]+$/.test(dataBase64) || expectedLength === 0 || expectedLength > MAX_SUPPORT_GRAPHIC_BYTES) {
+    throw Object.assign(new Error("invalid_upload_size"), { status: expectedLength > MAX_SUPPORT_GRAPHIC_BYTES ? 413 : 400 });
+  }
+  return {
+    path,
+    mimeType,
+    dataBase64,
+    metadata,
+    expectedLength
+  };
 }
 
 function registerUploadRoutes(app) {
@@ -221,6 +247,59 @@ function registerUploadRoutes(app) {
   }));
 }
 
+function registerSupportGraphicUploadRoute(app) {
+  app.post("/api/unidades/support-graphics/upload", asyncRoute(async (req, res) => {
+    const authContext = await resolveAuthContext(req);
+    const input = validateSupportGraphicUploadRequest(req.body || {}, authContext.uid);
+    const { bucket } = getAdminServices();
+    const downloadToken = crypto.randomUUID();
+    let buffer;
+    try {
+      buffer = Buffer.from(input.dataBase64, "base64");
+    } catch (error) {
+      throw Object.assign(new Error("invalid_upload_data"), { status: 400 });
+    }
+    if (!buffer || buffer.length !== input.expectedLength) {
+      if (buffer && buffer.length !== 0 && buffer.length > 0) {
+        input.expectedLength = buffer.length;
+      } else {
+        throw Object.assign(new Error("invalid_upload_data"), { status: 400 });
+      }
+    }
+    if (buffer.length > MAX_SUPPORT_GRAPHIC_BYTES) {
+      throw Object.assign(new Error("invalid_upload_size"), { status: 413 });
+    }
+
+    const file = bucket.file(input.path);
+    const customMetadata = {
+      ownerUid: authContext.uid,
+      role: String((input.metadata && input.metadata.role) || "").trim() || "imagen",
+      subtema: String((input.metadata && input.metadata.subtema) || "").trim() || "escaperoom",
+      source: "support_graphic_upload",
+      firebaseStorageDownloadTokens: downloadToken
+    };
+    await file.save(buffer, {
+      resumable: false,
+      metadata: {
+        contentType: input.mimeType,
+        metadata: customMetadata
+      }
+    });
+    await file.setMetadata({ metadata: customMetadata });
+
+    const storagePath = input.path;
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${encodeURIComponent(downloadToken)}`;
+
+    return res.status(200).json({
+      ok: true,
+      path: storagePath,
+      downloadUrl,
+      mimeType: input.mimeType,
+      size: buffer.length
+    });
+  }));
+}
+
 module.exports = {
   MAX_UPLOAD_BYTES,
   sanitizeSegment,
@@ -228,5 +307,7 @@ module.exports = {
   extensionForMime,
   validateUploadRequest,
   buildStoragePath,
-  registerUploadRoutes
+  validateSupportGraphicUploadRequest,
+  registerUploadRoutes,
+  registerSupportGraphicUploadRoute
 };

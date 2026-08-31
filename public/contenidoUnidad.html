@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <!-- Bootstrap Select CSS -->
     <link rel="stylesheet" href="vendor/bootstrap-select/bootstrap-select.min.css">
-  
+
     <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
 
     <script src="vendor/marked/marked.umd.js"></script>
@@ -32,7 +32,7 @@
     <script src="vendor/pdfjs/pdf.min.js"></script>
 
   <link rel="stylesheet" href="contenidoUnidad.css">
-  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
   <link rel="stylesheet" href="chatbot.css">
   <link rel="stylesheet" href="header.css">
 
@@ -43,14 +43,11 @@
         <div class="header-content">
       <!-- header-content loaded from chromeLayout.js -->
     </div>
-    </header> 
+    </header>
 
 
 
     <div id="sidebar">
-        <button id="menuToggle" aria-label="Abrir menú">
-        <i class="fas fa-bars"></i>
-        </button>
 
         <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
@@ -65,8 +62,8 @@
         </div>
         <button class="chatbot-close" id="chatbotClose">&times;</button>
       </div>
-     
-      
+
+
       <div class="chatbot-messages" id="chatbotMessages">
           <!-- Aquí se mostrarán los mensajes -->
       </div>
@@ -75,39 +72,39 @@
           <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
       </div>
      </div>
-     
-    
+
+
     <!-- Botón para generar nueva lectura -->
 <button id="abrirUnidadBtn" class="btn-flotante-unidad" title="Ver información de la unidad">
     <i class="bx bx-info-circle"></i>
   </button>
-  
-  
-  
+
+
+
   <!-- Botón flotante para ver lecturas guardadas -->
   <button id="btnVerMindMaps" class="btn-flotante-imagenes3" title="Ver MindMaps Guardados" style="bottom: 220px;">
     <i class="fas fa-book-reader"></i>
   </button>
-  
-  
+
+
   <!-- Botón flotante para ver imágenes guardadas -->
   <button id="btnAbrirPanelGuardadas" class="btn-flotante-imagenes2" title="Imágenes guardadas" style="bottom: 160px;">
     <i class="bx bx-folder"></i>
   </button>
-  
+
   <!-- Botón flotante para abrir el generador de imágenes -->
   <button id="btnAbrirGeneradorImagenes" class="btn-flotante-imagenes" title="Generar Imagen">
     <i class="bx bx-image-add"></i>
   </button>
-  
-  
+
+
   <button id="btnAbrirGenerador" class="btn-flotante-generador" title="Generar Lectura">
     <i class="bx bx-plus"></i>
   </button>
-  
+
 <div id="contenedorGeneradorLectura" style="display:none;"></div>
 
-  
+
 
 <!-- Resultado final -->
 <div id="editorLectura" style="display: none;">
@@ -135,13 +132,13 @@
         </div>
         </div>
     </div>
-  
+
     <!-- Header simple -->
     <div class="back-btn">
       <a href="unidadHome.html"><i class="bx bx-arrow-back"></i> Volver</a>
     </div>
-  
-  
+
+
 
   <!-- Lista de lecturas guardadas -->
   <div id="app-container-contenido-unidad" class="LecturasGuardadas">
@@ -149,31 +146,31 @@
       <div id="listaLecturas"></div>
     </div>
   </div>
-  
+
   <div id="modalCompartirLectura" class="modal">
     <div class="modal-content">
       <span class="close" id="cerrarModalCompartirLecturaBtn">&times;</span>
       <h4>¿Con quién deseas compartir esta lectura?</h4>
-  
-  
+
+
       <label for="selectUsuarios">Selecciona usuarios específicos:</label>
       <select id="emailCompartirLectura" class="form-select mt-2" multiple></select>
-  
+
       <button id="btnCompartirUsuario" class="btn btn-primary w-100 mt-2">Compartir con usuario</button>
     </div>
   </div>
-  
+
 
 
   <!--  =================
-  Modal para ver lecturas completas 
+  Modal para ver lecturas completas
   ================= -->
 
 
 <div id="lecturaModal" class="modal">
   <div class="modal-content">
     <div class="modal-header" style="position: relative;">
-      
+
       <!-- Botón "X" para cerrar -->
       <button id="cerrarModalBtnTop" style="
         position: absolute;
@@ -196,15 +193,15 @@
     <div class="modal-actions">
       <div id="guardarCambiosBtn" class="btn" tabindex="0" style="cursor: pointer;">
         <i class="fas fa-save"></i> <span class="btn-title">Guardar</span>
-      </div> 
+      </div>
 
       <div id="exportarModalInDesignBtn">
         <i class="fas fa-microscope" title=""></i> <span class="btn-title">InDesign</span>
-      </div>  
+      </div>
 
       <div id="cerrarModalBtn">
         <i class="fas fa-microscope" title=""></i> <span class="btn-title">Cerrar</span>
-      </div>  
+      </div>
     </div>
   </div>
 </div>
@@ -237,13 +234,13 @@
   <div class="panel-header">
     <h2>Genera tu MindMap</h2>
     <button id="cerrarPanelGuardadas" class="btn-cerrar">&times;</button>
-    
+
     <!-- Íconos de acción -->
     <div class="panel-actions">
       <button id="nuevoMindMapBtn" class="btn-icon" title="Nuevo MindMap">
         <i class="fas fa-project-diagram"></i>
       </button>
-  
+
       <label for="inputMultipleImagenes" class="btn-icon" title="Nueva palabra (Subir PNG)">
         <i class="fas fa-upload"></i>
       </label>
@@ -265,9 +262,9 @@
 
     </div>
 
- 
+
   </div>
-  
+
   <!-- Caja de texto para pegar el cuento -->
   <div id="areaNuevoMindmap" style="display:none; margin-top: 1rem;">
     <strong>Pega tu cuento o texto:</strong>
@@ -284,7 +281,7 @@
 
   </div>
 
-  
+
   <!-- Resultado del MindMap generado -->
   <div id="resultadoMindmap" style="margin-top: 1rem;"></div>
 </div>
@@ -423,13 +420,13 @@
     <button id="cerrarGeneradorImagenes" style="background: transparent; border: none; font-size: 1.2rem;">&times;</button>
   </div>
   <div id="generadorImagenesContainer"></div>
-  
+
   <!-- 📸 Galería de imágenes guardadas - Actualizado -->
   <div class="galeria-container">
-    <div id="galeriaImagenesGuardadas" 
-         style="display: grid; 
-                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); 
-                gap: 1rem; 
+    <div id="galeriaImagenesGuardadas"
+         style="display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 1rem;
                 padding: 0.5rem;
                 overflow-y: auto;"></div>
   </div>
@@ -482,7 +479,7 @@
       <option value="14">14</option>
       <option value="15">15</option>
     </select>
-    
+
 
     <div style="margin-top: 1rem; text-align: right;">
       <button id="cancelarCompartirBtn">Cancelar</button>
@@ -505,7 +502,7 @@
 <script src="js/html-docx.js"></script>
 <script src="vendor/vanilla-tilt/vanilla-tilt.min.js"></script>
 
-<script src="vendor/prism/prism.js"></script>  
+<script src="vendor/prism/prism.js"></script>
 
 <script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
 <script src="vendor/trumbowyg/plugins/trumbowyg.fontsize.min.js"></script>
@@ -520,8 +517,8 @@
 
 
 <script type="module" src="js/contenidoUnidad.js"></script>
-<script type="module" src="js/chromeLayout.js"></script>
-  <script type="module" src="js/sidebar.js"></script>
+<script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
+  <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
 <script type="module" src="js/chatbot.js"></script>
 <script type="module" src="js/generarImagenes.js"></script>
 

@@ -147,10 +147,12 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return String(panelMusicSessionLocalCache.get(key) || "").trim();
   }
 
-  async function hydratePanelMusicLocalCaches(session = null) {
+  async function hydratePanelMusicLocalCaches(session = null, options = {}) {
     const activeSession = session || getActiveSession();
     const sessionId = String(activeSession?.id || "").trim();
     if (!activeSession || !sessionId) return false;
+    const isCurrent = typeof options?.isCurrent === "function" ? options.isCurrent : () => true;
+    if (!isCurrent()) return false;
     cleanupLegacyPanelMusicSessionStorageCaches();
     const hydrateTrack = async (track, kind) => {
       const normalized = normalizePanelMusicTrack(track);
@@ -174,12 +176,16 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const hydratedUploadedTracks = [];
     for (const track of uploadedTracks) {
       const hydrated = await hydrateTrack(track, "uploaded");
+      if (!isCurrent()) return false;
       hydratedUploadedTracks.push(hydrated);
       if (String(track?.localDataUrl || "").trim() !== String(hydrated?.localDataUrl || "").trim()) changed = true;
     }
     const hydratedUploaded = await hydrateTrack(cfg.trackLibrary?.uploaded || null, "uploaded");
+    if (!isCurrent()) return false;
     const hydratedAi = await hydrateTrack(cfg.trackLibrary?.ai || null, "ai");
+    if (!isCurrent()) return false;
     const hydratedTrack = await hydrateTrack(cfg.track || null, cfg?.track?.model ? "ai" : "uploaded");
+    if (!isCurrent()) return false;
     if (String(cfg.trackLibrary?.uploaded?.localDataUrl || "").trim() !== String(hydratedUploaded?.localDataUrl || "").trim()) changed = true;
     if (String(cfg.trackLibrary?.ai?.localDataUrl || "").trim() !== String(hydratedAi?.localDataUrl || "").trim()) changed = true;
     if (String(cfg.track?.localDataUrl || "").trim() !== String(hydratedTrack?.localDataUrl || "").trim()) changed = true;
@@ -193,7 +199,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       },
       track: hydratedTrack
     };
-    if (panelMusicState.selectedTrackKind) {
+    if (panelMusicState.selectedTrackKind && isCurrent()) {
       syncPanelMusicStateFromSession(activeSession);
     }
     return changed;
@@ -1669,6 +1675,32 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     audioEl: null
   };
 
+  function getActiveGlobalPanelMusicLibraryId() {
+    const previewTrackId = String(panelMusicPreviewState.trackId || "").trim();
+    if (previewTrackId.startsWith("global-")
+      && (panelMusicPreviewState.loading || panelMusicPreviewState.audioEl)) {
+      return previewTrackId.slice("global-".length).trim();
+    }
+    if (panelMusicState.playing && panelMusicState.sourceType === "track") {
+      return String(panelMusicState.track?.libraryId || "").trim();
+    }
+    return "";
+  }
+
+  function getOrderedGlobalPanelMusicLibraryItems() {
+    const items = Array.isArray(panelMusicGlobalLibraryState.items)
+      ? [...panelMusicGlobalLibraryState.items]
+      : [];
+    const activeLibraryId = getActiveGlobalPanelMusicLibraryId();
+    if (!activeLibraryId) return items;
+    const activeIndex = items.findIndex(
+      (item) => String(item?.libraryId || "").trim() === activeLibraryId
+    );
+    if (activeIndex <= 0) return items;
+    const [activeItem] = items.splice(activeIndex, 1);
+    return [activeItem, ...items];
+  }
+
   function stopPanelMusicPreview() {
     if (panelMusicPreviewState.audioEl) {
       try { panelMusicPreviewState.audioEl.pause(); } catch (_) { }
@@ -1879,7 +1911,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       } else if (panelMusicGlobalLibraryState.error) {
         els.panelMusicGlobalLibraryList.innerHTML = `<div class="music-track-info">${escapeHtml(panelMusicGlobalLibraryState.error)}</div>`;
       } else if (panelMusicGlobalLibraryState.items.length) {
-        els.panelMusicGlobalLibraryList.innerHTML = panelMusicGlobalLibraryState.items.map((track) => {
+        els.panelMusicGlobalLibraryList.innerHTML = getOrderedGlobalPanelMusicLibraryItems().map((track) => {
           const trackId = `global-${track.libraryId}`;
           const isPreviewPlaying = panelMusicPreviewState.trackId === trackId && !panelMusicPreviewState.loading && !!panelMusicPreviewState.audioEl;
           const isPreviewLoading = panelMusicPreviewState.trackId === trackId && panelMusicPreviewState.loading;
@@ -2301,6 +2333,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     togglePanelMusicTrackPreview,
     stopPanelMusicPreview,
     updatePanelMusicPreviewVolume,
+    getActiveGlobalPanelMusicLibraryId,
+    getOrderedGlobalPanelMusicLibraryItems,
     resolvePanelMusicTrackSrc,
     getPanelMontageMusicConfig,
     handleTimelineSelectAudioLoopChip,

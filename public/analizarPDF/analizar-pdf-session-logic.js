@@ -62,18 +62,21 @@ function looksLikeRecortableDocumentName(value = "") {
 export function inferUnidadFromDocumentName(value = "") {
   const name = String(value || "").trim();
   if (!name) return "";
+  if (/(?:^|[_\-\s])(?:00[_\-\s]?)?INTRO(?:[_\-\s.]|$)/i.test(name)) {
+    return "Intro";
+  }
   if (looksLikeRecortableDocumentName(name)) {
     return "Recortables";
   }
-  if (/(?:^|[_\-\s])COMP[_\-\s]?LEC(?:[_\-\s.]|$)/i.test(name)) {
+  if (/(?:^|[_\-\s])(?:COMP[_\-\s]?)?LEC(?:[_\-\s.]|$)/i.test(name)) {
     return "Lecturas";
   }
-  if (/(?:^|[_\-\s])00[_\-\s]?UP(?:[_\-\s.]|$)/i.test(name)) {
+  if (/(?:^|[_\-\s])(?:00[_\-\s]?)?(?:UP|PROYECTO)(?:[_\-\s.]|$)/i.test(name)) {
     return "Proyecto";
   }
-  const lessonMatch = name.match(/(?:^|[_\-\s])0?(\d{1,2})[_\-\s]?L\1(?:[_\-\s.]|$)/i);
+  const lessonMatch = name.match(/(?:^|[_\-\s])(?:0?(\d{1,2})[_\-\s]?(?:U|L)\1|(?:U|L)0?(\d{1,2}))(?:[_\-\s.]|$)/i);
   if (lessonMatch) {
-    return `Unidad ${Number(lessonMatch[1])}`;
+    return `Unidad ${Number(lessonMatch[1] || lessonMatch[2])}`;
   }
   return "";
 }
@@ -145,23 +148,29 @@ export async function buildAnalysisTargetsForAll({
   session = null,
   activeRevisionId = "",
   selectedFiles = [],
+  selectedRevisionIds = null,
   resolveCachedFileForEntry = async () => null,
   buildFileKey = (value = "") => String(value || "").trim().toLowerCase(),
 } = {}) {
-  const revisions = prioritizeRevisionsForRecortablesDestinations(
-    Array.isArray(session?.revisions) ? session.revisions : []
-  );
+  // Conserva el orden visual dentro de cada fase, pero resuelve destinos antes de fuentes.
+  const revisions = Array.isArray(session?.revisions) ? [...session.revisions] : [];
   const selectedFilesByKey = new Map();
   for (const selectedFile of Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : []) {
     const fileKey = buildFileKey(selectedFile?.name || "");
     if (!fileKey || selectedFilesByKey.has(fileKey)) continue;
     selectedFilesByKey.set(fileKey, selectedFile);
   }
+  const frozenSelectedRevisionIds = Array.isArray(selectedRevisionIds)
+    ? new Set(selectedRevisionIds.map((value) => String(value || "").trim()).filter(Boolean))
+    : null;
   const targets = [];
   for (const revision of revisions) {
     const revisionId = String(revision?.id || "").trim();
     if (!revisionId) continue;
-    const files = Array.isArray(revision?.files) ? revision.files : [];
+    if (frozenSelectedRevisionIds && !frozenSelectedRevisionIds.has(revisionId)) continue;
+    const files = (Array.isArray(revision?.files) ? revision.files : []).filter((file) => (
+      frozenSelectedRevisionIds ? true : file?.analysisSelected !== false
+    ));
     const revisionSelectedFiles = files
       .map((entry) => selectedFilesByKey.get(String(entry?.fileKey || "").trim()) || null)
       .filter(Boolean);
@@ -183,12 +192,20 @@ export async function buildAnalysisTargetsForAll({
         targets.push({ selectedFile: cachedFile, targetFile, revision });
         continue;
       }
-      if (String(targetFile?.sourceAssetPath || "").trim()) {
+      if (
+        String(targetFile?.sourceAssetPath || "").trim()
+        || String(targetFile?.sourceStoragePath || "").trim()
+        || String(targetFile?.sourceDownloadUrl || "").trim()
+      ) {
         targets.push({ selectedFile: null, targetFile, revision, useStoredSource: true });
       }
     }
   }
-  return targets;
+  const phase = (target) => {
+    const role = String(target?.targetFile?.workflowRole || target?.revision?.workflowRole || "source").toLowerCase();
+    return role === "destination" ? 0 : role === "both" ? 1 : 2;
+  };
+  return targets.map((target, index) => ({ target, index })).sort((a, b) => phase(a.target) - phase(b.target) || a.index - b.index).map(({ target }) => target);
 }
 
 function defaultRenderableAnalysisPredicate(entry = {}) {

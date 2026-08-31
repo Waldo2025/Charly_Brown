@@ -1,10 +1,11 @@
 import {
   deleteAnalizarPdfSession,
+  getAnalizarPdfSessionDetail,
   getAnalizarPdfAnalysisStatus,
   listAnalizarPdfSessions,
   queueAnalizarPdfUpload,
   saveAnalizarPdfSession
-} from "./analizar-pdf-api.js";
+} from "./analizar-pdf-api.js?v=2026-1.0.10.590";
 import { createAnalizarPdfSaveCoordinator } from "./analizar-pdf-save-coordinator.js";
 
 const EMPTY_RESULT = Object.freeze({
@@ -13,6 +14,10 @@ const EMPTY_RESULT = Object.freeze({
   spellingIssues: [],
   orthotypographyIssues: [],
   redactionIssues: [],
+  noteIssues: [],
+  noteHistoryIssues: [],
+  trackedChangeIssues: [],
+  customRuleIssues: [],
   colorIssues: [],
   recortableIssues: [],
   stats: null
@@ -73,7 +78,9 @@ function normalizeColorEntry(raw = {}, index = 0) {
     name: swatchName,
     swatchName,
     cmyk: String(source.cmyk || "").trim(),
-    hex: String(source.hex || "").trim()
+    hex: String(source.hex || "").trim(),
+    usageCount: Math.max(0, Number(source.usageCount || 0) || 0),
+    pageCount: Math.max(0, Number(source.pageCount || 0) || 0)
   };
 }
 
@@ -98,6 +105,10 @@ function normalizeResult(raw = {}) {
     spellingIssues: Array.isArray(source.spellingIssues) ? source.spellingIssues : [],
     orthotypographyIssues: Array.isArray(source.orthotypographyIssues) ? source.orthotypographyIssues : [],
     redactionIssues: Array.isArray(source.redactionIssues) ? source.redactionIssues : [],
+    noteIssues: Array.isArray(source.noteIssues) ? source.noteIssues : [],
+    noteHistoryIssues: Array.isArray(source.noteHistoryIssues) ? source.noteHistoryIssues : [],
+    trackedChangeIssues: Array.isArray(source.trackedChangeIssues) ? source.trackedChangeIssues : [],
+    customRuleIssues: Array.isArray(source.customRuleIssues) ? source.customRuleIssues : [],
     colorIssues: Array.isArray(source.colorIssues) ? source.colorIssues : [],
     recortableIssues: Array.isArray(source.recortableIssues) ? source.recortableIssues : [],
     stats
@@ -122,6 +133,9 @@ function normalizeResultSummary(raw = {}, result = EMPTY_RESULT) {
     redactionIssueCount: Number(source.redactionIssueCount) >= 0
       ? Number(source.redactionIssueCount)
       : result.redactionIssues.length,
+    noteIssueCount: Number(source.noteIssueCount) >= 0 ? Number(source.noteIssueCount) : (Array.isArray(result?.noteIssues) ? result.noteIssues.length : 0),
+    trackedChangeIssueCount: Number(source.trackedChangeIssueCount) >= 0 ? Number(source.trackedChangeIssueCount) : (Array.isArray(result?.trackedChangeIssues) ? result.trackedChangeIssues.length : 0),
+    customRuleIssueCount: Number(source.customRuleIssueCount) >= 0 ? Number(source.customRuleIssueCount) : (Array.isArray(result?.customRuleIssues) ? result.customRuleIssues.length : 0),
     colorIssueCount: Number(source.colorIssueCount) >= 0
       ? Number(source.colorIssueCount)
       : result.colorIssues.length,
@@ -259,6 +273,7 @@ function buildFileKey(name = "") {
 function normalizeFileEntry(raw = {}, index = 0) {
   const source = raw && typeof raw === "object" ? raw : {};
   const documentName = String(source.documentName || source.fileName || "").trim();
+  const railTintHex = String(source.railTintHex || "").trim();
   const result = normalizeResult(source.result);
   const sourceReference = [
     documentName,
@@ -280,6 +295,13 @@ function normalizeFileEntry(raw = {}, index = 0) {
     fileSize: Number(source.fileSize || 0) || 0,
     fileLastModified: Number(source.fileLastModified || 0) || 0,
     fileMimeType: String(source.fileMimeType || "").trim(),
+    workflowRole: ["source", "destination", "both"].includes(String(source.workflowRole || "").trim().toLowerCase())
+      ? String(source.workflowRole || "").trim().toLowerCase()
+      : "source",
+    linkedAssetKind: ["recortable", "ficha", "anexo", "video"].includes(String(source.linkedAssetKind || "").trim().toLowerCase()) ? String(source.linkedAssetKind).trim().toLowerCase() : "",
+    analysisSelected: source.analysisSelected !== false,
+    detectedLanguageCode: String(source.detectedLanguageCode || result?.stats?.language?.resolvedCode || "").trim(),
+    languageConfidence: Math.max(0, Math.min(1, Number(source.languageConfidence || result?.stats?.language?.confidence || 0) || 0)),
     sourceStoragePath: String(source.sourceStoragePath || "").trim(),
     sourceDownloadUrl: String(source.sourceDownloadUrl || "").trim(),
     correctedStoragePath: String(source.correctedStoragePath || "").trim(),
@@ -290,6 +312,7 @@ function normalizeFileEntry(raw = {}, index = 0) {
     analysisJobId: String(source.analysisJobId || "").trim(),
     createdAt: String(source.createdAt || "").trim(),
     updatedAt: String(source.updatedAt || "").trim(),
+    railTintHex: /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(railTintHex) ? railTintHex : "",
     resultSummary: normalizeResultSummary(source.resultSummary, result),
     result,
     quickAnalysis: normalizeQuickAnalysis(source.quickAnalysis)
@@ -308,6 +331,11 @@ function normalizeRevisionEntry(raw = {}, index = 0) {
     title: String(source.title || buildRevisionTitle(source)).trim() || buildRevisionTitle(source),
     unidad: String(source.unidad || "").trim(),
     revisionNumero: String(source.revisionNumero || "").trim(),
+    workflowRole: ["source", "destination", "both"].includes(String(source.workflowRole || "").trim().toLowerCase())
+      ? String(source.workflowRole || "").trim().toLowerCase()
+      : "source",
+    linkedAssetKind: ["recortable", "ficha", "anexo", "video"].includes(String(source.linkedAssetKind || "").trim().toLowerCase()) ? String(source.linkedAssetKind).trim().toLowerCase() : "",
+    detectedStructure: source.detectedStructure && typeof source.detectedStructure === "object" ? source.detectedStructure : { type: "", label: "", ordinal: null, source: "" },
     recortableRole: /^recortables$/i.test(unidad)
       ? (["source", "destination", "both"].includes(normalizedRole) ? normalizedRole : "source")
       : "",
@@ -324,10 +352,26 @@ function normalizeRevisionEntry(raw = {}, index = 0) {
       spellingIssueCount: Number(summarySource.spellingIssueCount || 0) || 0,
       orthotypographyIssueCount: Number(summarySource.orthotypographyIssueCount || 0) || 0,
       redactionIssueCount: Number(summarySource.redactionIssueCount || 0) || 0,
+      noteIssueCount: Number(summarySource.noteIssueCount || 0) || 0,
+      trackedChangeIssueCount: Number(summarySource.trackedChangeIssueCount || 0) || 0,
       colorIssueCount: Number(summarySource.colorIssueCount || 0) || 0,
       recortableIssueCount: Number(summarySource.recortableIssueCount || 0) || 0,
     },
     files
+  };
+}
+
+function normalizeAnalysisRuleConfig(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const ids = Array.isArray(source.customRuleIds)
+    ? [...new Set(source.customRuleIds.map((value) => String(value || "").trim()).filter(Boolean))].slice(0, 20)
+    : [];
+  return {
+    customRuleIds: ids,
+    catalogVersion: String(source.catalogVersion || "").trim(),
+    customRules: Array.isArray(source.customRules)
+      ? source.customRules.filter((rule) => rule && typeof rule === "object" && ids.includes(String(rule.id || ""))).slice(0, 20)
+      : []
   };
 }
 
@@ -348,11 +392,15 @@ export function normalizeAnalizarPdfSession(raw = {}) {
   return {
     id: String(source.id || "").trim(),
     title: String(source.title || "").trim() || "Sesión sin título",
+    customTitle: String(source.customTitle || "").trim(),
     ownerId: String(source.ownerId || "").trim(),
     createdAt: String(source.createdAt || "").trim(),
     updatedAt: String(source.updatedAt || "").trim(),
     sessionKey: String(source.sessionKey || buildSessionKey(bibliographicInfo)).trim(),
     sourceType: source.sourceType === "idml" ? "idml" : "pdf",
+    workflowFormat: source.workflowFormat === "libre" ? "libre" : "en_forma",
+    analysisRuleConfig: normalizeAnalysisRuleConfig(source.analysisRuleConfig),
+    languageCode: ["auto", "es-MX", "en-US", "fr-FR", "pt-BR", "de-DE", "it-IT", "ca-ES"].includes(String(source.languageCode || "")) ? String(source.languageCode) : "es-MX",
     analysisStatus: normalizeAnalysisStatus(source.analysisStatus),
     analysisJobId: String(source.analysisJobId || "").trim(),
     bibliographicInfo,
@@ -375,7 +423,7 @@ export function normalizeAnalizarPdfSession(raw = {}) {
 
 export function createEmptyAnalizarPdfSession() {
   return normalizeAnalizarPdfSession({
-    title: "Nueva sesión",
+    title: "Nuevo análisis",
     sourceType: "pdf",
     analysisStatus: "idle",
     bibliographicInfo: { ...EMPTY_BIBLIOGRAPHIC_INFO },
@@ -394,6 +442,11 @@ export function createEmptyAnalizarPdfSession() {
 export async function loadSessions() {
   const payload = await listAnalizarPdfSessions();
   return Array.isArray(payload?.sessions) ? payload.sessions.map((item) => normalizeAnalizarPdfSession(item)) : [];
+}
+
+export async function loadSessionDetail(sessionId = "") {
+  const payload = await getAnalizarPdfSessionDetail(sessionId);
+  return payload?.session ? normalizeAnalizarPdfSession(payload.session) : null;
 }
 
 export async function saveSession(session = null, options = {}) {

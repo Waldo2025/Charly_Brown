@@ -288,18 +288,22 @@ try {
   assert.deepEqual(
     filterLabels,
     [
+      "Ortografía",
       "Ortotipografía",
+      "Análisis rápido ortotipográfico",
       "Propuestas de redacción",
       "Texto fuera o desbordado",
       "Campo formativo",
+      "Notas",
       "Control de cambios",
+      "Condiciones personalizadas",
       "Recortables / Fichas / Anexos / Videos",
     ],
     "El modal del rail debe listar las categorías solicitadas."
   );
   await page.locator("[data-action='toggle-rail-category'][data-rail-category-id='recortables']").uncheck();
   await page.waitForFunction(() => !document.querySelector("[data-rail-category='recortables']"));
-  const storedRailVisibility = await page.evaluate(() => JSON.parse(window.localStorage.getItem("analizar-pdf-rail-category-visibility") || "{}"));
+  const storedRailVisibility = await page.evaluate(() => JSON.parse(window.localStorage.getItem("analizar-pdf-rail-category-visibility-en-forma") || "{}"));
   assert.equal(storedRailVisibility.recortables, false, "El filtro del rail debe persistir la categoría desactivada.");
 
   console.log("Analizar PDF rail browser smoke OK.");

@@ -1,12 +1,5 @@
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
-import { getDefaultFirebaseApp } from './firebase-default-app.js';
-
-// Initialize Firebase
-const app = getDefaultFirebaseApp();
-const auth = getAuth(app);
-
 (function () { // IIFE starts here
-  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.0.71';
+  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.10.833';
 
   function normalizePageId(pageId, fallback = 'index.html') {
     const normalized = String(pageId || '').trim().toLowerCase();
@@ -37,6 +30,8 @@ const auth = getAuth(app);
     'gestionusuarios.html': { title: 'Gestion de usuarios', header: 'simple' },
     'perfil.html': { title: 'Mi perfil', header: 'simple' },
     'chat.html': { title: 'Chat', header: 'simple', showFavoritesToggle: true }
+    , 'marcieblogeditor.html': { title: 'Marcie Blog Editor', header: 'simple' }
+    , 'scienceactivities.html': { title: 'Actividades de Ciencias', header: 'simple' }
     , 'experienciamenu.html': { title: 'Menu de experiencias', header: 'simple' }
   };
 
@@ -280,36 +275,95 @@ const auth = getAuth(app);
   }
 
   function renderSidebar(currentPage, showFavoritesToggle) {
-    const links = [
-      { href: 'home.html', icon: 'fas fa-home', label: 'Inicio' },
-      { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
-      { href: 'charly-brown.html', icon: 'fas fa-wand-magic-sparkles', label: 'Charly Brown', id: 'charlyBrownLink', roleVisibility: 'admin,author,editor,developer' },
-      { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
-      { href: 'PeppermintPattyAnalizer.html', icon: 'fas fa-file-pdf', label: 'Peppermint Patty Analizer' },
-      { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
-      { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' },
-      { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
-      { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
-      { href: 'PigPenCreator.html', icon: 'fas fa-door-closed', label: 'PigPen Escape Room' },
-      { href: 'experienciaMenu.html', icon: 'fas fa-layer-group', label: 'Experiencias' },
-      { href: 'perfil.html', icon: 'fas fa-user', label: 'Perfil' },
-      { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink', roleVisibility: 'admin' },
-    { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },
-    { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' }
-  ];
+    const groups = [
+      {
+        id: 'editorial',
+        label: 'Editorial',
+        icon: 'fas fa-pen-nib',
+        links: [
+          { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Análisis editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
+          { href: '/MarcieBlogEditor/MarcieBlogEditor.html', icon: 'fas fa-pen', label: 'Marcie Blog Editor', id: 'marcieBlogEditorLink', requiresAuth: true },
+          { href: 'charly-brown.html', icon: 'fas fa-wand-magic-sparkles', label: 'Charly Brown', id: 'charlyBrownLink', roleVisibility: 'admin,author,editor,developer' },
+          { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear cursos de Moodle' },
+          { href: 'PeppermintPattyAnalizer.html', icon: 'fas fa-file-pdf', label: 'Peppermint Patty Analizer' },
+          { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
+          { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' }
+        ]
+      },
+      {
+        id: 'multimedia',
+        label: 'Multimedia',
+        icon: 'fas fa-photo-film',
+        links: [
+          { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
+          { href: '/scienceActivities', icon: 'fas fa-flask', label: 'Actividades de ciencias' },
+          { href: 'PigPenCreator.html', icon: 'fas fa-door-closed', label: 'PigPen Escape Rooms' },
+          { href: 'experienciaMenu.html', icon: 'fas fa-layer-group', label: 'Experiencias' },
+          { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' }
+        ]
+      },
+      {
+        id: 'config',
+        label: 'Config',
+        icon: 'fas fa-gear',
+        links: [
+          { href: 'perfil.html', icon: 'fas fa-user', label: 'Perfil' },
+          { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink', roleVisibility: 'admin' }
+        ]
+      },
+      {
+        id: 'otros',
+        label: 'Otros',
+        icon: 'fas fa-ellipsis',
+        links: [
+          { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },
+          { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' }
+        ]
+      }
+    ];
 
-    const sidebarLinks = links.map((link) => {
+    const toRootSidebarHref = (href = '') => {
+      const value = String(href || '').trim();
+      if (!value || value === '#' || value.startsWith('/') || /^[a-z][a-z\d+.-]*:/i.test(value)) return value;
+      return `/${value.replace(/^\.\//, '')}`;
+    };
+
+    const sidebarActiveTones = [
+      'teal', 'blue', 'violet', 'amber', 'rose', 'cyan', 'lime',
+      'orange', 'fuchsia', 'sky', 'emerald', 'indigo', 'pink', 'yellow'
+    ];
+    let sidebarToneIndex = 0;
+
+    const isLinkActive = (link) => {
+      if (!link?.href || link.href === '#') return false;
+      try {
+        const pathname = new URL(link.href, window.location.href).pathname;
+        return normalizePageId(pathname.split('/').pop()) === currentPage;
+      } catch (_) {
+        return String(link.href || '').toLowerCase() === currentPage;
+      }
+    };
+
+    const renderLink = (link, extraClasses = []) => {
       const isAction = link.href === '#';
-      const isActive = !isAction && link.href.toLowerCase() === currentPage;
-      const classes = ['sidebar-link'];
+      const isActive = !isAction && isLinkActive(link);
+      const resolvedHref = toRootSidebarHref(link.href);
+      const classes = ['sidebar-link', ...extraClasses];
+      if (extraClasses.includes('sidebar-group-link')) {
+        classes.push(`sidebar-tone-${sidebarActiveTones[sidebarToneIndex % sidebarActiveTones.length]}`);
+        sidebarToneIndex += 1;
+      }
       if (link.roleVisibility) classes.push('d-none');
+      if (link.requiresAuth) classes.push('d-none');
       const attrs = [
-        `href="${link.href}"`,
+        `href="${resolvedHref}"`,
         `class="${classes.join(' ')}"`,
+        `title="${link.label}"`,
         isActive ? 'aria-current="page"' : ''
       ];
       if (link.id) attrs.push(`id="${link.id}"`);
       if (link.roleVisibility) attrs.push(`data-role-visibility="${link.roleVisibility}"`, 'hidden', 'aria-hidden="true"', 'tabindex="-1"');
+      if (link.requiresAuth) attrs.push('data-auth-required="true"', 'hidden', 'aria-hidden="true"', 'tabindex="-1"');
       const badgeHtml = link.id === 'chatLink'
         ? '<em id="chat-notification-badge" class="sidebar-badge" hidden aria-live="polite">0</em>'
         : '';
@@ -321,6 +375,24 @@ const auth = getAuth(app);
           ${badgeHtml}
         </a>
       `;
+    };
+
+    const groupedLinks = groups.map((group) => {
+      const containsActivePage = group.links.some((link) => isLinkActive(link));
+      const panelId = `sidebarGroupPanel-${group.id}`;
+      return `
+        <section class="sidebar-group${containsActivePage ? ' is-expanded' : ''}" data-sidebar-group="${group.id}">
+          <button class="sidebar-group-toggle" type="button" aria-expanded="${containsActivePage ? 'true' : 'false'}"
+            aria-controls="${panelId}" title="${group.label}">
+            <i class="${group.icon} sidebar-group-icon" aria-hidden="true"></i>
+            <span>${group.label}</span>
+            <i class="fas fa-chevron-down sidebar-group-chevron" aria-hidden="true"></i>
+          </button>
+          <div id="${panelId}" class="sidebar-group-items" role="group" aria-label="${group.label}"${containsActivePage ? '' : ' hidden'}>
+            ${group.links.map((link) => renderLink(link, ['sidebar-group-link'])).join('')}
+          </div>
+        </section>
+      `;
     }).join('');
 
     const favoritesToggle = showFavoritesToggle
@@ -331,12 +403,20 @@ const auth = getAuth(app);
       `
       : '';
 
-    return `${sidebarLinks}
-      ${favoritesToggle}
-      <a href="#" class="sidebar-link" id="logoutLink">
-        <i class="fas fa-sign-out-alt"></i>
-        <span>Cerrar sesion</span>
-      </a>
+    return `
+      <div class="sidebar-primary-action">
+        ${renderLink({ href: 'home.html', icon: 'fas fa-house', label: 'Inicio' }, ['sidebar-home-link'])}
+      </div>
+      <div class="sidebar-groups" aria-label="Accesos agrupados">
+        ${groupedLinks}
+      </div>
+      <div class="sidebar-footer-actions">
+        ${favoritesToggle}
+        <a href="#" class="sidebar-link" id="logoutLink">
+          <i class="fas fa-arrow-right-from-bracket"></i>
+          <span>Cerrar sesión</span>
+        </a>
+      </div>
     `;
   }
 
@@ -345,9 +425,7 @@ const auth = getAuth(app);
     headerContent.innerHTML = renderHeader(cfg.title, cfg.header);
   }
 
-  onAuthStateChanged(auth, (user) => {
-    setHeaderUserEmail(user?.email || '');
-  });
+  setHeaderUserEmail('');
 
   const sidebarMenu = document.querySelector('#sidebar .sidebar-menu');
   if (sidebarMenu) {
@@ -355,4 +433,5 @@ const auth = getAuth(app);
   }
 
   ensureThemeManagerScript();
+  document.dispatchEvent(new CustomEvent('charlylayout:ready'));
 })();

@@ -1,14 +1,19 @@
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { auth } from "../js/firebase-instance.js";
+import { animate as animeAnimate, remove as animeRemove, spring, stagger } from "../vendor/animejs/anime.esm.min.js";
 import {
   createAnalizarPdfSessionStore,
   createEmptyAnalizarPdfSession,
+  loadSessionDetail,
   loadSessions,
   pollAnalysisStatus,
   saveSession
-} from "./analizar-pdf-session-store.js?v=2026-1.0.10.466";
-import { createAnalizarPdfSidepanelApi } from "./analizar-pdf-sidepanel.js?v=2026-1.0.10.452";
-import { createAnalizarPdfResultsRenderer } from "./analizar-pdf-results.js?v=2026-1.0.10.469";
+} from "./analizar-pdf-session-store.js?v=2026-1.0.10.746";
+import { createAnalizarPdfSidepanelApi } from "./analizar-pdf-sidepanel.js?v=2026-1.0.10.617";
+import {
+  createAnalizarPdfResultsRenderer,
+  getAnalizarPdfAnalysisCategories,
+} from "./analizar-pdf-results.js?v=2026-1.0.10.790";
 import {
   activateAnalizarPdfStyleMapping,
   cancelAnalizarPdfAnalysis,
@@ -20,7 +25,8 @@ import {
   queueAnalizarPdfStoredSourceAnalysis,
   runAnalizarPdfQuickOrthotypography,
   saveAnalizarPdfStyleMapping
-} from "./analizar-pdf-api.js?v=2026-1.0.10.452";
+} from "./analizar-pdf-api.js?v=2026-1.0.10.789";
+import { createAnalizarPdfAnalysisRulesUi } from "./analizar-pdf-analysis-rules.js?v=2026-1.0.10.2";
 import {
   buildAnalizarPdfLocalBlobKey,
   deleteAnalizarPdfCachedAnalysisSession,
@@ -36,6 +42,7 @@ import {
 import {
   buildAnalysisTargetsForAll as buildAnalysisTargetsForAllPure,
   documentNameMatchesRevision,
+  inferUnidadFromDocumentName,
   ensureActivePointers,
   getEffectiveRecortableRole,
   hasRenderableAnalysis,
@@ -45,7 +52,7 @@ import {
   recortableRoleSupportsDestination,
   shouldShowRecortableRole,
   upsertRevisionInSession,
-} from "./analizar-pdf-session-logic.js?v=2026-1.0.10.466";
+} from "./analizar-pdf-session-logic.js?v=2026-1.0.10.805";
 
 const state = {
   sessions: [],
@@ -55,12 +62,20 @@ const state = {
   draggedRevisionId: "",
   busyOverlayLabel: "",
   isSavingSession: false,
+  isImportingCollectFolder: false,
   isAnalyzingAll: false,
   isAnalyzingCurrent: false,
   isQuickAnalyzingAll: false,
+  importWarnings: [],
   isCreatingTemplateFromFile: false,
   isCreatingTemplatesFromAll: false,
+  isInsertingRevision: false,
+  insertRevisionIndex: -1,
   defaultRevisionsModalOpen: false,
+  pendingNewSession: null,
+  pendingNewSessionFiles: [],
+  pendingCreateFolderSelection: false,
+  globalTemplateModalOpen: false,
   currentUser: null,
   selectedFiles: [],
   analysisPollTimer: 0,
@@ -80,11 +95,45 @@ const state = {
   isRehydratingFileSelection: false,
   jobMetaText: "",
   jobMetaSessionId: "",
+  revisionTimelineSignature: "",
+  completedRevisionAnimationIds: new Set(),
+  bootSpinnerDismissed: false,
+  revisionTimelineRevealPending: false,
+  revisionTimelineRevealInProgress: false,
+  revisionTimelineRevealSignature: "",
+  deferredRevisionTimelineSession: null,
 };
 
 let exportConfigRestoreFocusEl = null;
+let bootSpinnerFallbackTimer = 0;
+let revisionTimelineRevealTimer = 0;
+let sessionRailRevealFrame = 0;
+let coloredActionRevealFrame = 0;
+let completedRailGroupRevealFrame = 0;
+let inlineRailActionRevealFrame = 0;
+let collectFolderImportPromise = null;
+let analysisSpriteAnchorObserver = null;
+const activeAnalysisSprites = new Map();
+const animatedSessionRailIds = new Set();
+const animatedCompletedRailGroupKeys = new Set();
+const animatedInlineRailActionKeys = new Set();
+let coloredActionsRevealComplete = false;
+let completedRailInitialRevealInProgress = false;
+let completedRailInitialRevealFinished = false;
+let resultsRailRenderSignature = "";
+let pendingResultsRailEntrySession = null;
+let sessionRailInitialRevealInProgress = false;
+let sessionRailInitialRevealFinished = false;
+let deferredSessionRailRender = false;
+let activeRailActionTooltipTrigger = null;
 const ANALYZE_BTN_DEFAULT_LABEL = String(document.getElementById("analizarPdfAnalyzeBtn")?.textContent || "Analizar ficha editorial").trim() || "Analizar ficha editorial";
 const LOCAL_ANALYSIS_SESSION_STORAGE_PREFIX = "cb_analizar_pdf_local_session:";
+const SESSION_CATALOG_STORAGE_PREFIX = "cb_analizar_pdf_catalog_v1:";
+const loadedSessionDetailIds = new Set();
+const sessionDetailPromises = new Map();
+const catalogOnlySessionIds = new Set();
+const localAnalysisPersistenceChains = new Map();
+const localAnalysisPersistenceGenerations = new Map();
 const MAPPING_GROUPS_STORAGE_KEY = "cb_analizar_pdf_mapping_groups";
 const UNGROUPED_MAPPING_GROUP_ID = "__ungrouped__";
 const LEGACY_DEFAULT_MAPPING_IDS = new Set([
@@ -93,13 +142,18 @@ const LEGACY_DEFAULT_MAPPING_IDS = new Set([
   "default_la_primero_unidad",
 ]);
 
+let activeAnalysisFlowStartedAt = 0;
+
 function logAnalizarPdfFlow(step = "", payload = null) {
   const label = `[analizar-pdf][flow] ${String(step || "").trim()}`;
+  const elapsedMs = activeAnalysisFlowStartedAt > 0
+    ? Math.round(performance.now() - activeAnalysisFlowStartedAt)
+    : null;
   if (!payload || typeof payload !== "object") {
-    console.log(label);
+    console.log(label, elapsedMs === null ? undefined : { elapsedMs });
     return;
   }
-  console.log(label, payload);
+  console.log(label, elapsedMs === null ? payload : { elapsedMs, ...payload });
 }
 
 const PROYECTO_IDML_MAPPING_TEMPLATE = Object.freeze([
@@ -143,15 +197,54 @@ const LA_UNIDAD_PRIMERO_MAPPING_TEMPLATE = Object.freeze([
 
 const BIBLIO_DRAFT_STORAGE_KEY = "cb_analizar_pdf_biblio_draft_v1";
 const ACTIVE_SESSION_STORAGE_KEY = "cb_analizar_pdf_active_session_v1";
+const ANALIZAR_PDF_THEME_STORAGE_KEY = "cb_analizar_pdf_theme_v1";
+const ANALIZAR_PDF_THEMES = Object.freeze(["light", "medium", "dark"]);
+const ANALIZAR_PDF_THEME_META = Object.freeze({
+  light: { label: "claro", icon: "fa-sun" },
+  medium: { label: "medio", icon: "fa-circle-half-stroke" },
+  dark: { label: "oscuro", icon: "fa-moon" },
+});
+
+function hasAnimeTargets(targets = null) {
+  if (!targets) return false;
+  if (typeof targets === "string") return Boolean(document.querySelector(targets));
+  if (targets instanceof Element || targets === window || targets === document) return true;
+  if (Array.isArray(targets) || targets instanceof NodeList || targets instanceof HTMLCollection) {
+    return Array.from(targets).some(Boolean);
+  }
+  return true;
+}
+
+function animate(targets, parameters = {}) {
+  if (!hasAnimeTargets(targets)) return null;
+  return animeAnimate(targets, parameters);
+}
+
+function removeAnimeAnimation(targets) {
+  if (!hasAnimeTargets(targets)) return;
+  animeRemove(targets);
+}
 
 const els = {
   sessionList: document.getElementById("analizarPdfSessionList"),
   createSessionBtn: document.querySelector('[data-action="create-session"]'),
+  sessionSearchBtn: document.getElementById("analizarPdfSessionSearchBtn"),
+  sessionSearchModal: document.getElementById("analizarPdfSessionSearchModal"),
+  sessionSearchInput: document.getElementById("analizarPdfSessionSearchInput"),
+  sessionSearchResults: document.getElementById("analizarPdfSessionSearchResults"),
   sessionTitleLabel: document.getElementById("analizarPdfSessionTitleLabel"),
+  heroSessionTitleContainer: document.querySelector(".analizar-pdf-hero-session-title"),
+  heroSessionTitle: document.getElementById("analizarPdfHeroSessionTitle"),
+  heroSessionTitleText: document.querySelector("#analizarPdfHeroSessionTitle .analizar-pdf-hero-session-title-text"),
+  heroSessionTitleInput: document.getElementById("analizarPdfHeroSessionTitleInput"),
   sourceType: document.getElementById("analizarPdfSourceType"),
   indexPageInput: document.getElementById("analizarPdfIndexPageInput"),
   temarioPageInput: document.getElementById("analizarPdfTemarioPageInput"),
   bookTypeInput: document.getElementById("analizarPdfBookTypeInput"),
+  libreWorkflowField: document.getElementById("analizarPdfLibreWorkflowField"),
+  libreWorkflowInput: document.getElementById("analizarPdfLibreWorkflowInput"),
+  libreLanguageField: document.getElementById("analizarPdfLibreLanguageField"),
+  libreLanguageInput: document.getElementById("analizarPdfLibreLanguageInput"),
   nivelInput: document.getElementById("analizarPdfNivelInput"),
   gradoInput: document.getElementById("analizarPdfGradoInput"),
   trimestreInput: document.getElementById("analizarPdfTrimestreInput"),
@@ -164,6 +257,9 @@ const els = {
   createDefaultRevisionsBtn: document.getElementById("analizarPdfCreateDefaultRevisionsBtn"),
   addRevisionBtn: document.getElementById("analizarPdfAddRevisionBtn"),
   revisionList: document.getElementById("analizarPdfRevisionList"),
+  toggleCardSelectionBtn: document.getElementById("analizarPdfToggleCardSelectionBtn"),
+  selectedCardsCount: document.getElementById("analizarPdfSelectedCardsCount"),
+  selectAllCardsBtn: document.getElementById("analizarPdfSelectAllCardsBtn"),
   fileList: document.getElementById("analizarPdfFileList"),
   addSectionBtn: document.getElementById("analizarPdfAddSectionBtn"),
   addSectionButtons: document.querySelectorAll('[data-action="add-section"]'),
@@ -171,6 +267,10 @@ const els = {
   paletteList: document.getElementById("analizarPdfPaletteList"),
   addPaletteColorBtn: document.getElementById("analizarPdfAddPaletteColorBtn"),
   fileInput: document.getElementById("analizarPdfFileInput"),
+  folderInput: document.getElementById("analizarPdfFolderInput"),
+  chooseFolderBtn: document.getElementById("analizarPdfChooseFolderBtn"),
+  themeToggleBtn: document.getElementById("analizarPdfThemeToggleBtn"),
+  editGlobalTemplateBtn: document.getElementById("analizarPdfEditGlobalTemplateBtn"),
   fileLabel: document.getElementById("analizarPdfFileLabel"),
   analyzeBtn: document.getElementById("analizarPdfAnalyzeBtn"),
   analyzeAllBtn: document.getElementById("analizarPdfAnalyzeAllBtn"),
@@ -183,11 +283,15 @@ const els = {
   mappingsBtn: document.getElementById("analizarPdfMappingsBtn"),
   bootSpinner: document.getElementById("analizarPdfBootSpinner"),
   editorialPanel: document.getElementById("analizarPdfEditorialPanel"),
+  biblioGrid: document.querySelector(".analizar-pdf-biblio-grid"),
   toggleEditorialBtn: document.getElementById("analizarPdfToggleEditorialBtn"),
   editorialSpinner: document.getElementById("analizarPdfEditorialSpinner"),
   editorialSpinnerLabel: document.getElementById("analizarPdfEditorialSpinnerLabel"),
   results: document.getElementById("analizarPdfResults"),
   pageReports: document.getElementById("analizarPdfPageReports"),
+  quickDetailPanel: document.getElementById("analizarPdfQuickDetailPanel"),
+  quickDetailResizeHandle: document.getElementById("analizarPdfQuickDetailResizeHandle"),
+  quickRailHost: document.getElementById("analizarPdfQuickRailHost"),
   jobMeta: document.getElementById("analizarPdfJobMeta"),
   mappingsModal: document.getElementById("analizarPdfMappingsModal"),
   mappingsList: document.getElementById("analizarPdfMappingsList"),
@@ -215,14 +319,45 @@ const els = {
   mappingEntriesList: document.getElementById("analizarPdfMappingEntriesList"),
   defaultRevisionsModal: document.getElementById("analizarPdfDefaultRevisionsModal"),
   defaultSourceTypeInput: document.getElementById("analizarPdfDefaultSourceTypeInput"),
+  defaultWorkflowFormatInput: document.getElementById("analizarPdfDefaultWorkflowFormatInput"),
+  defaultLanguageInput: document.getElementById("analizarPdfDefaultLanguageInput"),
+  defaultBookNameInput: document.getElementById("analizarPdfDefaultBookNameInput"),
+  defaultFolderBtn: document.getElementById("analizarPdfDefaultFolderBtn"),
+  defaultFolderSummary: document.getElementById("analizarPdfDefaultFolderSummary"),
   defaultBookTypeInput: document.getElementById("analizarPdfDefaultBookTypeInput"),
   defaultNivelInput: document.getElementById("analizarPdfDefaultNivelInput"),
   defaultGradoInput: document.getElementById("analizarPdfDefaultGradoInput"),
   defaultTrimestreInput: document.getElementById("analizarPdfDefaultTrimestreInput"),
   defaultEdicionNumeroInput: document.getElementById("analizarPdfDefaultEdicionNumeroInput"),
   defaultRevisionNumeroInput: document.getElementById("analizarPdfDefaultRevisionNumeroInput"),
+  defaultUnitCountInput: document.getElementById("analizarPdfDefaultUnitCountInput"),
   defaultRevisionsSummary: document.getElementById("analizarPdfDefaultRevisionsSummary"),
   defaultRevisionsConfirmBtn: document.getElementById("analizarPdfDefaultRevisionsConfirmBtn"),
+  globalTemplateModal: document.getElementById("analizarPdfGlobalTemplateModal"),
+  globalTemplateForm: document.getElementById("analizarPdfGlobalTemplateForm"),
+  globalSourceTypeInput: document.getElementById("analizarPdfGlobalSourceTypeInput"),
+  globalWorkflowFormatInput: document.getElementById("analizarPdfGlobalWorkflowFormatInput"),
+  globalLanguageInput: document.getElementById("analizarPdfGlobalLanguageInput"),
+  globalBookNameInput: document.getElementById("analizarPdfGlobalBookNameInput"),
+  globalLibreFolderField: document.getElementById("analizarPdfGlobalLibreFolderField"),
+  globalLibreFolderBtn: document.getElementById("analizarPdfGlobalLibreFolderBtn"),
+  globalLibreFolderSummary: document.getElementById("analizarPdfGlobalLibreFolderSummary"),
+  globalBookTypeInput: document.getElementById("analizarPdfGlobalBookTypeInput"),
+  globalNivelInput: document.getElementById("analizarPdfGlobalNivelInput"),
+  globalGradoInput: document.getElementById("analizarPdfGlobalGradoInput"),
+  globalTrimestreInput: document.getElementById("analizarPdfGlobalTrimestreInput"),
+  globalEdicionInput: document.getElementById("analizarPdfGlobalEdicionInput"),
+  globalRevisionInput: document.getElementById("analizarPdfGlobalRevisionInput"),
+  globalTemplateSaveBtn: document.getElementById("analizarPdfGlobalTemplateSaveBtn"),
+  insertRevisionModal: document.getElementById("analizarPdfInsertRevisionModal"),
+  insertRevisionForm: document.getElementById("analizarPdfInsertRevisionForm"),
+  insertRevisionUnit: document.getElementById("analizarPdfInsertRevisionUnit"),
+  insertRevisionNumber: document.getElementById("analizarPdfInsertRevisionNumber"),
+  insertRevisionRole: document.getElementById("analizarPdfInsertRevisionRole"),
+  insertRevisionFile: document.getElementById("analizarPdfInsertRevisionFile"),
+  insertRevisionFileName: document.getElementById("analizarPdfInsertRevisionFileName"),
+  insertRevisionError: document.getElementById("analizarPdfInsertRevisionError"),
+  insertRevisionSubmit: document.getElementById("analizarPdfInsertRevisionSubmit"),
   exportConfigModal: document.getElementById("analizarPdfExportConfigModal"),
   exportConfigCloseBtn: document.getElementById("analizarPdfExportConfigCloseBtn"),
   exportConfigCancelBtn: document.getElementById("analizarPdfExportConfigCancelBtn"),
@@ -238,9 +373,25 @@ const els = {
 };
 
 const store = createAnalizarPdfSessionStore({ state });
+createAnalizarPdfAnalysisRulesUi({
+  getActiveSession: () => store.getActiveSession(),
+  getAnalysisCategories: () => getAnalizarPdfAnalysisCategories(),
+  saveSessionConfig: async (analysisRuleConfig) => {
+    const next = mutateActiveSession((draft) => {
+      draft.analysisRuleConfig = analysisRuleConfig;
+      return draft;
+    }, { render: false });
+    if (!next) return null;
+    const saved = await saveSession(next);
+    store.upsertSession(saved);
+    renderAll({ preserveScroll: true });
+    return saved;
+  }
+});
 const resultsRenderer = createAnalizarPdfResultsRenderer({
   el: els.results,
   pageReportsEl: els.pageReports,
+  railHostEl: els.quickRailHost,
   onToggleCorrectionMode: handleToggleCorrectionMode,
   onToggleCorrectionPage: handleToggleCorrectionPage,
   onToggleCorrectionIssue: handleToggleCorrectionIssue,
@@ -273,7 +424,40 @@ function escapeAttr(value = "") {
 }
 
 function isBusyAnalysisStatus(status = "idle") {
-  return ["uploading", "queued", "processing"].includes(String(status || "").trim().toLowerCase());
+  return ["uploading", "queued", "processing", "delivering"].includes(String(status || "").trim().toLowerCase());
+}
+
+function hasFinishedAnalysisPayload(file = null) {
+  const summary = file?.resultSummary && typeof file.resultSummary === "object" ? file.resultSummary : {};
+  const result = file?.result && typeof file.result === "object" ? file.result : {};
+  const stats = result?.stats && typeof result.stats === "object" ? result.stats : null;
+  return Boolean(
+    String(summary?.analyzedAt || "").trim()
+    || Number(summary?.pageCount || stats?.pageCount || 0) > 0
+    || (Array.isArray(stats?.pageReports) && stats.pageReports.length > 0)
+  );
+}
+
+function clearInterruptedAnalysisStatuses(session = null) {
+  if (!session || typeof session !== "object") return false;
+  const liveJobId = String(state.analysisPollController?.jobId || "").trim();
+  let changed = false;
+  for (const revision of Array.isArray(session.revisions) ? session.revisions : []) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (!isBusyAnalysisStatus(file?.analysisStatus || "")) continue;
+      const fileJobId = String(file?.analysisJobId || "").trim();
+      if (liveJobId && fileJobId === liveJobId) continue;
+      file.analysisStatus = hasFinishedAnalysisPayload(file) ? "completed" : "cancelled";
+      file.analysisJobId = "";
+      changed = true;
+    }
+  }
+  if (isBusyAnalysisStatus(session.analysisStatus || "") && (!liveJobId || String(session.analysisJobId || "").trim() !== liveJobId)) {
+    session.analysisStatus = "idle";
+    session.analysisJobId = "";
+    changed = true;
+  }
+  return changed;
 }
 
 function updateEditorialSpinner(status = "idle") {
@@ -283,7 +467,18 @@ function updateEditorialSpinner(status = "idle") {
     els.editorialSpinner.hidden = false;
     els.editorialPanel.classList.add("is-generating");
     if (els.editorialSpinnerLabel) {
-      els.editorialSpinnerLabel.textContent = overlayLabel;
+      const friendlyLabel = /backend|servidor|cloud|api|job|cola|polling/i.test(overlayLabel)
+        ? "Preparando tu análisis"
+        : /subiend|upload|cargando archivo/i.test(overlayLabel)
+          ? "Preparando tu archivo"
+          : /guard|persist|snapshot/i.test(overlayLabel)
+            ? "Guardando tus avances"
+            : /recortable|ficha|anexo|video|referencia/i.test(overlayLabel)
+              ? "Comprobando las referencias"
+              : /ortograf|ortotipograf/i.test(overlayLabel)
+                ? "Revisando la escritura y presentación"
+                : overlayLabel;
+      els.editorialSpinnerLabel.textContent = friendlyLabel;
     }
     return;
   }
@@ -293,10 +488,12 @@ function updateEditorialSpinner(status = "idle") {
   els.editorialPanel.classList.toggle("is-generating", isBusy);
   if (els.editorialSpinnerLabel) {
     els.editorialSpinnerLabel.textContent = cleanStatus === "uploading"
-      ? "Subiendo archivo"
+      ? "Preparando tu archivo"
       : cleanStatus === "queued"
-        ? "En cola de análisis"
-        : "Generando análisis";
+        ? "Todo listo, comenzamos enseguida"
+        : cleanStatus === "processing"
+          ? "Revisando el contenido"
+          : "Preparando el análisis";
   }
 }
 
@@ -346,6 +543,7 @@ function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed", options
   const targetFileId = String(options?.fileId || "").trim();
   const hasExactTarget = Boolean(targetRevisionId && targetFileId);
   const keepBatchOverlay = options?.keepBatchOverlay === true;
+  const updateTargetRailOnly = options?.updateTargetRailOnly === true && hasExactTarget;
   let changed = false;
   mutateActiveSession((draft) => {
     if (!draft || typeof draft !== "object") {
@@ -385,7 +583,16 @@ function clearBusyAnalysisStateForJob(jobId = "", nextStatus = "failed", options
     setBusyOverlay(state.busyOverlayLabel || "Analizando todas las fichas editoriales");
   }
   renderActionButtonState();
-  renderAll();
+  renderAll({ preserveResultsRail: updateTargetRailOnly });
+  if (updateTargetRailOnly) {
+    const activeSession = store.getActiveSession();
+    resultsRenderer.updateRailEntry(
+      buildRenderableSession(activeSession),
+      targetRevisionId,
+      targetFileId
+    );
+    resultsRailRenderSignature = buildResultsRailRenderSignature(activeSession);
+  }
   return changed;
 }
 
@@ -428,6 +635,7 @@ function applyAnalysisStatusPayloadToLocalSession(payload = null) {
     if (!targetFile || !targetRevision) {
       return draft;
     }
+    const wasBusy = isBusyAnalysisStatus(targetFile.analysisStatus || "");
     targetFile.analysisStatus = status || targetFile.analysisStatus || "idle";
     targetFile.analysisJobId = ["queued", "processing", "uploading"].includes(status) ? cleanJobId : "";
     if (hasResult) {
@@ -440,6 +648,9 @@ function applyAnalysisStatusPayloadToLocalSession(payload = null) {
     targetFile.updatedAt = new Date().toISOString();
     targetRevision.summary = buildRevisionSummary(targetRevision.files || []);
     targetRevision.updatedAt = new Date().toISOString();
+    if (status === "completed" && (wasBusy || hasResult)) {
+      state.completedRevisionAnimationIds.add(String(targetRevision.id || "").trim());
+    }
     draft.analysisStatus = ["queued", "processing", "uploading"].includes(status) ? status : "idle";
     draft.analysisJobId = ["queued", "processing", "uploading"].includes(status) ? cleanJobId : "";
     return draft;
@@ -474,7 +685,8 @@ function isIdmlFileEntry(file = null, session = null) {
 }
 
 function renderActionButtonState() {
-  const blockAll = state.isAnalyzingAll || state.isAnalyzingCurrent || state.isSavingSession || state.isQuickAnalyzingAll || state.isCreatingTemplateFromFile || state.isCreatingTemplatesFromAll;
+  const blockAll = state.isImportingCollectFolder || state.isAnalyzingAll || state.isAnalyzingCurrent || state.isSavingSession || state.isQuickAnalyzingAll || state.isCreatingTemplateFromFile || state.isCreatingTemplatesFromAll || state.isInsertingRevision;
+  const selectionLocked = state.isAnalyzingAll || state.isAnalyzingCurrent || state.isQuickAnalyzingAll;
   const session = store.getActiveSession();
   const revision = getActiveRevision(session);
   const file = getActiveFile(session, revision);
@@ -486,13 +698,25 @@ function renderActionButtonState() {
   });
   if (els.analyzeBtn) {
     els.analyzeBtn.disabled = blockAll && !fileBusy;
-    els.analyzeBtn.textContent = fileBusy ? "Detener análisis" : ANALYZE_BTN_DEFAULT_LABEL;
+    const actionLabel = fileBusy ? "Detener análisis de esta ficha" : "Analizar esta ficha editorial";
+    els.analyzeBtn.setAttribute("aria-label", actionLabel);
+    els.analyzeBtn.setAttribute("data-tooltip", actionLabel);
+    els.analyzeBtn.removeAttribute("title");
   }
   if (els.analyzeAllBtn) {
     els.analyzeAllBtn.disabled = blockAll;
   }
+  if (els.chooseFolderBtn) {
+    els.chooseFolderBtn.disabled = blockAll;
+  }
+  if (els.folderInput) {
+    els.folderInput.disabled = blockAll;
+  }
   if (els.createDefaultRevisionsBtn) {
     els.createDefaultRevisionsBtn.disabled = blockAll || !session;
+  }
+  if (els.editGlobalTemplateBtn) {
+    els.editGlobalTemplateBtn.disabled = blockAll || !session;
   }
   if (els.createTemplateFromFileBtn) {
     els.createTemplateFromFileBtn.disabled = blockAll || !activeHasSource;
@@ -509,6 +733,11 @@ function renderActionButtonState() {
   if (els.exportCorrectedBtn) {
     els.exportCorrectedBtn.disabled = blockAll || state.isExportingCorrectedIdml || !canExportCurrentFileAsIdml(session, revision, file);
   }
+  for (const control of [els.toggleCardSelectionBtn, els.selectAllCardsBtn]) {
+    if (!control) continue;
+    control.disabled = selectionLocked;
+    control.setAttribute("aria-disabled", String(selectionLocked));
+  }
 }
 
 async function flushUiFrame() {
@@ -516,11 +745,294 @@ async function flushUiFrame() {
 }
 
 function hideBootSpinner() {
-  if (!els.bootSpinner) return;
+  if (!els.bootSpinner || state.bootSpinnerDismissed) return;
+  state.bootSpinnerDismissed = true;
+  window.clearTimeout(bootSpinnerFallbackTimer);
   els.bootSpinner.classList.add("is-hidden");
   window.setTimeout(() => {
     els.bootSpinner?.setAttribute("hidden", "");
-  }, 260);
+    // La entrada de archivos empieza cuando el spinner ya dejó ver el contenido.
+    scheduleRevisionTimelineReveal();
+    scheduleSessionRailReveal();
+    scheduleColoredActionReveal();
+    scheduleCompletedRailGroupReveal();
+    scheduleInlineRailActionReveal();
+  }, 180);
+}
+
+function scheduleInlineRailActionReveal() {
+  if (
+    !state.bootSpinnerDismissed
+    || !els.quickRailHost
+  ) return;
+  window.cancelAnimationFrame(inlineRailActionRevealFrame);
+  inlineRailActionRevealFrame = window.requestAnimationFrame(() => {
+    inlineRailActionRevealFrame = 0;
+    const buttons = [...els.quickRailHost.querySelectorAll(
+      ".analizar-pdf-ortho-rail-head .analizar-pdf-inline-actions .analizar-pdf-rail-selection-toggle[data-action]"
+    )].filter((button) => !animatedInlineRailActionKeys.has(String(button.dataset.action || "").trim()));
+    const icons = buttons.map((button) => button.querySelector(":scope > i")).filter(Boolean);
+    if (!icons.length) return;
+    buttons.forEach((button) => animatedInlineRailActionKeys.add(String(button.dataset.action || "").trim()));
+    if (prefersReducedRevisionMotion()) {
+      els.quickRailHost.classList.remove("is-initial-inline-actions-reveal-pending");
+      return;
+    }
+    removeAnimeAnimation(icons);
+    icons.forEach((icon, index) => {
+      icon.style.opacity = "0";
+      icon.style.transform = `translateY(8px) scale(.12) rotate(${index % 2 ? 16 : -16}deg)`;
+      icon.style.transformOrigin = "50% 50%";
+    });
+    els.quickRailHost.classList.remove("is-initial-inline-actions-reveal-pending");
+    animate(icons, {
+      opacity: [0, 1],
+      y: [8, 0],
+      scale: [.12, 1],
+      rotate: (icon, index) => [index % 2 ? 16 : -16, 0],
+      delay: stagger(52, { start: 18 }),
+      ease: spring({ bounce: .44, duration: 280 }),
+      onComplete: () => {
+        icons.filter((icon) => icon.isConnected).forEach((icon) => {
+          icon.style.removeProperty("opacity");
+          icon.style.removeProperty("transform");
+          icon.style.removeProperty("transform-origin");
+        });
+      },
+    });
+  });
+}
+
+function scheduleCompletedRailGroupReveal() {
+  if (!state.bootSpinnerDismissed || !els.quickRailHost || completedRailInitialRevealInProgress) return;
+  window.cancelAnimationFrame(completedRailGroupRevealFrame);
+  completedRailGroupRevealFrame = window.requestAnimationFrame(() => {
+    completedRailGroupRevealFrame = 0;
+    const groups = [...els.quickRailHost.querySelectorAll(
+      ".analizar-pdf-ortho-rail-body > .analizar-pdf-ortho-rail-group.is-complete"
+    )].filter((group) => {
+      const key = String(group.dataset.railGroupKey || "").trim();
+      return key && !animatedCompletedRailGroupKeys.has(key);
+    });
+    if (!groups.length) {
+      if (!completedRailInitialRevealFinished) {
+        completedRailInitialRevealFinished = true;
+        els.quickRailHost.classList.remove("is-initial-rail-reveal-pending");
+        scheduleInlineRailActionReveal();
+      }
+      return;
+    }
+    const isInitialReveal = !completedRailInitialRevealFinished;
+    const summaries = groups.map((group) => group.querySelector(":scope > summary")).filter(Boolean);
+    groups.forEach((group) => animatedCompletedRailGroupKeys.add(String(group.dataset.railGroupKey || "").trim()));
+    if (prefersReducedRevisionMotion()) {
+      completedRailInitialRevealFinished = true;
+      els.quickRailHost.classList.remove("is-initial-rail-reveal-pending");
+      scheduleInlineRailActionReveal();
+      return;
+    }
+    if (isInitialReveal) completedRailInitialRevealInProgress = true;
+    removeAnimeAnimation([...groups, ...summaries]);
+    groups.forEach((group) => {
+      group.style.opacity = "0";
+    });
+    summaries.forEach((summary, index) => {
+      summary.style.opacity = "0";
+      summary.style.transform = `translateX(20px) scale(.22) rotate(${index % 2 ? 3 : -3}deg)`;
+      summary.style.transformOrigin = "82% 50%";
+    });
+    if (isInitialReveal) els.quickRailHost.classList.remove("is-initial-rail-reveal-pending");
+    animate(groups, {
+      opacity: [0, 1],
+      delay: stagger(40),
+      duration: 280,
+      ease: "out(3)",
+    });
+    animate(summaries, {
+      opacity: [0, 1],
+      x: [20, 0],
+      scale: [.22, 1],
+      rotate: (summary, index) => [index % 2 ? 3 : -3, 0],
+      delay: stagger(40),
+      ease: spring({ bounce: .42, duration: 360 }),
+      onComplete: () => {
+        const revealNodesRemainConnected = summaries.every((summary) => summary.isConnected);
+        if (revealNodesRemainConnected) {
+          groups.forEach((group) => {
+            group.style.removeProperty("opacity");
+          });
+          summaries.forEach((summary) => {
+            summary.style.removeProperty("opacity");
+            summary.style.removeProperty("transform");
+            summary.style.removeProperty("transform-origin");
+          });
+        }
+        if (isInitialReveal) {
+          completedRailInitialRevealInProgress = false;
+          completedRailInitialRevealFinished = true;
+          if (pendingResultsRailEntrySession) {
+            updateResultsRailEntriesForSession(pendingResultsRailEntrySession);
+            pendingResultsRailEntrySession = null;
+          }
+          scheduleInlineRailActionReveal();
+        }
+      },
+    });
+  });
+}
+
+function buildResultsRailRenderSignature(session = null) {
+  if (!session) return "empty";
+  return JSON.stringify((Array.isArray(session.revisions) ? session.revisions : []).map((revision) => ({
+    id: String(revision?.id || "").trim(),
+    unidad: String(revision?.unidad || "").trim(),
+    revisionNumero: String(revision?.revisionNumero || "").trim(),
+    updatedAt: String(revision?.updatedAt || "").trim(),
+    tint: resolveRevisionAccentColor(revision, session?.workflowFormat),
+    files: (Array.isArray(revision?.files) ? revision.files : []).map((file) => ({
+      id: String(file?.id || "").trim(),
+      updatedAt: String(file?.updatedAt || "").trim(),
+      status: String(file?.analysisStatus || "").trim(),
+      tint: String(file?.railTintHex || "").trim(),
+      quickUpdatedAt: String(file?.quickAnalysis?.updatedAt || file?.quickAnalysis?.generatedAt || "").trim(),
+      hasResult: hasRenderableAnalysis(file),
+    })),
+  })));
+}
+
+function updateResultsRailEntriesForSession(session = null) {
+  if (!session) return;
+  const renderableSession = buildRenderableSession(session);
+  resultsRenderer.updateSessionReference(renderableSession);
+  for (const revision of Array.isArray(session.revisions) ? session.revisions : []) {
+    for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      resultsRenderer.updateRailEntry(
+        renderableSession,
+        String(revision?.id || "").trim(),
+        String(file?.id || "").trim()
+      );
+    }
+  }
+  resultsRailRenderSignature = buildResultsRailRenderSignature(session);
+}
+
+function renderResultsWithRailAnimations(session = null) {
+  const nextSignature = buildResultsRailRenderSignature(session);
+  if (resultsRailRenderSignature === nextSignature && els.quickRailHost?.querySelector(".analizar-pdf-ortho-rail")) {
+    resultsRenderer.updateSessionReference(session);
+    return;
+  }
+  if (completedRailInitialRevealInProgress) {
+    // La hidratación puede llegar mientras los items brotan. Actualizar únicamente
+    // la referencia de datos evita sustituir el rail completo al terminar la animación.
+    resultsRenderer.updateSessionReference(session);
+    pendingResultsRailEntrySession = session;
+    return;
+  }
+  resultsRenderer.render(session);
+  resultsRailRenderSignature = nextSignature;
+  scheduleCompletedRailGroupReveal();
+  scheduleInlineRailActionReveal();
+}
+
+function scheduleColoredActionReveal() {
+  if (!state.bootSpinnerDismissed || coloredActionsRevealComplete) return;
+  window.cancelAnimationFrame(coloredActionRevealFrame);
+  coloredActionRevealFrame = window.requestAnimationFrame(() => {
+    coloredActionRevealFrame = 0;
+    const actionHost = document.querySelector(".analizar-pdf-hero-actions");
+    const actions = [...(actionHost?.querySelectorAll(":scope > .analizar-pdf-metal-action") || [])];
+    if (!actions.length) return;
+    coloredActionsRevealComplete = true;
+    if (prefersReducedRevisionMotion()) {
+      document.documentElement.classList.add("ap-hero-actions-reveal-ready");
+      return;
+    }
+    removeAnimeAnimation(actions);
+    actions.forEach((action, index) => {
+      action.style.opacity = "0";
+      action.style.transform = `translateY(12px) scale(.16) rotate(${index % 2 ? 9 : -9}deg)`;
+      action.style.transformOrigin = "50% 50%";
+    });
+    document.documentElement.classList.add("ap-hero-actions-reveal-ready");
+    animate(actions, {
+      opacity: [0, 1],
+      y: [12, 0],
+      scale: [.16, 1],
+      rotate: (action, index) => [index % 2 ? 9 : -9, 0],
+      delay: stagger(130, { start: 45 }),
+      ease: spring({ bounce: .46, duration: 620 }),
+      onComplete: () => actions.forEach((action) => {
+        action.style.removeProperty("opacity");
+        action.style.removeProperty("transform");
+        action.style.removeProperty("transform-origin");
+      }),
+    });
+  });
+}
+
+function scheduleSessionRailReveal() {
+  if (!state.bootSpinnerDismissed || !els.sessionList || sessionRailInitialRevealInProgress) return;
+  window.cancelAnimationFrame(sessionRailRevealFrame);
+  sessionRailRevealFrame = window.requestAnimationFrame(() => {
+    sessionRailRevealFrame = 0;
+    const cards = [...els.sessionList.querySelectorAll(".analizar-pdf-session-card[data-session-id]")]
+      .filter((card) => !animatedSessionRailIds.has(String(card.dataset.sessionId || "").trim()));
+    if (!cards.length) {
+      if (!sessionRailInitialRevealFinished) {
+        sessionRailInitialRevealFinished = true;
+        els.sessionList.classList.remove("is-initial-session-reveal-pending");
+      }
+      return;
+    }
+    const isInitialReveal = !sessionRailInitialRevealFinished;
+    cards.forEach((card) => animatedSessionRailIds.add(String(card.dataset.sessionId || "").trim()));
+    if (prefersReducedRevisionMotion()) {
+      sessionRailInitialRevealFinished = true;
+      els.sessionList.classList.remove("is-initial-session-reveal-pending");
+      return;
+    }
+    if (isInitialReveal) sessionRailInitialRevealInProgress = true;
+    removeAnimeAnimation(cards);
+    cards.forEach((card) => {
+      card.style.opacity = "0";
+      card.style.transform = "translateX(-18px) scale(.72)";
+      card.style.transformOrigin = "18% 50%";
+    });
+    if (isInitialReveal) els.sessionList.classList.remove("is-initial-session-reveal-pending");
+    animate(cards, {
+      opacity: [0, 1],
+      x: [-18, 0],
+      scale: [.72, 1],
+      delay: stagger(32),
+      ease: spring({ bounce: .38, duration: 320 }),
+      onComplete: () => {
+        cards.filter((card) => card.isConnected).forEach((card) => {
+          card.style.removeProperty("opacity");
+          card.style.removeProperty("transform");
+          card.style.removeProperty("transform-origin");
+        });
+        if (isInitialReveal) {
+          sessionRailInitialRevealInProgress = false;
+          sessionRailInitialRevealFinished = true;
+          if (deferredSessionRailRender) {
+            deferredSessionRailRender = false;
+            sidepanelApi.renderSessions();
+            scheduleSessionRailReveal();
+          }
+        }
+      },
+    });
+  });
+}
+
+function renderSessionRailWithAnimation() {
+  if (sessionRailInitialRevealInProgress) {
+    deferredSessionRailRender = true;
+    return;
+  }
+  sidepanelApi.renderSessions();
+  scheduleSessionRailReveal();
 }
 
 function getLiveJobMetaElement() {
@@ -563,6 +1075,80 @@ function safeLocalStorageRemove(key = "") {
   }
 }
 
+function normalizeAnalizarPdfTheme(value = "") {
+  const theme = String(value || "").trim().toLowerCase();
+  return ANALIZAR_PDF_THEMES.includes(theme) ? theme : "light";
+}
+
+function applyAnalizarPdfTheme(value = "light", { persist = true } = {}) {
+  const theme = normalizeAnalizarPdfTheme(value);
+  const meta = ANALIZAR_PDF_THEME_META[theme];
+  document.documentElement.dataset.apTheme = theme;
+  if (els.themeToggleBtn) {
+    const label = `Tema: ${meta.label}. Cambiar tema`;
+    els.themeToggleBtn.dataset.theme = theme;
+    els.themeToggleBtn.dataset.tooltip = label;
+    els.themeToggleBtn.setAttribute("aria-label", label);
+    const icon = els.themeToggleBtn.querySelector("i");
+    if (icon) icon.className = `fas ${meta.icon}`;
+  }
+  if (persist) safeLocalStorageSet(ANALIZAR_PDF_THEME_STORAGE_KEY, theme);
+  return theme;
+}
+
+function cycleAnalizarPdfTheme() {
+  const currentTheme = normalizeAnalizarPdfTheme(document.documentElement.dataset.apTheme);
+  const nextIndex = (ANALIZAR_PDF_THEMES.indexOf(currentTheme) + 1) % ANALIZAR_PDF_THEMES.length;
+  applyAnalizarPdfTheme(ANALIZAR_PDF_THEMES[nextIndex]);
+}
+
+function getSessionCatalogStorageKey(user = null) {
+  const uid = String(user?.uid || "").trim();
+  return uid ? `${SESSION_CATALOG_STORAGE_PREFIX}${uid}` : "";
+}
+
+function buildSessionCatalogSnapshot(sessions = []) {
+  return (Array.isArray(sessions) ? sessions : []).map((session) => {
+    const snapshot = structuredClone(session);
+    snapshot.result = null;
+    snapshot.revisions = (Array.isArray(snapshot.revisions) ? snapshot.revisions : []).map((revision) => {
+      const revisionTintHex = resolveRevisionAccentColor(revision, snapshot?.workflowFormat);
+      return {
+        ...revision,
+        files: (Array.isArray(revision.files) ? revision.files : []).map((file) => ({
+          ...file,
+          railTintHex: String(snapshot?.workflowFormat === "libre"
+            ? (revisionTintHex || file?.railTintHex || "")
+            : (file?.railTintHex || revisionTintHex || "")).trim(),
+          result: null,
+          quickAnalysis: null
+        }))
+      };
+    });
+    return snapshot;
+  });
+}
+
+function persistSessionCatalog(user = null, sessions = []) {
+  const key = getSessionCatalogStorageKey(user);
+  if (!key) return;
+  safeLocalStorageSet(key, JSON.stringify(buildSessionCatalogSnapshot(sessions)));
+}
+
+function restoreSessionCatalog(user = null) {
+  const key = getSessionCatalogStorageKey(user);
+  if (!key) return [];
+  try {
+    const parsed = JSON.parse(safeLocalStorageGet(key) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    parsed.forEach((session) => clearInterruptedAnalysisStatuses(session));
+    return parsed;
+  } catch (_) {
+    safeLocalStorageRemove(key);
+    return [];
+  }
+}
+
 function getLocalAnalysisSessionStorageKey(sessionId = "") {
   const cleanSessionId = String(sessionId || "").trim();
   return cleanSessionId ? `${LOCAL_ANALYSIS_SESSION_STORAGE_PREFIX}${cleanSessionId}` : "";
@@ -571,14 +1157,32 @@ function getLocalAnalysisSessionStorageKey(sessionId = "") {
 function persistLocalAnalysisSession(session = null) {
   const sessionId = String(session?.id || "").trim();
   const key = getLocalAnalysisSessionStorageKey(sessionId);
-  if (!key || !session) return;
-  putAnalizarPdfCachedAnalysisSession(session).catch(() => {
-    try {
-      safeLocalStorageSet(key, JSON.stringify(session));
-    } catch (_) {
-      // noop
+  if (!key || !session || catalogOnlySessionIds.has(sessionId)) return Promise.resolve(null);
+  const snapshot = structuredClone(session);
+  const generation = Number(localAnalysisPersistenceGenerations.get(sessionId) || 0);
+  const previous = localAnalysisPersistenceChains.get(sessionId) || Promise.resolve();
+  const task = previous
+    .catch(() => null)
+    .then(async () => {
+      if (Number(localAnalysisPersistenceGenerations.get(sessionId) || 0) !== generation) return null;
+      try {
+        return await putAnalizarPdfCachedAnalysisSession(snapshot);
+      } catch (_) {
+        try {
+          safeLocalStorageSet(key, JSON.stringify(snapshot));
+        } catch (_) {
+          // IndexedDB y localStorage pueden rechazar payloads grandes; el guardado remoto sigue disponible.
+        }
+        return null;
+      }
+    });
+  const trackedTask = task.finally(() => {
+    if (localAnalysisPersistenceChains.get(sessionId) === trackedTask) {
+      localAnalysisPersistenceChains.delete(sessionId);
     }
   });
+  localAnalysisPersistenceChains.set(sessionId, trackedTask);
+  return trackedTask;
 }
 
 function mergeLocalAnalysisIntoSession(session = null, local = null) {
@@ -664,10 +1268,21 @@ async function restoreLocalAnalysisSession(session = null) {
 
 function removeLocalAnalysisSession(sessionId = "") {
   const key = getLocalAnalysisSessionStorageKey(sessionId);
+  const cleanSessionId = String(sessionId || "").trim();
+  const pendingWrite = localAnalysisPersistenceChains.get(cleanSessionId) || Promise.resolve();
+  localAnalysisPersistenceGenerations.set(
+    cleanSessionId,
+    Number(localAnalysisPersistenceGenerations.get(cleanSessionId) || 0) + 1
+  );
+  localAnalysisPersistenceChains.delete(cleanSessionId);
+  catalogOnlySessionIds.delete(cleanSessionId);
   if (key) {
     safeLocalStorageRemove(key);
   }
-  deleteAnalizarPdfCachedAnalysisSession(sessionId).catch(() => {});
+  Promise.resolve(pendingWrite)
+    .catch(() => null)
+    .then(() => deleteAnalizarPdfCachedAnalysisSession(cleanSessionId))
+    .catch(() => {});
 }
 
 function buildSessionTitleFromBibliographicInfo(info = {}) {
@@ -677,7 +1292,7 @@ function buildSessionTitleFromBibliographicInfo(info = {}) {
     String(info?.trimestre || "").trim(),
     String(info?.edicionNumero || "").trim(),
   ].filter(Boolean);
-  return parts.join(" · ") || "Nueva sesión";
+  return parts.join(" · ") || "Nuevo análisis";
 }
 
 function buildDerivedSessionTitle(session = null) {
@@ -1846,6 +2461,8 @@ function buildRenderableSession(session = null) {
         sourceType: entry.sourceType || session.sourceType,
         analysisStatus: entry.analysisStatus || "idle",
         analysisJobId: entry.analysisJobId || "",
+        workflowFormat: session.workflowFormat || "en_forma",
+        railTintHex: String(entry.railTintHex || "").trim(),
         result: entry.result || createEmptyResultPayload(),
         resultSummary: entry.resultSummary || createEmptyResultSummary(),
         quickAnalysis: entry.quickAnalysis || null,
@@ -1967,9 +2584,6 @@ function buildLocalAnalysisContextForJob(session = null, targetRevisionId = "", 
       if (!recortablePages.length) continue;
       contextFiles.push({
         id: file?.id || "",
-        documentName: file?.documentName || file?.fileName || "Archivo",
-        sourceType: file?.sourceType || session?.sourceType || "",
-        resultSummary: file?.resultSummary || null,
         result: {
           stats: {
             pageReports: recortablePages,
@@ -1980,14 +2594,13 @@ function buildLocalAnalysisContextForJob(session = null, targetRevisionId = "", 
     if (!contextFiles.length) continue;
     contextRevisions.push({
       id: revision?.id || "",
-      title: revision?.title || "",
-      unidad: revision?.unidad || "",
-      revisionNumero: revision?.revisionNumero || "",
-      recortableRole: revision?.recortableRole || "",
       files: contextFiles,
     });
   }
-  return contextRevisions.length ? { revisions: contextRevisions } : null;
+  return {
+    analysisCategories: getAnalizarPdfAnalysisCategories(),
+    revisions: contextRevisions,
+  };
 }
 
 function syncPersistedTitleMap() {
@@ -2203,7 +2816,7 @@ async function clearStaleLocalSourceMetadata(session = null) {
   return saved;
 }
 
-async function rehydrateSelectedFilesForActiveContext() {
+async function rehydrateSelectedFilesForActiveContext(options = {}) {
   const session = store.getActiveSession();
   const revision = getActiveRevision(session);
   const activeFile = getActiveFile(session, revision);
@@ -2213,25 +2826,25 @@ async function rehydrateSelectedFilesForActiveContext() {
   if (!activeFile) {
     state.selectedFiles = [];
     els.fileInput.value = "";
-    renderActiveSession();
+    renderActiveSession(options);
     return;
   }
   const currentMatch = Array.isArray(state.selectedFiles)
     && state.selectedFiles.length === 1
     && buildFileKey(state.selectedFiles[0]?.name || "") === buildFileKey(activeFile.documentName || "");
   if (currentMatch) {
-    renderActiveSession();
+    renderActiveSession(options);
     return;
   }
   state.selectedFiles = [];
   els.fileInput.value = "";
   if (!activeFile.hasLocalSource || !activeFile.localBlobKey) {
-    renderActiveSession();
+    renderActiveSession(options);
     return;
   }
   const cachedFile = await resolveCachedFileForEntry(activeFile);
   if (!cachedFile) {
-    renderActiveSession();
+    renderActiveSession(options);
     return;
   }
   state.selectedFiles = [cachedFile];
@@ -2247,7 +2860,7 @@ async function rehydrateSelectedFilesForActiveContext() {
       state.isRehydratingFileSelection = false;
     });
   }
-  renderActiveSession();
+  renderActiveSession(options);
 }
 
 async function persistSelectedFilesToActiveRevision() {
@@ -2396,8 +3009,8 @@ async function buildAnalysisTargets(session = null, selectedFiles = state.select
       })));
     }
   }
-  targets.push(...activeTargets);
   targets.push(...destinationTargetsToAnalyzeLast);
+  targets.push(...activeTargets);
   logAnalizarPdfFlow("buildAnalysisTargets:resolved-cached", {
     resolvedCount: targets.length,
       targets: targets.map((target) => ({
@@ -2410,11 +3023,12 @@ async function buildAnalysisTargets(session = null, selectedFiles = state.select
   return targets;
 }
 
-async function buildAnalysisTargetsForAll(session = null, selectedFiles = state.selectedFiles) {
+async function buildAnalysisTargetsForAll(session = null, selectedFiles = state.selectedFiles, options = {}) {
   return buildAnalysisTargetsForAllPure({
     session,
     activeRevisionId: String(getActiveRevision(session)?.id || "").trim(),
     selectedFiles,
+    selectedRevisionIds: Array.isArray(options?.selectedRevisionIds) ? options.selectedRevisionIds : null,
     resolveCachedFileForEntry,
     buildFileKey,
   });
@@ -2536,8 +3150,32 @@ function isRecoverableStoredSourceAnalysisError(error = null) {
   );
 }
 
-async function runAnalysisForTargets(session = null, targets = [], emptyMessage = "") {
+function buildFinalLinkedAssetReconciliationTargets(targets = []) {
+  const linkedDestinationUnits = new Set(["recortables", "fichas", "anexos"]);
+  const destinationTargets = [];
+  const sourceTargets = [];
+
+  for (const target of Array.isArray(targets) ? targets : []) {
+    const unidad = String(target?.revision?.unidad || "").trim().toLowerCase();
+    if (linkedDestinationUnits.has(unidad)) {
+      destinationTargets.push(target);
+    } else {
+      sourceTargets.push(target);
+    }
+  }
+
+  if (!destinationTargets.length || !sourceTargets.length) {
+    return [];
+  }
+  return [...destinationTargets, ...sourceTargets];
+}
+
+async function runAnalysisForTargets(session = null, targets = [], emptyMessage = "", options = {}) {
   const savedSessionId = String(session?.id || "").trim();
+  const initialMagicSpriteToken = String(options?.initialMagicSpriteToken || "").trim();
+  let persistentMagicSpriteToken = activeAnalysisSprites.has(initialMagicSpriteToken)
+    ? initialMagicSpriteToken
+    : "";
   if (savedSessionId) {
     delete state.clearedRailSessionIds[savedSessionId];
   }
@@ -2549,6 +3187,7 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
     throw new Error("No hay sesión activa.");
   }
   if (!targets.length) {
+    stopAnalysisSprite(initialMagicSpriteToken);
     await clearBusyStatusesWithoutLocalFiles(session, {
       scope: "targets"
     });
@@ -2568,6 +3207,27 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
       ...targetProgress,
       step: "Preparando archivo",
     }));
+    const spriteContext = {
+      revisionId: revision?.id || "",
+      fileId: targetFile?.id || "",
+      revision,
+      file: targetFile || selectedFile,
+    };
+    const reusableSpriteToken = state.isAnalyzingAll && activeAnalysisSprites.has(persistentMagicSpriteToken)
+      ? persistentMagicSpriteToken
+      : (targetIndex === 0 && activeAnalysisSprites.has(initialMagicSpriteToken) ? initialMagicSpriteToken : "");
+    const magicSpriteToken = reusableSpriteToken
+      ? retargetAnalysisSprite(reusableSpriteToken, spriteContext)
+      : startAnalysisSprite(spriteContext);
+    if (state.isAnalyzingAll) persistentMagicSpriteToken = magicSpriteToken;
+    primeAnalysisSpriteWords(magicSpriteToken, selectedFile);
+    startProgressiveAnalysisWords(activeAnalysisSprites.get(magicSpriteToken), {
+      phase: "preparing-file",
+      maxProgress: .28,
+      increment: .018,
+      interval: 1320,
+      startDelay: 40,
+    });
     await flushUiFrame();
     logAnalizarPdfFlow("runAnalysisForTargets:target", {
       revisionId: revision?.id || "",
@@ -2579,6 +3239,13 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
     const localMetadata = selectedFile
       ? await cacheSelectedFileForRevision(savedSessionId, revision.id, targetFile, selectedFile)
       : null;
+    startProgressiveAnalysisWords(activeAnalysisSprites.get(magicSpriteToken), {
+      phase: "reading-source",
+      maxProgress: .36,
+      increment: .022,
+      interval: 1240,
+      startDelay: 20,
+    });
     setBusyOverlay(buildEditorialProcessLabel(session, revision, targetFile || selectedFile, {
       ...targetProgress,
       step: selectedFile ? "Guardando copia local del IDML" : "Usando copia guardada del IDML",
@@ -2599,7 +3266,8 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
         }
       }
       return draft;
-    });
+    }, { render: false });
+    renderAll({ preserveResultsRail: true });
     logAnalizarPdfFlow("runAnalysisForTargets:persist-before-upload", {
       fileId: targetFile?.id || "",
     });
@@ -2607,6 +3275,13 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
       ...targetProgress,
       step: "Guardando estado de la ficha",
     }));
+    startProgressiveAnalysisWords(activeAnalysisSprites.get(magicSpriteToken), {
+      phase: "saving-file-state",
+      maxProgress: .42,
+      increment: .02,
+      interval: 1200,
+      startDelay: 20,
+    });
     await flushUiFrame();
     await saveActiveSessionSnapshot();
     let upload = null;
@@ -2615,6 +3290,13 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
         ...targetProgress,
         step: useStoredSource ? "Creando job con copia guardada" : "Subiendo IDML al backend",
       }));
+      startProgressiveAnalysisWords(activeAnalysisSprites.get(magicSpriteToken), {
+        phase: "uploading-source",
+        maxProgress: .48,
+        increment: .024,
+        interval: 1160,
+        startDelay: 20,
+      });
       await flushUiFrame();
       const activeSessionForJob = store.getActiveSession();
       const localAnalysisContext = buildLocalAnalysisContextForJob(activeSessionForJob, revision.id, targetFile.id);
@@ -2634,6 +3316,7 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
     } catch (error) {
       if (useStoredSource && isRecoverableStoredSourceAnalysisError(error)) {
         if (requiresSuccessBeforeActive) {
+          stopAnalysisSprite(magicSpriteToken);
           throw createMissingRecortableDestinationError(
             "No se analizó la unidad origen porque primero debe analizarse el recortable destino.",
             [{
@@ -2666,10 +3349,13 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
             draft.analysisStatus = "idle";
           }
           return draft;
-        });
+        }, { render: false });
+        renderAll({ preserveResultsRail: true });
         await saveActiveSessionSnapshot();
+        stopAnalysisSprite(magicSpriteToken);
         continue;
       }
+      stopAnalysisSprite(magicSpriteToken);
       throw error;
     }
     const queued = upload.response || {};
@@ -2692,7 +3378,9 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
       draft.analysisStatus = queued.status || "queued";
       draft.analysisJobId = queued.jobId || "";
       return draft;
-    });
+    }, { render: false });
+    renderAll({ preserveResultsRail: true });
+    syncAnalysisSpriteProgressStage(magicSpriteToken, queued.status || "queued");
     setJobMetaText(formatJobMeta(queued, buildRenderableSession(store.getActiveSession())));
     try {
       await startPolling(queued.jobId || "", {
@@ -2702,8 +3390,11 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
         action: targetProgress.action,
         index: targetProgress.index,
         total: targetProgress.total,
+        magicSpriteToken,
+        keepMagicSpriteAlive: state.isAnalyzingAll === true,
       });
     } catch (error) {
+      stopAnalysisSprite(magicSpriteToken);
       const targetLabel = targetFile?.documentName || selectedFile?.name || "archivo";
       nonBlockingMessages.push(`${targetLabel}: ${String(error?.message || error)}`);
       continue;
@@ -2712,6 +3403,7 @@ async function runAnalysisForTargets(session = null, targets = [], emptyMessage 
   if (nonBlockingMessages.length) {
     setJobMetaText(nonBlockingMessages.join(" "));
   }
+  return activeAnalysisSprites.has(persistentMagicSpriteToken) ? persistentMagicSpriteToken : "";
 }
 
 function syncFileInputForSession(session = null) {
@@ -2807,6 +3499,22 @@ function renderSectionsEditor(session = null) {
 function renderBibliographicInfo(session = null) {
   const bibliographicInfo = session?.bibliographicInfo || {};
   const activeRevision = getActiveRevision(session);
+  const isLibre = session?.workflowFormat === "libre";
+  els.biblioGrid?.classList.toggle("is-libre", isLibre);
+  if (els.libreWorkflowField) els.libreWorkflowField.hidden = !isLibre;
+  if (els.libreWorkflowInput) els.libreWorkflowInput.value = isLibre ? "Libre" : "En Forma";
+  if (els.libreLanguageField) els.libreLanguageField.hidden = !isLibre;
+  if (els.libreLanguageInput) els.libreLanguageInput.value = String(session?.languageCode || "es-MX");
+  [
+    els.bookTypeInput,
+    els.nivelInput,
+    els.gradoInput,
+    els.trimestreInput,
+    els.unidadInput,
+  ].forEach((input) => input?.closest("label")?.toggleAttribute("hidden", isLibre));
+  if (els.recortableRoleField) els.recortableRoleField.hidden = isLibre;
+  els.revisionMappingSelect?.closest("label")?.toggleAttribute("hidden", isLibre);
+  els.sessionTitleLabel?.closest("label")?.toggleAttribute("hidden", isLibre);
   const inferredRevisionMappingId = String(
     activeRevision?.mappingId ||
     activeRevision?.files?.[0]?.mappingId ||
@@ -2869,73 +3577,1263 @@ function renderSavedAnalysisSelector(session = null) {
     : `<option value="">Sin análisis guardados</option>`;
 }
 
+function resolveRevisionAccentColor(revision = null, workflowFormat = "") {
+  const isHex = (value) => /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(value || "").trim());
+  if (String(workflowFormat || "").trim().toLowerCase() === "libre") {
+    const dominantColor = (Array.isArray(revision?.files) ? revision.files : [])
+      .map((file) => String(file?.result?.stats?.dominantPageSwatch?.hex || "").trim())
+      .find(isHex) || "";
+    if (dominantColor) return dominantColor;
+  }
+  const unit = String(revision?.unidad || revision?.title || "").trim();
+  const unitNumber = String(unit.match(/^unidad\s+(\d{1,2})$/i)?.[1] || "").trim();
+  const targetSwatch = /^proyecto$/i.test(unit)
+    ? "10ED PROYECTO"
+    : /^lecturas?$/i.test(unit)
+      ? "COLOR DE LA SEMANA"
+      : /^recortables?$/i.test(unit)
+        ? "LEVEL COLOR"
+        : unitNumber ? `U${unitNumber}` : "";
+  const swatches = (Array.isArray(revision?.files) ? revision.files : [])
+    .flatMap((file) => Array.isArray(file?.result?.stats?.swatchInventory) ? file.result.stats.swatchInventory : []);
+  const isNeutral = (value) => /^(?:BLACK|PAPER|NONE|\[NONE\]|\[PAPER\]|REGISTRATION)$/i.test(String(value || "").trim());
+  const normalizedTarget = targetSwatch.toUpperCase();
+  const matchingSwatch = targetSwatch
+    ? swatches.find((swatch) => {
+      const name = String(swatch?.name || swatch?.swatchName || "").trim().toUpperCase();
+      return name === normalizedTarget || name.includes(normalizedTarget);
+    })
+    : null;
+  const extractedSwatch = matchingSwatch || swatches.find((swatch) => {
+    const name = String(swatch?.name || swatch?.swatchName || "").trim();
+    return !isNeutral(name) && isHex(swatch?.hex);
+  });
+  const color = String(extractedSwatch?.hex || "").trim();
+  if (isHex(color)) return color;
+  const cachedColor = (Array.isArray(revision?.files) ? revision.files : [])
+    .map((file) => String(file?.railTintHex || "").trim())
+    .find(isHex) || "";
+  return cachedColor;
+}
+
+function renderRevisionInsertSlot(index = 0) {
+  const safeIndex = Math.max(0, Number(index) || 0);
+  return `
+    <div class="analizar-pdf-revision-insert-slot" data-insert-index="${safeIndex}" role="presentation">
+      <button
+        type="button"
+        class="analizar-pdf-revision-insert-btn"
+        data-action="open-insert-revision"
+        data-insert-index="${safeIndex}"
+        aria-label="Añadir ficha editorial en esta posición"
+        title="Añadir ficha editorial aquí"
+      >
+        <i class="fas fa-plus" aria-hidden="true"></i>
+      </button>
+    </div>
+  `;
+}
+
+const ANALYSIS_WORD_FALLBACK = Object.freeze(["Texto", "Estilos", "Color", "Página", "Folio", "IDML", "Listo"]);
+const ANALYSIS_WORD_STOPWORDS = new Set([
+  "para", "como", "esta", "este", "estos", "estas", "desde", "hasta", "entre",
+  "sobre", "también", "porque", "cuando", "donde", "cada", "todo", "toda", "todos", "todas",
+]);
+
+function collectIdmlAnimationWords(result = null, limit = 8) {
+  const maxWords = Math.max(1, Math.min(32, Number(limit) || 8));
+  const pages = Array.isArray(result?.stats?.pageReports) ? result.stats.pageReports : [];
+  const textParts = [];
+  for (const page of pages) {
+    const pageText = String(page?.pageText || "").trim();
+    if (pageText) {
+      textParts.push(pageText);
+      continue;
+    }
+    for (const entries of Object.values(page?.content || {})) {
+      for (const entry of Array.isArray(entries) ? entries : []) {
+        const text = String(entry?.text || "").trim();
+        if (text) textParts.push(text);
+      }
+    }
+  }
+  const unique = [];
+  const seen = new Set();
+  const tokens = textParts.join(" ").match(/\p{L}[\p{L}\p{M}’'-]{2,}/gu) || [];
+  for (const token of tokens) {
+    const clean = String(token || "").replace(/^[’'-]+|[’'-]+$/g, "").trim();
+    const normalized = clean.toLocaleLowerCase("es-MX");
+    if (clean.length < 4 || clean.length > 18 || ANALYSIS_WORD_STOPWORDS.has(normalized) || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    unique.push(clean);
+  }
+  if (!unique.length) return ANALYSIS_WORD_FALLBACK.slice(0, maxWords);
+  if (unique.length <= maxWords) return unique;
+  const selected = [];
+  const step = unique.length / maxWords;
+  for (let index = 0; index < maxWords; index += 1) {
+    selected.push(unique[Math.min(unique.length - 1, Math.floor(index * step))]);
+  }
+  return selected;
+}
+
+async function extractIdmlAnimationWordsFromFile(file = null, limit = 32) {
+  if (!(file instanceof Blob) || !String(file?.name || "").toLowerCase().endsWith(".idml")) return [];
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let eocdOffset = -1;
+    for (let offset = Math.max(0, bytes.length - 65_557); offset <= bytes.length - 22; offset += 1) {
+      if (view.getUint32(offset, true) === 0x06054b50) eocdOffset = offset;
+    }
+    if (eocdOffset < 0) return [];
+    const entryCount = view.getUint16(eocdOffset + 10, true);
+    let cursor = view.getUint32(eocdOffset + 16, true);
+    const decoder = new TextDecoder("utf-8");
+    const xmlTexts = [];
+    for (let index = 0; index < entryCount && cursor + 46 <= bytes.length; index += 1) {
+      if (view.getUint32(cursor, true) !== 0x02014b50) break;
+      const method = view.getUint16(cursor + 10, true);
+      const compressedSize = view.getUint32(cursor + 20, true);
+      const fileNameLength = view.getUint16(cursor + 28, true);
+      const extraLength = view.getUint16(cursor + 30, true);
+      const commentLength = view.getUint16(cursor + 32, true);
+      const localOffset = view.getUint32(cursor + 42, true);
+      const name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + fileNameLength));
+      cursor += 46 + fileNameLength + extraLength + commentLength;
+      if (!/^Stories\/Story_.*\.xml$/i.test(name) || localOffset + 30 > bytes.length) continue;
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = bytes.slice(dataOffset, dataOffset + compressedSize);
+      let raw = compressed;
+      if (method === 8 && typeof DecompressionStream === "function") {
+        raw = new Uint8Array(await new Response(
+          new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"))
+        ).arrayBuffer());
+      } else if (method !== 0) {
+        continue;
+      }
+      xmlTexts.push(decoder.decode(raw));
+      if (xmlTexts.length >= 36) break;
+    }
+    const parser = new DOMParser();
+    const textParts = [];
+    for (const xmlText of xmlTexts) {
+      const xml = parser.parseFromString(xmlText, "application/xml");
+      xml.querySelectorAll("Content").forEach((node) => {
+        if (!node.closest("Note") && String(node.textContent || "").trim()) textParts.push(node.textContent);
+      });
+    }
+    return collectIdmlAnimationWords({ stats: { pageReports: [{ pageText: textParts.join(" ") }] } }, limit);
+  } catch (_) {
+    return [];
+  }
+}
+
+function primeAnalysisSpriteWords(token = "", file = null) {
+  const cleanToken = String(token || "").trim();
+  const record = activeAnalysisSprites.get(cleanToken) || null;
+  if (!record) return;
+  extractIdmlAnimationWordsFromFile(file, 32).then((words) => {
+    const liveRecord = activeAnalysisSprites.get(cleanToken) || null;
+    if (liveRecord && words.length) liveRecord.animationWords = words;
+  }).catch(() => {});
+}
+
+function resolveRevisionAnimationWords(revision = null, limit = 8) {
+  const files = Array.isArray(revision?.files) ? revision.files : [];
+  const analyzedFile = files.find((file) => file?.result?.stats?.pageReports?.length) || files[0] || null;
+  return collectIdmlAnimationWords(analyzedFile?.result || null, limit);
+}
+
+function resolveAnalysisAnimationWords(revisionId = "", fileId = "", limit = 8) {
+  const session = store.getActiveSession();
+  const revision = (Array.isArray(session?.revisions) ? session.revisions : [])
+    .find((entry) => String(entry?.id || "").trim() === String(revisionId || "").trim()) || null;
+  const files = Array.isArray(revision?.files) ? revision.files : [];
+  const file = files.find((entry) => String(entry?.id || "").trim() === String(fileId || "").trim())
+    || files.find((entry) => entry?.result?.stats?.pageReports?.length)
+    || files[0]
+    || null;
+  return collectIdmlAnimationWords(file?.result || null, limit);
+}
+
 function renderRevisionList(session = null) {
   if (!els.revisionList) return;
   const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
+  const totalSelectable = revisions.reduce((count, revision) => count + ((revision.files || []).length ? 1 : 0), 0);
+  const selectedCount = revisions.reduce((count, revision) => {
+    const files = Array.isArray(revision?.files) ? revision.files : [];
+    return count + (files.length && files.every((file) => file?.analysisSelected !== false) ? 1 : 0);
+  }, 0);
+  const selectionLocked = state.isAnalyzingAll || state.isAnalyzingCurrent || state.isQuickAnalyzingAll;
+  if (els.selectedCardsCount) els.selectedCardsCount.textContent = `${selectedCount}/${totalSelectable}`;
+  if (els.selectAllCardsBtn) {
+    els.selectAllCardsBtn.hidden = !state.cardAnalysisSelectionMode;
+    els.selectAllCardsBtn.disabled = selectionLocked;
+    els.selectAllCardsBtn.setAttribute("aria-disabled", String(selectionLocked));
+  }
+  if (els.toggleCardSelectionBtn) {
+    els.toggleCardSelectionBtn.disabled = selectionLocked;
+    els.toggleCardSelectionBtn.setAttribute("aria-disabled", String(selectionLocked));
+  }
   const activeRevisionId = String(getActiveRevision(session)?.id || "").trim();
   if (!revisions.length) {
     els.revisionList.innerHTML = `<div class="analizar-pdf-empty-state">No hay fichas editoriales todavía.</div>`;
     return;
   }
+  const timelineSignature = revisions.map((revision) => String(revision?.id || "")).join("|");
+  if (state.revisionTimelineRevealInProgress) {
+    if (state.revisionTimelineRevealSignature === timelineSignature) {
+      // Firebase y la rehidratación local pueden pedir otro render durante la entrada.
+      // Conservamos los nodos que Anime.js está moviendo y aplicamos el último estado al terminar.
+      state.deferredRevisionTimelineSession = session;
+      return;
+    }
+    removeAnimeAnimation(els.revisionList.querySelectorAll(".analizar-pdf-revision-timeline-card"));
+    state.revisionTimelineRevealInProgress = false;
+    state.revisionTimelineRevealSignature = "";
+    state.deferredRevisionTimelineSession = null;
+  }
+  const shouldRevealTimeline = state.revisionTimelineSignature !== timelineSignature;
+  state.revisionTimelineSignature = timelineSignature;
+  if (shouldRevealTimeline) {
+    state.revisionTimelineRevealPending = true;
+  }
+  els.revisionList.classList.toggle(
+    "is-reveal-pending",
+    state.revisionTimelineRevealPending && !prefersReducedRevisionMotion()
+  );
+  const completedRevisionIds = new Set(state.completedRevisionAnimationIds);
+  state.completedRevisionAnimationIds.clear();
+  removeAnimeAnimation(els.revisionList.querySelectorAll([
+    ".analizar-pdf-revision-machine *",
+    ".analizar-pdf-revision-eruption *",
+    ".analizar-pdf-revision-timeline-card.is-processing .analizar-pdf-subrecord-card-row",
+  ].join(",")));
+  els.revisionList.setAttribute("role", "list");
+  els.revisionList.setAttribute("aria-label", "Línea de tiempo de fichas editoriales");
   els.revisionList.innerHTML = revisions.map((revision, index) => {
     const isBusy = isRevisionBusy(revision);
-    return `
+    const accentColor = resolveRevisionAccentColor(revision, session?.workflowFormat);
+    const isCompleted = !isBusy
+      && Array.isArray(revision.files)
+      && revision.files.length > 0
+      && revision.files.every((file) => String(file?.analysisStatus || "").toLowerCase() === "completed");
+    const machineWords = resolveRevisionAnimationWords(revision, 14);
+    const revisionFiles = Array.isArray(revision?.files) ? revision.files : [];
+    const analysisSelected = Boolean(revisionFiles.length) && revisionFiles.every((file) => file?.analysisSelected !== false);
+    const resolvedLanguage = String((revision.files || [])[0]?.result?.stats?.language?.resolvedCode || "").trim();
+    const analyzedStructure = (revision.files || [])[0]?.result?.stats?.detectedStructure || null;
+    const visibleStructure = analyzedStructure?.label ? analyzedStructure : revision.detectedStructure;
+    const displayRevisionTitle = session?.workflowFormat === "libre" ? `Archivo ${index + 1}` : (revision.title || "Nueva ficha editorial");
+    return `${index === 0 ? renderRevisionInsertSlot(0) : ""}
     <article
       id="analizarPdfEditorialPanel-${escapeAttr(revision.id)}"
-      class="analizar-pdf-subrecord-card${revision.id === activeRevisionId ? " is-active" : ""}${isBusy ? " is-processing" : ""}"
+      class="analizar-pdf-subrecord-card analizar-pdf-revision-timeline-card${revision.id === activeRevisionId ? " is-active" : ""}${isBusy ? " is-processing" : ""}${isCompleted ? " is-complete" : ""}"
       data-revision-id="${escapeAttr(revision.id)}"
+      data-timeline-index="${index + 1}"
+      ${accentColor ? `style="--revision-accent:${escapeAttr(accentColor)}"` : ""}
+      role="listitem"
       draggable="true"
     >
+      ${isBusy ? `
+        <div class="analizar-pdf-revision-machine" aria-hidden="true">
+          <span class="analizar-pdf-revision-machine-vent"></span>
+          <span class="analizar-pdf-revision-machine-smoke" style="--smoke-x:-24px"></span>
+          <span class="analizar-pdf-revision-machine-smoke" style="--smoke-x:4px"></span>
+          <span class="analizar-pdf-revision-machine-smoke" style="--smoke-x:26px"></span>
+          ${machineWords.map((word, wordIndex) => {
+            const spread = machineWords.length > 1 ? wordIndex / (machineWords.length - 1) : .5;
+            const wordX = Math.round(-54 + (spread * 108));
+            return `<span class="analizar-pdf-revision-machine-word" style="--word-x:${wordX}px">${escapeHtml(word)}</span>`;
+          }).join("")}
+        </div>
+      ` : ""}
+      ${state.cardAnalysisSelectionMode ? `<button type="button" class="analizar-pdf-card-analysis-check" data-action="toggle-analysis-selection" data-revision-id="${escapeAttr(revision.id)}" role="checkbox" aria-checked="${analysisSelected ? "true" : "false"}" aria-label="${analysisSelected ? "Omitir esta ficha del análisis masivo" : "Incluir esta ficha en el análisis masivo"}" title="${selectionLocked ? "La selección está bloqueada mientras se realiza el análisis" : (analysisSelected ? "Omitir del análisis masivo" : "Incluir en el análisis masivo")}" ${selectionLocked ? 'disabled aria-disabled="true"' : ""}><span><i class="fas fa-check" aria-hidden="true"></i></span></button>` : ""}
+      <span class="analizar-pdf-revision-file-tab" aria-hidden="true"><i class="fas fa-folder" aria-hidden="true"></i> Archivo ${index + 1}</span>
       <div class="analizar-pdf-subrecord-card-row">
         <button type="button" class="analizar-pdf-subrecord-card-select" data-action="select-revision" data-revision-id="${escapeAttr(revision.id)}">
           <span class="analizar-pdf-subrecord-card-title">
-            <span>${escapeHtml(revision.title || "Nueva ficha editorial")}</span>
-            ${isBusy ? '<span class="analizar-pdf-subrecord-spinner" aria-label="Ficha en proceso" title="Ficha en proceso"></span>' : ""}
+            <span>${escapeHtml(displayRevisionTitle)}</span>
+            ${isCompleted ? '<span class="analizar-pdf-revision-complete-mark" aria-label="Análisis terminado" title="Análisis terminado"><i class="fas fa-check" aria-hidden="true"></i></span>' : ""}
           </span>
-          <small>${escapeHtml([
-            revision.unidad || "Unidad pendiente",
-            revision.revisionNumero || "Revisión pendiente",
-            `${revision.fileCount || revision.files?.length || 0} archivo(s)`
-          ].join(" · "))}</small>
+          <small>${escapeHtml(`${revision.fileCount || revision.files?.length || 0} ${(revision.fileCount || revision.files?.length || 0) === 1 ? "archivo" : "archivos"}`)}</small>
+          ${visibleStructure?.label ? `<small class="analizar-pdf-card-structure">${escapeHtml(visibleStructure.label)}</small>` : ""}
+          ${session?.languageCode === "auto" && resolvedLanguage ? `<small class="analizar-pdf-card-language">${escapeHtml(resolvedLanguage)}</small>` : ""}
         </button>
-        <div class="analizar-pdf-subrecord-actions">
-          <button
-            type="button"
-            class="analizar-pdf-icon-btn analizar-pdf-subrecord-order-btn"
-            data-action="move-revision-up"
-            data-revision-id="${escapeAttr(revision.id)}"
-            aria-label="Subir ficha editorial"
-            title="Subir ficha editorial"
-            ${index === 0 ? "disabled" : ""}
-          >
-            <i class="fas fa-chevron-up" aria-hidden="true"></i>
-          </button>
-          <button
-            type="button"
-            class="analizar-pdf-icon-btn analizar-pdf-subrecord-order-btn"
-            data-action="move-revision-down"
-            data-revision-id="${escapeAttr(revision.id)}"
-            aria-label="Bajar ficha editorial"
-            title="Bajar ficha editorial"
-            ${index === revisions.length - 1 ? "disabled" : ""}
-          >
-            <i class="fas fa-chevron-down" aria-hidden="true"></i>
-          </button>
-          <button
-            type="button"
-            class="analizar-pdf-icon-btn analizar-pdf-subrecord-delete-btn"
-            data-action="delete-revision"
-            data-revision-id="${escapeAttr(revision.id)}"
-            aria-label="Eliminar ficha editorial"
-            title="Eliminar ficha editorial"
-          >
-            <i class="fas fa-trash" aria-hidden="true"></i>
-          </button>
-        </div>
       </div>
+      <button
+        type="button"
+        class="analizar-pdf-icon-btn analizar-pdf-revision-analyze-btn"
+        data-action="analyze-revision"
+        data-revision-id="${escapeAttr(revision.id)}"
+        aria-label="Analizar esta ficha editorial"
+        title="Analizar esta ficha editorial"
+        ${isBusy ? 'disabled aria-disabled="true"' : ""}
+      >
+        <i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i>
+      </button>
+      <button
+        type="button"
+        class="analizar-pdf-icon-btn analizar-pdf-subrecord-delete-btn analizar-pdf-revision-delete-btn"
+        data-action="delete-revision"
+        data-revision-id="${escapeAttr(revision.id)}"
+        aria-label="Eliminar ficha editorial"
+        title="Eliminar ficha editorial"
+      >
+        <i class="fas fa-trash" aria-hidden="true"></i>
+      </button>
     </article>
+    ${renderRevisionInsertSlot(index + 1)}
   `;
   }).join("");
+  if (state.revisionTimelineRevealPending) {
+    scheduleRevisionTimelineReveal();
+  }
+  window.requestAnimationFrame(() => {
+    repositionActiveAnalysisSprites();
+    animateRevisionTimeline({ completedRevisionIds });
+  });
+}
+
+function prefersReducedRevisionMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+}
+
+function scheduleRevisionTimelineReveal() {
+  if (!state.revisionTimelineRevealPending || !state.bootSpinnerDismissed) return;
+  window.clearTimeout(revisionTimelineRevealTimer);
+  // Un debounce corto evita animar nodos que Firebase reemplace en la misma ráfaga.
+  revisionTimelineRevealTimer = window.setTimeout(() => {
+    revisionTimelineRevealTimer = 0;
+    const cards = els.revisionList?.querySelectorAll(".analizar-pdf-revision-timeline-card") || [];
+    if (!cards.length) return;
+    state.revisionTimelineRevealPending = false;
+    animateRevisionTimeline({ shouldRevealTimeline: true });
+  }, 72);
+}
+
+function finishRevisionTimelineReveal(revealSignature = "") {
+  if (state.revisionTimelineRevealSignature !== revealSignature) return;
+  state.revisionTimelineRevealInProgress = false;
+  state.revisionTimelineRevealSignature = "";
+  const deferredSession = state.deferredRevisionTimelineSession;
+  state.deferredRevisionTimelineSession = null;
+  if (deferredSession) {
+    renderRevisionList(deferredSession);
+  }
+}
+
+function animateRevisionTimeline({ shouldRevealTimeline = false, completedRevisionIds = new Set() } = {}) {
+  if (!els.revisionList) return;
+  const cards = [...els.revisionList.querySelectorAll(".analizar-pdf-revision-timeline-card")];
+  if (prefersReducedRevisionMotion()) {
+    els.revisionList.classList.remove("is-reveal-pending");
+    cards.forEach((card) => {
+      card.style.removeProperty("opacity");
+      card.style.removeProperty("transform");
+    });
+    return;
+  }
+  if (shouldRevealTimeline && cards.length) {
+    const revealSignature = state.revisionTimelineSignature;
+    state.revisionTimelineRevealInProgress = true;
+    state.revisionTimelineRevealSignature = revealSignature;
+    state.deferredRevisionTimelineSession = null;
+    removeAnimeAnimation(cards);
+    cards.forEach((card, index) => {
+      card.style.opacity = "0";
+      card.style.transform = `translateY(42px) scale(.08) rotate(${index % 2 ? 5 : -5}deg)`;
+      card.style.transformOrigin = "50% 86%";
+    });
+    els.revisionList.classList.remove("is-reveal-pending");
+    animate(cards, {
+      opacity: [0, 1],
+      y: [42, 0],
+      scale: [.08, 1],
+      rotate: (card, index) => [index % 2 ? 5 : -5, 0],
+      // Mantiene la entrada secuencial sin dejar una pausa larga entre archivos.
+      delay: stagger(135, { start: 25 }),
+      ease: spring({ bounce: .48, duration: 720 }),
+      onComplete: () => {
+        animate(cards, {
+          y: (card, index) => [0, index % 2 ? -3 : -5, 0],
+          rotate: (card, index) => [0, index % 2 ? .55 : -.55, 0],
+          delay: stagger(42),
+          duration: 390,
+          ease: "inOut(2)",
+          onComplete: () => {
+            cards.forEach((card) => {
+              card.style.removeProperty("transform-origin");
+            });
+            finishRevisionTimelineReveal(revealSignature);
+          },
+        });
+      },
+    });
+  }
+  animateProcessingRevisionMachines(cards.filter((card) => card.classList.contains("is-processing")));
+  for (const revisionId of completedRevisionIds) {
+    const card = cards.find((item) => String(item.dataset.revisionId || "") === revisionId);
+    if (!card) continue;
+    card.classList.add("is-analysis-finished");
+    removeAnimeAnimation(card);
+    animate(card, {
+      scale: [1, 1.035, 1],
+      y: [0, -8, 0],
+      duration: 760,
+      ease: "out(5)",
+    });
+    window.setTimeout(() => card.classList.remove("is-analysis-finished"), 1400);
+  }
+}
+
+function animateProcessingRevisionMachines(cards = []) {
+  for (const card of Array.isArray(cards) ? cards : [...cards]) {
+    const vent = card.querySelector(".analizar-pdf-revision-machine-vent");
+    const smokes = card.querySelectorAll(".analizar-pdf-revision-machine-smoke");
+    const words = card.querySelectorAll(".analizar-pdf-revision-machine-word");
+    const content = card.querySelector(".analizar-pdf-subrecord-card-row");
+    animate(vent, {
+      opacity: [.35, 1, .35],
+      scaleX: [.72, 1.08, .72],
+      duration: 760,
+      alternate: true,
+      loop: true,
+      ease: "inOut(2)",
+    });
+    animate(content, {
+      x: [0, .8, -.7, .45, 0],
+      y: [0, -.45, .35, 0],
+      duration: 920,
+      loop: true,
+      ease: "inOut(2)",
+    });
+    animate(smokes, {
+      opacity: [0, .72, .42, 0],
+      x: (particle) => [0, Number.parseFloat(getComputedStyle(particle).getPropertyValue("--smoke-x")) || 0],
+      y: [8, -24, -54],
+      scale: [.35, 1.15, 1.65],
+      delay: stagger(430),
+      duration: 2600,
+      loop: true,
+      ease: "out(3)",
+    });
+  animate(words, {
+      opacity: [0, .95, .72, 0],
+      x: (word) => [0, Number.parseFloat(getComputedStyle(word).getPropertyValue("--word-x")) || 0],
+      y: [9, -30, -66],
+      rotate: (word, index) => [0, index % 2 ? 12 : -12],
+      scale: [.45, 1.04, .82],
+      delay: stagger(310),
+      duration: 6800,
+      loop: true,
+      ease: "out(3)",
+    });
+  }
+}
+
+function eruptProcessingRevisionCard(revisionId = "", context = {}) {
+  if (prefersReducedRevisionMotion()) return Promise.resolve();
+  const cleanRevisionId = String(revisionId || "").trim();
+  const card = [...document.querySelectorAll(".analizar-pdf-revision-timeline-card[data-revision-id]")]
+    .find((item) => String(item.dataset.revisionId || "").trim() === cleanRevisionId) || null;
+  if (!card) return Promise.resolve();
+  card.classList.add("is-machine-erupting");
+  removeAnimeAnimation(card.querySelectorAll(".analizar-pdf-revision-machine *"));
+  const eruption = document.createElement("div");
+  eruption.className = "analizar-pdf-revision-eruption";
+  eruption.setAttribute("aria-hidden", "true");
+  const eruptionWords = Array.isArray(context?.words) && context.words.length
+    ? context.words.slice(0, 24)
+    : resolveAnalysisAnimationWords(cleanRevisionId, String(context?.fileId || "").trim(), 20);
+  eruption.innerHTML = `
+    ${Array.from({ length: 14 }, (_, index) => `<span class="analizar-pdf-revision-eruption-spark${index % 3 === 0 ? " is-star" : ""}"></span>`).join("")}
+    ${Array.from({ length: 7 }, () => '<span class="analizar-pdf-revision-eruption-cloud"></span>').join("")}
+  `;
+  card.appendChild(eruption);
+  const vent = card.querySelector(".analizar-pdf-revision-machine-vent");
+  const sparks = [...eruption.querySelectorAll(".analizar-pdf-revision-eruption-spark")];
+  const clouds = [...eruption.querySelectorAll(".analizar-pdf-revision-eruption-cloud")];
+  const landingTarget = findAnalysisRailLandingTarget(null, {
+    revisionId: cleanRevisionId,
+    fileId: String(context?.fileId || "").trim(),
+  });
+  const cardRect = card.getBoundingClientRect();
+  const targetRect = landingTarget?.getBoundingClientRect?.() || cardRect;
+  const baseFillProgress = getRailWordColorProgress(landingTarget);
+  const eruptionFillLimit = Math.max(baseFillProgress, Math.min(1, Number(context?.fillLimit ?? .8) || .8));
+  const revisionAccent = String(getComputedStyle(card).getPropertyValue("--revision-accent") || "").trim();
+  const startX = cardRect.left + (cardRect.width * .5);
+  const startY = cardRect.top - 3;
+  const endX = targetRect.left + (targetRect.width * .5);
+  const endY = targetRect.top + Math.min(targetRect.height * .5, 34);
+  const words = eruptionWords.map((label, index) => {
+    const word = document.createElement("span");
+    word.className = "analizar-pdf-revision-eruption-word is-flying-to-rail";
+    word.textContent = label;
+    if (revisionAccent) word.style.setProperty("--revision-accent", revisionAccent);
+    word.style.left = `${Math.round(startX + ((index % 2 ? 1 : -1) * (index + 1) * 2))}px`;
+    word.style.top = `${Math.round(startY)}px`;
+    document.body.appendChild(word);
+    return word;
+  });
+  animate(vent, {
+    scale: [1, 1.45, .75, 1.2],
+    opacity: [.5, 1, .3],
+    duration: 980,
+    ease: "out(4)",
+  });
+  animate(sparks, {
+    opacity: [0, 1, .9, 0],
+    x: (spark, index) => [0, ((index % 7) - 3) * 27 + (index % 2 ? 11 : -11)],
+    y: (spark, index) => [8, -48 - ((index % 5) * 18), -72 - ((index % 4) * 24)],
+    scale: [.15, 1.45, .2],
+    rotate: (spark, index) => [0, index % 2 ? 240 : -240],
+    delay: stagger(34),
+    duration: 1380,
+    ease: "out(4)",
+  });
+  animate(clouds, {
+    opacity: [0, .82, .38, 0],
+    x: (cloud, index) => [0, ((index - 3) * 17)],
+    y: [4, -40, -78],
+    scale: [.2, 1.3, 2],
+    delay: stagger(72),
+    duration: 1650,
+    ease: "out(3)",
+  });
+  animate(card.querySelector(".analizar-pdf-subrecord-card-row"), {
+    y: [0, 5, -9, 4, -3, 0],
+    rotate: [0, -.8, 1.1, -.5, .25, 0],
+    duration: 1450,
+    ease: "out(4)",
+  });
+  return new Promise((resolve) => {
+    let arrivedWords = 0;
+    words.forEach((word, index) => {
+      const fanX = ((index - ((words.length - 1) / 2)) * 13) + (index % 2 ? 8 : -8);
+      const destinationX = endX - Number.parseFloat(word.style.left || "0");
+      const destinationY = endY - startY;
+      animate(word, {
+        opacity: [0, 1, 1, 1, .92, 0],
+        x: [0, fanX, fanX * .72, destinationX * .5, destinationX],
+        y: [8, -76 - ((index % 3) * 9), -92, destinationY * .42, destinationY],
+        rotate: [0, index % 2 ? 18 : -18, index % 2 ? -8 : 8, 0],
+        scale: [.18, 1.18, 1, .9, .68],
+        delay: index * 145,
+        duration: 1840 + (index * 34),
+        ease: "inOut(3)",
+        onComplete: () => {
+          arrivedWords += 1;
+          const revealedTarget = typeof context?.onWordArrive === "function"
+            ? context.onWordArrive({ index, total: words.length, word: word.textContent || "" })
+            : findAnalysisRailTarget(null, context);
+          const progressiveFill = baseFillProgress + ((eruptionFillLimit - baseFillProgress) * (arrivedWords / words.length));
+          advanceRailWordColorFill(revealedTarget, progressiveFill, {
+            ownerToken: context?.magicSpriteToken || "",
+            wordIndex: index,
+          });
+          word.remove();
+          if (arrivedWords < words.length) return;
+          eruption.remove();
+          card.classList.remove("is-machine-erupting");
+          resolve(revealedTarget);
+        },
+      });
+    });
+  });
+}
+
+function createAnalysisSpriteToken() {
+  if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  return `analysis-sprite-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function positionAnalysisSpriteOverRevision(record = null) {
+  if (!record?.host) return false;
+  const revisionId = String(record.revisionId || "").trim();
+  const card = [...document.querySelectorAll(".analizar-pdf-revision-timeline-card[data-revision-id]")]
+    .find((item) => String(item.dataset.revisionId || "").trim() === revisionId) || null;
+  if (!card) {
+    // Un render de estado puede sustituir brevemente las cards. Conservamos el
+    // último fotograma del personaje y reintentamos el anclaje sin hacerlo parpadear.
+    record.anchorRetryCount = Number(record.anchorRetryCount || 0) + 1;
+    if (record.anchorRetryCount <= 12 && !record.anchorRetryFrame) {
+      record.anchorRetryFrame = window.requestAnimationFrame(() => {
+        record.anchorRetryFrame = 0;
+        if (activeAnalysisSprites.has(record.token)) positionAnalysisSpriteOverRevision(record);
+      });
+    }
+    return false;
+  }
+  record.anchorRetryCount = 0;
+  const cardRect = card.getBoundingClientRect();
+  const workerWidth = record.host.offsetWidth || 96;
+  const workerHeight = record.host.offsetHeight || 114;
+  const cardInset = 28;
+  const left = Math.max(8, Math.min(
+    window.innerWidth - workerWidth - 8,
+    cardRect.left - workerWidth + cardInset
+  ));
+  const top = Math.max(8, Math.min(
+    window.innerHeight - workerHeight - 34,
+    cardRect.top + ((cardRect.height - workerHeight) / 2)
+  ));
+  record.host.style.left = `${Math.round(left)}px`;
+  record.host.style.top = `${Math.round(top)}px`;
+  record.host.style.visibility = "visible";
+  return true;
+}
+
+function repositionActiveAnalysisSprites() {
+  activeAnalysisSprites.forEach((record) => positionAnalysisSpriteOverRevision(record));
+}
+
+function emitMagicTrailParticle({ x = 0, y = 0, ownerToken = "", variant = "character" } = {}) {
+  const particle = document.createElement("span");
+  particle.className = `analizar-pdf-magic-trail-particle analizar-pdf-magic-trail-particle--${variant}`;
+  particle.dataset.magicOwner = String(ownerToken || "");
+  if (variant === "orb") {
+    const colors = ["#fff58d", "#70f0d4", "#ad94ff", "#ff91c8", "#71c7ff"];
+    particle.style.setProperty("--trail-color", colors[Math.floor(Math.random() * colors.length)]);
+  }
+  particle.style.left = `${Math.round(x + ((Math.random() - .5) * 8))}px`;
+  particle.style.top = `${Math.round(y + ((Math.random() - .5) * 8))}px`;
+  document.body.appendChild(particle);
+  const travelX = variant === "orb" ? -18 - (Math.random() * 18) : -5 - (Math.random() * 10);
+  const travelY = (Math.random() - .5) * (variant === "orb" ? 22 : 14);
+  animate(particle, {
+    x: [0, travelX],
+    y: [0, travelY],
+    scale: variant === "orb" ? [1.25, .15] : [1, .1],
+    opacity: [0, 1, 0],
+    rotate: [0, Math.random() > .5 ? 150 : -150],
+    duration: variant === "orb" ? 560 : 760,
+    ease: "out(3)",
+    onComplete: () => particle.remove(),
+  });
+}
+
+function startMagicTrailEmitter(element = null, {
+  ownerToken = "",
+  variant = "character",
+  interval = 170,
+  locate = null,
+} = {}) {
+  if (!element || prefersReducedRevisionMotion()) return () => {};
+  const emit = () => {
+    if (!element.isConnected) return;
+    const rect = element.getBoundingClientRect();
+    const point = typeof locate === "function"
+      ? locate(rect)
+      : { x: rect.left + (rect.width * .32), y: rect.top + (rect.height * .68) };
+    emitMagicTrailParticle({ ...point, ownerToken, variant });
+  };
+  emit();
+  const timer = window.setInterval(emit, interval);
+  return () => window.clearInterval(timer);
+}
+
+function startAnalysisSprite(context = {}) {
+  const token = createAnalysisSpriteToken();
+  const host = document.createElement("div");
+  host.className = "analizar-pdf-magic-worker";
+  host.dataset.analysisSpriteToken = token;
+  host.setAttribute("aria-hidden", "true");
+  host.innerHTML = `
+    <div class="analizar-pdf-magic-wizard">
+      <div class="analizar-pdf-magic-particle-orbit analizar-pdf-magic-particle-orbit--inner" aria-hidden="true">
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 0deg; --particle-radius: 42px"></span>
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 90deg; --particle-radius: 38px"></span>
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 180deg; --particle-radius: 42px"></span>
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 270deg; --particle-radius: 38px"></span>
+      </div>
+      <div class="analizar-pdf-magic-particle-orbit analizar-pdf-magic-particle-orbit--outer" aria-hidden="true">
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 35deg; --particle-radius: 51px"></span>
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 155deg; --particle-radius: 48px"></span>
+        <span class="analizar-pdf-magic-orbit-particle" style="--particle-angle: 275deg; --particle-radius: 51px"></span>
+      </div>
+      <span class="analizar-pdf-magic-spark analizar-pdf-magic-spark--one">✦</span>
+      <span class="analizar-pdf-magic-spark analizar-pdf-magic-spark--two">✧</span>
+      <picture class="analizar-pdf-magic-mage-picture">
+        <source srcset="/analizarPDF/assets/peppermint-magic-v1.webp" type="image/webp">
+        <img
+          class="analizar-pdf-magic-mage-art"
+          src="/analizarPDF/assets/peppermint-magic-v1.png"
+          alt=""
+          width="367"
+          height="480"
+          decoding="async"
+        >
+      </picture>
+      <span class="analizar-pdf-magic-casting-arm" aria-hidden="true">
+        <img src="/analizarPDF/assets/peppermint-magic-v1.webp" alt="" width="367" height="480" decoding="async">
+      </span>
+      <span class="analizar-pdf-magic-cast-ring" aria-hidden="true"></span>
+    </div>
+  `;
+  document.body.appendChild(host);
+  const wizard = host.querySelector(".analizar-pdf-magic-wizard");
+  const wand = host.querySelector(".analizar-pdf-magic-wand");
+  const feet = host.querySelector(".analizar-pdf-magic-feet");
+  const mageArt = host.querySelector(".analizar-pdf-magic-mage-art");
+  const castingArm = host.querySelector(".analizar-pdf-magic-casting-arm");
+  const castRing = host.querySelector(".analizar-pdf-magic-cast-ring");
+  const particleOrbits = host.querySelectorAll(".analizar-pdf-magic-particle-orbit");
+  const orbitParticles = host.querySelectorAll(".analizar-pdf-magic-orbit-particle");
+  mageArt?.addEventListener("error", () => {
+    const picture = mageArt.closest("picture");
+    picture?.querySelector("source")?.remove();
+    if (!String(mageArt.currentSrc || mageArt.src || "").endsWith("peppermint-magic-v1.png")) {
+      mageArt.src = "/analizarPDF/assets/peppermint-magic-v1.png";
+    }
+  }, { once: true });
+  const sparks = host.querySelectorAll(".analizar-pdf-magic-spark");
+  const record = {
+    token,
+    host,
+    wizard,
+    revisionId: String(context?.revisionId || context?.revision?.id || "").trim(),
+    fileId: String(context?.fileId || context?.file?.id || "").trim(),
+    animationWords: resolveAnalysisAnimationWords(
+      context?.revisionId || context?.revision?.id || "",
+      context?.fileId || context?.file?.id || "",
+      32
+    ),
+  };
+  activeAnalysisSprites.set(token, record);
+  positionAnalysisSpriteOverRevision(record);
+
+  if (prefersReducedRevisionMotion()) {
+    host.classList.add("is-reduced-motion");
+    return token;
+  }
+  animate(host, { opacity: [0, 1], duration: 180, ease: "out(2)" });
+  record.stopTrail = startMagicTrailEmitter(wizard, { ownerToken: token, variant: "character", interval: 180 });
+  animate(wizard, {
+    x: [0, 6, -5, 0],
+    y: [0, -5, 3, -2, 0],
+    rotate: [0, -1.2, 1, 0],
+    duration: 5200,
+    alternate: true,
+    loop: true,
+    ease: "inOut(2)",
+  });
+  animate(mageArt, {
+    y: [0, -1.5, 0],
+    rotate: [-.35, .35, -.35],
+    scaleY: [1, .99, 1],
+    duration: 820,
+    alternate: true,
+    loop: true,
+    ease: "inOut(2)",
+  });
+  animate(castingArm, {
+    rotate: [0, -4.5, 2.5, 0],
+    scale: [1, 1.012, 1],
+    duration: 1080,
+    delay: 180,
+    loop: true,
+    ease: "inOut(3)",
+  });
+  animate(castRing, {
+    opacity: [0, .95, 0],
+    scale: [.35, 1.45],
+    duration: 1080,
+    delay: 180,
+    loop: true,
+    ease: "out(3)",
+  });
+  if (wand) {
+    animate(wand, {
+      rotate: [-8, 24, -12],
+      transformOrigin: "82px 82px",
+      duration: 620,
+      alternate: true,
+      loop: true,
+      ease: "inOut(3)",
+    });
+  }
+  if (feet) {
+    animate(feet, {
+      y: [0, -3, 0],
+      duration: 260,
+      alternate: true,
+      loop: true,
+      ease: "inOut(2)",
+    });
+  }
+  animate(sparks, {
+    opacity: [.15, 1, .15],
+    scale: [.55, 1.25, .55],
+    rotate: [0, 120],
+    delay: stagger(170),
+    duration: 1080,
+    loop: true,
+    ease: "inOut(2)",
+  });
+  particleOrbits.forEach((orbit, index) => {
+    animate(orbit, {
+      rotate: index ? [360, 0] : [0, 360],
+      duration: index ? 5200 : 3900,
+      loop: true,
+      ease: "linear",
+    });
+  });
+  animate(orbitParticles, {
+    opacity: [.25, 1, .35],
+    delay: stagger(110),
+    duration: 980,
+    alternate: true,
+    loop: true,
+    ease: "inOut(2)",
+  });
+  return token;
+}
+
+function retargetAnalysisSprite(token = "", context = {}) {
+  const cleanToken = String(token || "").trim();
+  const record = activeAnalysisSprites.get(cleanToken) || null;
+  if (!record) return startAnalysisSprite(context);
+  const nextRevisionId = String(context?.revisionId || context?.revision?.id || record.revisionId || "").trim();
+  const nextFileId = String(context?.fileId || context?.file?.id || record.fileId || "").trim();
+  const isSameTarget = nextRevisionId === String(record.revisionId || "").trim()
+    && nextFileId === String(record.fileId || "").trim();
+  record.revisionId = nextRevisionId;
+  record.fileId = nextFileId;
+  record.anchorRetryCount = 0;
+  stopProgressiveAnalysisWords(record);
+  if (!isSameTarget) {
+    record.railFillProgress = 0;
+    record.progressWordCount = 0;
+    record.progressWordsInFlight = 0;
+  }
+  positionAnalysisSpriteOverRevision(record);
+  return cleanToken;
+}
+
+function resumeAnalysisSpriteIdle(record = null) {
+  if (!record?.wizard || prefersReducedRevisionMotion()) return;
+  removeAnimeAnimation(record.wizard);
+  animate(record.wizard, {
+    x: [0, 4, -3, 0],
+    y: [0, -3, 2, 0],
+    rotate: [0, -0.8, 0.7, 0],
+    duration: 3600,
+    loop: true,
+    ease: "inOut(2)",
+  });
+}
+
+function findAnalysisRailTarget(record = null, context = {}) {
+  const revisionId = String(context?.revisionId || record?.revisionId || "").trim();
+  const fileId = String(context?.fileId || record?.fileId || "").trim();
+  const groups = [...document.querySelectorAll(".analizar-pdf-ortho-rail-group[data-rail-group-key]")];
+  const exactPrefix = ["file", revisionId, fileId].join("::");
+  return groups.find((group) => String(group.dataset.railGroupKey || "").startsWith(exactPrefix))
+    || groups.find((group) => revisionId && String(group.dataset.railGroupKey || "").includes(`::${revisionId}::`))
+    || null;
+}
+
+function findAnalysisRailLandingTarget(record = null, context = {}) {
+  return findAnalysisRailTarget(record, context)
+    || document.querySelector("#analizarPdfQuickRailHost .analizar-pdf-ortho-rail-body")
+    || document.querySelector("#analizarPdfQuickRailHost .analizar-pdf-ortho-rail")
+    || document.getElementById("analizarPdfQuickRailHost")
+    || null;
+}
+
+function resolveSpriteAnimationWord(ownerToken = "", index = 0) {
+  const record = activeAnalysisSprites.get(String(ownerToken || "")) || null;
+  const words = Array.isArray(record?.animationWords) && record.animationWords.length
+    ? record.animationWords
+    : ANALYSIS_WORD_FALLBACK;
+  return String(words[Math.abs(Number(index) || 0) % words.length] || "Texto");
+}
+
+function emitRailWordSplash(target = null, ownerToken = "", options = {}) {
+  const summary = target?.querySelector(":scope > summary") || target;
+  if (!summary || prefersReducedRevisionMotion()) return;
+  const rect = summary.getBoundingClientRect();
+  const isFinal = options?.isFinal === true;
+  const wordCount = isFinal ? 12 : Math.max(2, Number(options?.count || 4) || 4);
+  const baseIndex = Number(options?.wordIndex || 0) || 0;
+  const targetStyle = getComputedStyle(target);
+  const railTint = String(targetStyle.getPropertyValue("--analizar-pdf-rail-tint") || "").trim();
+  const railInk = String(targetStyle.getPropertyValue("--analizar-pdf-rail-ink") || "").trim();
+  const words = Array.from({ length: wordCount }, (_, index) => {
+    const word = document.createElement("span");
+    word.className = `analizar-pdf-rail-word-splash${isFinal ? " is-final-word" : ""}`;
+    word.dataset.railSplashOwner = String(ownerToken || "");
+    word.textContent = resolveSpriteAnimationWord(ownerToken, baseIndex + index);
+    if (railTint) word.style.setProperty("--analizar-pdf-rail-tint", railTint);
+    if (railInk) word.style.setProperty("--analizar-pdf-rail-ink", railInk);
+    word.style.left = `${rect.left + (rect.width * (.08 + (Math.random() * .84)))}px`;
+    word.style.top = `${rect.top + (rect.height * (.25 + (Math.random() * .5)))}px`;
+    document.body.appendChild(word);
+    return word;
+  });
+  animate(words, {
+    x: () => (Math.random() - .5) * (isFinal ? 34 : 18),
+    y: () => (isFinal ? 34 : 18) + (Math.random() * (isFinal ? 58 : 28)),
+    opacity: [0, 1, .95, .72, 0],
+    scale: () => [.45, .88 + (Math.random() * .32), .72, .25],
+    rotate: () => [0, (Math.random() > .5 ? 1 : -1) * (8 + (Math.random() * 18))],
+    delay: stagger(isFinal ? 48 : 62),
+    duration: () => (isFinal ? 1250 : 780) + (Math.random() * 420),
+    ease: "in(2.4)",
+    onComplete: () => words.forEach((word) => word.remove()),
+  });
+}
+
+function advanceRailWordColorFill(target = null, progress = 0, options = {}) {
+  const summary = target?.querySelector?.(":scope > summary") || null;
+  if (!target || !summary) return null;
+  const safeProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+  target.classList.add("is-magic-arrival", "is-magic-color-filling", "is-word-color-loading");
+  let fill = summary.querySelector(":scope > .analizar-pdf-rail-color-fill");
+  if (!fill) {
+    fill = document.createElement("span");
+    fill.className = "analizar-pdf-rail-color-fill is-word-driven";
+    fill.setAttribute("aria-hidden", "true");
+    fill.dataset.progress = "0";
+    summary.prepend(fill);
+  }
+  if (prefersReducedRevisionMotion()) {
+    fill.style.transform = `scaleY(${safeProgress})`;
+    fill.dataset.progress = String(safeProgress);
+    if (safeProgress >= 1) {
+      fill.remove();
+      target.classList.remove("is-magic-arrival", "is-magic-color-filling", "is-word-color-loading");
+    }
+    return target;
+  }
+
+  const previousProgress = Math.max(0, Math.min(safeProgress, Number(fill.dataset.progress || 0) || 0));
+  fill.dataset.progress = String(safeProgress);
+  removeAnimeAnimation(fill);
+  fill.style.transform = `scaleY(${previousProgress})`;
+  animate(fill, {
+    scaleY: [previousProgress, safeProgress],
+    opacity: [.78, 1],
+    duration: 210,
+    ease: "out(3)",
+  });
+  removeAnimeAnimation(summary);
+  const isFinalFill = safeProgress >= 1;
+  animate(summary, isFinalFill ? {
+    x: [0, -4, 4.5, -3.8, 3.6, -3, 2.8, -2.2, 1.8, -1.2, .8, 0],
+    y: [0, -1.8, 1.5, -1.3, 1.2, -.9, .8, -.6, .45, -.25, 0],
+    rotate: [0, -.9, 1, -.82, .76, -.62, .56, -.42, .32, -.2, .1, 0],
+    scale: [1, 1.018, .994, 1.014, .996, 1.011, .998, 1.007, 1],
+    duration: 2420,
+    ease: "inOut(2.2)",
+  } : {
+    x: [0, -2.5, 3, -1.8, 1.2, 0],
+    y: [0, -1, 1.4, -.6, 0],
+    rotate: [0, -.55, .65, -.32, .18, 0],
+    scale: [1, 1.012, .996, 1.008, 1],
+    duration: 420,
+    ease: "out(4)",
+  });
+  emitRailWordSplash(target, options?.ownerToken || "", {
+    count: safeProgress >= 1 ? 12 : 3,
+    isFinal: safeProgress >= 1,
+    wordIndex: options?.wordIndex || 0,
+  });
+  if (safeProgress >= 1) {
+    window.setTimeout(() => {
+      fill.remove();
+      target.classList.remove("is-magic-arrival", "is-magic-color-filling", "is-word-color-loading");
+    }, 2480);
+  }
+  return target;
+}
+
+function getRailWordColorProgress(target = null) {
+  const fill = target?.querySelector?.(":scope > summary > .analizar-pdf-rail-color-fill") || null;
+  return Math.max(0, Math.min(1, Number(fill?.dataset?.progress || 0) || 0));
+}
+
+function stopProgressiveAnalysisWords(record = null) {
+  if (!record) return;
+  if (record.progressWordTimer) window.clearInterval(record.progressWordTimer);
+  if (record.progressWordStartTimer) window.clearTimeout(record.progressWordStartTimer);
+  record.progressWordTimer = 0;
+  record.progressWordStartTimer = 0;
+  record.progressWordsActive = false;
+}
+
+function waitForProgressiveAnalysisWords(record = null, timeout = 1800) {
+  if (!record?.progressWordsInFlight) return Promise.resolve();
+  const startedAt = performance.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!record.progressWordsInFlight || performance.now() - startedAt >= timeout) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(check);
+    };
+    check();
+  });
+}
+
+function launchProgressiveAnalysisWord(record = null) {
+  if (!record?.wizard || Number(record.progressWordsInFlight || 0) >= 3 || prefersReducedRevisionMotion()) return false;
+  const target = findAnalysisRailTarget(record, record);
+  const card = [...document.querySelectorAll(".analizar-pdf-revision-timeline-card[data-revision-id]")]
+    .find((item) => String(item.dataset.revisionId || "").trim() === String(record.revisionId || "").trim()) || null;
+  if (!target?.isConnected || !card?.isConnected) return false;
+  const cardRect = card.getBoundingClientRect();
+  const targetRect = (target.querySelector(":scope > summary") || target).getBoundingClientRect();
+  if (!cardRect.width || !targetRect.width) return false;
+
+  const wordIndex = Number(record.progressWordCount || 0);
+  record.progressWordCount = wordIndex + 1;
+  record.progressWordsInFlight = Number(record.progressWordsInFlight || 0) + 1;
+  const startX = cardRect.left + (cardRect.width * (.42 + (Math.random() * .16)));
+  const startY = cardRect.top + 2;
+  const endX = targetRect.left + Math.min(targetRect.width * .5, 82);
+  const endY = targetRect.top + Math.min(targetRect.height * .5, 34);
+  const word = document.createElement("span");
+  word.className = "analizar-pdf-revision-eruption-word is-flying-to-rail is-progress-word";
+  word.dataset.magicOwner = record.token;
+  word.textContent = resolveSpriteAnimationWord(record.token, wordIndex);
+  word.style.left = `${startX}px`;
+  word.style.top = `${startY}px`;
+  const accent = String(getComputedStyle(card).getPropertyValue("--revision-accent") || "").trim();
+  if (accent) word.style.setProperty("--revision-accent", accent);
+  document.body.appendChild(word);
+  const castingArm = record.host?.querySelector(".analizar-pdf-magic-casting-arm");
+  if (castingArm) {
+    animate(castingArm, { rotate: [0, -8, 3, 0], duration: 420, ease: "out(4)" });
+  }
+  animate(word, {
+    x: [0, (endX - startX) * .18, (endX - startX) * .52, endX - startX],
+    y: [8, -48 - (Math.random() * 28), -66, endY - startY],
+    scale: [.35, 1.08, .92, .68],
+    rotate: [0, wordIndex % 2 ? 12 : -12, wordIndex % 2 ? -5 : 5, 0],
+    opacity: [0, 1, 1, .92, 0],
+    duration: 1120,
+    ease: "inOut(3)",
+    onComplete: () => {
+      word.remove();
+      record.progressWordsInFlight = Math.max(0, Number(record.progressWordsInFlight || 1) - 1);
+      const liveTarget = findAnalysisRailTarget(record, record) || target;
+      const current = Math.max(Number(record.railFillProgress || 0), getRailWordColorProgress(liveTarget));
+      const maxProgress = Math.max(0, Math.min(.98, Number(record.progressWordMaxProgress ?? .6) || .6));
+      const increment = Math.max(.01, Math.min(.12, Number(record.progressWordIncrement || .045) || .045));
+      record.railFillProgress = Math.min(maxProgress, current + increment);
+      advanceRailWordColorFill(liveTarget, record.railFillProgress, {
+        ownerToken: record.token,
+        wordIndex,
+      });
+    },
+  });
+  return true;
+}
+
+function startProgressiveAnalysisWords(record = null, options = {}) {
+  if (!record || prefersReducedRevisionMotion()) return;
+  const phase = String(options?.phase || "processing").trim() || "processing";
+  if (record.progressWordsActive && record.progressWordPhase === phase && options?.reset !== true) return;
+  stopProgressiveAnalysisWords(record);
+  if (options?.reset === true) {
+    record.railFillProgress = 0;
+    record.progressWordCount = 0;
+    record.progressWordsInFlight = 0;
+  }
+  record.progressWordPhase = phase;
+  const currentProgress = Math.max(
+    Number(record.railFillProgress || 0) || 0,
+    getRailWordColorProgress(findAnalysisRailTarget(record, record))
+  );
+  const requestedMaxProgress = Math.max(0, Math.min(.98, Number(options?.maxProgress ?? .6) || .6));
+  record.progressWordMaxProgress = Math.max(currentProgress, requestedMaxProgress);
+  record.progressWordIncrement = Math.max(.01, Math.min(.12, Number(options?.increment || .045) || .045));
+  record.progressWordsActive = true;
+  const emit = () => launchProgressiveAnalysisWord(record);
+  record.progressWordStartTimer = window.setTimeout(emit, Math.max(0, Number(options?.startDelay ?? 80) || 0));
+  const cadence = Math.min(760, Math.max(420, Number(options?.interval || 720) || 720));
+  record.progressWordTimer = window.setInterval(emit, cadence);
+}
+
+function syncAnalysisSpriteProgressStage(token = "", status = "") {
+  const record = activeAnalysisSprites.get(String(token || "")) || null;
+  if (!record) return;
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "queued") {
+    startProgressiveAnalysisWords(record, {
+      phase: "extracting",
+      maxProgress: .58,
+      increment: .028,
+      interval: 1280,
+      startDelay: 80,
+    });
+    return;
+  }
+  if (normalized === "processing") {
+    startProgressiveAnalysisWords(record, {
+      phase: "analyzing",
+      maxProgress: .76,
+      increment: .034,
+      interval: 1120,
+      startDelay: 40,
+    });
+    return;
+  }
+  stopProgressiveAnalysisWords(record);
+}
+
+function animateRailMagicImpact(target = null, ownerToken = "") {
+  const summary = target?.querySelector?.(":scope > summary") || null;
+  if (!target || !summary || prefersReducedRevisionMotion()) return Promise.resolve(target);
+  target.classList.add("is-magic-arrival");
+  emitRailWordSplash(target, ownerToken);
+  removeAnimeAnimation(summary);
+  return new Promise((resolve) => {
+    animate(summary, {
+      scale: [1, 1.09, .98, 1.035, 1],
+      x: [0, -3, 3, -1, 0],
+      rotate: [0, -.8, .6, -.2, 0],
+      duration: 620,
+      ease: "out(4)",
+      onComplete: () => {
+        target.classList.remove("is-magic-arrival");
+        resolve(target);
+      },
+    });
+  });
+}
+
+function animateRailColorFill(target = null, ownerToken = "") {
+  const summary = target?.querySelector(":scope > summary") || null;
+  if (!target || !summary) return Promise.resolve(target);
+  target.classList.add("is-magic-arrival", "is-magic-color-filling");
+  if (prefersReducedRevisionMotion()) {
+    target.classList.remove("is-magic-arrival", "is-magic-color-filling");
+    return Promise.resolve(target);
+  }
+
+  const fill = document.createElement("span");
+  fill.className = "analizar-pdf-rail-color-fill";
+  fill.setAttribute("aria-hidden", "true");
+  summary.prepend(fill);
+  emitRailWordSplash(target, ownerToken);
+  removeAnimeAnimation(summary);
+  return new Promise((resolve) => {
+    animate(fill, {
+      scaleY: [0, .22, .54, .82, 1],
+      opacity: [.28, .72, .9, 1],
+      duration: 1700,
+      ease: "inOut(3)",
+    });
+    animate(summary, {
+      x: [0, -3, 4, -2, 2, 0],
+      y: [0, -2, 1, -1, 0],
+      scale: [1, 1.035, .99, 1.02, 1],
+      rotate: [0, -.8, .7, -.35, .18, 0],
+      duration: 1900,
+      ease: "inOut(3)",
+      onComplete: () => {
+        emitRailWordSplash(target, ownerToken, { isFinal: true });
+        fill.remove();
+        target.classList.remove("is-magic-arrival", "is-magic-color-filling");
+        resolve(target);
+      },
+    });
+  });
+}
+
+function stopAnalysisSprite(token = "", { immediate = false } = {}) {
+  const record = activeAnalysisSprites.get(String(token || ""));
+  if (!record) return;
+  activeAnalysisSprites.delete(record.token);
+  stopProgressiveAnalysisWords(record);
+  if (record.anchorRetryFrame) window.cancelAnimationFrame(record.anchorRetryFrame);
+  record.stopTrail?.();
+  document.querySelectorAll(`[data-magic-owner="${CSS.escape(record.token)}"]`).forEach((particle) => particle.remove());
+  removeAnimeAnimation(record.host.querySelectorAll("*"));
+  removeAnimeAnimation(record.host);
+  if (immediate || prefersReducedRevisionMotion()) {
+    record.host.remove();
+    return;
+  }
+  animate(record.host, {
+    opacity: [1, 0],
+    scale: [1, .7],
+    duration: 220,
+    ease: "in(3)",
+    onComplete: () => record.host.remove(),
+  });
+}
+
+function completeAnalysisSprite(token = "", context = {}) {
+  const record = activeAnalysisSprites.get(String(token || ""));
+  if (!record) return Promise.resolve(null);
+  const keepAlive = context?.keepAlive === true;
+  const materializingTarget = findAnalysisRailTarget(record, context);
+  const landingTarget = findAnalysisRailLandingTarget(record, context);
+  const revealRailTarget = () => {
+    if (typeof context?.onArrive === "function") {
+      context.onArrive();
+    }
+    return findAnalysisRailTarget(record, context) || materializingTarget || null;
+  };
+  const animateRevealedTarget = (target = null) => context?.skipColorFill === true
+    ? (context?.finalizeVerticalFill === true
+      ? new Promise((resolve) => {
+        advanceRailWordColorFill(target, 1, { ownerToken: record.token, wordIndex: 99 });
+        window.setTimeout(() => resolve(target), 2500);
+      })
+      : animateRailMagicImpact(target, record.token))
+    : animateRailColorFill(target, record.token);
+  if (!landingTarget || prefersReducedRevisionMotion()) {
+    const revealedTarget = revealRailTarget();
+    if (revealedTarget) animateRevealedTarget(revealedTarget);
+    if (keepAlive) {
+      resumeAnalysisSpriteIdle(record);
+    } else {
+      stopAnalysisSprite(record.token);
+    }
+    return Promise.resolve(revealedTarget);
+  }
+
+  materializingTarget?.classList.add("is-magic-materializing");
+  removeAnimeAnimation(record.wizard);
+  animate(record.wizard, {
+    rotate: [0, -4, 3, 0],
+    scale: [1, 1.035, 1],
+    duration: 430,
+    ease: "out(4)",
+  });
+  const wand = record.host.querySelector(".analizar-pdf-magic-wand");
+  if (wand) {
+    animate(wand, {
+      rotate: [-8, 58, 8],
+      transformOrigin: "82px 82px",
+      duration: 390,
+      ease: "out(4)",
+    });
+  }
+  const revealedTarget = revealRailTarget();
+  return Promise.resolve(revealedTarget ? animateRevealedTarget(revealedTarget) : revealedTarget)
+    .then(() => {
+      materializingTarget?.classList.remove("is-magic-materializing");
+      if (keepAlive) {
+        resumeAnalysisSpriteIdle(record);
+        positionAnalysisSpriteOverRevision(record);
+      } else {
+        stopAnalysisSprite(record.token);
+      }
+      return revealedTarget;
+    });
 }
 
 function renderFileList(session = null) {
@@ -3149,10 +5047,14 @@ function renderMappingsModal() {
   els.mappingEntriesList.insertAdjacentHTML("beforeend", helper);
 }
 
-function renderActiveSession() {
+function renderActiveSession(options = {}) {
   const session = store.getActiveSession();
   ensureActiveRevisionAndFile(session);
   const sessionId = String(session?.id || "").trim();
+  if (els.heroSessionTitle && els.heroSessionTitleInput?.hidden !== false) {
+    const title = String(session?.title || "Sesión sin título").trim() || "Sesión sin título";
+    if (els.heroSessionTitleText) els.heroSessionTitleText.textContent = title;
+  }
   if (state.jobMetaSessionId && state.jobMetaSessionId !== sessionId) {
     state.jobMetaText = "";
     state.jobMetaSessionId = sessionId;
@@ -3180,7 +5082,9 @@ function renderActiveSession() {
   renderFileList(session);
   renderSectionsEditor(session);
   renderPaletteShell(session);
-  resultsRenderer.render(buildRenderableSession(session));
+  if (options?.preserveResultsRail !== true) {
+    renderResultsWithRailAnimations(buildRenderableSession(session));
+  }
   if (!state.jobMetaText && !isBusyAnalysisStatus(session?.analysisStatus || "")) {
     const missingLocalSourceNotice = buildMissingLocalSourceNoticeFromSession(session);
     if (missingLocalSourceNotice) {
@@ -3300,10 +5204,11 @@ function handleToggleCorrectionIssue(payload = {}) {
   renderAll();
 }
 
-function renderAll() {
-  sidepanelApi.renderSessions();
-  renderActiveSession();
+function renderAll(options = {}) {
+  renderSessionRailWithAnimation();
+  renderActiveSession(options);
   renderDefaultRevisionsModal();
+  renderGlobalTemplateModal();
   renderMappingsModal();
   renderExportConfigModal();
   const jobMeta = getLiveJobMetaElement();
@@ -3312,9 +5217,68 @@ function renderAll() {
   }
 }
 
+async function refreshActiveSessionDetail(sessionId = "", options = {}) {
+  const cleanSessionId = String(sessionId || state.activeSessionId || "").trim();
+  if (!cleanSessionId) return null;
+  const localSession = state.sessions.find((session) => String(session?.id || "").trim() === cleanSessionId) || null;
+  const hasCompleteLocalSession = Boolean(
+    localSession
+    && !catalogOnlySessionIds.has(cleanSessionId)
+    && (Array.isArray(localSession.revisions) ? localSession.revisions.length : 0) > 0
+  );
+  if (hasCompleteLocalSession && options.force !== true) {
+    loadedSessionDetailIds.add(cleanSessionId);
+    return localSession;
+  }
+  if (loadedSessionDetailIds.has(cleanSessionId)) {
+    return state.sessions.find((session) => session.id === cleanSessionId) || null;
+  }
+  if (sessionDetailPromises.has(cleanSessionId)) {
+    return sessionDetailPromises.get(cleanSessionId);
+  }
+  const request = (async () => {
+    try {
+      const remoteSession = await loadSessionDetail(cleanSessionId);
+      if (!remoteSession) return null;
+      const restoredSession = await restoreLocalAnalysisSession(remoteSession);
+      catalogOnlySessionIds.delete(cleanSessionId);
+      const clearedInterruptedState = clearInterruptedAnalysisStatuses(restoredSession);
+      store.upsertSession(restoredSession);
+      if (clearedInterruptedState) {
+        persistLocalAnalysisSession(restoredSession);
+      }
+      loadedSessionDetailIds.add(cleanSessionId);
+      if (state.activeSessionId === cleanSessionId) {
+        ensureActiveRevisionAndFile(restoredSession);
+        if (options.render !== false) {
+          renderAll();
+          rehydrateSelectedFilesForActiveContext().catch(() => {});
+        }
+        void clearBusyStatusesWithoutLocalFiles(restoredSession, { scope: "all" }).catch(() => {});
+      }
+      return restoredSession;
+    } catch (error) {
+      if (state.activeSessionId === cleanSessionId) {
+        setJobMetaText(String(error?.message || error));
+      }
+      return null;
+    } finally {
+      sessionDetailPromises.delete(cleanSessionId);
+    }
+  })();
+  sessionDetailPromises.set(cleanSessionId, request);
+  return request;
+}
+
 async function refreshSessions(preferredSessionId = "") {
   const sessions = await loadSessions();
   const sessionsWithLocalAnalysis = await Promise.all(sessions.map((session) => restoreLocalAnalysisSession(session)));
+  sessionsWithLocalAnalysis.forEach((session) => {
+    catalogOnlySessionIds.delete(String(session?.id || "").trim());
+    if (clearInterruptedAnalysisStatuses(session)) {
+      persistLocalAnalysisSession(session);
+    }
+  });
   const normalizedSessions = [];
   for (const session of sessionsWithLocalAnalysis) {
     if (normalizeSingleFilePerRevision(session)) {
@@ -3327,7 +5291,9 @@ async function refreshSessions(preferredSessionId = "") {
   store.setActiveSession(fallbackId);
   ensureActiveRevisionAndFile(store.getActiveSession());
   await clearBusyStatusesWithoutLocalFiles(store.getActiveSession(), { scope: "all" });
+  persistSessionCatalog(state.currentUser, sessionsWithLocalAnalysis);
   renderAll();
+  void refreshActiveSessionDetail(fallbackId);
   if (normalizedSessions.length) {
     Promise.allSettled(normalizedSessions.map((session) => saveSession(session))).catch(() => {});
   }
@@ -3434,9 +5400,10 @@ function normalizeSingleFilePerRevision(session = null) {
   return changed;
 }
 
-async function attachSelectedFilesToRevision(session = null, revisionId = "", selectedFiles = []) {
+async function attachSelectedFilesToRevision(session = null, revisionId = "", selectedFiles = [], options = {}) {
   const cleanRevisionId = String(revisionId || "").trim();
   const files = Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : [];
+  const replaceExisting = options?.replaceExisting === true;
   if (!session || !cleanRevisionId || !files.length) {
     return session;
   }
@@ -3447,7 +5414,17 @@ async function attachSelectedFilesToRevision(session = null, revisionId = "", se
     return session;
   }
   revision.files = Array.isArray(revision.files) ? revision.files : [];
-  const fileEntriesByName = new Map();
+  const currentRevisionBlobKeyPrefix = `${String(session.id || "").trim()}::${cleanRevisionId}::`;
+  const replacedLocalBlobKeys = replaceExisting
+    ? revision.files
+      .map((entry) => String(entry?.localBlobKey || "").trim())
+      .filter((localBlobKey) => localBlobKey && localBlobKey.startsWith(currentRevisionBlobKeyPrefix))
+    : [];
+  if (replaceExisting) {
+    // Un ID nuevo distingue una nueva selección de Collect del archivo ya
+    // analizado. Así el backend no restaura resultados de la versión anterior.
+    revision.files = [];
+  }
   const matchingFiles = files.filter((file) => documentNameMatchesRevision(file?.name || "", revision));
   const selectedFilesForRevision = matchingFiles.length
     ? [matchingFiles[matchingFiles.length - 1]]
@@ -3473,6 +5450,7 @@ async function attachSelectedFilesToRevision(session = null, revisionId = "", se
         fileSize: 0,
         fileLastModified: 0,
         fileMimeType: "",
+        workflowRole: String(revision.workflowRole || revision.recortableRole || "source").trim().toLowerCase() || "source",
         sourceType: getNormalizedSourceType(session.sourceType),
         analysisStatus: "idle",
         analysisJobId: "",
@@ -3488,10 +5466,10 @@ async function attachSelectedFilesToRevision(session = null, revisionId = "", se
       fileEntry.mappingId = String(fileEntry.mappingId || revision.mappingId || "").trim();
       fileEntry.mappingTitle = String(fileEntry.mappingTitle || revision.mappingTitle || "").trim();
       fileEntry.mappingUpdatedAt = String(fileEntry.mappingUpdatedAt || revision.mappingUpdatedAt || "").trim();
+      fileEntry.workflowRole = String(revision.workflowRole || revision.recortableRole || fileEntry.workflowRole || "source").trim().toLowerCase() || "source";
       resetFileAnalysisState(fileEntry);
     }
     revision.files = [fileEntry];
-    fileEntriesByName.set(documentName, fileEntry);
   }
   revision.fileCount = revision.files.length;
   revision.summary = buildRevisionSummary(revision.files);
@@ -3522,6 +5500,18 @@ async function attachSelectedFilesToRevision(session = null, revisionId = "", se
       }
     }
     saved = await saveSession(draft);
+  }
+  if (replaceExisting && replacedLocalBlobKeys.length) {
+    const finalSavedRevision = (Array.isArray(saved?.revisions) ? saved.revisions : [])
+      .find((entry) => String(entry?.id || "").trim() === cleanRevisionId) || null;
+    const activeLocalBlobKeys = new Set(
+      (Array.isArray(finalSavedRevision?.files) ? finalSavedRevision.files : [])
+        .map((entry) => String(entry?.localBlobKey || "").trim())
+        .filter(Boolean)
+    );
+    await Promise.all(replacedLocalBlobKeys
+      .filter((localBlobKey) => !activeLocalBlobKeys.has(localBlobKey))
+      .map((localBlobKey) => deleteAnalizarPdfCachedFile(localBlobKey).catch(() => {})));
   }
   store.upsertSession(saved);
   store.setActiveSession(saved.id);
@@ -3622,6 +5612,62 @@ async function attachUnmatchedSelectedFilesToEmptyRevisions(session = null, sele
   return saved;
 }
 
+function isRootCollectFile(file = null) {
+  const relativePath = String(file?.webkitRelativePath || "").trim();
+  return !relativePath || relativePath.split("/").filter(Boolean).length <= 2;
+}
+
+async function importCollectFolder(files = []) {
+  let session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea una sesión antes de elegir la carpeta Collect.");
+    return;
+  }
+  const idmlFiles = Array.from(files || []).filter((file) => {
+    return /\.idml$/i.test(String(file?.name || "")) && isRootCollectFile(file);
+  });
+  if (!idmlFiles.length) {
+    setJobMetaText("No se encontraron IDML en la raíz de la carpeta Collect.");
+    return;
+  }
+  const importSessionId = String(session.id || "").trim();
+  const warnings = [];
+  const assignmentsByRevisionId = new Map();
+  for (const file of idmlFiles) {
+    const unidad = inferUnidadFromDocumentName(file.name);
+    const revision = (session.revisions || []).find((entry) => String(entry?.unidad || "").toLowerCase() === String(unidad || "").toLowerCase());
+    if (!unidad || !revision) {
+      warnings.push(`${file.name}: no coincide con una ficha de esta sesión.`);
+      continue;
+    }
+    const previous = assignmentsByRevisionId.get(revision.id);
+    if (previous) {
+      warnings.push(`${previous.name}: se sustituyó por ${file.name} para ${revision.title || unidad}.`);
+    }
+    assignmentsByRevisionId.set(revision.id, file);
+  }
+  let assignedCount = 0;
+  for (const [revisionId, file] of assignmentsByRevisionId) {
+    if (String(store.getActiveSession()?.id || "").trim() !== importSessionId) {
+      throw new Error("La sesión activa cambió durante la importación. Vuelve a elegir la carpeta Collect.");
+    }
+    session = await attachSelectedFilesToRevision(session, revisionId, [file], {
+      replaceExisting: true,
+    });
+    assignedCount += 1;
+  }
+  state.selectedFiles = [];
+  state.importWarnings = warnings;
+  const pointers = ensureActivePointers(session, state.activeRevisionId, state.activeFileId);
+  state.activeRevisionId = pointers.activeRevisionId;
+  state.activeFileId = pointers.activeFileId;
+  renderAll();
+  setJobMetaText([
+    `${assignedCount}/${idmlFiles.length} IDML actualizado(s) en esta sesión.`,
+    warnings.length ? `Pendientes: ${warnings.join(" ")}` : "",
+  ].filter(Boolean).join(" "));
+}
+
 function createDraftRevision(session = null) {
   const defaultMapping = resolveDefaultMappingForSession(session);
   const timestamp = new Date().toISOString();
@@ -3632,6 +5678,7 @@ function createDraftRevision(session = null) {
     unidad: "",
     revisionNumero: "",
     recortableRole: "source",
+    workflowRole: "source",
     mappingId: String(defaultMapping?.id || "").trim(),
     mappingTitle: String(defaultMapping?.title || "").trim(),
     mappingUpdatedAt: String(defaultMapping?.updatedAt || "").trim(),
@@ -3651,17 +5698,186 @@ function createDraftRevision(session = null) {
   };
 }
 
-function resolveDefaultRevisionUnitCountByTrimester(trimestre = "") {
-  const cleanTrimestre = String(trimestre || "").trim().toLowerCase();
-  if (cleanTrimestre === "trimestre 2") return 6;
-  if (cleanTrimestre === "trimestre 1" || cleanTrimestre === "trimestre 3") return 7;
-  return 7;
+function setInsertRevisionError(message = "") {
+  if (!els.insertRevisionError) return;
+  const cleanMessage = String(message || "").trim();
+  els.insertRevisionError.textContent = cleanMessage;
+  els.insertRevisionError.hidden = !cleanMessage;
+}
+
+function openInsertRevisionModal(index = 0) {
+  const session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea una sesión antes de añadir una ficha editorial.");
+    return;
+  }
+  if (state.isInsertingRevision || state.isAnalyzingCurrent || state.isAnalyzingAll) return;
+  const revisionCount = Array.isArray(session.revisions) ? session.revisions.length : 0;
+  state.insertRevisionIndex = Math.max(0, Math.min(revisionCount, Number(index) || 0));
+  const activeRevision = getActiveRevision(session);
+  if (els.insertRevisionUnit) els.insertRevisionUnit.value = "";
+  if (els.insertRevisionNumber) els.insertRevisionNumber.value = String(activeRevision?.revisionNumero || "F2").trim() || "F2";
+  if (els.insertRevisionRole) els.insertRevisionRole.value = "source";
+  if (els.insertRevisionFile) els.insertRevisionFile.value = "";
+  if (els.insertRevisionFileName) els.insertRevisionFileName.textContent = "Ningún archivo seleccionado";
+  setInsertRevisionError("");
+  if (els.insertRevisionModal) els.insertRevisionModal.hidden = false;
+  window.requestAnimationFrame(() => els.insertRevisionUnit?.focus());
+}
+
+function closeInsertRevisionModal() {
+  if (state.isInsertingRevision) return;
+  if (els.insertRevisionModal) els.insertRevisionModal.hidden = true;
+  state.insertRevisionIndex = -1;
+  setInsertRevisionError("");
+}
+
+async function createTemplateForInsertedRevision(session = null, revisionId = "", fileId = "") {
+  const revision = (Array.isArray(session?.revisions) ? session.revisions : [])
+    .find((entry) => String(entry?.id || "").trim() === String(revisionId || "").trim()) || null;
+  const file = (Array.isArray(revision?.files) ? revision.files : [])
+    .find((entry) => String(entry?.id || "").trim() === String(fileId || "").trim()) || null;
+  if (!revision || !file) return session;
+  const { payload, savedMapping } = await createTemplateMappingForRevisionFile(session, revision, file);
+  const draft = structuredClone(session);
+  applyTemplateMappingToRevisionFile(draft, revision.id, file.id, savedMapping, payload?.sourceAssetPath || "");
+  const saved = await saveSession(draft);
+  store.upsertSession(saved);
+  store.setActiveSession(saved.id);
+  return saved;
+}
+
+async function handleInsertRevisionSubmit(event = null) {
+  event?.preventDefault?.();
+  if (state.isInsertingRevision) return;
+  const session = store.getActiveSession();
+  const unidad = String(els.insertRevisionUnit?.value || "").trim();
+  const revisionNumero = String(els.insertRevisionNumber?.value || "").trim();
+  const workflowRole = String(els.insertRevisionRole?.value || "source").trim().toLowerCase();
+  const selectedFile = els.insertRevisionFile?.files?.[0] || null;
+  if (!session) {
+    setInsertRevisionError("No hay una sesión activa.");
+    return;
+  }
+  if (!unidad || !revisionNumero) {
+    setInsertRevisionError("Selecciona la unidad y la revisión de la nueva ficha.");
+    return;
+  }
+  if (!selectedFile || !/\.idml$/i.test(String(selectedFile.name || ""))) {
+    setInsertRevisionError("Selecciona un archivo IDML válido del dispositivo.");
+    return;
+  }
+
+  const insertionIndex = Math.max(0, Math.min(session.revisions?.length || 0, Number(state.insertRevisionIndex) || 0));
+  const draftRevision = createDraftRevision(session);
+  draftRevision.unidad = unidad;
+  draftRevision.revisionNumero = revisionNumero;
+  draftRevision.revisionKey = buildRevisionKey(draftRevision) || buildDraftRevisionKey();
+  draftRevision.title = buildRevisionTitle(draftRevision);
+  draftRevision.workflowRole = ["source", "destination", "both"].includes(workflowRole) ? workflowRole : "source";
+  draftRevision.recortableRole = normalizeRecortableRole(draftRevision.workflowRole, unidad);
+  const revisionId = draftRevision.id;
+  let fileId = "";
+  let templateWarning = "";
+
+  try {
+    state.isInsertingRevision = true;
+    state.isAnalyzingCurrent = true;
+    if (els.insertRevisionSubmit) els.insertRevisionSubmit.disabled = true;
+    if (els.insertRevisionModal) els.insertRevisionModal.hidden = true;
+    setBusyOverlay(`Preparando ${draftRevision.title}`);
+    renderActionButtonState();
+    await flushUiFrame();
+
+    const draft = structuredClone(session);
+    draft.sourceType = "idml";
+    draft.revisions = Array.isArray(draft.revisions) ? draft.revisions : [];
+    draft.revisions.splice(insertionIndex, 0, draftRevision);
+    draft.bibliographicInfo = draft.bibliographicInfo || {};
+    draft.bibliographicInfo.unidad = unidad;
+    draft.bibliographicInfo.revisionNumero = revisionNumero;
+    if (shouldShowRecortableRole(unidad)) {
+      draft.bibliographicInfo.recortableRole = draftRevision.recortableRole || "source";
+    }
+    let saved = await saveSession(draft);
+    store.upsertSession(saved);
+    store.setActiveSession(saved.id);
+    state.activeRevisionId = revisionId;
+    state.activeFileId = "";
+    ensureActiveRevisionAndFile(saved);
+    renderAll();
+
+    saved = await attachSelectedFilesToRevision(saved, revisionId, [selectedFile]);
+    let insertedRevision = (saved.revisions || []).find((entry) => entry.id === revisionId) || null;
+    let insertedFile = insertedRevision?.files?.[0] || null;
+    fileId = String(insertedFile?.id || "").trim();
+    if (!insertedRevision || !insertedFile) {
+      throw new Error("No se pudo adjuntar el IDML a la nueva ficha editorial.");
+    }
+    state.activeRevisionId = revisionId;
+    state.activeFileId = fileId;
+    ensureActiveRevisionAndFile(saved);
+    renderAll();
+
+    try {
+      saved = await createTemplateForInsertedRevision(saved, revisionId, fileId);
+    } catch (error) {
+      templateWarning = formatIdmlToolError(error);
+      logAnalizarPdfFlow("insertRevision:template-warning", { revisionId, fileId, message: templateWarning });
+    }
+
+    insertedRevision = (saved.revisions || []).find((entry) => entry.id === revisionId) || null;
+    insertedFile = insertedRevision?.files?.find((entry) => entry.id === fileId) || insertedRevision?.files?.[0] || null;
+    if (!insertedRevision || !insertedFile) {
+      throw new Error("La ficha se creó, pero no se pudo preparar su objetivo de análisis.");
+    }
+    state.activeRevisionId = revisionId;
+    state.activeFileId = insertedFile.id;
+    await runAnalysisForTargets(saved, [{
+      selectedFile,
+      targetFile: insertedFile,
+      revision: insertedRevision,
+    }], "No se pudo preparar el archivo seleccionado para el análisis.");
+    setJobMetaText([
+      `${draftRevision.title} se añadió y terminó de analizarse.`,
+      templateWarning ? `Aviso de plantilla: ${templateWarning}` : "",
+    ].filter(Boolean).join(" "));
+  } catch (error) {
+    logAnalizarPdfFlow("insertRevision:error", {
+      revisionId,
+      fileId,
+      message: String(error?.message || error),
+      stack: String(error?.stack || ""),
+    });
+    mutateActiveSession((draft) => {
+      const revision = (draft.revisions || []).find((entry) => entry.id === revisionId);
+      const file = revision?.files?.find((entry) => entry.id === fileId) || revision?.files?.[0];
+      if (file) file.analysisStatus = "failed";
+      return draft;
+    }, { render: false });
+    setJobMetaText(`La ficha se añadió, pero el proceso no terminó: ${String(error?.message || error)}`);
+  } finally {
+    state.isInsertingRevision = false;
+    state.isAnalyzingCurrent = false;
+    state.insertRevisionIndex = -1;
+    if (els.insertRevisionSubmit) els.insertRevisionSubmit.disabled = false;
+    if (els.insertRevisionFile) els.insertRevisionFile.value = "";
+    setBusyOverlay("");
+    renderActionButtonState();
+    renderAll();
+  }
+}
+
+function resolveDefaultRevisionUnitCount(config = {}) {
+  const requested = Number(config?.unitCount || 7);
+  return Math.max(1, Math.min(10, Number.isFinite(requested) ? Math.round(requested) : 7));
 }
 
 function buildDefaultRevisionBlueprints(config = {}) {
-  const unitCount = resolveDefaultRevisionUnitCountByTrimester(config.trimestre);
+  const unitCount = resolveDefaultRevisionUnitCount(config);
   const revisionNumero = String(config.revisionNumero || "F1").trim() || "F1";
   const units = [
+    { unidad: "Intro", recortableRole: "source" },
     { unidad: "Proyecto", recortableRole: "source" },
     ...Array.from({ length: unitCount }, (_, index) => ({
       unidad: `Unidad ${index + 1}`,
@@ -3678,6 +5894,11 @@ function buildDefaultRevisionBlueprints(config = {}) {
 
 function collectDefaultRevisionsConfigFromDom() {
   return {
+    unitCount: Number(els.defaultUnitCountInput?.value || 7),
+    workflowFormat: els.defaultWorkflowFormatInput?.value === "libre" ? "libre" : "en_forma",
+    languageCode: String(els.defaultLanguageInput?.value || "es-MX").trim(),
+    bookName: String(els.defaultBookNameInput?.value || "").trim(),
+    folderFileCount: Array.isArray(state.pendingNewSessionFiles) ? state.pendingNewSessionFiles.filter((file) => /\.idml$/i.test(String(file?.name || ""))).length : 0,
     sourceType: String(els.defaultSourceTypeInput?.value || "idml").trim() || "idml",
     bookType: String(els.defaultBookTypeInput?.value || "").trim(),
     nivel: String(els.defaultNivelInput?.value || "").trim(),
@@ -3690,39 +5911,53 @@ function collectDefaultRevisionsConfigFromDom() {
 
 function validateDefaultRevisionsConfig(config = {}) {
   const missing = [];
-  if (!config.bookType) missing.push("Tipo");
-  if (!config.nivel) missing.push("Nivel");
-  if (!config.grado) missing.push("Grado");
-  if (!config.trimestre) missing.push("Trimestre");
-  if (!config.edicionNumero) missing.push("Edición");
-  if (!config.revisionNumero) missing.push("Revisión");
+  if (config.workflowFormat !== "libre" && resolveDefaultRevisionUnitCount(config) !== Number(config.unitCount || 7)) missing.push("Número de unidades válido (1–10)");
+  if (config.workflowFormat === "libre" && Number(config.folderFileCount || 0) < 1) missing.push("Carpeta con archivos IDML");
   return missing;
 }
 
 function buildDefaultRevisionsSummaryText(config = {}) {
-  const unitCount = resolveDefaultRevisionUnitCountByTrimester(config.trimestre);
-  if (!config.trimestre) {
-    return "Selecciona un trimestre para calcular las fichas base.";
-  }
-  return `${config.trimestre}: Proyecto + ${unitCount} unidad(es) + Lecturas + Recortables.`;
+  if (config.workflowFormat === "libre") return "Se creará una sesión Libre y después elegirás la carpeta con archivos IDML.";
+  const unitCount = resolveDefaultRevisionUnitCount(config);
+  return `Se crearán Intro + Proyecto + ${unitCount} unidad(es) + Lecturas + Recortables.`;
 }
 
 function seedDefaultRevisionsModalFromSession(session = null) {
   const info = session?.bibliographicInfo || {};
+  if (els.defaultWorkflowFormatInput) els.defaultWorkflowFormatInput.value = session?.workflowFormat === "libre" ? "libre" : "en_forma";
+  if (els.defaultLanguageInput) els.defaultLanguageInput.value = String(session?.languageCode || "es-MX");
+  if (els.defaultBookNameInput) els.defaultBookNameInput.value = String(session?.customTitle || "").trim();
   if (els.defaultSourceTypeInput) els.defaultSourceTypeInput.value = "idml";
-  if (els.defaultBookTypeInput) els.defaultBookTypeInput.value = info.bookType || els.bookTypeInput?.value || "";
-  if (els.defaultNivelInput) els.defaultNivelInput.value = info.nivel || els.nivelInput?.value || "";
-  if (els.defaultGradoInput) els.defaultGradoInput.value = info.grado || els.gradoInput?.value || "";
-  if (els.defaultTrimestreInput) els.defaultTrimestreInput.value = info.trimestre || els.trimestreInput?.value || "";
-  if (els.defaultEdicionNumeroInput) els.defaultEdicionNumeroInput.value = info.edicionNumero || els.edicionNumeroInput?.value || "";
-  if (els.defaultRevisionNumeroInput) els.defaultRevisionNumeroInput.value = info.revisionNumero || els.revisionNumeroInput?.value || "F1";
+  if (els.defaultBookTypeInput) els.defaultBookTypeInput.value = info.bookType || "LA";
+  if (els.defaultNivelInput) els.defaultNivelInput.value = info.nivel || "Primaria";
+  if (els.defaultGradoInput) els.defaultGradoInput.value = info.grado || "";
+  if (els.defaultTrimestreInput) els.defaultTrimestreInput.value = info.trimestre || "Trimestre 1";
+  if (els.defaultEdicionNumeroInput) els.defaultEdicionNumeroInput.value = info.edicionNumero || "10rev";
+  if (els.defaultRevisionNumeroInput) els.defaultRevisionNumeroInput.value = info.revisionNumero || "F1";
+  if (els.defaultUnitCountInput) els.defaultUnitCountInput.value = "7";
+  if (els.defaultFolderSummary) els.defaultFolderSummary.textContent = "Ninguna carpeta seleccionada.";
 }
 
 function renderDefaultRevisionsModal() {
   if (!els.defaultRevisionsModal) return;
   els.defaultRevisionsModal.hidden = !state.defaultRevisionsModalOpen;
   if (!state.defaultRevisionsModalOpen) return;
+  const fieldsGrid = els.defaultWorkflowFormatInput?.closest(".analizar-pdf-default-revisions-grid");
+  const workflowField = els.defaultWorkflowFormatInput?.closest("label");
+  const unitCountField = els.defaultUnitCountInput?.closest("label");
+  if (fieldsGrid && workflowField && unitCountField) {
+    fieldsGrid.prepend(workflowField);
+    workflowField.after(unitCountField);
+  }
   const config = collectDefaultRevisionsConfigFromDom();
+  const libre = config.workflowFormat === "libre";
+  if (els.defaultUnitCountInput) els.defaultUnitCountInput.closest("label")?.toggleAttribute("hidden", libre);
+  [
+    els.defaultBookTypeInput,
+    els.defaultNivelInput,
+    els.defaultGradoInput,
+    els.defaultTrimestreInput,
+  ].forEach((input) => input?.closest("label")?.toggleAttribute("hidden", libre));
   const missing = validateDefaultRevisionsConfig(config);
   if (els.defaultRevisionsSummary) {
     els.defaultRevisionsSummary.textContent = missing.length
@@ -3735,7 +5970,7 @@ function renderDefaultRevisionsModal() {
 }
 
 function openDefaultRevisionsModal() {
-  const session = store.getActiveSession();
+  const session = state.pendingNewSession || store.getActiveSession();
   if (!session) {
     setJobMetaText("Crea una sesión antes de generar fichas base.");
     return;
@@ -3747,20 +5982,275 @@ function openDefaultRevisionsModal() {
 
 function closeDefaultRevisionsModal() {
   state.defaultRevisionsModalOpen = false;
+  state.pendingNewSession = null;
+  state.pendingNewSessionFiles = [];
+  state.pendingCreateFolderSelection = false;
   renderDefaultRevisionsModal();
 }
 
-async function handleCreateDefaultRevisions(config = null) {
+function collectGlobalTemplateConfigFromDom() {
+  return {
+    sourceType: getNormalizedSourceType(els.globalSourceTypeInput?.value || "idml"),
+    workflowFormat: els.globalWorkflowFormatInput?.value === "libre" ? "libre" : "en_forma",
+    languageCode: String(els.globalLanguageInput?.value || "es-MX").trim(),
+    bookName: String(els.globalBookNameInput?.value || "").trim(),
+    bookType: String(els.globalBookTypeInput?.value || "").trim(),
+    nivel: String(els.globalNivelInput?.value || "").trim(),
+    grado: String(els.globalGradoInput?.value || "").trim(),
+    trimestre: String(els.globalTrimestreInput?.value || "").trim(),
+    edicionNumero: String(els.globalEdicionInput?.value || "").trim(),
+    revisionNumero: String(els.globalRevisionInput?.value || "").trim(),
+  };
+}
+
+function detectLibreStructure(fileName = "") {
+  const name = String(fileName || "").replace(/\.idml$/i, "");
+  const patterns = [
+    ["chapter", /(?:cap(?:i|í)tulo|chapter|chap)[ _.-]*(\d+)/i],
+    ["topic", /(?:tema|topic)[ _.-]*(\d+)/i],
+    ["unit", /(?:unidad|unit|u)[ _.-]*(\d+)/i],
+    ["section", /(?:secci(?:o|ó)n|section|sec)[ _.-]*(\d+)/i],
+  ];
+  for (const [type, pattern] of patterns) {
+    const match = name.match(pattern);
+    if (match) return { type, label: match[0], ordinal: Number(match[1]), source: "filename" };
+  }
+  return { type: "", label: "", ordinal: null, source: "" };
+}
+
+async function importLibreFolder(folderFiles = []) {
+  const isUsable = (file) => {
+    const path = String(file?.webkitRelativePath || file?.name || "");
+    return /\.idml$/i.test(path) && !path.split("/").some((part) => part.startsWith(".") || /^~\$/.test(part));
+  };
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  const seen = new Set();
+  const files = folderFiles.filter(isUsable).sort((a, b) => collator.compare(a.webkitRelativePath || a.name, b.webkitRelativePath || b.name)).filter((file) => {
+    const key = `${String(file.webkitRelativePath || file.name).toLowerCase()}::${file.size}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!files.length) throw new Error("La carpeta no contiene archivos IDML válidos.");
+  const now = Date.now();
+  const structures = files.map((file) => detectLibreStructure(file.name));
+  const sequenceWarnings = [];
+  const ordinalsByType = new Map();
+  for (const structure of structures) {
+    if (!structure.type || !Number.isFinite(structure.ordinal)) continue;
+    const values = ordinalsByType.get(structure.type) || [];
+    values.push(structure.ordinal);
+    ordinalsByType.set(structure.type, values);
+  }
+  for (const [type, values] of ordinalsByType) {
+    const ordered = [...values].sort((a, b) => a - b);
+    const duplicates = ordered.filter((value, index) => index > 0 && value === ordered[index - 1]);
+    const missing = [];
+    for (let value = ordered[0]; value <= ordered[ordered.length - 1]; value += 1) if (!ordered.includes(value)) missing.push(value);
+    if (duplicates.length) sequenceWarnings.push(`${type}: secuencias duplicadas ${[...new Set(duplicates)].join(", ")}`);
+    if (missing.length) sequenceWarnings.push(`${type}: faltan ${missing.join(", ")}`);
+  }
+  const nextSession = mutateActiveSession((draft) => {
+    draft.sourceType = "idml";
+    draft.workflowFormat = "libre";
+    draft.importWarnings = sequenceWarnings;
+    draft.revisions = files.map((file, index) => {
+      const documentName = String(file.name || `archivo-${index + 1}.idml`);
+      const title = `Archivo ${index + 1}`;
+      const fileId = `file_${now}_${index + 1}`;
+      return {
+        id: `revision_${now}_${index + 1}`,
+        revisionKey: `libre_${now}_${index + 1}`,
+        title,
+        unidad: title,
+        revisionNumero: String(index + 1),
+        workflowRole: "source",
+        detectedStructure: structures[index],
+        files: [{ id: fileId, fileKey: buildFileKey(documentName), documentName, sourceType: "idml", workflowRole: "source", analysisSelected: true, fileSize: file.size, fileLastModified: file.lastModified, fileMimeType: file.type, analysisStatus: "idle" }],
+        fileCount: 1,
+      };
+    });
+    draft.activeRevisionId = draft.revisions[0]?.id || "";
+    draft.activeFileId = draft.revisions[0]?.files?.[0]?.id || "";
+    draft.updatedAt = new Date().toISOString();
+    return draft;
+  }, { render: false });
+  if (!nextSession) {
+    throw new Error("No fue posible preparar las fichas editoriales del modo Libre.");
+  }
+  state.selectedFiles = files;
+  const saved = await saveSession(nextSession);
+  store.upsertSession(saved);
+  store.setActiveSession(saved.id);
+  ensureActiveRevisionAndFile(saved);
+  renderAll();
+  const cacheFailures = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const revision = saved.revisions[index];
+    const fileEntry = revision?.files?.[0];
+    if (!revision || !fileEntry) continue;
+    try {
+      const localMetadata = await cacheSelectedFileForRevision(saved.id, revision.id, fileEntry, files[index]);
+      if (!localMetadata) {
+        throw new Error("IndexedDB no devolvió metadata local.");
+      }
+      Object.assign(fileEntry, localMetadata);
+      fileEntry.documentName = String(files[index]?.name || fileEntry.documentName || "").trim();
+      fileEntry.fileKey = buildFileKey(fileEntry.documentName);
+      fileEntry.sourceType = "idml";
+      fileEntry.analysisSelected = true;
+    } catch (error) {
+      cacheFailures.push(`${files[index]?.name || `Archivo ${index + 1}`}: ${String(error?.message || error)}`);
+    }
+  }
+  const persisted = await saveSession(saved);
+  store.upsertSession(persisted);
+  store.setActiveSession(persisted.id);
+  ensureActiveRevisionAndFile(persisted);
+  renderAll();
+  if (els.globalLibreFolderSummary) els.globalLibreFolderSummary.textContent = `${files.length} IDML detectados${sequenceWarnings.length ? ` · ${sequenceWarnings.length} advertencias` : ""}`;
+  setJobMetaText(`${files.length} fichas Libre creadas; ${files.length - cacheFailures.length} archivo(s) cargados.${cacheFailures.length ? ` No cargados: ${cacheFailures.slice(0, 4).join("; ")}` : ""}${sequenceWarnings.length ? ` ${sequenceWarnings.join("; ")}` : ""}`);
+  return persisted;
+}
+
+function seedGlobalTemplateModalFromSession(session = null) {
+  const info = session?.bibliographicInfo || {};
+  if (els.globalSourceTypeInput) els.globalSourceTypeInput.value = getNormalizedSourceType(session?.sourceType || "idml");
+  if (els.globalWorkflowFormatInput) {
+    els.globalWorkflowFormatInput.value = session?.workflowFormat === "libre" ? "libre" : "en_forma";
+    els.globalWorkflowFormatInput.disabled = (session?.revisions || []).length > 0;
+  }
+  if (els.globalLanguageInput) els.globalLanguageInput.value = String(session?.languageCode || "es-MX");
+  if (els.globalBookNameInput) els.globalBookNameInput.value = String(session?.customTitle || session?.title || "").trim();
+  if (els.globalBookTypeInput) els.globalBookTypeInput.value = String(info.bookType || "").trim();
+  if (els.globalNivelInput) els.globalNivelInput.value = String(info.nivel || "").trim();
+  if (els.globalGradoInput) els.globalGradoInput.value = String(info.grado || "").trim();
+  if (els.globalTrimestreInput) els.globalTrimestreInput.value = String(info.trimestre || "").trim();
+  if (els.globalEdicionInput) els.globalEdicionInput.value = String(info.edicionNumero || "").trim();
+  if (els.globalRevisionInput) els.globalRevisionInput.value = String(info.revisionNumero || getActiveRevision(session)?.revisionNumero || "F1").trim();
+}
+
+function renderGlobalTemplateModal() {
+  if (!els.globalTemplateModal) return;
+  els.globalTemplateModal.hidden = !state.globalTemplateModalOpen;
+  const libre = els.globalWorkflowFormatInput?.value === "libre";
+  if (els.globalLibreFolderField) els.globalLibreFolderField.hidden = !libre;
+  [
+    els.globalBookTypeInput,
+    els.globalNivelInput,
+    els.globalGradoInput,
+    els.globalTrimestreInput,
+  ].forEach((input) => input?.closest("label")?.toggleAttribute("hidden", libre));
+  els.globalTemplateModal.dataset.workflowFormat = libre ? "libre" : "en_forma";
+}
+
+function openGlobalTemplateModal() {
   const session = store.getActiveSession();
+  if (!session) {
+    setJobMetaText("Crea un análisis antes de editar los datos globales.");
+    return;
+  }
+  seedGlobalTemplateModalFromSession(session);
+  state.globalTemplateModalOpen = true;
+  renderGlobalTemplateModal();
+  window.requestAnimationFrame(() => els.globalBookTypeInput?.focus());
+}
+
+function closeGlobalTemplateModal() {
+  state.globalTemplateModalOpen = false;
+  renderGlobalTemplateModal();
+}
+
+async function handleSaveGlobalTemplateData() {
+  const currentSession = store.getActiveSession();
+  if (!currentSession) return;
+  const config = collectGlobalTemplateConfigFromDom();
+  const nextSession = mutateActiveSession((draft) => {
+    const currentInfo = draft.bibliographicInfo || {};
+    draft.sourceType = config.sourceType;
+    draft.workflowFormat = config.workflowFormat;
+    draft.languageCode = config.languageCode;
+    if (config.bookName) draft.customTitle = config.bookName;
+    draft.bibliographicInfo = {
+      ...currentInfo,
+      bookType: config.bookType,
+      nivel: config.nivel,
+      grado: config.grado,
+      trimestre: config.trimestre,
+      edicionNumero: config.edicionNumero,
+      revisionNumero: config.revisionNumero,
+      // Unidad y rol son deliberadamente individuales y nunca se pisan aquí.
+      unidad: currentInfo.unidad || "",
+      recortableRole: currentInfo.recortableRole || "source",
+    };
+    for (const revision of Array.isArray(draft.revisions) ? draft.revisions : []) {
+      if (config.revisionNumero) revision.revisionNumero = config.revisionNumero;
+      revision.title = buildRevisionTitle(revision);
+      revision.revisionKey = buildRevisionKey(revision);
+      revision.updatedAt = new Date().toISOString();
+    }
+    draft.title = draft.customTitle || buildDerivedSessionTitle(draft);
+    draft.sessionKey = buildSessionKey(getSessionBaseInfo(draft));
+    draft.updatedAt = new Date().toISOString();
+    return draft;
+  }, { render: false });
+  if (!nextSession) return;
+
+  if (els.globalTemplateSaveBtn) els.globalTemplateSaveBtn.disabled = true;
+  try {
+    const saved = await saveSession(nextSession);
+    store.upsertSession(saved);
+    store.setActiveSession(saved.id);
+    syncPersistedTitleMap();
+    closeGlobalTemplateModal();
+    renderAll({ preserveResultsRail: true });
+    updateResultsRailEntriesForSession(saved);
+    setJobMetaText("Datos globales actualizados en todas las fichas editoriales.");
+  } finally {
+    if (els.globalTemplateSaveBtn) els.globalTemplateSaveBtn.disabled = false;
+  }
+}
+
+async function handleCreateDefaultRevisions(config = null) {
+  let session = state.pendingNewSession || store.getActiveSession();
   if (!session) {
     setJobMetaText("Crea una sesión antes de generar fichas base.");
     return;
   }
   const normalizedConfig = config || collectDefaultRevisionsConfigFromDom();
+  const pendingFolderFiles = Array.from(state.pendingNewSessionFiles || []);
   const missing = validateDefaultRevisionsConfig(normalizedConfig);
   if (missing.length) {
     setJobMetaText(`Faltan datos para crear fichas base: ${missing.join(", ")}.`);
     return;
+  }
+  if (state.pendingNewSession) {
+    const pending = structuredClone(state.pendingNewSession);
+    pending.sourceType = "idml";
+    pending.workflowFormat = normalizedConfig.workflowFormat;
+    pending.languageCode = normalizedConfig.languageCode;
+    pending.customTitle = normalizedConfig.bookName;
+    pending.title = normalizedConfig.bookName || pending.title;
+    pending.bibliographicInfo = {
+      ...(pending.bibliographicInfo || {}),
+      bookType: normalizedConfig.bookType || "",
+      nivel: normalizedConfig.nivel || "",
+      grado: normalizedConfig.grado || "",
+      trimestre: normalizedConfig.trimestre || "",
+      edicionNumero: normalizedConfig.edicionNumero || "",
+      revisionNumero: normalizedConfig.revisionNumero || "F1",
+    };
+    session = await saveSession(pending);
+    store.upsertSession(session);
+    store.setActiveSession(session.id);
+    state.pendingNewSession = null;
+    if (normalizedConfig.workflowFormat === "libre") {
+      closeDefaultRevisionsModal();
+      renderAll();
+      setJobMetaText("Sesión Libre creada. Importando los archivos IDML seleccionados...");
+      await importLibreFolder(pendingFolderFiles);
+      return;
+    }
   }
   const blueprints = buildDefaultRevisionBlueprints(normalizedConfig);
   const added = [];
@@ -3768,12 +6258,12 @@ async function handleCreateDefaultRevisions(config = null) {
     draft.sourceType = "idml";
     draft.bibliographicInfo = {
       ...(draft.bibliographicInfo || {}),
-      bookType: normalizedConfig.bookType,
-      nivel: normalizedConfig.nivel,
-      grado: normalizedConfig.grado,
-      trimestre: normalizedConfig.trimestre,
-      edicionNumero: normalizedConfig.edicionNumero,
-      revisionNumero: normalizedConfig.revisionNumero,
+      bookType: normalizedConfig.bookType || "",
+      nivel: normalizedConfig.nivel || "",
+      grado: normalizedConfig.grado || "",
+      trimestre: normalizedConfig.trimestre || "",
+      edicionNumero: normalizedConfig.edicionNumero || "",
+      revisionNumero: normalizedConfig.revisionNumero || "F1",
       unidad: draft.bibliographicInfo?.unidad || "Proyecto",
       recortableRole: draft.bibliographicInfo?.recortableRole || "source",
     };
@@ -3818,6 +6308,10 @@ async function handleCreateDefaultRevisions(config = null) {
   setJobMetaText(added.length
     ? `Fichas base creadas: ${added.length}.`
     : "Las fichas base ya existían; no se duplicaron.");
+  if (pendingFolderFiles.length) {
+    setJobMetaText("Fichas base creadas. Asignando los IDML de la carpeta Collect...");
+    await importCollectFolder(pendingFolderFiles);
+  }
 }
 
 function upsertRevisionIntoSession(session = null, filesToMerge = []) {
@@ -3845,11 +6339,11 @@ function resolveSessionForPersistence(session = null, filesToMerge = []) {
   removeRecortableSourceFileContamination(draft);
   normalizeSingleFilePerRevision(draft);
   const derivedTitle = buildDerivedSessionTitle(draft);
-  draft.title = derivedTitle;
+  draft.title = String(draft.customTitle || "").trim() || derivedTitle;
   draft.sessionKey = buildSessionKey(getSessionBaseInfo(draft));
   const currentId = String(draft?.id || "").trim();
   const savedTitleForCurrentId = String(state.persistedTitlesBySessionId[currentId] || "").trim();
-  if (savedTitleForCurrentId && savedTitleForCurrentId !== derivedTitle) {
+  if (!String(draft.customTitle || "").trim() && savedTitleForCurrentId && savedTitleForCurrentId !== derivedTitle) {
     draft.id = "";
     draft.createdAt = "";
     draft.analysisStatus = "idle";
@@ -3891,19 +6385,44 @@ async function persistActiveSession(filesToMerge = [], options = {}) {
   store.setActiveSession(saved.id);
   ensureActiveRevisionAndFile(saved);
   syncPersistedTitleMap();
-  renderAll();
+  renderAll({ preserveResultsRail: options?.preserveResultsRail === true });
   return saved;
 }
 
 async function saveActiveSessionSnapshot(options = {}) {
   const session = store.getActiveSession();
   if (!session) throw new Error("No hay sesión activa.");
-  persistLocalAnalysisSession(session);
+  await persistLocalAnalysisSession(session);
   const saved = session;
   if (options.render === true) {
     renderAll();
   }
   return saved;
+}
+
+async function persistDurableAnalysisSnapshot(options = {}) {
+  const session = store.getActiveSession();
+  if (!session) return { session: null, remoteSaved: false };
+  await persistLocalAnalysisSession(session);
+  if (options.remote === false) return { session, remoteSaved: false };
+  try {
+    const saved = await saveSession(session, { includeAnalysis: true });
+    catalogOnlySessionIds.delete(String(saved?.id || session.id || "").trim());
+    store.upsertSession(saved);
+    store.setActiveSession(saved.id);
+    ensureActiveRevisionAndFile(saved);
+    syncPersistedTitleMap();
+    persistSessionCatalog(state.currentUser, state.sessions);
+    await persistLocalAnalysisSession(saved);
+    return { session: saved, remoteSaved: true };
+  } catch (error) {
+    logAnalizarPdfFlow("analysisSnapshot:remote-save-failed", {
+      sessionId: session?.id || "",
+      reason: String(options?.reason || "analysis-completed"),
+      message: String(error?.message || error),
+    });
+    return { session, remoteSaved: false, error };
+  }
 }
 
 function buildTemplateMappingTitle(revision = null) {
@@ -4089,14 +6608,15 @@ async function buildTemplateCreationTargets(session = null) {
   return targets;
 }
 
-async function handleCreateTemplatesFromAll() {
+async function handleCreateTemplatesFromAll(options = {}) {
   if (state.isCreatingTemplatesFromAll) return;
   let session = store.getActiveSession();
   if (!session) {
     setJobMetaText("Crea una sesión antes de crear plantillas.");
     return;
   }
-  session = await persistActiveSession([]);
+  const preserveResultsRail = options?.preserveResultsRail === true;
+  session = await persistActiveSession([], { preserveResultsRail });
   const targets = await buildTemplateCreationTargets(session);
   if (!targets.length) {
     setJobMetaText("No hay fichas editoriales con IDML local/backend disponible para crear plantillas.");
@@ -4167,19 +6687,25 @@ async function handleCreateTemplatesFromAll() {
       `Grupo: ${group.title}.`,
       failures.length ? `Fallos: ${failures.slice(0, 6).join(" ")}` : "",
     ].filter(Boolean).join(" "));
-    renderAll();
+    renderAll({ preserveResultsRail });
   } finally {
     state.isCreatingTemplatesFromAll = false;
     setBusyOverlay("");
     renderActionButtonState();
-    renderAll();
+    renderAll({ preserveResultsRail });
   }
 }
 
-async function buildQuickAnalysisTargets(session = null) {
+async function buildQuickAnalysisTargets(session = null, selectedRevisionIds = null) {
   const targets = [];
+  const frozenSelectedRevisionIds = Array.isArray(selectedRevisionIds)
+    ? new Set(selectedRevisionIds.map((value) => String(value || "").trim()).filter(Boolean))
+    : null;
   for (const revision of Array.isArray(session?.revisions) ? session.revisions : []) {
+    const revisionId = String(revision?.id || "").trim();
+    if (frozenSelectedRevisionIds && !frozenSelectedRevisionIds.has(revisionId)) continue;
     for (const file of Array.isArray(revision?.files) ? revision.files : []) {
+      if (!frozenSelectedRevisionIds && file?.analysisSelected === false) continue;
       if (!hasAvailableIdmlSource(file)) {
         continue;
       }
@@ -4200,7 +6726,34 @@ async function buildQuickAnalysisTargets(session = null) {
   return targets;
 }
 
-async function handleQuickAnalyzeAll() {
+function buildQuickAnalysisFromFullResult(file = null) {
+  const pageReports = Array.isArray(file?.result?.stats?.pageReports) ? file.result.stats.pageReports : [];
+  const executedCategories = file?.result?.stats?.analysisCategories;
+  if (!pageReports.length || executedCategories?.orthotypography === false) return null;
+  const pages = pageReports
+    .map((page) => ({
+      pageName: String(page?.pageName || "").trim(),
+      issues: (Array.isArray(page?.orthotypographyIssues) ? page.orthotypographyIssues : []).map((issue) => ({
+        ...issue,
+        pageName: String(issue?.pageName || page?.pageName || "").trim(),
+        paragraphText: String(issue?.paragraphText || issue?.context || "").trim(),
+      })),
+    }))
+    .filter((page) => page.pageName && page.issues.length);
+  return {
+    ok: true,
+    status: "completed",
+    sourceType: "idml",
+    source: "full-analysis-reuse",
+    orthotypographyIssueCount: pages.reduce((total, page) => total + page.issues.length, 0),
+    pageCount: pageReports.length,
+    pages,
+    generatedAt: new Date().toISOString(),
+    durationMs: 0,
+  };
+}
+
+async function handleQuickAnalyzeAll(options = {}) {
   if (state.isQuickAnalyzingAll) return;
   const session = store.getActiveSession();
   if (!session) {
@@ -4214,13 +6767,27 @@ async function handleQuickAnalyzeAll() {
     setJobMetaText("El análisis rápido ortotipográfico solo aplica a sesiones IDML.");
     return;
   }
-  const targets = await buildQuickAnalysisTargets(session);
+  const requestedRevisionId = String(options?.revisionId || "").trim();
+  const requestedFileId = String(options?.fileId || "").trim();
+  const selectedRevisionIds = Array.isArray(options?.selectedRevisionIds)
+    ? options.selectedRevisionIds
+    : (Array.isArray(session?.revisions) ? session.revisions : []).filter((revision) => {
+      const files = Array.isArray(revision?.files) ? revision.files : [];
+      return files.length && files.every((file) => file?.analysisSelected !== false);
+    }).map((revision) => String(revision?.id || "").trim()).filter(Boolean);
+  const allTargets = await buildQuickAnalysisTargets(session, selectedRevisionIds);
+  const targets = allTargets.filter(({ revision, file }) => (
+    (!requestedRevisionId || String(revision?.id || "").trim() === requestedRevisionId)
+    && (!requestedFileId || String(file?.id || "").trim() === requestedFileId)
+  ));
   const missing = buildMissingLocalSourceNoticeFromSession(session);
   if (!targets.length) {
     setJobMetaText(missing || "No hay copias backend de IDML disponibles para análisis rápido.");
     return;
   }
   const failures = [];
+  const keepMagicSpriteAlive = options?.keepMagicSpriteAlive === true;
+  let magicSpriteToken = String(options?.magicSpriteToken || "").trim();
   try {
     state.isQuickAnalyzingAll = true;
     setBusyOverlay("Preparando análisis rápido ortotipográfico");
@@ -4228,6 +6795,15 @@ async function handleQuickAnalyzeAll() {
     await flushUiFrame();
     for (let index = 0; index < targets.length; index += 1) {
       const { revision, file, selectedFile, useStoredSource } = targets[index];
+      const spriteContext = {
+        revisionId: revision?.id || "",
+        fileId: file?.id || "",
+        revision,
+        file,
+      };
+      magicSpriteToken = activeAnalysisSprites.has(magicSpriteToken)
+        ? retargetAnalysisSprite(magicSpriteToken, spriteContext)
+        : startAnalysisSprite(spriteContext);
       setBusyOverlay(buildEditorialProcessLabel(session, revision, file, {
         action: "Análisis rápido",
         step: useStoredSource ? "Leyendo copia guardada" : "Preparando IDML local",
@@ -4244,7 +6820,8 @@ async function handleQuickAnalyzeAll() {
           total: targets.length,
         }));
         await flushUiFrame();
-        const payload = await runAnalizarPdfQuickOrthotypography(session.id, revision.id, file.id, {
+        const reusedQuickAnalysis = buildQuickAnalysisFromFullResult(file);
+        const payload = reusedQuickAnalysis ? { quickAnalysis: reusedQuickAnalysis } : await runAnalizarPdfQuickOrthotypography(session.id, revision.id, file.id, {
           file: selectedFile,
           useStoredSource,
           fileName: file.documentName || selectedFile?.name || "documento.idml",
@@ -4274,16 +6851,26 @@ async function handleQuickAnalyzeAll() {
           return draft;
         }, { render: false });
         if (next) {
-          persistLocalAnalysisSession(next);
+          await persistLocalAnalysisSession(next);
+          resultsRenderer.updateRailEntry(
+            buildRenderableSession(next),
+            String(revision?.id || "").trim(),
+            String(file?.id || "").trim()
+          );
+          resultsRailRenderSignature = buildResultsRailRenderSignature(next);
         }
-        renderAll();
+        // La ficha y el rail se actualizan al finalizar la fase. Evitar un render
+        // global por archivo conserva el mismo personaje durante búsqueda y guardado.
+        renderActionButtonState();
       } catch (error) {
         failures.push(`${revision.title || revision.unidad || "Ficha editorial"}: ${formatIdmlToolError(error)}`);
       }
     }
     const analyzedCount = targets.length - failures.length;
+    const durableSnapshot = await persistDurableAnalysisSnapshot({ reason: "quick-analysis-completed" });
     setJobMetaText([
       `Análisis rápido finalizado: ${analyzedCount}/${targets.length} ficha(s).`,
+      durableSnapshot.remoteSaved ? "Resultados guardados." : "Resultados conservados localmente; el guardado remoto queda pendiente.",
       failures.length ? `Fallos: ${failures.slice(0, 6).join(" ")}` : "",
       missing ? `Omitidas: ${missing}` : "",
     ].filter(Boolean).join(" "));
@@ -4291,7 +6878,8 @@ async function handleQuickAnalyzeAll() {
     state.isQuickAnalyzingAll = false;
     setBusyOverlay("");
     renderActionButtonState();
-    renderAll();
+    renderAll({ preserveResultsRail: true });
+    if (!keepMagicSpriteAlive) stopAnalysisSprite(magicSpriteToken);
   }
 }
 
@@ -4309,15 +6897,13 @@ async function handleCreateSession() {
   state.jobMetaSessionId = "";
   setJobMetaText("");
   const session = createEmptyAnalizarPdfSession();
-  const draftRevision = createDraftRevision(session);
-  session.revisions = [draftRevision];
-  const saved = await saveSession(session);
-  store.upsertSession(saved);
-  store.setActiveSession(saved.id);
-  state.activeRevisionId = String(saved.revisions?.[0]?.id || draftRevision.id || "").trim();
+  session.revisions = [];
+  state.pendingNewSession = session;
+  state.pendingNewSessionFiles = [];
+  state.pendingCreateFolderSelection = false;
+  state.activeRevisionId = "";
   state.activeFileId = "";
-  ensureActiveRevisionAndFile(saved);
-  renderAll();
+  openDefaultRevisionsModal();
 }
 
 async function handleCreateRevision() {
@@ -4354,9 +6940,38 @@ function handleSelectSession(sessionId = "") {
   store.setActiveSession(sessionId);
   ensureActiveRevisionAndFile(store.getActiveSession());
   renderAll();
+  void refreshActiveSessionDetail(sessionId);
 }
 
-async function handleRenameSession() {}
+async function handleRenameSession(sessionId = "", requestedTitle = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  const cleanTitle = String(requestedTitle || "").trim();
+  const current = state.sessions.find((session) => String(session?.id || "").trim() === cleanSessionId) || null;
+  if (!current || !cleanTitle || cleanTitle === String(current.title || "").trim()) return current;
+  const previous = structuredClone(current);
+  const next = structuredClone(current);
+  next.title = cleanTitle;
+  next.customTitle = cleanTitle;
+  next.updatedAt = new Date().toISOString();
+  store.upsertSession(next);
+  syncPersistedTitleMap();
+  renderAll();
+  try {
+    const saved = await saveSession(next);
+    store.upsertSession(saved);
+    syncPersistedTitleMap();
+    persistSessionCatalog(state.currentUser, state.sessions);
+    persistLocalAnalysisSession(saved);
+    renderAll();
+    return saved;
+  } catch (error) {
+    store.upsertSession(previous);
+    syncPersistedTitleMap();
+    renderAll();
+    setJobMetaText(String(error?.message || error));
+    return previous;
+  }
+}
 
 async function handleDeleteSession(sessionId = "") {
   if (!window.confirm("¿Eliminar esta sesión?")) return;
@@ -4402,6 +7017,123 @@ async function handleDeleteRevision(revisionId = "") {
   renderAll();
 }
 
+function collectRevisionTimelineRects() {
+  if (!els.revisionList) return new Map();
+  return new Map([...els.revisionList.querySelectorAll(".analizar-pdf-revision-timeline-card[data-revision-id]")]
+    .map((card) => [String(card.dataset.revisionId || "").trim(), card.getBoundingClientRect()]));
+}
+
+function updateRevisionFileTab(card = null, index = 0) {
+  const tab = card?.querySelector?.(".analizar-pdf-revision-file-tab");
+  if (!tab) return;
+  const textNode = [...tab.childNodes].find((node) => node.nodeType === 3);
+  if (textNode) {
+    textNode.nodeValue = ` Archivo ${index + 1}`;
+    return;
+  }
+  tab.append(document.createTextNode(` Archivo ${index + 1}`));
+}
+
+function syncRevisionTimelineDomOrder(revisions = []) {
+  if (!els.revisionList) return false;
+  const orderedRevisions = Array.isArray(revisions) ? revisions : [];
+  const cardsById = new Map([...els.revisionList.querySelectorAll(".analizar-pdf-revision-timeline-card[data-revision-id]")]
+    .map((card) => [String(card.dataset.revisionId || "").trim(), card]));
+  const slots = [...els.revisionList.querySelectorAll(".analizar-pdf-revision-insert-slot")];
+  if (cardsById.size !== orderedRevisions.length || slots.length !== orderedRevisions.length + 1) return false;
+
+  const desiredNodes = [];
+  orderedRevisions.forEach((revision, index) => {
+    const revisionId = String(revision?.id || "").trim();
+    const card = cardsById.get(revisionId);
+    const slot = slots[index];
+    if (!card || !slot) return;
+    slot.dataset.insertIndex = String(index);
+    slot.querySelector("[data-insert-index]")?.setAttribute("data-insert-index", String(index));
+    card.dataset.timelineIndex = String(index + 1);
+    updateRevisionFileTab(card, index);
+    desiredNodes.push(slot, card);
+  });
+  const finalSlot = slots[orderedRevisions.length];
+  if (desiredNodes.length !== orderedRevisions.length * 2 || !finalSlot) return false;
+  finalSlot.dataset.insertIndex = String(orderedRevisions.length);
+  finalSlot.querySelector("[data-insert-index]")?.setAttribute("data-insert-index", String(orderedRevisions.length));
+  desiredNodes.push(finalSlot);
+
+  let cursor = els.revisionList.firstElementChild;
+  for (const node of desiredNodes) {
+    if (node === cursor) {
+      cursor = cursor.nextElementSibling;
+      continue;
+    }
+    els.revisionList.insertBefore(node, cursor);
+  }
+  state.revisionTimelineSignature = orderedRevisions.map((revision) => String(revision?.id || "")).join("|");
+  state.revisionTimelineRevealPending = false;
+  return true;
+}
+
+function animateRevisionTimelineReorder(previousRects = new Map()) {
+  if (!els.revisionList || prefersReducedRevisionMotion() || typeof Element.prototype.animate !== "function") return;
+  window.requestAnimationFrame(() => {
+    for (const card of els.revisionList.querySelectorAll(".analizar-pdf-revision-timeline-card[data-revision-id]")) {
+      const previousRect = previousRects.get(String(card.dataset.revisionId || "").trim());
+      if (!previousRect) continue;
+      const nextRect = card.getBoundingClientRect();
+      const deltaX = previousRect.left - nextRect.left;
+      const deltaY = previousRect.top - nextRect.top;
+      if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) continue;
+      card.animate([
+        { translate: `${deltaX}px ${deltaY}px` },
+        { translate: "0 0" },
+      ], {
+        duration: 320,
+        easing: "cubic-bezier(.2,.85,.25,1)",
+      });
+    }
+  });
+}
+
+function refreshRevisionOrderViews(session = null, options = {}) {
+  const previousRects = options.animate === false ? new Map() : collectRevisionTimelineRects();
+  if (!syncRevisionTimelineDomOrder(session?.revisions || [])) {
+    renderRevisionList(session);
+    return false;
+  }
+  renderSavedAnalysisSelector(session);
+  renderResultsWithRailAnimations(buildRenderableSession(session));
+  persistLocalAnalysisSession(session);
+  if (options.animate !== false) animateRevisionTimelineReorder(previousRects);
+  return true;
+}
+
+async function persistRevisionOrderWithoutFullRender(nextSession = null, previousSession = null, activeRevisionId = "") {
+  store.upsertSession(nextSession);
+  store.setActiveSession(nextSession.id);
+  state.activeRevisionId = String(activeRevisionId || "").trim();
+  ensureActiveRevisionAndFile(nextSession);
+  syncPersistedTitleMap();
+  refreshRevisionOrderViews(nextSession);
+  try {
+    const saved = await saveSession(nextSession);
+    store.upsertSession(saved);
+    store.setActiveSession(saved.id);
+    ensureActiveRevisionAndFile(saved);
+    syncPersistedTitleMap();
+    refreshRevisionOrderViews(saved, { animate: false });
+    return saved;
+  } catch (error) {
+    if (previousSession) {
+      store.upsertSession(previousSession);
+      store.setActiveSession(previousSession.id);
+      ensureActiveRevisionAndFile(previousSession);
+      syncPersistedTitleMap();
+      refreshRevisionOrderViews(previousSession);
+    }
+    throw error;
+  }
+}
+
 async function handleMoveRevision(revisionId = "", direction = "") {
   const cleanRevisionId = String(revisionId || "").trim();
   const cleanDirection = String(direction || "").trim();
@@ -4418,13 +7150,7 @@ async function handleMoveRevision(revisionId = "", direction = "") {
   const nextSession = structuredClone(session);
   const [movedRevision] = nextSession.revisions.splice(currentIndex, 1);
   nextSession.revisions.splice(targetIndex, 0, movedRevision);
-  const saved = await saveSession(nextSession);
-  store.upsertSession(saved);
-  store.setActiveSession(saved.id);
-  state.activeRevisionId = cleanRevisionId;
-  ensureActiveRevisionAndFile(saved);
-  syncPersistedTitleMap();
-  renderAll();
+  await persistRevisionOrderWithoutFullRender(nextSession, session, cleanRevisionId);
 }
 
 async function handleReorderRevision(draggedRevisionId = "", targetRevisionId = "") {
@@ -4438,13 +7164,7 @@ async function handleReorderRevision(draggedRevisionId = "", targetRevisionId = 
   const nextSession = structuredClone(session);
   const [movedRevision] = nextSession.revisions.splice(sourceIndex, 1);
   nextSession.revisions.splice(targetIndex, 0, movedRevision);
-  const saved = await saveSession(nextSession);
-  store.upsertSession(saved);
-  store.setActiveSession(saved.id);
-  state.activeRevisionId = sourceId;
-  ensureActiveRevisionAndFile(saved);
-  syncPersistedTitleMap();
-  renderAll();
+  await persistRevisionOrderWithoutFullRender(nextSession, session, sourceId);
 }
 
 function clearRevisionDragState() {
@@ -4565,11 +7285,236 @@ function updateCurrentMappingEntryDraftFromEvent(event) {
   state.__mappingDraft = normalizeStyleMapping(next);
 }
 
+function getRailActionTooltipElement() {
+  let tooltip = document.getElementById("analizarPdfRailActionTooltip");
+  if (tooltip) return tooltip;
+  tooltip = document.createElement("div");
+  tooltip.id = "analizarPdfRailActionTooltip";
+  tooltip.className = "analizar-pdf-global-action-tooltip";
+  tooltip.setAttribute("role", "tooltip");
+  tooltip.setAttribute("popover", "manual");
+  tooltip.hidden = true;
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
+function hideRailActionTooltip() {
+  const tooltip = document.getElementById("analizarPdfRailActionTooltip");
+  activeRailActionTooltipTrigger?.removeAttribute("aria-describedby");
+  activeRailActionTooltipTrigger = null;
+  if (!tooltip) return;
+  tooltip.classList.remove("is-visible");
+  if (typeof tooltip.hidePopover === "function" && tooltip.matches(":popover-open")) {
+    tooltip.hidePopover();
+  }
+  tooltip.hidden = true;
+}
+
+function showRailActionTooltip(trigger = null) {
+  if (!(trigger instanceof Element) || !trigger.matches([
+    ".analizar-pdf-ortho-rail-head .analizar-pdf-rail-selection-toggle[data-tooltip]",
+    ".analizar-pdf-ortho-rail .analizar-pdf-rail-file-title[data-tooltip]",
+  ].join(", "))) return;
+  const label = String(trigger.getAttribute("data-tooltip") || "").trim();
+  if (!label) return;
+  const tooltip = getRailActionTooltipElement();
+  activeRailActionTooltipTrigger?.removeAttribute("aria-describedby");
+  activeRailActionTooltipTrigger = trigger;
+  trigger.setAttribute("aria-describedby", tooltip.id);
+  tooltip.textContent = label;
+  tooltip.hidden = false;
+  if (typeof tooltip.showPopover === "function" && !tooltip.matches(":popover-open")) {
+    tooltip.showPopover();
+  }
+  tooltip.classList.remove("is-visible");
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+  const triggerRect = trigger.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const viewportPadding = 8;
+  const centeredLeft = triggerRect.left + ((triggerRect.width - tooltipRect.width) / 2);
+  const left = Math.min(
+    window.innerWidth - tooltipRect.width - viewportPadding,
+    Math.max(viewportPadding, centeredLeft)
+  );
+  const belowTop = triggerRect.bottom + 8;
+  const aboveTop = triggerRect.top - tooltipRect.height - 8;
+  const preferAbove = trigger.matches(".analizar-pdf-rail-file-title");
+  const top = preferAbove && aboveTop >= viewportPadding
+    ? aboveTop
+    : belowTop + tooltipRect.height <= window.innerHeight - viewportPadding
+      ? belowTop
+      : Math.max(viewportPadding, aboveTop);
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(top)}px`;
+  tooltip.classList.add("is-visible");
+}
+
+function bindRailActionTooltips() {
+  const findTrigger = (target) => target instanceof Element
+    ? target.closest([
+      ".analizar-pdf-ortho-rail-head .analizar-pdf-rail-selection-toggle[data-tooltip]",
+      ".analizar-pdf-ortho-rail .analizar-pdf-rail-file-title[data-tooltip]",
+    ].join(", "))
+    : null;
+  document.addEventListener("pointerover", (event) => {
+    const trigger = findTrigger(event.target);
+    if (!trigger || (event.relatedTarget instanceof Node && trigger.contains(event.relatedTarget))) return;
+    showRailActionTooltip(trigger);
+  });
+  document.addEventListener("pointerout", (event) => {
+    const trigger = findTrigger(event.target);
+    if (!trigger || (event.relatedTarget instanceof Node && trigger.contains(event.relatedTarget))) return;
+    hideRailActionTooltip();
+  });
+  document.addEventListener("focusin", (event) => showRailActionTooltip(findTrigger(event.target)));
+  document.addEventListener("focusout", (event) => {
+    if (findTrigger(event.target)) hideRailActionTooltip();
+  });
+  document.addEventListener("click", hideRailActionTooltip, { capture: true });
+  window.addEventListener("resize", hideRailActionTooltip, { passive: true });
+}
+
+function bindQuickDetailPanelResize() {
+  const panel = els.quickDetailPanel;
+  const handle = els.quickDetailResizeHandle;
+  if (!panel || !handle) return;
+  const storageKey = "analizar-pdf-quick-detail-size-v2";
+  const clampSize = (width, height) => {
+    const rect = panel.getBoundingClientRect();
+    const maxWidth = Math.max(320, Math.min(760, window.innerWidth - 48));
+    const maxHeight = Math.max(260, window.innerHeight - rect.top - 12);
+    return {
+      width: Math.min(maxWidth, Math.max(320, Math.round(width))),
+      height: Math.min(maxHeight, Math.max(260, Math.round(height))),
+    };
+  };
+  const applySize = (width, height, persist = false) => {
+    const next = clampSize(width, height);
+    panel.style.setProperty("--ap-quick-detail-width", `${next.width}px`);
+    panel.style.setProperty("--ap-quick-detail-height", `${next.height}px`);
+    if (persist) {
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch (_) {}
+    }
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (Number.isFinite(saved?.width) && Number.isFinite(saved?.height)) applySize(saved.width, saved.height);
+  } catch (_) {}
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startRect = panel.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    panel.classList.add("is-resizing");
+    handle.setPointerCapture?.(event.pointerId);
+    const onPointerMove = (moveEvent) => {
+      applySize(startRect.width + (startX - moveEvent.clientX), startRect.height + (moveEvent.clientY - startY));
+    };
+    const onPointerUp = () => {
+      panel.classList.remove("is-resizing");
+      const finalRect = panel.getBoundingClientRect();
+      applySize(finalRect.width, finalRect.height, true);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    window.addEventListener("pointercancel", onPointerUp, { once: true });
+  });
+
+  handle.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const rect = panel.getBoundingClientRect();
+    const step = event.shiftKey ? 48 : 16;
+    const width = rect.width + (event.key === "ArrowLeft" ? step : event.key === "ArrowRight" ? -step : 0);
+    const height = rect.height + (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0);
+    applySize(width, height, true);
+  });
+}
+
 function bindEditorEvents() {
+  bindRailActionTooltips();
+  bindQuickDetailPanelResize();
+  document.addEventListener("click", (event) => {
+    if (!els.quickDetailPanel?.classList.contains("is-visible")) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || els.quickDetailPanel.contains(target) || target.closest(".analizar-pdf-ortho-link") || target.closest("#analizarPdfFullPageTextModal") || target.closest("#analizarPdfAnalysisRulesModal")) return;
+    resultsRenderer.closeQuickDetail();
+  });
+  els.themeToggleBtn?.addEventListener("click", cycleAnalizarPdfTheme);
+  if (els.heroSessionTitle && els.heroSessionTitleInput) {
+    const beginSessionTitleEdit = () => {
+      const session = store.getActiveSession();
+      if (!session) return;
+      const visibleTitleWidth = Math.ceil(els.heroSessionTitle.getBoundingClientRect().width);
+      if (els.heroSessionTitleContainer && visibleTitleWidth > 0) {
+        els.heroSessionTitleContainer.style.setProperty("--ap-hero-session-edit-width", `${visibleTitleWidth}px`);
+        els.heroSessionTitleContainer.classList.add("is-editing");
+      }
+      els.heroSessionTitleInput.value = String(session.title || "").trim();
+      els.heroSessionTitleInput.dataset.originalTitle = String(session.title || "").trim();
+      els.heroSessionTitle.hidden = true;
+      els.heroSessionTitleInput.hidden = false;
+      els.heroSessionTitleInput.focus();
+      els.heroSessionTitleInput.select();
+    };
+    const finishSessionTitleEdit = () => {
+      if (els.heroSessionTitleInput.hidden) return;
+      const cancelled = els.heroSessionTitleInput.dataset.cancelEdit === "true";
+      const originalTitle = String(els.heroSessionTitleInput.dataset.originalTitle || "").trim();
+      const nextTitle = String(els.heroSessionTitleInput.value || "").trim() || originalTitle || "Sesión sin título";
+      delete els.heroSessionTitleInput.dataset.cancelEdit;
+      delete els.heroSessionTitleInput.dataset.originalTitle;
+      els.heroSessionTitleInput.hidden = true;
+      els.heroSessionTitle.hidden = false;
+      if (els.heroSessionTitleContainer) {
+        els.heroSessionTitleContainer.classList.remove("is-editing");
+        els.heroSessionTitleContainer.style.removeProperty("--ap-hero-session-edit-width");
+      }
+      if (els.heroSessionTitleText) {
+        els.heroSessionTitleText.textContent = cancelled ? originalTitle : nextTitle;
+      }
+      if (!cancelled && nextTitle !== originalTitle) {
+        void handleRenameSession(state.activeSessionId, nextTitle);
+      }
+    };
+    els.heroSessionTitle.addEventListener("click", (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".analizar-pdf-hero-session-edit-icon")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      beginSessionTitleEdit();
+    });
+    els.heroSessionTitle.addEventListener("dblclick", beginSessionTitleEdit);
+    els.heroSessionTitle.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      beginSessionTitleEdit();
+    });
+    els.heroSessionTitleInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        els.heroSessionTitleInput.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        els.heroSessionTitleInput.dataset.cancelEdit = "true";
+        els.heroSessionTitleInput.blur();
+      }
+    });
+    els.heroSessionTitleInput.addEventListener("blur", finishSessionTitleEdit);
+  }
   if (els.toggleEditorialBtn && els.editorialPanel) {
     els.toggleEditorialBtn.addEventListener("click", () => {
       const isCollapsed = els.editorialPanel.classList.toggle("is-collapsed");
-      els.toggleEditorialBtn.setAttribute("aria-expanded", !isCollapsed ? "true" : "false");
+      els.toggleEditorialBtn.classList.toggle("is-collapsed", isCollapsed);
+      els.toggleEditorialBtn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+      const label = isCollapsed ? "Mostrar ficha editorial" : "Ocultar ficha editorial";
+      els.toggleEditorialBtn.setAttribute("aria-label", label);
+      els.toggleEditorialBtn.setAttribute("title", label);
       safeLocalStorageSet("cb_editorial_panel_collapsed", isCollapsed ? "true" : "false");
     });
   }
@@ -4648,7 +7593,7 @@ function bindEditorEvents() {
         } else {
           session.bibliographicInfo[field] = nextValue;
         }
-        session.title = buildDerivedSessionTitle(session);
+        session.title = session.customTitle || buildDerivedSessionTitle(session);
         session.sessionKey = buildSessionKey(getSessionBaseInfo(session));
         return session;
       });
@@ -4694,7 +7639,34 @@ function bindEditorEvents() {
     });
   }
 
-  els.revisionList?.addEventListener("click", (event) => {
+  els.revisionList?.addEventListener("click", async (event) => {
+    const analysisSelectionButton = event.target.closest('button[data-action="toggle-analysis-selection"]');
+    if (analysisSelectionButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (analysisSelectionButton.disabled || state.isAnalyzingAll || state.isAnalyzingCurrent || state.isQuickAnalyzingAll) return;
+      const revisionId = String(analysisSelectionButton.dataset.revisionId || "").trim();
+      const analysisSelected = analysisSelectionButton.getAttribute("aria-checked") !== "true";
+      const selectionVersion = (Number(state.cardAnalysisSelectionVersion) || 0) + 1;
+      state.cardAnalysisSelectionVersion = selectionVersion;
+      const nextSession = mutateActiveSession((draft) => {
+        const revision = (draft.revisions || []).find((entry) => String(entry?.id || "") === revisionId);
+        for (const file of revision?.files || []) file.analysisSelected = analysisSelected;
+        draft.updatedAt = new Date().toISOString();
+        return draft;
+      });
+      if (nextSession) saveSession(nextSession).then((saved) => {
+        if (state.cardAnalysisSelectionVersion !== selectionVersion) return;
+        store.upsertSession(saved);
+        renderAll({ preserveResultsRail: true });
+      }).catch((error) => setJobMetaText(String(error?.message || error)));
+      return;
+    }
+    const insertButton = event.target.closest('[data-action="open-insert-revision"]');
+    if (insertButton) {
+      openInsertRevisionModal(Number(insertButton.dataset.insertIndex || 0));
+      return;
+    }
     const moveUpButton = event.target.closest('[data-action="move-revision-up"]');
     if (moveUpButton) {
       const revisionId = String(moveUpButton.dataset.revisionId || "").trim();
@@ -4711,6 +7683,43 @@ function bindEditorEvents() {
       });
       return;
     }
+    const analyzeRevisionButton = event.target.closest('[data-action="analyze-revision"]');
+    if (analyzeRevisionButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (analyzeRevisionButton.disabled || state.isAnalyzingCurrent || state.isAnalyzingAll || state.isSavingSession) {
+        return;
+      }
+      const revisionId = String(analyzeRevisionButton.dataset.revisionId || "").trim();
+      const currentSession = store.getActiveSession();
+      const selectedRevision = (Array.isArray(currentSession?.revisions) ? currentSession.revisions : [])
+        .find((entry) => String(entry?.id || "").trim() === revisionId) || null;
+      if (!selectedRevision) return;
+      const selectedFile = (Array.isArray(selectedRevision.files) ? selectedRevision.files : [])
+        .find((file) => String(file?.id || "").trim() === String(state.activeFileId || "").trim())
+        || selectedRevision.files?.[0]
+        || null;
+      state.activeRevisionId = revisionId;
+      state.activeFileId = String(selectedFile?.id || "").trim();
+      state.selectedFiles = [];
+      if (els.fileInput) {
+        els.fileInput.value = "";
+      }
+      mutateActiveSession((session) => {
+        session.bibliographicInfo.unidad = selectedRevision.unidad || "";
+        session.bibliographicInfo.revisionNumero = selectedRevision.revisionNumero || "";
+        session.bibliographicInfo.recortableRole = resolveBibliographicRecortableRole(session, selectedRevision);
+        return session;
+      }, { render: false });
+      renderActiveSession({ preserveResultsRail: true });
+      try {
+        await rehydrateSelectedFilesForActiveContext({ preserveResultsRail: true });
+        els.analyzeBtn?.click();
+      } catch (error) {
+        setJobMetaText(String(error?.message || error));
+      }
+      return;
+    }
     const deleteButton = event.target.closest('[data-action="delete-revision"]');
     if (deleteButton) {
       const revisionId = String(deleteButton.dataset.revisionId || "").trim();
@@ -4721,7 +7730,18 @@ function bindEditorEvents() {
     }
     const button = event.target.closest("[data-revision-id]");
     if (!button) return;
-    state.activeRevisionId = String(button.dataset.revisionId || "").trim();
+    const revisionId = String(button.dataset.revisionId || "").trim();
+    if (!revisionId) return;
+    const currentSession = store.getActiveSession();
+    const selectedRevision = (Array.isArray(currentSession?.revisions) ? currentSession.revisions : [])
+      .find((entry) => String(entry?.id || "").trim() === revisionId) || null;
+    const selectedFile = (Array.isArray(selectedRevision?.files) ? selectedRevision.files : [])
+      .find((file) => String(file?.id || "").trim() === String(state.activeFileId || "").trim())
+      || selectedRevision?.files?.[0]
+      || null;
+    const selectedFileId = String(selectedFile?.id || "").trim();
+    state.activeRevisionId = revisionId;
+    state.activeFileId = selectedFileId;
     state.selectedFiles = [];
     if (els.fileInput) {
       els.fileInput.value = "";
@@ -4733,15 +7753,23 @@ function bindEditorEvents() {
         session.bibliographicInfo.revisionNumero = revision.revisionNumero || "";
         session.bibliographicInfo.recortableRole = resolveBibliographicRecortableRole(session, revision);
         return session;
-      });
-      rehydrateSelectedFilesForActiveContext().catch(() => {});
+      }, { render: false });
+      renderActiveSession({ preserveResultsRail: true });
+      resultsRenderer.toggleFileRailGroup(revisionId, selectedFileId);
+      rehydrateSelectedFilesForActiveContext({ preserveResultsRail: true }).catch(() => {});
       return;
     }
-    renderAll();
-    rehydrateSelectedFilesForActiveContext().catch(() => {});
+    renderActiveSession({ preserveResultsRail: true });
+    resultsRenderer.toggleFileRailGroup(revisionId, selectedFileId);
+    rehydrateSelectedFilesForActiveContext({ preserveResultsRail: true }).catch(() => {});
   });
 
   els.revisionList?.addEventListener("dragstart", (event) => {
+    if (event.target.closest('.analizar-pdf-card-analysis-check')) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const card = event.target.closest(".analizar-pdf-subrecord-card[data-revision-id]");
     if (!card) return;
     const revisionId = String(card.dataset.revisionId || "").trim();
@@ -4795,20 +7823,53 @@ function bindEditorEvents() {
     openDefaultRevisionsModal();
   });
 
+  els.editGlobalTemplateBtn?.addEventListener("click", () => {
+    openGlobalTemplateModal();
+  });
+
+  els.globalTemplateModal?.addEventListener("click", (event) => {
+    if (event.target.closest('[data-action="close-global-template-modal"]')) {
+      closeGlobalTemplateModal();
+    }
+  });
+
+  els.globalTemplateModal?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.globalTemplateModalOpen) {
+      event.preventDefault();
+      closeGlobalTemplateModal();
+      els.editGlobalTemplateBtn?.focus();
+    }
+  });
+
+  els.globalTemplateForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleSaveGlobalTemplateData().catch((error) => {
+      setJobMetaText(String(error?.message || error));
+    });
+  });
+
   els.defaultRevisionsModal?.addEventListener("click", (event) => {
     if (event.target.closest('[data-action="close-default-revisions-modal"]')) {
       closeDefaultRevisionsModal();
     }
   });
+  els.defaultFolderBtn?.addEventListener("click", () => {
+    state.pendingCreateFolderSelection = true;
+    els.folderInput?.click();
+  });
 
   [
     els.defaultSourceTypeInput,
+    els.defaultWorkflowFormatInput,
+    els.defaultLanguageInput,
+    els.defaultBookNameInput,
     els.defaultBookTypeInput,
     els.defaultNivelInput,
     els.defaultGradoInput,
     els.defaultTrimestreInput,
     els.defaultEdicionNumeroInput,
     els.defaultRevisionNumeroInput,
+    els.defaultUnitCountInput,
   ].forEach((element) => {
     element?.addEventListener("change", () => renderDefaultRevisionsModal());
   });
@@ -4816,6 +7877,97 @@ function bindEditorEvents() {
   els.defaultRevisionsConfirmBtn?.addEventListener("click", () => {
     handleCreateDefaultRevisions(collectDefaultRevisionsConfigFromDom()).catch((error) => {
       setJobMetaText(String(error?.message || error));
+    });
+  });
+
+  els.insertRevisionModal?.addEventListener("click", (event) => {
+    if (event.target.closest('[data-action="close-insert-revision-modal"]')) {
+      closeInsertRevisionModal();
+    }
+  });
+
+  els.insertRevisionForm?.addEventListener("submit", (event) => {
+    handleInsertRevisionSubmit(event).catch((error) => {
+      setInsertRevisionError(String(error?.message || error));
+    });
+  });
+
+  els.insertRevisionFile?.addEventListener("change", () => {
+    const file = els.insertRevisionFile?.files?.[0] || null;
+    if (els.insertRevisionFileName) {
+      els.insertRevisionFileName.textContent = file?.name || "Ningún archivo seleccionado";
+    }
+    setInsertRevisionError(file && !/\.idml$/i.test(String(file.name || ""))
+      ? "El archivo debe tener extensión .idml."
+      : "");
+  });
+
+  els.chooseFolderBtn?.addEventListener("click", () => {
+    if (state.isImportingCollectFolder || state.isAnalyzingCurrent || state.isAnalyzingAll) {
+      return;
+    }
+    if (!store.getActiveSession()) {
+      setJobMetaText("Crea una sesión antes de elegir la carpeta Collect.");
+      return;
+    }
+    els.folderInput?.click();
+  });
+
+  els.toggleCardSelectionBtn?.addEventListener("click", () => {
+    if (state.isAnalyzingAll || state.isAnalyzingCurrent || state.isQuickAnalyzingAll) return;
+    state.cardAnalysisSelectionMode = !state.cardAnalysisSelectionMode;
+    els.toggleCardSelectionBtn.setAttribute("aria-pressed", String(state.cardAnalysisSelectionMode));
+    renderAll({ preserveResultsRail: true });
+  });
+  els.selectAllCardsBtn?.addEventListener("click", () => {
+    if (state.isAnalyzingAll || state.isAnalyzingCurrent || state.isQuickAnalyzingAll) return;
+    const session = store.getActiveSession();
+    const allSelected = (session?.revisions || []).every((revision) => (revision.files || []).every((file) => file?.analysisSelected !== false));
+    const nextSession = mutateActiveSession((draft) => {
+      for (const revision of draft.revisions || []) for (const file of revision.files || []) file.analysisSelected = !allSelected;
+      draft.updatedAt = new Date().toISOString();
+      return draft;
+    });
+    if (nextSession) saveSession(nextSession).then((saved) => { store.upsertSession(saved); renderAll({ preserveResultsRail: true }); }).catch((error) => setJobMetaText(String(error?.message || error)));
+  });
+  els.globalWorkflowFormatInput?.addEventListener("change", renderGlobalTemplateModal);
+  els.globalLibreFolderBtn?.addEventListener("click", () => {
+    if (els.globalWorkflowFormatInput) els.globalWorkflowFormatInput.value = "libre";
+    handleSaveGlobalTemplateData().then(() => els.folderInput?.click()).catch((error) => setJobMetaText(String(error?.message || error)));
+  });
+
+  els.folderInput?.addEventListener("change", () => {
+    if (collectFolderImportPromise) return;
+    const selectedFolderFiles = Array.from(els.folderInput?.files || []);
+    if (state.pendingCreateFolderSelection && state.defaultRevisionsModalOpen) {
+      state.pendingCreateFolderSelection = false;
+      state.pendingNewSessionFiles = selectedFolderFiles;
+      const idmlCount = selectedFolderFiles.filter((file) => /\.idml$/i.test(String(file?.name || ""))).length;
+      if (els.defaultFolderSummary) els.defaultFolderSummary.textContent = idmlCount ? `${idmlCount} archivo(s) IDML listos para cargar.` : "La carpeta no contiene archivos IDML.";
+      if (els.folderInput) els.folderInput.value = "";
+      renderDefaultRevisionsModal();
+      return;
+    }
+    state.isImportingCollectFolder = true;
+    setBusyOverlay("Asignando todos los IDML de la carpeta Collect");
+    setJobMetaText("Preparando fichas. Analizar todo comenzará cuando termine la asignación.");
+    renderActionButtonState();
+    const activeSession = store.getActiveSession();
+    const importPromise = activeSession?.workflowFormat === "libre"
+      ? importLibreFolder(selectedFolderFiles)
+      : importCollectFolder(selectedFolderFiles);
+    collectFolderImportPromise = importPromise;
+    importPromise.catch((error) => {
+      setJobMetaText(String(error?.message || error));
+    }).finally(() => {
+      if (collectFolderImportPromise === importPromise) {
+        collectFolderImportPromise = null;
+      }
+      state.isImportingCollectFolder = false;
+      setBusyOverlay("");
+      if (els.folderInput) els.folderInput.value = "";
+      renderActionButtonState();
+      renderAll({ preserveResultsRail: true });
     });
   });
 
@@ -5224,7 +8376,7 @@ function bindEditorEvents() {
     });
   });
 
-  els.saveBtn.addEventListener("click", async () => {
+  els.saveBtn?.addEventListener("click", async () => {
     if (state.isSavingSession) {
       return;
     }
@@ -5356,7 +8508,7 @@ function bindEditorEvents() {
     }
   });
 
-  els.analyzeBtn.addEventListener("click", async () => {
+  els.analyzeBtn?.addEventListener("click", async () => {
     const session = store.getActiveSession();
     const revision = getActiveRevision(session);
     const activeFile = getActiveFile(session, revision);
@@ -5403,8 +8555,24 @@ function bindEditorEvents() {
     }
     const targetRevisionId = String(revision?.id || state.activeRevisionId || "").trim();
     const targetFileId = String(activeFile?.id || state.activeFileId || "").trim();
+    let initialMagicSpriteToken = "";
     try {
       state.isAnalyzingCurrent = true;
+      activeAnalysisFlowStartedAt = performance.now();
+      initialMagicSpriteToken = startAnalysisSprite({
+        revisionId: targetRevisionId,
+        fileId: targetFileId,
+        revision,
+        file: activeFile,
+      });
+      primeAnalysisSpriteWords(initialMagicSpriteToken, uploadState.files[0] || null);
+      startProgressiveAnalysisWords(activeAnalysisSprites.get(initialMagicSpriteToken), {
+        phase: "preparing-session",
+        maxProgress: .12,
+        increment: .016,
+        interval: 1360,
+        startDelay: 40,
+      });
       logAnalizarPdfFlow("analyzeBtn:start", {
         sessionId: session?.id || "",
         selectedFiles: uploadState.files.map((file) => file?.name || ""),
@@ -5421,16 +8589,35 @@ function bindEditorEvents() {
         sourceType: uploadState.sourceType
       }));
       logAnalizarPdfFlow("analyzeBtn:files-to-merge", { filesToMerge });
-      let saved = await persistActiveSession(filesToMerge);
+      let saved = await persistActiveSession(filesToMerge, { preserveResultsRail: true });
       restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
       saved = await restoreCachedFilesForRecortableDestinations(saved, getActiveRevision(saved));
       saved = await clearStaleLocalSourceMetadata(saved);
       restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
+      // El pipeline IDML del archivo activo ya extrae estilos, swatches y texto.
+      // No ejecutar aquí la herramienta independiente para *todas* las fichas:
+      // convertía "Analizar archivo" en 10–12 extracciones y guardados seriales.
+      setBusyOverlay("Preparando extracción integrada de estilos y texto");
+      startProgressiveAnalysisWords(activeAnalysisSprites.get(initialMagicSpriteToken), {
+        phase: "extracting-styles",
+        maxProgress: .2,
+        increment: .018,
+        interval: 1280,
+        startDelay: 20,
+      });
+      await flushUiFrame();
       setBusyOverlay(buildEditorialProcessLabel(saved, getActiveRevision(saved), getActiveFile(saved, getActiveRevision(saved)), {
         action: "Analizando",
         step: "Construyendo objetivos de análisis",
       }));
       renderActionButtonState();
+      startProgressiveAnalysisWords(activeAnalysisSprites.get(initialMagicSpriteToken), {
+        phase: "building-targets",
+        maxProgress: .24,
+        increment: .016,
+        interval: 1260,
+        startDelay: 20,
+      });
       await flushUiFrame();
       const targets = await buildAnalysisTargets(saved, uploadState.files.length ? uploadState.files : []);
       logAnalizarPdfFlow("analyzeBtn:targets", {
@@ -5455,16 +8642,26 @@ function bindEditorEvents() {
           missingRecortableDestinationIssues
         );
       }
-      await runAnalysisForTargets(
+      initialMagicSpriteToken = await runAnalysisForTargets(
         saved,
         targets,
         uploadState.files.length
           ? "No se pudieron resolver los archivos seleccionados en la ficha editorial activa."
-          : "No hay archivo local disponible en esta ficha editorial. Selecciónalo de nuevo para recargarlo."
+          : "No hay archivo local disponible en esta ficha editorial. Selecciónalo de nuevo para recargarlo.",
+        { initialMagicSpriteToken }
       );
+      const analysisCategories = getAnalizarPdfAnalysisCategories();
+      if (analysisCategories["quick-orthotypography"] !== false) {
+        await handleQuickAnalyzeAll({
+          revisionId: targetRevisionId,
+          fileId: targetFileId,
+          magicSpriteToken: initialMagicSpriteToken,
+          keepMagicSpriteAlive: true,
+        });
+      }
       state.selectedFiles = [];
       els.fileInput.value = "";
-      renderAll();
+      renderAll({ preserveResultsRail: true });
       rehydrateSelectedFilesForActiveContext().catch(() => {});
     } catch (error) {
       logAnalizarPdfFlow("analyzeBtn:error", {
@@ -5488,10 +8685,12 @@ function bindEditorEvents() {
       setJobMetaText(String(error?.message || error));
     } finally {
       logAnalizarPdfFlow("analyzeBtn:finally");
+      activeAnalysisFlowStartedAt = 0;
+      stopAnalysisSprite(initialMagicSpriteToken);
       state.isAnalyzingCurrent = false;
       setBusyOverlay("");
       renderActionButtonState();
-      renderAll();
+      renderAll({ preserveResultsRail: true });
     }
   });
 
@@ -5499,17 +8698,59 @@ function bindEditorEvents() {
     if (state.isAnalyzingAll) {
       return;
     }
+    if (collectFolderImportPromise) {
+      setJobMetaText("Esperando a que termine la asignación de todos los IDML...");
+      try {
+        await collectFolderImportPromise;
+      } catch (_) {
+        return;
+      }
+    }
     const session = store.getActiveSession();
     const uploadState = getUploadUiState(session);
     if (!session) {
       setJobMetaText("Crea una sesión antes de analizar.");
       return;
     }
+    const selectedRevisionIds = (Array.isArray(session.revisions) ? session.revisions : []).filter((revision) => {
+      const files = Array.isArray(revision?.files) ? revision.files : [];
+      return files.length && files.every((file) => file?.analysisSelected !== false);
+    }).map((revision) => String(revision?.id || "").trim()).filter(Boolean);
+    if (!selectedRevisionIds.length) {
+      setJobMetaText("Selecciona al menos una ficha editorial antes de iniciar el análisis.");
+      return;
+    }
     const targetRevisionId = String(getActiveRevision(session)?.id || state.activeRevisionId || "").trim();
     const targetFileId = String(getActiveFile(session, getActiveRevision(session))?.id || state.activeFileId || "").trim();
+    let initialMagicSpriteToken = "";
     try {
       state.isAnalyzingAll = true;
-      setBusyOverlay(buildEditorialProcessLabel(session, getActiveRevision(session), getActiveFile(session, getActiveRevision(session)), {
+      renderActionButtonState();
+      renderRevisionList(session);
+      activeAnalysisFlowStartedAt = performance.now();
+      logAnalizarPdfFlow("analyzeAllBtn:start", {
+        sessionId: session?.id || "",
+        selectedRevisionIds,
+        selectedFiles: uploadState.files.map((file) => file?.name || ""),
+      });
+      const initialRevision = Array.isArray(session.revisions) ? session.revisions[0] : null;
+      const initialFile = Array.isArray(initialRevision?.files) ? initialRevision.files[0] : null;
+      initialMagicSpriteToken = startAnalysisSprite({
+        revisionId: initialRevision?.id || targetRevisionId,
+        fileId: initialFile?.id || targetFileId,
+        revision: initialRevision,
+        file: initialFile,
+      });
+      primeAnalysisSpriteWords(initialMagicSpriteToken, uploadState.files[0] || null);
+      startProgressiveAnalysisWords(activeAnalysisSprites.get(initialMagicSpriteToken), {
+        phase: "preparing-session",
+        maxProgress: .12,
+        increment: .016,
+        interval: 1360,
+        startDelay: 40,
+      });
+      await flushUiFrame();
+      setBusyOverlay(buildEditorialProcessLabel(session, initialRevision, initialFile, {
         action: "Analizar todo",
         step: "Preparando fichas editoriales",
       }));
@@ -5524,7 +8765,7 @@ function bindEditorEvents() {
         filesToMerge,
         selectedFiles: uploadState.files.map((file) => file?.name || ""),
       });
-      let saved = await persistActiveSession(filesToMerge);
+      let saved = await persistActiveSession(filesToMerge, { preserveResultsRail: true });
       saved = await attachUnmatchedSelectedFilesToEmptyRevisions(saved, uploadState.files);
       restoreAnalysisTargetPointers(saved, targetRevisionId, targetFileId, uploadState.files);
       saved = await restoreCachedFilesForRecortableDestinations(saved, getActiveRevision(saved));
@@ -5534,9 +8775,18 @@ function bindEditorEvents() {
         action: "Analizar todo",
         step: "Construyendo cola de fichas",
       }));
+      startProgressiveAnalysisWords(activeAnalysisSprites.get(initialMagicSpriteToken), {
+        phase: "building-analysis-queue",
+        maxProgress: .24,
+        increment: .018,
+        interval: 1280,
+        startDelay: 20,
+      });
       renderActionButtonState();
       await flushUiFrame();
-      const targets = await buildAnalysisTargetsForAll(saved, uploadState.files.length ? uploadState.files : []);
+      const targets = await buildAnalysisTargetsForAll(saved, uploadState.files.length ? uploadState.files : [], {
+        selectedRevisionIds,
+      });
       const missingLocalSourceMessages = await buildMissingLocalSourceMessagesForAll(saved, uploadState.files, targets);
       const missingLocalSourceNotice = missingLocalSourceMessages.length
         ? [
@@ -5570,14 +8820,53 @@ function bindEditorEvents() {
         targets,
         uploadState.files.length
           ? "No se pudieron resolver los archivos seleccionados para el análisis completo."
-          : (missingLocalSourceNotice || "No hay archivos locales disponibles en las fichas editoriales para un análisis completo.")
-      );
+          : (missingLocalSourceNotice || "No hay archivos locales disponibles en las fichas editoriales para un análisis completo."),
+        { initialMagicSpriteToken }
+      ) || initialMagicSpriteToken;
+      // Los destinos ya fueron procesados primero; la reconciliación usa los resultados persistidos y no crea jobs.
+      const reconciliationTargets = [];
+      if (reconciliationTargets.length) {
+        const completedSession = store.getActiveSession();
+        setBusyOverlay(buildEditorialProcessLabel(
+          completedSession,
+          getActiveRevision(completedSession),
+          getActiveFile(completedSession, getActiveRevision(completedSession)),
+          {
+            action: "Validación final",
+            step: "Revisando destinos de recortables, fichas y anexos",
+          }
+        ));
+        setJobMetaText("Revisando nuevamente las referencias y sus archivos destino...");
+        logAnalizarPdfFlow("analyzeAllBtn:linked-assets-reconciliation", {
+          targetCount: reconciliationTargets.length,
+          order: reconciliationTargets.map((target) => ({
+            revisionId: target?.revision?.id || "",
+            fileId: target?.targetFile?.id || "",
+            unidad: target?.revision?.unidad || "",
+          })),
+        });
+        await flushUiFrame();
+        await runAnalysisForTargets(
+          completedSession,
+          reconciliationTargets,
+          "No hay archivos disponibles para la validación final de referencias.",
+          { initialMagicSpriteToken }
+        );
+      }
       if (missingLocalSourceNotice) {
         setJobMetaText(missingLocalSourceNotice);
       }
+      const analysisCategories = getAnalizarPdfAnalysisCategories();
+      if (analysisCategories["quick-orthotypography"] !== false) {
+        await handleQuickAnalyzeAll({
+          magicSpriteToken: initialMagicSpriteToken,
+          keepMagicSpriteAlive: true,
+          selectedRevisionIds,
+        });
+      }
       state.selectedFiles = [];
       els.fileInput.value = "";
-      renderAll();
+      renderAll({ preserveResultsRail: true });
       rehydrateSelectedFilesForActiveContext().catch(() => {});
     } catch (error) {
       if (isMissingRecortableDestinationError(error)) {
@@ -5591,10 +8880,13 @@ function bindEditorEvents() {
       });
       setJobMetaText(String(error?.message || error));
     } finally {
+      logAnalizarPdfFlow("analyzeAllBtn:finally");
+      activeAnalysisFlowStartedAt = 0;
+      stopAnalysisSprite(initialMagicSpriteToken);
       state.isAnalyzingAll = false;
       setBusyOverlay("");
       renderActionButtonState();
-      renderAll();
+      renderAll({ preserveResultsRail: true });
     }
   });
 }
@@ -5638,20 +8930,138 @@ async function startPolling(jobId = "", context = {}) {
           hasResult: Boolean(payload?.result),
           error: payload?.error || "",
         });
-        const renderSession = applyAnalysisStatusPayloadToLocalSession(payload) || store.getActiveSession();
+        let renderSession = applyAnalysisStatusPayloadToLocalSession(payload) || store.getActiveSession();
+        const magicSpriteToken = String(context?.magicSpriteToken || "").trim();
+        syncAnalysisSpriteProgressStage(magicSpriteToken, payload?.status || "");
+        const shouldDeliverToRail = payload?.status === "completed" && activeAnalysisSprites.has(magicSpriteToken);
+        if (shouldDeliverToRail) {
+          const deliveryRevisionId = String(payload?.revisionId || context?.revision?.id || "").trim();
+          state.completedRevisionAnimationIds.delete(deliveryRevisionId);
+          renderSession = mutateActiveSession((draft) => {
+            const revisionId = deliveryRevisionId;
+            const fileId = String(payload?.fileId || context?.file?.id || "").trim();
+            const revision = (Array.isArray(draft?.revisions) ? draft.revisions : [])
+              .find((entry) => String(entry?.id || "").trim() === revisionId) || null;
+            const file = (Array.isArray(revision?.files) ? revision.files : [])
+              .find((entry) => String(entry?.id || "").trim() === fileId) || null;
+            if (file) {
+              file.analysisStatus = "delivering";
+              file.analysisJobId = cleanJobId;
+            }
+            draft.analysisStatus = "delivering";
+            draft.analysisJobId = cleanJobId;
+            return draft;
+          }, { render: false }) || renderSession;
+        }
         ensureActiveRevisionAndFile(store.getActiveSession());
         setJobMetaText(formatJobMeta(payload, buildRenderableSession(renderSession)));
-        renderAll();
+        // Los cambios queued/processing solo afectan la ficha y los controles.
+        // Mantener los nodos del rail evita cortar trayectorias y progresos Anime.js.
+        renderAll({ preserveResultsRail: true });
         if (payload?.status === "queued" || payload?.status === "processing") {
-          state.analysisPollTimer = window.setTimeout(tick, 2500);
+          // Un intervalo de 2.5 s añadía varios segundos de latencia visible aun
+          // cuando el worker ya había terminado. 900 ms mantiene un sondeo
+          // moderado (un único job activo) y entrega el resultado oportunamente.
+          state.analysisPollTimer = window.setTimeout(tick, 900);
           logAnalizarPdfFlow("startPolling:scheduled-next", { jobId: cleanJobId });
           return;
         }
-        clearBusyAnalysisStateForJob(cleanJobId, payload?.status || "completed", {
-          revisionId: payload?.revisionId || "",
-          fileId: payload?.fileId || "",
-          keepBatchOverlay: state.isAnalyzingAll === true,
-        });
+        let durableSnapshotHandled = false;
+        if (payload?.status === "completed") {
+          const deliveryContext = {
+            revisionId: payload?.revisionId || context?.revision?.id || "",
+            fileId: payload?.fileId || context?.file?.id || "",
+          };
+          if (shouldDeliverToRail) {
+            stopProgressiveAnalysisWords(activeAnalysisSprites.get(magicSpriteToken));
+            let railResultCommitted = false;
+            const commitRailResultOnce = () => {
+              if (!railResultCommitted) {
+                railResultCommitted = true;
+                state.completedRevisionAnimationIds.add(String(deliveryContext.revisionId || "").trim());
+                clearBusyAnalysisStateForJob(cleanJobId, "completed", {
+                  ...deliveryContext,
+                  keepBatchOverlay: state.isAnalyzingAll === true,
+                  updateTargetRailOnly: true,
+                });
+              }
+              return findAnalysisRailTarget(activeAnalysisSprites.get(magicSpriteToken) || null, deliveryContext);
+            };
+            // La persistencia y la animación final son independientes. Antes se
+            // ejecutaban en serie (erupción -> guardado remoto -> relleno), lo que
+            // agregaba su duración completa al tiempo del análisis.
+            const durableSnapshotPromise = persistDurableAnalysisSnapshot({ reason: "analysis-job-completed" });
+            const eruptionPromise = eruptProcessingRevisionCard(deliveryContext.revisionId, {
+              ...deliveryContext,
+              magicSpriteToken,
+              words: payload?.result?.stats?.pageReports?.length
+                ? collectIdmlAnimationWords(payload.result, 20)
+                : resolveAnalysisAnimationWords(deliveryContext.revisionId, deliveryContext.fileId, 20),
+              onWordArrive: commitRailResultOnce,
+              fillLimit: .84,
+            });
+            const [durableSnapshot] = await Promise.all([durableSnapshotPromise, eruptionPromise]);
+            durableSnapshotHandled = true;
+            if (!durableSnapshot.remoteSaved) {
+              setJobMetaText(`${getJobMetaText()} Resultados conservados localmente; el guardado remoto queda pendiente.`.trim());
+            }
+            const spriteRecord = activeAnalysisSprites.get(magicSpriteToken) || null;
+            if (spriteRecord && payload?.result) {
+              spriteRecord.animationWords = collectIdmlAnimationWords(payload.result, 32);
+            }
+            startProgressiveAnalysisWords(spriteRecord, {
+              phase: "saving",
+              maxProgress: .96,
+              increment: .028,
+              interval: 1050,
+              startDelay: 0,
+            });
+            setBusyOverlay(buildEditorialProcessLabel(context?.session || store.getActiveSession(), context?.revision || null, context?.file || null, {
+              action: context?.action || "Analizando",
+              index: context?.index || 0,
+              total: context?.total || 0,
+              step: "Guardando y sincronizando resultados",
+            }));
+            stopProgressiveAnalysisWords(spriteRecord);
+            await waitForProgressiveAnalysisWords(spriteRecord);
+            const completionPromise = completeAnalysisSprite(magicSpriteToken, {
+              ...deliveryContext,
+              onArrive: commitRailResultOnce,
+              skipColorFill: true,
+              finalizeVerticalFill: true,
+              keepAlive: context?.keepMagicSpriteAlive === true,
+            });
+            // En una ficha individual el resultado ya está integrado y guardado:
+            // dejamos que el acabado visual continúe sin bloquear el botón. En un
+            // lote sí esperamos para no retargetear el mismo personaje a mitad de
+            // la transición.
+            if (context?.keepMagicSpriteAlive === true) {
+              await completionPromise;
+            } else {
+              void completionPromise.catch(() => stopAnalysisSprite(magicSpriteToken));
+            }
+          } else {
+            stopAnalysisSprite(magicSpriteToken);
+            clearBusyAnalysisStateForJob(cleanJobId, "completed", {
+              ...deliveryContext,
+              keepBatchOverlay: state.isAnalyzingAll === true,
+              updateTargetRailOnly: true,
+            });
+          }
+        } else {
+          stopAnalysisSprite(magicSpriteToken);
+          clearBusyAnalysisStateForJob(cleanJobId, payload?.status || "failed", {
+            revisionId: payload?.revisionId || "",
+            fileId: payload?.fileId || "",
+            keepBatchOverlay: state.isAnalyzingAll === true,
+          });
+        }
+        if (payload?.status === "completed" && !durableSnapshotHandled) {
+          const durableSnapshot = await persistDurableAnalysisSnapshot({ reason: "analysis-job-completed" });
+          if (!durableSnapshot.remoteSaved) {
+            setJobMetaText(`${getJobMetaText()} Resultados conservados localmente; el guardado remoto queda pendiente.`.trim());
+          }
+        }
         settleAnalysisPoll(payload);
       } catch (error) {
         const clearStatus = isAuthAnalysisError(error)
@@ -5665,6 +9075,7 @@ async function startPolling(jobId = "", context = {}) {
           message: String(error?.message || error),
         });
         if (clearStatus) {
+          stopAnalysisSprite(context?.magicSpriteToken || "");
           clearBusyAnalysisStateForJob(cleanJobId, clearStatus, {
             keepBatchOverlay: state.isAnalyzingAll === true,
           });
@@ -5676,6 +9087,7 @@ async function startPolling(jobId = "", context = {}) {
           settleAnalysisPoll({ jobId: cleanJobId, status: clearStatus, error: String(error?.message || error) });
           return;
         }
+        stopAnalysisSprite(context?.magicSpriteToken || "");
         setJobMetaText(String(error?.message || error));
         rejectAnalysisPoll(error);
       }
@@ -5685,17 +9097,33 @@ async function startPolling(jobId = "", context = {}) {
 }
 
 async function bootstrap() {
+  applyAnalizarPdfTheme(safeLocalStorageGet(ANALIZAR_PDF_THEME_STORAGE_KEY) || document.documentElement.dataset.apTheme || "light", { persist: false });
   sidepanelApi.bindEvents();
   bindEditorEvents();
   loadMappingGroupsFromStorage();
+  renderAll();
+  if (typeof ResizeObserver === "function" && els.revisionList) {
+    analysisSpriteAnchorObserver?.disconnect();
+    analysisSpriteAnchorObserver = new ResizeObserver(() => repositionActiveAnalysisSprites());
+    analysisSpriteAnchorObserver.observe(els.revisionList);
+  }
+  window.addEventListener("resize", repositionActiveAnalysisSprites, { passive: true });
+  window.addEventListener("scroll", repositionActiveAnalysisSprites, { passive: true, capture: true });
+  // No bloquear la interfaz si Firebase tarda en restaurar la sesión.
+  bootSpinnerFallbackTimer = window.setTimeout(hideBootSpinner, 900);
   const isCollapsed = safeLocalStorageGet("cb_editorial_panel_collapsed") === "true";
   if (isCollapsed && els.editorialPanel && els.toggleEditorialBtn) {
     els.editorialPanel.classList.add("is-collapsed");
+    els.toggleEditorialBtn.classList.add("is-collapsed");
     els.toggleEditorialBtn.setAttribute("aria-expanded", "false");
+    els.toggleEditorialBtn.setAttribute("aria-label", "Mostrar ficha editorial");
+    els.toggleEditorialBtn.setAttribute("title", "Mostrar ficha editorial");
   }
   onAuthStateChanged(auth, async (user) => {
     state.currentUser = user || null;
       if (!user) {
+        loadedSessionDetailIds.clear();
+        sessionDetailPromises.clear();
         state.sessions = [];
         state.styleMappings = [];
         state.activeSessionId = "";
@@ -5703,26 +9131,54 @@ async function bootstrap() {
         hideBootSpinner();
         return;
       }
+    const cachedSessions = restoreSessionCatalog(user);
+    if (cachedSessions.length) {
+      cachedSessions.forEach((session) => {
+        const sessionId = String(session?.id || "").trim();
+        if (sessionId) catalogOnlySessionIds.add(sessionId);
+      });
+      store.setSessions(cachedSessions);
+      const cachedActiveId = restoreActiveSessionId() || cachedSessions[0]?.id || "";
+        store.setActiveSession(cachedActiveId);
+        ensureActiveRevisionAndFile(store.getActiveSession());
+        const locallyHydratedSession = await restoreLocalAnalysisSession(store.getActiveSession());
+        if (locallyHydratedSession) {
+          store.upsertSession(locallyHydratedSession);
+          store.setActiveSession(cachedActiveId);
+          ensureActiveRevisionAndFile(locallyHydratedSession);
+        }
+        renderAll();
+      hideBootSpinner();
+    }
     try {
-      await refreshStyleMappings();
+      const styleMappingsPromise = refreshStyleMappings().catch((error) => {
+        setJobMetaText(String(error?.message || error));
+      });
       await refreshSessions();
+      await refreshActiveSessionDetail(state.activeSessionId).catch(() => null);
       if (!state.sessions.length) {
         const session = createEmptyAnalizarPdfSession();
         const draft = restoreBibliographicDraft();
         if (draft && typeof draft === "object") {
           session.bibliographicInfo = { ...session.bibliographicInfo, ...draft };
-          session.title = buildDerivedSessionTitle(session);
+          session.title = session.customTitle || buildDerivedSessionTitle(session);
         }
         const saved = await saveSession(session);
         store.upsertSession(saved);
         store.setActiveSession(saved.id);
+        loadedSessionDetailIds.add(saved.id);
         syncPersistedTitleMap();
+        persistSessionCatalog(user, state.sessions);
         renderAll();
       }
+      void styleMappingsPromise;
       await rehydrateSelectedFilesForActiveContext().catch(() => {});
     } catch (error) {
       setJobMetaText(String(error?.message || error));
     } finally {
+      scheduleSessionRailReveal();
+      scheduleCompletedRailGroupReveal();
+      scheduleInlineRailActionReveal();
       hideBootSpinner();
     }
   });

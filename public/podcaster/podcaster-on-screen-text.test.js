@@ -169,6 +169,22 @@ test("migrates legacy overlay copy to captions when it is the literal dialogue",
   assert.equal(normalized.onScreenText, "¿Cómo cambia nuestra forma de aprender?");
 });
 
+test("creative normalization keeps in-scene text separate and synchronizes captions with Guion", () => {
+  const normalized = normalizePodcasterSceneTextFields({
+    voiceOverText: "Este es el Guion completo.",
+    headlineText: "IDEA CENTRAL",
+    captionText: "Subtítulo personalizado obsoleto",
+    inSceneText: "TEXTO DENTRO DE LA ESCENA",
+    overlayMode: "headline"
+  }, { syncCaptionWithVoiceOver: true });
+
+  assert.equal(normalized.headlineText, "IDEA CENTRAL");
+  assert.equal(normalized.captionText, "Este es el Guion completo.");
+  assert.equal(normalized.inSceneText, "TEXTO DENTRO DE LA ESCENA");
+  assert.equal(normalized.overlayMode, "both");
+  assert.equal(normalized.onScreenText, "IDEA CENTRAL\nEste es el Guion completo.");
+});
+
 test("migrates no-summarize legacy copy to captions and editorial copy to headline", () => {
   const caption = normalizePodcasterSceneTextFields({
     text: "Diálogo diferente",

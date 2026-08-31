@@ -52,6 +52,15 @@ import {
   isSafeArchivePath,
   restorePigPenArchiveAssets
 } from "./escape-room-zip-import.mjs";
+import {
+  buildMoodleAnswerKeyHtml
+} from "./escape-room-answer-export.mjs";
+import {
+  dataUrlToBlob,
+  detectAssetMimeType,
+  extensionForMimeType,
+  optimizeRasterImage
+} from "./escape-room-image-optimizer.mjs";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -79,6 +88,12 @@ const BRIEF_WIDTH_STORAGE_KEY = "PigPenCreator.briefWidth.v1";
 const BRIEF_WIDTH_DEFAULT = 340;
 const BRIEF_WIDTH_MIN = 280;
 const BRIEF_WIDTH_MAX = 560;
+const INSPECTOR_WIDTH_STORAGE_KEY = "PigPenCreator.inspectorWidth.v1";
+const INSPECTOR_WIDTH_DEFAULT = 220;
+const INSPECTOR_WIDTH_MIN = 200;
+const INSPECTOR_WIDTH_MAX = 480;
+const STUDIO_MAIN_MIN_WIDTH = 360;
+const CREATOR_LOGO_URL = new URL("../logo.png", import.meta.url);
 // El estudio multipanel cabe desde una tablet grande / laptop compacta.
 // Reservar los drawers hasta 1439px hacia que incluso ventanas amplias
 // parecieran la version movil.
@@ -261,6 +276,9 @@ const elements = {
   btnGenerar: document.getElementById("btnGenerar"),
   btnLimpiar: document.getElementById("btnLimpiar"),
   btnExportar: document.getElementById("btnExportar"),
+  zipExportModal: document.getElementById("erZipExportModal"),
+  zipExportStatus: document.getElementById("erZipExportStatus"),
+  btnCopyAllAnswers: document.getElementById("btnCopyAllAnswers"),
   btnRepairEscapeRoom: document.getElementById("btnRepairEscapeRoom"),
   btnPreviewAutofill: document.getElementById("btnPreviewAutofill"),
   publishToggle: document.getElementById("publishToggle"),
@@ -345,6 +363,7 @@ const elements = {
   briefPanel: document.getElementById("briefCollapse"),
   briefResizeHandle: document.getElementById("erBriefResizeHandle"),
   inspectorPanel: document.getElementById("erInspectorPanel"),
+  inspectorResizeHandle: document.getElementById("erInspectorResizeHandle"),
   inspectorContentPanel: document.getElementById("erInspectorContentPanel"),
   inspectorRoomsPanel: document.getElementById("erInspectorRoomsPanel"),
   inspectorTabButtons: Array.from(document.querySelectorAll("[data-er-inspector-tab]")),
@@ -366,6 +385,9 @@ const state = {
   activeTab: "preview",
   isLoading: false,
   isGenerating: false,
+  isExporting: false,
+  exportReturnFocus: null,
+  answerCopyInFlight: false,
   formPersistenceSuspended: false,
   refreshHandle: null,
   sortable: null,
@@ -380,6 +402,7 @@ const state = {
   sessionMenuId: null,
   sessionMenuReturnFocus: null,
   briefWidth: BRIEF_WIDTH_DEFAULT,
+  inspectorWidth: INSPECTOR_WIDTH_DEFAULT,
   projectStorageNoticeShown: false,
   sessions: [],
   topics: [],
@@ -441,23 +464,46 @@ function setInspectorTab(tabName = "rooms") {
   });
 }
 
-function getBriefWidthLimit() {
-  if (!elements.studioWorkspace || !isStudioDesktop()) return BRIEF_WIDTH_MAX;
+function getPanelWidthBounds(panelName) {
+  const isBrief = panelName === "brief";
+  const configuredMin = isBrief ? BRIEF_WIDTH_MIN : INSPECTOR_WIDTH_MIN;
+  const configuredMax = isBrief ? BRIEF_WIDTH_MAX : INSPECTOR_WIDTH_MAX;
+  if (!elements.studioWorkspace || !isStudioDesktop()) {
+    return { min: configuredMin, max: configuredMax };
+  }
   const workspaceWidth = elements.studioWorkspace.clientWidth || window.innerWidth;
   const sessionsWidth = document.querySelector(".er-sessions-panel")?.offsetWidth || 220;
-  const inspectorWidth = state.inspectorOpen ? (elements.inspectorPanel?.offsetWidth || 220) : 0;
-  return Math.max(BRIEF_WIDTH_MIN, Math.min(BRIEF_WIDTH_MAX, workspaceWidth - sessionsWidth - inspectorWidth - 360));
+  const otherWidth = isBrief
+    ? (state.inspectorOpen ? state.inspectorWidth : 0)
+    : (state.briefOpen ? state.briefWidth : 0);
+  const available = Math.max(0, workspaceWidth - sessionsWidth - otherWidth - STUDIO_MAIN_MIN_WIDTH);
+  const max = Math.min(configuredMax, available);
+  return { min: Math.min(configuredMin, max), max };
 }
 
 function applyBriefWidth(width, { persist = false } = {}) {
-  const maxWidth = getBriefWidthLimit();
-  const nextWidth = Math.round(Math.min(maxWidth, Math.max(BRIEF_WIDTH_MIN, Number(width) || BRIEF_WIDTH_DEFAULT)));
+  const bounds = getPanelWidthBounds("brief");
+  const nextWidth = Math.round(Math.min(bounds.max, Math.max(bounds.min, Number(width) || BRIEF_WIDTH_DEFAULT)));
   state.briefWidth = nextWidth;
   elements.studioWorkspace?.style.setProperty("--er-brief-width", `${nextWidth}px`);
-  elements.briefResizeHandle?.setAttribute("aria-valuemax", String(maxWidth));
+  elements.briefResizeHandle?.setAttribute("aria-valuemin", String(bounds.min));
+  elements.briefResizeHandle?.setAttribute("aria-valuemax", String(bounds.max));
   elements.briefResizeHandle?.setAttribute("aria-valuenow", String(nextWidth));
   if (persist && isLocalStorageAvailable()) {
     window.localStorage.setItem(BRIEF_WIDTH_STORAGE_KEY, String(nextWidth));
+  }
+}
+
+function applyInspectorWidth(width, { persist = false } = {}) {
+  const bounds = getPanelWidthBounds("inspector");
+  const nextWidth = Math.round(Math.min(bounds.max, Math.max(bounds.min, Number(width) || INSPECTOR_WIDTH_DEFAULT)));
+  state.inspectorWidth = nextWidth;
+  elements.studioWorkspace?.style.setProperty("--er-inspector-width", `${nextWidth}px`);
+  elements.inspectorResizeHandle?.setAttribute("aria-valuemin", String(bounds.min));
+  elements.inspectorResizeHandle?.setAttribute("aria-valuemax", String(bounds.max));
+  elements.inspectorResizeHandle?.setAttribute("aria-valuenow", String(nextWidth));
+  if (persist && isLocalStorageAvailable()) {
+    window.localStorage.setItem(INSPECTOR_WIDTH_STORAGE_KEY, String(nextWidth));
   }
 }
 
@@ -467,6 +513,14 @@ function restoreBriefWidth() {
     savedWidth = Number(window.localStorage.getItem(BRIEF_WIDTH_STORAGE_KEY)) || BRIEF_WIDTH_DEFAULT;
   }
   applyBriefWidth(savedWidth);
+}
+
+function restoreInspectorWidth() {
+  let savedWidth = INSPECTOR_WIDTH_DEFAULT;
+  if (isLocalStorageAvailable()) {
+    savedWidth = Number(window.localStorage.getItem(INSPECTOR_WIDTH_STORAGE_KEY)) || INSPECTOR_WIDTH_DEFAULT;
+  }
+  applyInspectorWidth(savedWidth);
 }
 
 function getPanelByName(panelName) {
@@ -495,6 +549,7 @@ function syncStudioPanels() {
   elements.studioBackdrop?.classList.toggle("hidden", !drawerOpen);
   document.body.classList.toggle("er-drawer-open", drawerOpen);
   applyBriefWidth(state.briefWidth);
+  applyInspectorWidth(state.inspectorWidth);
 }
 
 function focusPanel(panelName) {
@@ -556,22 +611,21 @@ function trapDrawerFocus(event) {
   }
 }
 
-function wireBriefResizer() {
-  const handle = elements.briefResizeHandle;
+function wirePanelResizer({ handle, stateKey, applyWidth, getBounds, defaultWidth }) {
   if (!handle) return;
   handle.addEventListener("pointerdown", (event) => {
     if (!isStudioDesktop()) return;
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = state.briefWidth;
+    const startWidth = state[stateKey];
     handle.setPointerCapture?.(event.pointerId);
     handle.classList.add("is-resizing");
-    const onMove = (moveEvent) => applyBriefWidth(startWidth + startX - moveEvent.clientX);
+    const onMove = (moveEvent) => applyWidth(startWidth + startX - moveEvent.clientX);
     const onEnd = () => {
       handle.classList.remove("is-resizing");
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onEnd);
-      applyBriefWidth(state.briefWidth, { persist: true });
+      applyWidth(state[stateKey], { persist: true });
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onEnd, { once: true });
@@ -579,11 +633,32 @@ function wireBriefResizer() {
   handle.addEventListener("keydown", (event) => {
     if (!isStudioDesktop() || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    if (event.key === "Home") applyBriefWidth(BRIEF_WIDTH_MIN, { persist: true });
-    else if (event.key === "End") applyBriefWidth(getBriefWidthLimit(), { persist: true });
-    else applyBriefWidth(state.briefWidth + (event.key === "ArrowLeft" ? 16 : -16), { persist: true });
+    const bounds = getBounds();
+    if (event.key === "Home") applyWidth(bounds.min, { persist: true });
+    else if (event.key === "End") applyWidth(bounds.max, { persist: true });
+    else applyWidth(state[stateKey] + (event.key === "ArrowLeft" ? 16 : -16), { persist: true });
   });
-  handle.addEventListener("dblclick", () => applyBriefWidth(BRIEF_WIDTH_DEFAULT, { persist: true }));
+  handle.addEventListener("dblclick", () => applyWidth(defaultWidth, { persist: true }));
+}
+
+function wireBriefResizer() {
+  wirePanelResizer({
+    handle: elements.briefResizeHandle,
+    stateKey: "briefWidth",
+    applyWidth: applyBriefWidth,
+    getBounds: () => getPanelWidthBounds("brief"),
+    defaultWidth: BRIEF_WIDTH_DEFAULT
+  });
+}
+
+function wireInspectorResizer() {
+  wirePanelResizer({
+    handle: elements.inspectorResizeHandle,
+    stateKey: "inspectorWidth",
+    applyWidth: applyInspectorWidth,
+    getBounds: () => getPanelWidthBounds("inspector"),
+    defaultWidth: INSPECTOR_WIDTH_DEFAULT
+  });
 }
 
 function wireStudioShell() {
@@ -605,6 +680,7 @@ function wireStudioShell() {
   });
   window.addEventListener("resize", syncStudioPanels);
   wireBriefResizer();
+  wireInspectorResizer();
 }
 
 function getPresentationMode(project = state.project) {
@@ -1449,11 +1525,17 @@ function renderTopicList() {
   const topics = sortTopics(state.topics);
   elements.topicEmpty.classList.toggle("hidden", topics.length > 0);
   elements.topicList.innerHTML = topics.map((topic) => `
-    <button type="button" class="er-topic-button ${topic.id === state.activeTopicId ? "is-active" : ""}"
-      data-topic-id="${escapeHtmlAttr(topic.id)}" aria-pressed="${topic.id === state.activeTopicId ? "true" : "false"}">
-      <span class="er-topic-number">Tema ${topic.academicNumber}</span>
-      <span class="er-topic-title">${escapeHtml(getTopicTitle(topic))}</span>
-    </button>
+    <div class="er-topic-item">
+      <button type="button" class="er-topic-button ${topic.id === state.activeTopicId ? "is-active" : ""}"
+        data-topic-id="${escapeHtmlAttr(topic.id)}" aria-pressed="${topic.id === state.activeTopicId ? "true" : "false"}">
+        <span class="er-topic-number">Tema ${topic.academicNumber}</span>
+        <span class="er-topic-title">${escapeHtml(getTopicTitle(topic))}</span>
+      </button>
+      <button type="button" class="er-topic-export er-studio-icon-button" data-topic-copy-answers="${escapeHtmlAttr(topic.id)}"
+        data-er-tooltip="Copiar respuestas HTML" aria-label="Copiar respuestas HTML del Tema ${topic.academicNumber}" ${state.answerCopyInFlight ? "disabled" : ""}>
+        <i class="fas fa-code" aria-hidden="true"></i>
+      </button>
+    </div>
   `).join("");
 }
 
@@ -1466,6 +1548,131 @@ async function fetchSessionTopics(sessionId) {
   } catch (_) {
     const snapshot = await getDocs(ref);
     return sortTopics(snapshot.docs.map(mapTopicDoc));
+  }
+}
+
+async function writeHtmlToClipboard(html = "") {
+  const markup = String(html || "").trim();
+  if (!markup) throw new Error("No hay contenido HTML para copiar.");
+  // Los editores visuales consumen text/html. Los campos de código de Moodle
+  // solo aceptan text/plain, así que allí conservamos el HTML fuente completo.
+  const plainText = markup;
+
+  if (typeof navigator?.clipboard?.write === "function" && typeof window.ClipboardItem === "function") {
+    try {
+      await navigator.clipboard.write([new window.ClipboardItem({
+        "text/html": new Blob([markup], { type: "text/html" }),
+        "text/plain": new Blob([plainText], { type: "text/plain" })
+      })]);
+      return;
+    } catch (error) {
+      console.warn("El navegador rechazó la copia enriquecida; se usará la copia compatible:", error);
+    }
+  }
+
+  const holder = document.createElement("div");
+  holder.contentEditable = "true";
+  holder.setAttribute("aria-hidden", "true");
+  holder.style.position = "fixed";
+  holder.style.left = "-10000px";
+  holder.style.top = "0";
+  holder.innerHTML = markup;
+  document.body.appendChild(holder);
+  let wroteRichClipboardData = false;
+  const handleCopy = (event) => {
+    if (!event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/html", markup);
+    event.clipboardData.setData("text/plain", plainText);
+    wroteRichClipboardData = true;
+  };
+  document.addEventListener("copy", handleCopy);
+  try {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(holder);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const copied = document.execCommand("copy");
+    selection?.removeAllRanges();
+    if (!copied || !wroteRichClipboardData) throw new Error("El navegador no permitió copiar las respuestas con formato.");
+  } finally {
+    document.removeEventListener("copy", handleCopy);
+    holder.remove();
+  }
+}
+
+function getLatestTopicForAnswerCopy(topic = {}) {
+  if (topic.id !== state.activeTopicId || !state.project) return topic;
+  return {
+    ...topic,
+    title: state.project.titulo || topic.title,
+    project: materializeProjectForExport()
+  };
+}
+
+async function copyAnswerKeyToClipboard({ sessionTitle, topics, successMessage }) {
+  const result = buildMoodleAnswerKeyHtml({ sessionTitle, topics });
+  if (!result.questionCount) {
+    setStatus("No hay preguntas generadas para copiar en esta selección.", "warning");
+    return false;
+  }
+  await writeHtmlToClipboard(result.html);
+  setStatus(successMessage, "success");
+  return true;
+}
+
+async function copyTopicAnswers(topicId) {
+  if (!topicId || state.answerCopyInFlight || state.isGenerating) return;
+  const topic = state.topics.find((item) => item.id === topicId);
+  if (!topic) return;
+  state.answerCopyInFlight = true;
+  renderTopicList();
+  syncActionButtons();
+  try {
+    const pendingSave = topicId === state.activeTopicId
+      ? flushPendingTopicSave().catch((error) => console.warn("No se pudo guardar el tema antes de copiar:", error))
+      : null;
+    const latestTopic = getLatestTopicForAnswerCopy(topic);
+    const sessionTitle = state.activeSessionMeta?.title || SESSION_TITLE_DEFAULT;
+    await copyAnswerKeyToClipboard({
+      sessionTitle,
+      topics: [latestTopic],
+      successMessage: `Respuestas del Tema ${latestTopic.academicNumber} copiadas con formato.`
+    });
+    if (pendingSave) await pendingSave;
+  } catch (error) {
+    console.error("No se pudieron copiar las respuestas del tema:", error);
+    setStatus("No fue posible copiar las respuestas de este tema.", "bad");
+  } finally {
+    state.answerCopyInFlight = false;
+    renderTopicList();
+    syncActionButtons();
+  }
+}
+
+async function copyAllTopicAnswers() {
+  if (!state.activeSessionId || state.answerCopyInFlight || state.isGenerating) return;
+  state.answerCopyInFlight = true;
+  renderTopicList();
+  syncActionButtons();
+  try {
+    const pendingSave = flushPendingTopicSave()
+      .catch((error) => console.warn("No se pudo guardar el tema antes de copiar la sesión:", error));
+    const topics = state.topics.map(getLatestTopicForAnswerCopy);
+    await copyAnswerKeyToClipboard({
+      sessionTitle: state.activeSessionMeta?.title || SESSION_TITLE_DEFAULT,
+      topics,
+      successMessage: "Respuestas de todos los temas copiadas con formato."
+    });
+    await pendingSave;
+  } catch (error) {
+    console.error("No se pudieron copiar las respuestas de la sesión:", error);
+    setStatus("No fue posible copiar las respuestas de esta sesión.", "bad");
+  } finally {
+    state.answerCopyInFlight = false;
+    renderTopicList();
+    syncActionButtons();
   }
 }
 
@@ -2683,7 +2890,10 @@ function syncActionButtons() {
   if (elements.modoPresentacionSelect) {
     elements.modoPresentacionSelect.disabled = state.isLoading || state.isGenerating;
   }
-  elements.btnExportar.disabled = state.isLoading || !hasData || state.isGenerating;
+  elements.btnExportar.disabled = state.isLoading || !hasData || state.isGenerating || state.isExporting;
+  if (elements.btnCopyAllAnswers) {
+    elements.btnCopyAllAnswers.disabled = state.isLoading || state.isGenerating || state.answerCopyInFlight || !state.activeSessionId || state.topics.length === 0;
+  }
   elements.btnCopiarJson.disabled = state.isLoading || !hasData || state.isGenerating;
   if (elements.btnRepairEscapeRoom) {
     elements.btnRepairEscapeRoom.disabled = state.isLoading || !hasData || state.isGenerating;
@@ -2981,15 +3191,150 @@ function prepareGeneratedProjectForPresentation(project, requestedMode = PRESENT
   };
 }
 
+function buildEscapeRoomResponseSchema(missionCount = 4, questionsPerMission = 1) {
+  const safeMissionCount = Math.max(2, Math.min(8, Number(missionCount) || 4));
+  const safeQuestionCount = Math.max(1, Math.min(6, Number(questionsPerMission) || 1));
+  const stringField = { type: "string" };
+  const stringArray = { type: "array", items: stringField };
+  const mediaSchema = {
+    type: "object",
+    properties: {
+      tipo: { type: "string", enum: ["imagen", "audio", "video"] },
+      url: stringField,
+      alt: stringField,
+      titulo: stringField,
+      texto: stringField
+    },
+    required: ["tipo", "url", "alt"]
+  };
+  const questionSchema = {
+    type: "object",
+    properties: {
+      id: stringField,
+      titulo: stringField,
+      reto: stringField,
+      tipo_interaccion: { type: "string", enum: ["texto", "opcion_multiple", "relacion_columnas", "multimedia"] },
+      subtipo_respuesta: { type: "string", enum: ["palabra", "frase_libre", "letra", "numero", "codigo_corto"] },
+      respuesta_correcta: stringField,
+      respuestas_aceptadas: stringArray,
+      opciones: stringArray,
+      parejas: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { izquierda: stringField, derecha: stringField, pista: stringField },
+          required: ["izquierda", "derecha"]
+        }
+      },
+      media: mediaSchema,
+      pista: stringField,
+      retroalimentacion_correcta: stringField,
+      retroalimentacion_incorrecta: stringField,
+      imagen_prompt: stringField,
+      imagen_alt: stringField,
+      imagen: stringField
+    },
+    required: [
+      "id", "titulo", "reto", "tipo_interaccion", "subtipo_respuesta", "respuesta_correcta",
+      "respuestas_aceptadas", "opciones", "parejas", "pista", "retroalimentacion_correcta",
+      "retroalimentacion_incorrecta", "imagen_prompt", "imagen_alt", "imagen"
+    ]
+  };
+  return {
+    type: "object",
+    properties: {
+      modo_presentacion: { type: "string", enum: [PRESENTATION_MODE_ROOMS, PRESENTATION_MODE_MENU] },
+      titulo: stringField,
+      subtitulo: stringField,
+      introduccion: stringField,
+      instrucciones: stringField,
+      ambientacion: stringField,
+      linea_visual_base: stringField,
+      misiones: {
+        type: "array",
+        minItems: safeMissionCount,
+        maxItems: safeMissionCount,
+        items: {
+          type: "object",
+          properties: {
+            id: stringField,
+            release: stringField,
+            titulo: stringField,
+            historia: stringField,
+            reto: stringField,
+            preguntas: {
+              type: "array",
+              minItems: safeQuestionCount,
+              maxItems: safeQuestionCount,
+              items: questionSchema
+            },
+            desbloquea: stringArray,
+            bloqueada_inicial: { type: "boolean" }
+          },
+          required: ["id", "release", "titulo", "historia", "reto", "preguntas", "desbloquea", "bloqueada_inicial"]
+        }
+      },
+      conclusion: stringField
+    },
+    required: [
+      "modo_presentacion", "titulo", "subtitulo", "introduccion", "instrucciones", "ambientacion",
+      "linea_visual_base", "misiones", "conclusion"
+    ]
+  };
+}
+
 function extractGeneratedJson(rawText = "") {
   const cleaned = String(rawText).replace(/```json/gi, "").replace(/```/g, "").trim();
+  let parseError = null;
   try {
     return JSON.parse(cleaned);
-  } catch {
+  } catch (error) {
+    parseError = error;
     const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (nestedError) {
+        parseError = nestedError;
+      }
+    }
   }
-  throw new Error("No se pudo interpretar el JSON devuelto por la IA.");
+  const error = new Error(`No se pudo interpretar el JSON devuelto por la IA${parseError?.message ? `: ${parseError.message}` : "."}`);
+  error.cause = parseError;
+  throw error;
+}
+
+async function repairGeneratedEscapeRoomJson(rawText, formData) {
+  const malformed = String(rawText || "").trim();
+  if (!malformed) throw new Error("La IA no devolvió contenido JSON para reparar.");
+  const repairedResponse = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+    method: "POST",
+    body: {
+      model: formData.modelo || TEXT_MODEL_DEFAULT,
+      payload: {
+        systemInstruction: {
+          parts: [{
+            text: "Eres un reparador de JSON. Corrige únicamente sintaxis, comas, comillas y cierres. Conserva todo el contenido y responde solo JSON válido conforme al esquema."
+          }]
+        },
+        contents: [{
+          role: "user",
+          parts: [{ text: `Corrige este JSON incompleto o inválido sin resumirlo ni cambiar sus datos:\n${malformed}` }]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseJsonSchema: buildEscapeRoomResponseSchema(formData.misiones, formData.preguntasPorSala),
+          maxOutputTokens: 16384,
+          temperature: 0
+        }
+      }
+    }
+  });
+  const repairedText = (repairedResponse?.candidates?.[0]?.content?.parts || [])
+    .map((part) => typeof part?.text === "string" ? part.text : "")
+    .join("")
+    || normalizeString(repairedResponse?.text || repairedResponse?.output_text, "");
+  return extractGeneratedJson(repairedText);
 }
 
 function extractJsonFromGeminiResponse(rawResponse = {}) {
@@ -3421,6 +3766,8 @@ async function regenerateMissionContent(index) {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
             responseMimeType: "application/json",
+            responseJsonSchema: buildEscapeRoomResponseSchema(formData.misiones, formData.preguntasPorSala),
+            maxOutputTokens: 16384,
             temperature: 0.72
           }
         }
@@ -5632,13 +5979,11 @@ function resolveRemoteAssetDownloadUrl(rawUrl = "") {
   }
 }
 
-/**
- * Fetch a remote resource and return its ArrayBuffer.
- * Returns null if the request fails or the response is not ok.
- */
+/** Fetch an exportable resource while preserving its real MIME type. */
 async function fetchBinaryAsset(url) {
   try {
     const rawUrl = String(url || "").trim();
+    if (isDataUrl(rawUrl)) return dataUrlToBlob(rawUrl);
     // Los assets locales del Creator (por ejemplo logo.png) deben descargarse
     // directamente. Enviarlos al proxy remoto los convierte erróneamente en un
     // recurso externo cuando hay una API configurada.
@@ -5648,27 +5993,33 @@ async function fetchBinaryAsset(url) {
     const response = await fetch(finalUrl, { mode: "cors" });
     if (!response.ok) return null;
     const buffer = await response.arrayBuffer();
-    return buffer;
+    const contentType = response.headers.get("content-type") || "application/octet-stream";
+    return new Blob([buffer], { type: contentType });
   } catch (e) {
     console.warn(`No se pudo descargar el recurso remoto para empaquetarlo: ${url}`, e);
     return null;
   }
 }
 
-function inferExtensionFromContentType(contentType, fallback = "png") {
-  if (!contentType) return fallback;
-  const mime = contentType.toLowerCase();
-  if (mime.includes("png")) return "png";
-  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
-  if (mime.includes("gif")) return "gif";
-  if (mime.includes("webp")) return "webp";
-  if (mime.includes("svg")) return "svg";
-  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
-  if (mime.includes("wav")) return "wav";
-  if (mime.includes("ogg")) return "ogg";
-  if (mime.includes("mp4")) return "mp4";
-  if (mime.includes("webm")) return "webm";
-  return fallback;
+function hasPngSignature(buffer) {
+  const bytes = new Uint8Array(buffer || new ArrayBuffer(0));
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return bytes.length >= signature.length && signature.every((byte, index) => bytes[index] === byte);
+}
+
+async function fetchRequiredCreatorLogo() {
+  const response = await fetch(CREATOR_LOGO_URL, {
+    credentials: "same-origin",
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error(`logo.png respondió HTTP ${response.status}.`);
+  }
+  const buffer = await response.arrayBuffer();
+  if (!hasPngSignature(buffer)) {
+    throw new Error("La respuesta de logo.png no contiene un archivo PNG válido.");
+  }
+  return new Uint8Array(buffer);
 }
 
 function sanitizeFileNameForAssets(value = "", fallback = "EscapeRoom") {
@@ -5681,21 +6032,92 @@ function sanitizeFileNameForAssets(value = "", fallback = "EscapeRoom") {
   return normalized || fallback;
 }
 
-async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
-  let downloaded = 0;
-  let failed = 0;
+function isExportableAssetSource(value = "") {
+  const source = String(value || "").trim();
+  return isRemoteUrl(source) || isDataUrl(source) || /^blob:/i.test(source);
+}
+
+function countExportableImages(project = {}) {
+  let total = isExportableAssetSource(project.backgroundImage) ? 1 : 0;
+  for (const mission of Array.isArray(project.misiones) ? project.misiones : []) {
+    const missionImage = String(mission?.imagen || "").trim();
+    if (isExportableAssetSource(missionImage)) total += 1;
+    if (mission?.media?.tipo === "imagen"
+      && isExportableAssetSource(mission.media.url)
+      && String(mission.media.url).trim() !== missionImage) total += 1;
+    for (const question of Array.isArray(mission?.preguntas) ? mission.preguntas : []) {
+      const questionImage = String(question?.imagen || "").trim();
+      if (isExportableAssetSource(questionImage)) total += 1;
+      if (question?.media?.tipo === "imagen"
+        && isExportableAssetSource(question.media.url)
+        && String(question.media.url).trim() !== questionImage) total += 1;
+    }
+  }
+  return total;
+}
+
+async function downloadRemoteAssets(project, remoteFiles, mediaFolder, { onImageProgress } = {}) {
+  const stats = {
+    downloaded: 0,
+    failed: 0,
+    imagesProcessed: 0,
+    imagesOptimized: 0,
+    imagesUnchanged: 0,
+    originalBytes: 0,
+    finalBytes: 0
+  };
+  const totalImages = countExportableImages(project);
+  let currentImage = 0;
+
+  async function packageAsset(source, basePath, { image = false, fallbackExtension = "bin" } = {}) {
+    if (!isExportableAssetSource(source)) return "";
+    if (image) {
+      currentImage += 1;
+      onImageProgress?.(currentImage, totalImages);
+    }
+    const blob = await fetchBinaryAsset(source);
+    if (!blob) {
+      stats.failed += 1;
+      return "";
+    }
+
+    let bytes;
+    let mimeType;
+    let extension;
+    if (image) {
+      stats.imagesProcessed += 1;
+      const result = await optimizeRasterImage(blob);
+      bytes = result.bytes;
+      mimeType = result.mimeType;
+      extension = result.extension || fallbackExtension;
+      stats.originalBytes += result.originalBytes;
+      stats.finalBytes += result.optimizedBytes;
+      if (result.status === "optimized") stats.imagesOptimized += 1;
+      else {
+        stats.imagesUnchanged += 1;
+        if (result.status === "failed") stats.failed += 1;
+      }
+    } else {
+      bytes = new Uint8Array(await blob.arrayBuffer());
+      mimeType = detectAssetMimeType(bytes, blob.type);
+      extension = extensionForMimeType(mimeType, fallbackExtension);
+    }
+
+    const fileName = `${basePath}.${extension}`;
+    remoteFiles[fileName] = bytes;
+    stats.downloaded += 1;
+    return fileName;
+  }
 
   // 1. Background Image
-  if (project.backgroundImage && isRemoteUrl(project.backgroundImage)) {
-    const buffer = await fetchBinaryAsset(project.backgroundImage);
-    if (buffer) {
-      const ext = inferExtensionFromContentType("image/png", "png"); // fallback content-type; actual type not needed for extension inference here
-      const fileName = `${mediaFolder}/${sanitizeFileNameForAssets(project.titulo, "escape-room")}-background.${ext}`;
-      remoteFiles[fileName] = new Uint8Array(buffer);
+  if (isExportableAssetSource(project.backgroundImage)) {
+    const fileName = await packageAsset(
+      project.backgroundImage,
+      `${mediaFolder}/${sanitizeFileNameForAssets(project.titulo, "escape-room")}-background`,
+      { image: true, fallbackExtension: "png" }
+    );
+    if (fileName) {
       project.backgroundImage = fileName;
-      downloaded += 1;
-    } else {
-      failed += 1;
     }
   }
 
@@ -5703,35 +6125,37 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
   if (Array.isArray(project.misiones)) {
     for (const [index, mission] of project.misiones.entries()) {
       const missionBase = sanitizeFileNameForAssets(mission.id || `mission-${index + 1}`, "mission");
+      const missionImageSource = String(mission.imagen || "").trim();
+      const missionMediaMirrorsImage = mission.media?.tipo === "imagen"
+        && String(mission.media.url || "").trim() === missionImageSource;
 
       // Mission imagen
-      if (mission.imagen && isRemoteUrl(mission.imagen)) {
-        const buffer = await fetchBinaryAsset(mission.imagen);
-        if (buffer) {
-          const ext = inferExtensionFromContentType("image/png", "png");
-          const fileName = `${mediaFolder}/${missionBase}-reference.${ext}`;
-          remoteFiles[fileName] = new Uint8Array(buffer);
+      if (isExportableAssetSource(missionImageSource)) {
+        const originalSource = missionImageSource;
+        const fileName = await packageAsset(
+          originalSource,
+          `${mediaFolder}/${missionBase}-reference`,
+          { image: true, fallbackExtension: "png" }
+        );
+        if (fileName) {
           mission.imagen = fileName;
-          if (mission.media && mission.media.tipo === "imagen") {
+          if (mission.media?.tipo === "imagen" && mission.media.url === originalSource) {
             mission.media.url = fileName;
           }
-          downloaded += 1;
-        } else {
-          failed += 1;
         }
       }
 
       // Mission media
-      if (mission.media?.url && isRemoteUrl(mission.media.url)) {
-        const buffer = await fetchBinaryAsset(mission.media.url);
-        if (buffer) {
-          const ext = inferExtensionFromContentType("application/octet-stream", mission.media.tipo === "audio" ? "mp3" : mission.media.tipo === "video" ? "mp4" : "png");
-          const fileName = `${mediaFolder}/${missionBase}-media.${ext}`;
-          remoteFiles[fileName] = new Uint8Array(buffer);
+      if (!missionMediaMirrorsImage && isExportableAssetSource(mission.media?.url)) {
+        const mediaIsImage = mission.media.tipo === "imagen";
+        const fallbackExtension = mission.media.tipo === "audio" ? "mp3" : mission.media.tipo === "video" ? "mp4" : "png";
+        const fileName = await packageAsset(
+          mission.media.url,
+          `${mediaFolder}/${missionBase}-media`,
+          { image: mediaIsImage, fallbackExtension }
+        );
+        if (fileName) {
           mission.media.url = fileName;
-          downloaded += 1;
-        } else {
-          failed += 1;
         }
       }
 
@@ -5739,35 +6163,37 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
       if (Array.isArray(mission.preguntas)) {
         for (const [questionIndex, question] of mission.preguntas.entries()) {
           const questionBase = `${missionBase}-${sanitizeFileNameForAssets(question.id || `question-${questionIndex + 1}`, "question")}`;
+          const questionImageSource = String(question.imagen || "").trim();
+          const questionMediaMirrorsImage = question.media?.tipo === "imagen"
+            && String(question.media.url || "").trim() === questionImageSource;
 
           // Question imagen
-          if (question.imagen && isRemoteUrl(question.imagen)) {
-            const buffer = await fetchBinaryAsset(question.imagen);
-            if (buffer) {
-              const ext = inferExtensionFromContentType("image/png", "png");
-              const fileName = `${mediaFolder}/${missionBase}-${questionIndex}-question.${ext}`;
-              remoteFiles[fileName] = new Uint8Array(buffer);
+          if (isExportableAssetSource(questionImageSource)) {
+            const originalSource = questionImageSource;
+            const fileName = await packageAsset(
+              originalSource,
+              `${mediaFolder}/${questionBase}-question`,
+              { image: true, fallbackExtension: "png" }
+            );
+            if (fileName) {
               question.imagen = fileName;
-              if (question.media && question.media.tipo === "imagen") {
+              if (question.media?.tipo === "imagen" && question.media.url === originalSource) {
                 question.media.url = fileName;
               }
-              downloaded += 1;
-            } else {
-              failed += 1;
             }
           }
 
           // Question media
-          if (question.media?.url && isRemoteUrl(question.media.url)) {
-            const buffer = await fetchBinaryAsset(question.media.url);
-            if (buffer) {
-              const ext = inferExtensionFromContentType("application/octet-stream", question.media.tipo === "audio" ? "mp3" : question.media.tipo === "video" ? "mp4" : "png");
-              const fileName = `${mediaFolder}/${missionBase}-${questionIndex}-${question.media.tipo}.${ext}`;
-              remoteFiles[fileName] = new Uint8Array(buffer);
+          if (!questionMediaMirrorsImage && isExportableAssetSource(question.media?.url)) {
+            const mediaIsImage = question.media.tipo === "imagen";
+            const fallbackExtension = question.media.tipo === "audio" ? "mp3" : question.media.tipo === "video" ? "mp4" : "png";
+            const fileName = await packageAsset(
+              question.media.url,
+              `${mediaFolder}/${questionBase}-${question.media.tipo || "media"}`,
+              { image: mediaIsImage, fallbackExtension }
+            );
+            if (fileName) {
               question.media.url = fileName;
-              downloaded += 1;
-            } else {
-              failed += 1;
             }
           }
         }
@@ -5775,10 +6201,64 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
     }
   }
 
-  return { downloaded, failed };
+  return stats;
 }
 
-async function exportPackage() {
+function formatCompactBytes(value = 0) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
+}
+
+function buildImageOptimizationSummary(stats = {}) {
+  const originalBytes = Number(stats.originalBytes) || 0;
+  const finalBytes = Number(stats.finalBytes) || 0;
+  const savedPercent = originalBytes > 0
+    ? Math.max(0, Math.round((1 - (finalBytes / originalBytes)) * 100))
+    : 0;
+  return `${stats.imagesOptimized || 0} imágenes optimizadas · ${formatCompactBytes(originalBytes)} → ${formatCompactBytes(finalBytes)} · ${savedPercent}% menos · ${stats.imagesUnchanged || 0} sin cambios`;
+}
+
+function updateZipExportProgress(message = "Preparando los archivos del tema…") {
+  if (elements.zipExportStatus) elements.zipExportStatus.textContent = message;
+}
+
+function trapZipExportModalFocus(event) {
+  if (!state.isExporting || !["Tab", "Escape"].includes(event.key)) return;
+  event.preventDefault();
+  elements.zipExportModal?.focus({ preventScroll: true });
+}
+
+function showZipExportProgress() {
+  if (state.isExporting) return false;
+  state.isExporting = true;
+  state.exportReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : elements.btnExportar;
+  syncActionButtons();
+  updateZipExportProgress();
+  document.body.classList.add("er-zip-export-in-progress");
+  elements.zipExportModal?.classList.remove("hidden");
+  elements.zipExportModal?.setAttribute("aria-hidden", "false");
+  document.addEventListener("keydown", trapZipExportModalFocus, true);
+  window.requestAnimationFrame(() => elements.zipExportModal?.focus({ preventScroll: true }));
+  return true;
+}
+
+function hideZipExportProgress() {
+  elements.zipExportModal?.classList.add("hidden");
+  elements.zipExportModal?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("er-zip-export-in-progress");
+  document.removeEventListener("keydown", trapZipExportModalFocus, true);
+  state.isExporting = false;
+  syncActionButtons();
+  const returnFocus = state.exportReturnFocus;
+  state.exportReturnFocus = null;
+  if (returnFocus instanceof HTMLElement && returnFocus.isConnected && !returnFocus.disabled) {
+    returnFocus.focus({ preventScroll: true });
+  }
+}
+
+async function buildAndDownloadExportPackage() {
   const originalProject = materializeProjectForExport();
   if (!originalProject) return;
   const validation = validateProjectSetup(originalProject);
@@ -5792,23 +6272,31 @@ async function exportPackage() {
     return;
   }
 
+  updateZipExportProgress("Descargando los recursos del tema…");
   setStatus("Descargando recursos remotos para empaquetado...", "info");
 
   const projectClone = clonePlainObject(originalProject);
   const remoteFiles = {};
   const mediaFolder = "assets/media";
 
-  const remoteAssetStats = await downloadRemoteAssets(projectClone, remoteFiles, mediaFolder);
-
-  try {
-    const logoBuffer = await fetchBinaryAsset("logo.png");
-    if (logoBuffer) {
-      remoteFiles["logo.png"] = new Uint8Array(logoBuffer);
+  const remoteAssetStats = await downloadRemoteAssets(projectClone, remoteFiles, mediaFolder, {
+    onImageProgress: (current, total) => {
+      const message = `Optimizando imagen ${current} de ${total}…`;
+      updateZipExportProgress(message);
+      setStatus(message, "info");
     }
-  } catch (e) {
-    console.warn("No se pudo descargar logo.png para el paquete:", e);
+  });
+
+  updateZipExportProgress("Preparando los recursos del paquete…");
+  try {
+    remoteFiles["logo.png"] = await fetchRequiredCreatorLogo();
+  } catch (error) {
+    console.error("No se pudo incorporar logo.png al paquete:", error);
+    setStatus("No se pudo incluir logo.png. El paquete ZIP no fue generado; recarga la página e inténtalo de nuevo.", "bad");
+    return;
   }
 
+  updateZipExportProgress("Organizando los archivos del juego…");
   const pkg = buildEscapeRoomPackage(projectClone);
   const zip = new JSZipCtor();
 
@@ -5826,6 +6314,7 @@ async function exportPackage() {
     zip.file(path, blob, { binary: true });
   });
 
+  updateZipExportProgress("Comprimiendo el paquete ZIP…");
   setStatus("Generando paquete ZIP...", "info");
 
   let blob = null;
@@ -5844,14 +6333,29 @@ async function exportPackage() {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+  updateZipExportProgress("La descarga está lista.");
+  const optimizationSummary = buildImageOptimizationSummary(remoteAssetStats);
   if (remoteAssetStats.failed > 0) {
     setStatus(
-      `Paquete ZIP generado con recursos remotos omitidos por CORS: ${remoteAssetStats.failed}. El juego seguirá usando esas URLs remotas.`,
+      `ZIP generado · ${optimizationSummary} · ${remoteAssetStats.failed} recursos no pudieron optimizarse o descargarse.`,
       "warning"
     );
     return;
   }
-  setStatus("Paquete ZIP generado con index.html y assets.", "success");
+  setStatus(`ZIP generado · ${optimizationSummary}`, "success");
+}
+
+async function exportPackage() {
+  if (!showZipExportProgress()) return;
+  try {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    await buildAndDownloadExportPackage();
+  } catch (error) {
+    console.error("No se pudo generar el paquete ZIP:", error);
+    setStatus(`No se pudo generar el paquete ZIP: ${error?.message || "error inesperado"}.`, "bad");
+  } finally {
+    hideZipExportProgress();
+  }
 }
 
 elements.form.addEventListener("submit", async (event) => {
@@ -5920,10 +6424,18 @@ elements.form.addEventListener("submit", async (event) => {
       .map((part) => typeof part?.text === "string" ? part.text : "")
       .join("")
       || normalizeString(generated?.text || generated?.output_text, "");
-    const parsed = prepareGeneratedProjectForPresentation(
-      extractGeneratedJson(rawText),
-      formData.modoPresentacion
-    );
+    let generatedProject;
+    try {
+      generatedProject = extractGeneratedJson(rawText);
+    } catch (parseError) {
+      console.warn("[PigPenCreator] Gemini devolvió JSON inválido; se intentará una reparación estructurada.", {
+        message: parseError?.message || String(parseError),
+        responseLength: rawText.length
+      });
+      setStatus("La IA devolvió JSON incompleto. Reparando la estructura automáticamente...", "warning");
+      generatedProject = await repairGeneratedEscapeRoomJson(rawText, formData);
+    }
+    const parsed = prepareGeneratedProjectForPresentation(generatedProject, formData.modoPresentacion);
 
     // Limpiar URLs de imágenes ficticias / marcadores de posición generados por la IA
     if (parsed && typeof parsed === "object") {
@@ -6061,10 +6573,16 @@ elements.btnAddMission.addEventListener("click", addMission);
 elements.btnAddTopic?.addEventListener("click", openNewTopicDialog);
 elements.newTopicForm?.addEventListener("submit", createNewTopicFromDialog);
 elements.topicList?.addEventListener("click", (event) => {
+  const copyButton = event.target.closest("[data-topic-copy-answers]");
+  if (copyButton) {
+    void copyTopicAnswers(copyButton.dataset.topicCopyAnswers);
+    return;
+  }
   const button = event.target.closest("[data-topic-id]");
   if (button) void selectTopic(button.dataset.topicId);
 });
 elements.btnExportar.addEventListener("click", exportPackage);
+elements.btnCopyAllAnswers?.addEventListener("click", copyAllTopicAnswers);
 elements.btnRepairEscapeRoom?.addEventListener("click", repairEscapeRoomRuntime);
 elements.btnPreviewAutofill?.addEventListener("click", triggerPreviewEditorialAutofill);
 elements.publishToggle?.addEventListener("change", handlePublishToggleChange);
@@ -6302,8 +6820,11 @@ elements.tabButtons.forEach((button) => {
 
 window.addEventListener("message", (event) => {
   if (event.source !== elements.previewFrame?.contentWindow) return;
+  // Un iframe srcdoc sin allow-same-origin tiene un origen opaco por diseño.
+  if (event.origin !== "null") return;
   const payload = event.data;
-  if (!payload || payload.type !== "pigpen-editorial-action") return;
+  if (!payload || typeof payload !== "object" || payload.type !== "pigpen-editorial-action") return;
+  if (payload.action !== "verify" && payload.action !== "autofill") return;
   syncPreviewEditorialButton(payload.action === "verify" ? "verify" : "autofill");
 });
 
@@ -6324,6 +6845,7 @@ elements.generalContentInputs.forEach((field) => {
 mountStudioPanels();
 wireSummaryBarMeasurements();
 restoreBriefWidth();
+restoreInspectorWidth();
 setInspectorTab("rooms");
 syncStudioPanels();
 wireStudioShell();

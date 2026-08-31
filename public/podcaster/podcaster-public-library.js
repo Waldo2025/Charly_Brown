@@ -920,7 +920,7 @@ async function playPodcastSceneLibraryPreview(item = null) {
   video.dataset.src = source;
   video.src = source;
   video.load();
-  
+
   const ok = await runtime.safeMediaPlay(video);
   if (ok) {
     runtime.setPodcastVideoStatus(`Reproduciendo vista previa: ${normalized.title}`);
@@ -1144,7 +1144,7 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
       publicSceneTitle: normalized.title,
       publicSceneThumbUrl: normalized.thumbUrl || "",
       publicSceneVideoUrl: normalized.downloadUrl || "",
-      publicSceneLibraryId: "", 
+      publicSceneLibraryId: "",
       sourcePublicSceneLibraryId: normalized.libraryId,
       playbackRate: normalized.playbackRate || 1
     };
@@ -1231,6 +1231,8 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
       trackId: assignedTrackId,
       startMs: inferredStartMs,
       sourceDurationMs,
+      mediaDurationMs: Math.round(Math.max(0, Number(normalized.durationSec || 0) || 0) * 1000),
+      durationMode: "auto",
       trimInMs: 0,
       trimOutMs: sourceDurationMs,
       zIndex: Math.max(1, Number(nextClip?.zIndex || previousClip?.zIndex || safeIndex + 1))
@@ -1262,7 +1264,7 @@ function insertLibrarySceneIntoSession(item = null, options = {}) {
       })
     };
   }, { render: false });
-  
+
   runtime.ensureOnScreenTextClipForRowId(runtime.getActiveSession(), rowId, { persist: true });
   runtime.ensureOnScreenTextClipsByRowId(runtime.getActiveSession(), { persist: true });
   if (insertIntoNewTrack) {

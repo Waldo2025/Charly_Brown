@@ -2,7 +2,7 @@
 <html lang="es">
 
 <head>
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.528"></script>
+  <script src="js/cache-version-loader.js?v=2026-1.0.10.835"></script>
   <meta charset="UTF-8">
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -63,7 +63,7 @@
       pointer-events: none;
       z-index: 5;
     }
-    
+
     .player-stage img.podcast-active-speaker-image {
         position: absolute;
         top: var(--pod-scene-media-top, 0px);
@@ -105,9 +105,6 @@
 
 
   <div id="sidebar">
-    <button id="menuToggle" aria-label="Abrir menú">
-      <i class="fas fa-bars"></i>
-    </button>
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
     </div>
@@ -122,67 +119,66 @@
             <h1 id="homeLauncherTitle">
               <img src="charlyEditor.png" alt="Charly Editor" class="flow-hero-logo">
             </h1>
-            <h2 class="flow-hero-title">Charly Brown Editor</h2>
-            <div class="flow-hero-actions">
-              <button type="button" class="flow-primary-action section-card" data-view="viewLecturas">
-                <i class="fas fa-book-open"></i>
-                <span>Abrir lecturas</span>
-              </button>
-              <a href="moodleCourse.html" class="flow-secondary-action">
-                <i class="fas fa-wand-magic-sparkles"></i>
-                <span>Crear Aprende</span>
-              </a>
-            </div>
           </div>
-          <div class="flow-hero-status" aria-label="Flujos principales">
-            <div class="section-card flow-status-action flow-blue" data-view="viewLecturas">
+          <div id="homeFlowStatus" class="flow-hero-status" data-layout="cards" aria-label="Flujos principales">
+            <div class="flow-status-toolbar">
+              <span>Accesos principales</span>
+              <button id="flowStatusLayoutToggle" class="home-ui-button home-ui-button--outline" type="button"
+                aria-label="Cambiar a vista de iconos" aria-pressed="false" title="Cambiar visualización">
+                <i class="fas fa-grip" aria-hidden="true"></i>
+                <span>Vista iconos</span>
+              </button>
+            </div>
+            <div class="flow-status-grid">
+            <button type="button" class="section-card flow-status-action flow-blue" data-view="viewLecturas" aria-label="Lecturas Primaria">
               <img src="charlyEditor.png" alt="Lecturas" class="flow-status-img">
               <div>
                 <span>Crear y revisar</span>
                 <strong>Lecturas Primaria</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </div>
-            <div class="section-card flow-status-action flow-green" data-view="viewUnidades">
+            </button>
+            <button type="button" class="section-card flow-status-action flow-green" data-view="viewUnidades" aria-label="Unidades Primaria">
               <img src="charlyEditor.png" alt="Unidades" class="flow-status-img">
               <div>
                 <span>Organizar contenidos</span>
                 <strong>Unidades Primaria</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </div>
-            <div class="section-card flow-status-action flow-rose" data-view="viewMultimedia">
+            </button>
+            <button type="button" class="section-card flow-status-action flow-rose" data-view="viewMultimedia" aria-label="Videos">
               <img src="SnoopyPodcastCreator.png" alt="Videos" class="flow-status-img">
               <div>
                 <span>Producir multimedia</span>
                 <strong>Videos</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </div>
-            <div class="section-card flow-status-action flow-violet" data-view="viewPodcasts">
+            </button>
+            <button type="button" class="section-card flow-status-action flow-violet" data-view="viewPodcasts" aria-label="Podcast">
               <img src="SnoopyPodcastCreator.png" alt="Podcast" class="flow-status-img">
               <div>
                 <span>Guiones y audio</span>
                 <strong>Podcast</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </div>
-            <div class="section-card flow-status-action flow-amber" data-view="viewAprende">
+            </button>
+            <button type="button" class="section-card flow-status-action flow-amber" data-view="viewAprende" aria-label="Contenido Aprende">
               <img src="woodstock.png" alt="Aprende" class="flow-status-img">
               <div>
                 <span>Publicar en LMS</span>
                 <strong>Contenido Aprende</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </div>
-            
-            <div class="section-card flow-status-action flow-rose" data-view="viewEscapeRooms" style="text-decoration: none;">
+            </button>
+
+            <button type="button" class="section-card flow-status-action flow-rose" data-view="viewEscapeRooms" aria-label="Escape Room">
               <img src="pigpen.png" alt="PigPen" class="flow-status-img">
               <div>
                 <span>Crear experiencias</span>
                 <strong>Escape Room</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
+            </button>
             </div>
           </div>
         </section>
@@ -200,7 +196,7 @@
           <h1 id="homeLauncherTitle">
             <img src="pigpen.png" alt="PigPen" class="flow-hero-logo">
           </h1>
-          <h2 class="flow-hero-title">Escape Rooms</h2>
+          <h2 class="workbench-view-title">Escape Rooms</h2>
 
           <div class="flow-search-box" style="margin: 1.5rem 0;">
             <i class="fas fa-search"></i>
@@ -246,7 +242,7 @@
           <h1 id="homeLauncherTitle">
             <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
           </h1>
-          <h2 class="flow-hero-title">Lecturas Primaria</h2>
+          <h2 class="workbench-view-title">Lecturas Primaria</h2>
 
           <div class="flow-search-box" style="margin: 1.5rem 0;">
             <i class="fas fa-search"></i>
@@ -293,7 +289,7 @@
           <h1 id="homeLauncherTitle">
             <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
           </h1>
-          <h2 class="flow-hero-title">Unidades Primaria</h2>
+          <h2 class="workbench-view-title">Unidades Primaria</h2>
 
           <div class="flow-search-box" style="margin: 1.5rem 0;">
             <i class="fas fa-search"></i>
@@ -340,11 +336,77 @@
           <h1 id="homeLauncherTitle">
             <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
           </h1>
-          <h2 class="flow-hero-title">Videos y Multimedia</h2>
+          <h2 class="workbench-view-title">Videos y Multimedia</h2>
 
           <div class="flow-search-box" style="margin: 1.5rem 0;">
             <i class="fas fa-search"></i>
             <input type="text" id="searchMultimedia" placeholder="Buscar video..." class="flow-search-input">
+          </div>
+
+          <div class="multimedia-academic-filters" aria-label="Filtros académicos de videos">
+            <div class="multimedia-academic-filter">
+              <label for="multimediaAcademicLevelFilter">Nivel</label>
+              <select id="multimediaAcademicLevelFilter">
+                <option value="all">Todos los niveles</option>
+                <option value="Preescolar">Preescolar</option>
+                <option value="Primaria">Primaria</option>
+                <option value="Secundaria">Secundaria</option>
+              </select>
+            </div>
+            <div class="multimedia-academic-filter">
+              <label for="multimediaAcademicGradeFilter">Grado</label>
+              <select id="multimediaAcademicGradeFilter">
+                <option value="all">Todos los grados</option>
+                <option value="Primero">Primero</option>
+                <option value="Segundo">Segundo</option>
+                <option value="Tercero">Tercero</option>
+                <option value="Cuarto">Cuarto</option>
+                <option value="Quinto">Quinto</option>
+                <option value="Sexto">Sexto</option>
+              </select>
+            </div>
+            <div class="multimedia-academic-filter">
+              <label for="multimediaAcademicTermFilter">Trimestre</label>
+              <select id="multimediaAcademicTermFilter">
+                <option value="all">Todos los trimestres</option>
+                <option value="1">Trimestre 1</option>
+                <option value="2">Trimestre 2</option>
+                <option value="3">Trimestre 3</option>
+              </select>
+            </div>
+            <div class="multimedia-academic-filter">
+              <label for="multimediaAcademicUnitFilter">Tema / Unidad</label>
+              <select id="multimediaAcademicUnitFilter">
+                <option value="all">Todos los temas / unidades</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+              </select>
+            </div>
+            <div class="multimedia-academic-filter">
+              <label for="multimediaAcademicSubjectFilter">Materia</label>
+              <select id="multimediaAcademicSubjectFilter">
+                <option value="all">Todas las materias</option>
+                <option value="Español">Español</option>
+                <option value="Matemáticas">Matemáticas</option>
+                <option value="Biología">Biología</option>
+                <option value="Historia del mundo">Historia del mundo</option>
+                <option value="Formación cívica y ética">Formación cívica y ética</option>
+                <option value="Geografía">Geografía</option>
+                <option value="Inglés">Inglés</option>
+                <option value="Física">Física</option>
+                <option value="Historia de México 1">Historia de México 1</option>
+                <option value="Química">Química</option>
+                <option value="Historia de México 2">Historia de México 2</option>
+              </select>
+            </div>
           </div>
 
           <div class="flow-stats-minimal" style="margin-top: 1rem;">
@@ -388,7 +450,7 @@
           <h1 id="homeLauncherTitle">
             <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
           </h1>
-          <h2 class="flow-hero-title">Proyectos de Podcast</h2>
+          <h2 class="workbench-view-title">Proyectos de Podcast</h2>
 
           <div class="flow-search-box" style="margin: 1.5rem 0;">
             <i class="fas fa-search"></i>
@@ -434,7 +496,7 @@
           <h1 id="homeLauncherTitle">
             <img src="woodstock.png" alt="Woodstock" class="flow-hero-logo">
           </h1>
-          <h2 class="flow-hero-title">Contenido Aprende</h2>
+          <h2 class="workbench-view-title">Contenido Aprende</h2>
 
           <div class="flow-search-box" style="margin: 1.5rem 0;">
             <i class="fas fa-search"></i>
@@ -599,6 +661,81 @@
     </div>
   </div>
 
+  <div id="videoAcademicDataModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-video-academic-data-modal"
+      aria-label="Cerrar asignación de datos académicos"></button>
+    <section class="floating-panel-card session-academic-data-panel" role="dialog" aria-modal="true"
+      aria-label="Asignar datos académicos al video">
+      <header class="timeline-clip-duration-head">
+        <h3>Asignar datos del video</h3>
+        <button id="closeVideoAcademicDataBtn" class="row-icon-btn" type="button" title="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <form id="videoAcademicDataForm" class="session-academic-data-form">
+        <label class="row-field">
+          <span>Nivel</span>
+          <select id="videoAcademicLevelSelect" aria-label="Nivel">
+            <option value="">Selecciona un nivel</option>
+            <option value="Preescolar">Preescolar</option>
+            <option value="Primaria">Primaria</option>
+            <option value="Secundaria">Secundaria</option>
+          </select>
+        </label>
+        <label class="row-field">
+          <span>Grado</span>
+          <select id="videoAcademicGradeSelect" aria-label="Grado">
+            <option value="">Selecciona un grado</option>
+            <option value="Primero">Primero</option>
+            <option value="Segundo">Segundo</option>
+            <option value="Tercero">Tercero</option>
+            <option value="Cuarto">Cuarto</option>
+            <option value="Quinto">Quinto</option>
+            <option value="Sexto">Sexto</option>
+          </select>
+        </label>
+        <label class="row-field">
+          <span>Trimestre</span>
+          <select id="videoAcademicTermSelect" aria-label="Trimestre">
+            <option value="">Selecciona un trimestre</option>
+            <option value="1">Trimestre 1</option>
+            <option value="2">Trimestre 2</option>
+            <option value="3">Trimestre 3</option>
+          </select>
+        </label>
+        <label class="row-field">
+          <span id="videoAcademicUnitLabel">Unidad</span>
+          <select id="videoAcademicUnitSelect" aria-label="Unidad">
+            <option value="">Selecciona una unidad</option>
+            <option value="1">Unidad 1</option>
+            <option value="2">Unidad 2</option>
+            <option value="3">Unidad 3</option>
+            <option value="4">Unidad 4</option>
+            <option value="5">Unidad 5</option>
+            <option value="6">Unidad 6</option>
+            <option value="7">Unidad 7</option>
+            <option value="8">Unidad 8</option>
+            <option value="9">Unidad 9</option>
+            <option value="10">Unidad 10</option>
+          </select>
+        </label>
+        <label id="videoAcademicSubjectField" class="row-field academic-subject-field" hidden>
+          <span id="videoAcademicSubjectLabel">Materia</span>
+          <select id="videoAcademicSubjectSelect" aria-label="Materia">
+            <option value="">Selecciona una materia</option>
+          </select>
+        </label>
+        <div class="timeline-clip-duration-actions">
+          <button id="cancelVideoAcademicDataBtn"
+            class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+            type="button">Cancelar</button>
+          <button id="saveVideoAcademicDataBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+            type="submit">Guardar</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
 
   <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
   <script data-cache-src="podcaster/podcaster-text-render.js"></script>
@@ -608,7 +745,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   <script type="module" data-cache-src="podcaster/podcaster-media-editor.js"></script>
   <script type="module" data-cache-src="js/home.js"></script>
-  <script type="module" src="js/chromeLayout.js"></script>
+  <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
   <script type="module" data-cache-src="js/sidebar.js"></script>
   <script type="module" src="js/chatbot.js"></script>
 

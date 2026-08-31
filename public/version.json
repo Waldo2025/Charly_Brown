@@ -1,8 +1,30 @@
 {
-  "version": "1.0.10.830",
-  "build": "2026-1.0.10.838",
+  "version": "1.0.10.840",
+  "build": "2026-1.0.10.856",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El dock de Retratos se muestra exclusivamente en Podcast con video y permanece oculto en Video activo y podcast sin video.",
+    "Añadido: Cmd/Ctrl + Shift + O reordena las escenas entre tracks desde el mismo flujo del botón del footer y aparece como el noveno atajo de la guía de Snoopy.",
+    "Corregido: El footer de Snoopy distribuye sus herramientas en una retícula responsive, conserva todas las filas visibles y permanece anclado al borde inferior incluso en viewports de poca altura.",
+    "Añadido: Cmd/Ctrl + M abre el modal de música del Editor Snoopy mediante el mismo flujo que los botones existentes y respeta la edición de campos de texto.",
+    "Mejorado: En la biblioteca global del panel de música, la canción que está cargando o reproduciéndose sube temporalmente al primer lugar y el orden original se restaura al detenerla.",
+    "Corregido: El preview del Editor Snoopy elimina el rebobinado al terminar videos, usa doble buffer para video, imagen y backdrop, congela el último frame de escenas extendidas y mantiene un reloj monotónico independiente de cargas asíncronas.",
+    "Mejorado: Al abrir una sesión, Snoopy hidrata en segundo plano todos los videos, imágenes, stop-motion, diálogos y música con progreso, caché local estable, renovación de URLs firmadas y reintento seguro sin borrar activos por fallos temporales.",
+    "Añadido: Los clips distinguen duración automática y manual, conservan ediciones antiguas y separan la duración física del video de la duración del audio y del timeline.",
+    "Corregido: Adjuntar una imagen de referencia en el inspector procesa y comprime la imagen en un Worker, evita serializar el archivo original y actualiza únicamente la vista activa mientras la subida continúa en segundo plano.",
+    "Corregido: Editar campos del panel de escenas actualiza únicamente la fila activa, evita reconstruir toda la aplicación al confirmar y difiere la sincronización completa del thread hasta cambiar de versión o guardar.",
+    "Corregido: Snoopy espera la subida de referencias antes de generar, muestra los bloqueos de IA responsable de Vertex, evita reintentos Cloud Tasks 5xx cuando una operación termina sin video y cierra trabajos de IA sin heartbeat.",
+    "Añadido: Snoopy Editor presenta una guía animada no modal con los nueve atajos vigentes, avance automático, navegación accesible, temas y adaptación móvil; aparece una sola vez por navegador y puede reabrirse desde el nuevo botón Ver atajos.",
+    "Añadido: Cmd/Ctrl + Shift + E abre Exportar video, selecciona MP4 H.264 a 1920x1080 y confirma automáticamente para iniciar el job con una sola combinación de teclas.",
+    "Actualizado: El selector global de video sincroniza el catálogo Veo con la API, muestra los seis modelos Vertex disponibles (incluido Veo 3.1 Lite) y admite automáticamente futuros IDs oficiales sin convertir el modelo elegido.",
+    "Corregido: Regenerar una escena siempre crea el video fuente completo de 8 segundos aunque el clip esté recortado, y conserva intactos trimInMs/trimOutMs y la duración visible del timeline.",
+    "Añadido: Cmd/Ctrl + Shift + G, con alternativa fiable Cmd/Ctrl + Alt + G, regenera el video de la escena activa usando el mismo flujo del botón del timeline.",
+    "Añadido: Cmd/Ctrl + Shift + L abre Reemplazar escena para la escena activa del editor Snoopy sin interferir con campos de texto.",
+    "Corregido: Los reemplazos manuales de una escena quedan marcados como fuente prioritaria; sólo las escenas sin reemplazo manual adoptan el video Veo generado más reciente.",
+    "Corregido: Al terminar una generación Veo, la escena publica inmediatamente su clip por rowId mediante transacción y adopta el video más reciente aunque otra ventana tenga abierta la misma sesión.",
+    "Corregido: Dos ventanas abiertas sobre la misma sesión ya no pueden restaurar videos viejos; el guardado reconcilia cada escena por fecha, conserva eliminaciones explícitas y resuelve medios privados antes de reproducirlos.",
+    "Ajustado: El grupo de zoom del footer Snoopy usa un ancho compacto y deja de ocupar el espacio flexible del transport.",
+    "Corregido: El footer del editor Snoopy usa un único grid responsive con divisiones alineadas, dos filas en anchos intermedios y grupos apilados legibles en móvil.",
     "Corregido: El filtro de sesiones usa exactamente la metadata guardada por Asignar datos, conserva nivel, grado, trimestre y tema/unidad al cargar listas resumidas y adopta el mismo diseño del modal académico.",
     "Añadido: Podcaster Studio permite filtrar sesiones desde el rail por título de sesión o video, nivel, grado, trimestre y tema/unidad usando los datos académicos ya cargados.",
     "Ajustado: La vista de iconos de Home usa botones cuadrados pequeños con imágenes contenidas, recupera los colores originales, mejora el contraste de la barra y sube los accesos principales.",
@@ -529,6 +551,6 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.838",
-  "updated_at": "2026-08-14T00:00:00.000Z"
+  "cache_version": "2026-1.0.10.856",
+  "updated_at": "2026-08-27T17:50:39-05:00"
 }

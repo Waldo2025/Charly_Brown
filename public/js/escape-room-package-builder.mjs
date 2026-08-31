@@ -433,6 +433,69 @@ body {
   z-index: 1;
   pointer-events: none;
 }
+.fullscreen-toggle {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 9px 12px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-soft) 92%, black 8%);
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.3);
+  backdrop-filter: blur(16px);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+.fullscreen-toggle:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-soft));
+}
+.fullscreen-toggle:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 3px;
+}
+.fullscreen-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+.fullscreen-toggle svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+.fullscreen-toggle .fullscreen-exit-icon { display: none; }
+.fullscreen-toggle.is-active .fullscreen-enter-icon { display: none; }
+.fullscreen-toggle.is-active .fullscreen-exit-icon { display: block; }
+html:fullscreen,
+html:fullscreen body,
+html.is-fullscreen,
+html.is-fullscreen body,
+html.is-immersive-fallback,
+html.is-immersive-fallback body {
+  min-width: 100%;
+  min-height: 100%;
+  background: var(--bg);
+}
+html.is-immersive-fallback,
+html.is-immersive-fallback body {
+  width: 100%;
+  height: 100%;
+  overscroll-behavior: none;
+}
+::backdrop { background: var(--bg); }
 .game-shell {
   position: relative;
   z-index: 2;
@@ -1535,6 +1598,21 @@ button:focus-visible,
 }
 
 @media (max-width: 560px) {
+  .fullscreen-toggle {
+    width: 40px;
+    padding: 9px;
+  }
+  .fullscreen-toggle [data-fullscreen-label] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .menu-mode .game-shell {
     padding-top: 42px;
   }
@@ -1766,7 +1844,10 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     isMasterSolved: false,
     alertAudioContext: null,
     alertAudioNodes: null,
-    nowOverrideMs: null
+    nowOverrideMs: null,
+    isImmersiveFallback: false,
+    immersiveScrollY: 0,
+    editorialReviewContextKey: ""
   };
 
   function isStorageAvailable() {
@@ -1913,9 +1994,84 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     timerValues: Array.from(document.querySelectorAll("[data-timer-value]")),
     startButtons: Array.from(document.querySelectorAll("[data-game-start]")),
     resetButtons: Array.from(document.querySelectorAll("[data-game-reset]")),
+    fullscreenButtons: Array.from(document.querySelectorAll("[data-fullscreen-toggle]")),
     menuCards: Array.from(document.querySelectorAll("[data-menu-card]")),
     liveStatus: document.getElementById("gameLiveStatus")
   };
+
+  function getFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function isNativeFullscreenAvailable() {
+    const root = document.documentElement;
+    if (document.fullscreenEnabled === false && !root.webkitRequestFullscreen) return false;
+    return Boolean(root.requestFullscreen || root.webkitRequestFullscreen);
+  }
+
+  function announceFullscreen(message) {
+    if (els.liveStatus) els.liveStatus.textContent = message;
+  }
+
+  function syncFullscreenControls() {
+    const isActive = Boolean(getFullscreenElement()) || state.isImmersiveFallback;
+    document.documentElement.classList.toggle("is-fullscreen", isActive);
+    els.fullscreenButtons.forEach((button) => {
+      const label = isActive ? "Salir de pantalla completa" : "Pantalla completa";
+      button.classList.toggle("is-active", isActive);
+      button.disabled = false;
+      button.setAttribute("aria-pressed", String(isActive));
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      const labelNode = button.querySelector("[data-fullscreen-label]");
+      if (labelNode) labelNode.textContent = label;
+    });
+  }
+
+  function enterImmersiveFallback() {
+    state.immersiveScrollY = window.scrollY;
+    state.isImmersiveFallback = true;
+    document.documentElement.classList.add("is-immersive-fallback");
+    document.body.classList.add("is-immersive-fallback");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    announceFullscreen("Modo inmersivo activado. En iPhone puedes añadir el juego a la pantalla de inicio para ocultar completamente Safari.");
+    syncFullscreenControls();
+  }
+
+  function exitImmersiveFallback() {
+    state.isImmersiveFallback = false;
+    document.documentElement.classList.remove("is-immersive-fallback");
+    document.body.classList.remove("is-immersive-fallback");
+    window.scrollTo({ top: state.immersiveScrollY, behavior: "auto" });
+    announceFullscreen("Modo inmersivo desactivado.");
+    syncFullscreenControls();
+  }
+
+  async function toggleFullscreen() {
+    if (state.isImmersiveFallback) {
+      exitImmersiveFallback();
+      return;
+    }
+    try {
+      if (getFullscreenElement()) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) await exit.call(document);
+        syncFullscreenControls();
+        return;
+      }
+      const root = document.documentElement;
+      if (!isNativeFullscreenAvailable()) {
+        enterImmersiveFallback();
+        return;
+      }
+      if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: "hide" });
+      else await root.webkitRequestFullscreen();
+      syncFullscreenControls();
+    } catch (error) {
+      console.warn("No se pudo cambiar el modo de pantalla completa:", error);
+      enterImmersiveFallback();
+    }
+  }
 
   function normalizeBaseText(value = "") {
     return String(value ?? "")
@@ -2741,8 +2897,16 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     button.textContent = shouldVerify ? "Verificar respuestas" : "Autocompletar pantalla";
     button.setAttribute("aria-label", shouldVerify ? "Verificar todas las respuestas" : "Autocompletar todas las respuestas");
     if (window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ === true && window.parent !== window) {
+      // El preview editorial vive en un sandbox de origen opaco; el padre valida event.source y el esquema.
       window.parent.postMessage({ type: "pigpen-editorial-action", action: button.dataset.editorialAction }, "*");
     }
+  }
+
+  function syncEditorialReviewActionForCurrentScreen() {
+    const contextKey = state.galleryScreen + ":" + (state.currentMissionId || "none");
+    if (state.editorialReviewContextKey === contextKey) return;
+    state.editorialReviewContextKey = contextKey;
+    setEditorialReviewAction("autofill");
   }
 
   function validateEditorialCurrentScreen() {
@@ -3126,6 +3290,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   }
 
   function render() {
+    syncEditorialReviewActionForCurrentScreen();
     renderGallery();
     renderMap();
     renderMission();
@@ -3149,6 +3314,13 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   els.resetButtons.forEach((button) => {
     button.addEventListener("click", resetEscapeRoom);
   });
+
+  els.fullscreenButtons.forEach((button) => {
+    button.addEventListener("click", toggleFullscreen);
+  });
+  document.addEventListener("fullscreenchange", syncFullscreenControls);
+  document.addEventListener("webkitfullscreenchange", syncFullscreenControls);
+  document.addEventListener("fullscreenerror", () => announceFullscreen("No fue posible activar la pantalla completa en este navegador."));
 
   els.menuCards.forEach((button) => {
     button.addEventListener("click", () => openMenuCard(button));
@@ -3246,9 +3418,18 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") persistProgressState();
   });
+  syncFullscreenControls();
   render();
 })();
 `;
+}
+
+function buildFullscreenButton() {
+  return `<button type="button" class="fullscreen-toggle" data-fullscreen-toggle aria-label="Pantalla completa" aria-pressed="false" title="Pantalla completa">
+    <svg class="fullscreen-enter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+    <svg class="fullscreen-exit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M8 21v-3a2 2 0 0 0-2-2H3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+    <span data-fullscreen-label>Pantalla completa</span>
+  </button>`;
 }
 
 function buildMenuSectionsHtml(normalized, finalPasscode) {
@@ -3289,12 +3470,16 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>${title}</title>
   <link rel="stylesheet" href="assets/game.css">
 </head>
 <body class="menu-mode">
   <img src="logo.png" alt="PigPen" class="game-logo-brand">
+  ${buildFullscreenButton()}
   <p id="gameLiveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
   <main class="game-shell">
     <section class="game-card menu-game-card">
@@ -3483,12 +3668,17 @@ export function buildGameHtml(project) {
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>${title}</title>
   <link rel="stylesheet" href="assets/game.css">
 </head>
 <body>
   <img src="logo.png" alt="Logo" class="game-logo-brand">
+  ${buildFullscreenButton()}
+  <p id="gameLiveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
   <main class="game-shell">
     <header class="game-header">
       <button type="button" class="secondary" data-gallery-prev>Anterior</button>
@@ -3576,7 +3766,10 @@ export function buildPreviewDocument(project, options = {}) {
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>${escapeHtml(normalized.titulo)}</title>
   <style>${buildGameCss(styleProject)}</style>
 </head>

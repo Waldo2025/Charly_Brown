@@ -22,8 +22,8 @@ assert.match(
 );
 assert.match(
   resultsSource,
-  /activeRevisionId[\s\S]*activeFileId[\s\S]*leftActive[\s\S]*rightActive/,
-  "El renderer debe priorizar el archivo activo para que Recortables destino no quede debajo del Proyecto."
+  /function buildOrderedRailEntries[\s\S]*revisionIndex[\s\S]*fileIndex/,
+  "El renderer debe conservar el orden explícito de fichas y archivos en el rail."
 );
 assert.match(
   resultsSource,

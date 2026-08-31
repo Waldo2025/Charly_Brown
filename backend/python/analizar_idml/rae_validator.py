@@ -38,6 +38,13 @@ RAE_CONFIRMED_ACCENT_REPLACEMENTS = {
     "acentuacion": "acentuación",
 }
 
+RAE_CONFIRMED_VALID_WORDS = {
+    "solito",
+    "solita",
+    "solitos",
+    "solitas",
+}
+
 _LOOKUP_CACHE = {}
 
 
@@ -65,6 +72,8 @@ def resolve_local_rae_status(word=""):
     clean = compact_word(word)
     if not clean:
         return "unknown"
+    if clean in RAE_CONFIRMED_VALID_WORDS:
+        return "valid"
     accentless = strip_accents(clean)
     if accentless in RAE_2010_UNACCENTED_MONOSYLLABLES:
         return "valid" if clean == accentless else "invalid"
