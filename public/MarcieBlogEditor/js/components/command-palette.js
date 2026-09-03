@@ -3,7 +3,7 @@
  */
 
 import { showModal, showNewSessionModal, closeActiveModal, showToast } from "./modals.js";
-import { createMarcieSession } from "../services/marcie-session-store.js";
+import { createMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
 
 function escapeHtml(value = "") {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -33,18 +33,6 @@ export function initCommandPalette({ getSessions, onSelectSession, onRefresh }) 
     });
   }
 
-  // Botón "IA" del topbar
-  const btnIaTopbar = document.querySelector(".btn.border.border-purple-200");
-  if (btnIaTopbar) {
-    btnIaTopbar.addEventListener("click", () => {
-      showToast("✨ Asistente Editorial IA activo en el panel derecho", "info");
-      const rightPanel = document.getElementById("right-panel");
-      if (rightPanel) {
-        rightPanel.classList.add("ring-2", "ring-purple-400");
-        setTimeout(() => rightPanel.classList.remove("ring-2", "ring-purple-400"), 1500);
-      }
-    });
-  }
 }
 
 export function openCommandPalette({ getSessions, onSelectSession, onRefresh }) {

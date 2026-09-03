@@ -57,8 +57,10 @@ const context = {
 vm.createContext(context);
 vm.runInContext([
   "const DEFAULT_EXPORT_API_BASE = \"https://snoopy-export.onrender.com/api\";",
+  "const DEFAULT_GEMINI_DIRECT_API_BASE = \"https://us-central1-charly-brown.cloudfunctions.net/geminiApi\";",
   extractFunction("getConfiguredApiBase"),
   extractFunction("getRemoteApiBase"),
+  extractFunction("getGeminiDirectApiBase"),
   extractFunction("getExportApiBase"),
   extractFunction("isLocalHostRuntime"),
   extractFunction("canUseSameOriginApi"),
@@ -68,10 +70,29 @@ vm.runInContext([
   extractFunction("buildApiUrl"),
   extractFunction("buildApiUrlFromBase"),
   extractFunction("buildApiUrlPreferRemote"),
+  extractFunction("buildGeminiApiUrl"),
   extractFunction("getVeoApiBase"),
   extractFunction("buildVeoApiUrl"),
   extractFunction("buildVeoApiUrlPreferRemote")
 ].join("\n\n"), context);
+
+test("long Gemini requests bypass Firebase Hosting", () => {
+  assert.equal(
+    context.buildGeminiApiUrl("/api/gemini/generate"),
+    "https://us-central1-charly-brown.cloudfunctions.net/geminiApi/api/gemini/generate"
+  );
+  context.window.location.hostname = "127.0.0.1";
+  context.window.location.port = "5010";
+  context.window.location.origin = "http://127.0.0.1:5010";
+  assert.equal(
+    context.buildGeminiApiUrl("/api/gemini/generate"),
+    "https://us-central1-charly-brown.cloudfunctions.net/geminiApi/api/gemini/generate",
+    "localhost también debe evitar el proxy de Hosting"
+  );
+  context.window.location.hostname = "charly-brown.web.app";
+  context.window.location.port = "";
+  context.window.location.origin = "https://charly-brown.web.app";
+});
 
 test("montage export requests resolve to the dedicated export backend", () => {
   const resolved = context.buildApiUrlPreferRemote("/api/podcaster/montage/export");

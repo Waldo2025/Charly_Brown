@@ -5296,13 +5296,13 @@ body[data-page="moodlecourse.html"] :is(
 }
 
 /* Botones del page moodleCourse: paleta del tema (estilo sidebar) */
-body[data-page="moodlecourse.html"] button:not(.icon-btn):not(.btn-close-modal) {
+body[data-page="moodlecourse.html"] button:not(.icon-btn):not(.btn-close-modal):not(.sidebar-group-toggle) {
     background-color: color-mix(in srgb, var(--app-bg-color, hsl(var(--card))) 90%, #ffffff 10%) !important;
     color: var(--app-text-color, hsl(var(--foreground))) !important;
     border: 1px solid hsl(var(--border)) !important;
 }
 
-body[data-page="moodlecourse.html"] button:not(.icon-btn):not(.btn-close-modal):hover:not(:disabled) {
+body[data-page="moodlecourse.html"] button:not(.icon-btn):not(.btn-close-modal):not(.sidebar-group-toggle):hover:not(:disabled) {
     background-color: color-mix(in srgb, var(--app-bg-color, hsl(var(--card))) 82%, #ffffff 18%) !important;
 }
 

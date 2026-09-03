@@ -49,20 +49,28 @@ const topics = [
             { izquierda: "México", derecha: "CDMX" },
             { izquierda: "Francia", derecha: "París" }
           ]
+        }, {
+          titulo: "Encaja pistas",
+          reto: "Arrastra cada ficha.",
+          tipo_interaccion: "drag_drop",
+          parejas: [
+            { izquierda: "Mamífero", derecha: "Ballena" },
+            { izquierda: "Ave", derecha: "Colibrí" }
+          ]
         }]
       }]
     }
   }
 ];
 
-assert.equal(countAnswerKeyQuestions(topics), 2);
+assert.equal(countAnswerKeyQuestions(topics), 3);
 
 const result = buildMoodleAnswerKeyHtml({
   sessionTitle: "Sesión <Docente>",
   topics
 });
 
-assert.equal(result.questionCount, 2);
+assert.equal(result.questionCount, 3);
 assert.equal(result.topicCount, 2);
 assert.ok(result.html.startsWith("<div style="), "Moodle debe recibir un único fragmento raíz.");
 assert.doesNotMatch(result.html, /<(?:html|head|style|script)\b/i, "El fragmento no debe depender de documento, scripts ni CSS global.");
@@ -72,6 +80,7 @@ assert.match(result.html, /Tema &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 assert.doesNotMatch(result.html, /<script>alert/);
 assert.ok(result.html.indexOf("Relaciones") < result.html.indexOf("Tema &lt;script"), "Los temas deben ordenarse por número académico.");
 assert.match(result.html, /México[\s\S]*CDMX[\s\S]*Francia[\s\S]*París/, "Las relaciones deben mostrar sus parejas correctas.");
+assert.match(result.html, /Mamífero[\s\S]*Ballena[\s\S]*Ave[\s\S]*Colibrí/, "Drag & drop debe mostrar sus parejas en la hoja de respuestas.");
 assert.match(result.html, /También acepta:<\/span> Arboleda/);
 assert.doesNotMatch(result.html, /También acepta:<\/span>[^<]*Árbol/i, "La respuesta principal no debe repetirse como variante.");
 assert.match(result.html, /Actividad 01/);

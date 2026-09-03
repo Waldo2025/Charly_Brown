@@ -6,7 +6,7 @@ const root = new URL("../", import.meta.url);
 
 test("Marcie exposes WordPress draft and publish actions without collecting credentials in the browser", async () => {
   const [html, editor, service] = await Promise.all([
-    readFile(new URL("public/MarcieBlogEditor/MarcieBlogEditor.html", root), "utf8"),
+    readFile(new URL("public/MarcieBlogEditor.html", root), "utf8"),
     readFile(new URL("public/MarcieBlogEditor/js/editor-app.js", root), "utf8"),
     readFile(new URL("public/MarcieBlogEditor/js/services/marcie-wordpress-service.js", root), "utf8")
   ]);
@@ -34,7 +34,7 @@ test("Firebase backend registers authenticated WordPress routes and binds the se
   ]);
   assert.match(index, /defineSecret\("MARCIE_WORDPRESS_CONFIG_JSON"\)/);
   assert.match(index, /registerMarcieWordPressRoutes\(geminiApp\)/);
-  assert.match(routes, /resolveAuthContext\(req\)/);
+  assert.match(routes, /const resolveRequestAuth = dependencies\.resolveAuthContext \|\| common\.resolveAuthContext;[\s\S]*resolveRequestAuth\(req\)/);
   assert.match(routes, /marcie_article_not_approved/);
   assert.match(routes, /\/api\/marcie\/wordpress\/draft/);
   assert.match(routes, /\/api\/marcie\/wordpress\/publish/);

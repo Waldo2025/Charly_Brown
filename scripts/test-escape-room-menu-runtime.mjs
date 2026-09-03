@@ -340,9 +340,9 @@ try {
   assert.equal(restoredState.progress.completed, 1, "La recarga debe restaurar el avance compatible.");
   assert.equal(await page.locator("[data-menu-mission='actividad-dos']").isDisabled(), false);
   const storedProgress = await page.evaluate(() => Object.entries(localStorage)
-    .filter(([key]) => key.includes(".v2.menu_secciones."))
+    .filter(([key]) => key.includes(".v3.menu_secciones."))
     .map(([, value]) => JSON.parse(value)));
-  assert.ok(storedProgress.some((item) => item.version === 2 && item.mode === "menu_secciones" && item.fingerprint), "El save debe incluir versión, modo y huella.");
+  assert.ok(storedProgress.some((item) => item.version === 3 && item.mode === "menu_secciones" && item.fingerprint), "El save debe incluir versión, modo y huella.");
 
   await page.goto(`${origin}/changed`, { waitUntil: "domcontentloaded" });
   const incompatibleState = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
@@ -407,11 +407,11 @@ try {
   const roomsMigration = await page.evaluate(() => ({
     legacy: localStorage.getItem("escapeRoomGame.progress.salaslegacyruntime"),
     versioned: Object.entries(localStorage)
-      .filter(([key]) => key.includes("escapeRoomGame.progress.salaslegacyruntime.v2.salas."))
+      .filter(([key]) => key.includes("escapeRoomGame.progress.salaslegacyruntime.v3.salas."))
       .map(([, value]) => JSON.parse(value))
   }));
   assert.equal(roomsMigration.legacy, null, "La migración de salas debe retirar la clave legacy una vez guardado v2.");
-  assert.ok(roomsMigration.versioned.some((item) => item.version === 2 && item.mode === "salas"), "La migración debe crear un save v2 para salas.");
+  assert.ok(roomsMigration.versioned.some((item) => item.version === 3 && item.mode === "salas"), "La migración debe crear un save v3 para salas.");
 
   await page.goto(`${origin}/question-types`, { waitUntil: "domcontentloaded" });
   await page.locator("[data-game-start]").click();
@@ -556,6 +556,12 @@ try {
 
   for (const route of ["safe-theme-menu", "safe-theme-rooms"]) {
     await page.goto(`${origin}/${route}`, { waitUntil: "domcontentloaded" });
+    if (route === "safe-theme-rooms") {
+      const previous = page.locator("[data-gallery-prev]");
+      assert.equal(await previous.isVisible(), false, "En la portada del modo salas no debe verse Previous.");
+      assert.equal(await previous.getAttribute("aria-hidden"), "true", "Previous tampoco debe anunciarse antes de que exista una pantalla anterior.");
+      assert.equal(await previous.isDisabled(), true, "Previous debe iniciar inactivo en modo salas.");
+    }
     const appliedTheme = await page.evaluate(() => ({
       background: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
       title: getComputedStyle(document.documentElement).getPropertyValue("--title-color").trim(),

@@ -1851,7 +1851,7 @@
       }
 
       /* MoodleCourse: iconos con paleta unificada */
-      body[data-page="moodlecourse.html"] :where(i, [class^="fa-"], [class*=" fa-"]) {
+      body[data-page="moodlecourse.html"] :where(#sidebar2, #sidebarTemas, #contenidoEditor, main) :where(i, [class^="fa-"], [class*=" fa-"]) {
         color: hsl(var(--muted-foreground)) !important;
       }
 

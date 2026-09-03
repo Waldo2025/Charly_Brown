@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Marcie Blog Editor - Radar Editorial Educativo" />
+  <title>Marcie Blog Editor</title>
+  <script src="/js/runtime-config.js?v=20260831-marcie-r1"></script>
+
+  <!-- Font Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Filtro para suprimir warning de Tailwind en tiempo de ejecución -->
+  <script>
+    (function () {
+      const originalWarn = window.console?.warn;
+      if (typeof originalWarn !== "function") return;
+      window.console.warn = function (...args) {
+        if (typeof args[0] === "string" && args[0].includes("cdn.tailwindcss.com should not be used in production")) return;
+        return originalWarn.apply(console, args);
+      };
+    })();
+  </script>
+
+  <!-- Motor completo de Tailwind CSS (versión local) -->
+  <script src="/js/tailwindcss-3.4.17.js"></script>
+
+  <!-- Configuración de tema Shadcn UI para Tailwind -->
+  <script>
+    tailwind.config = {
+      darkMode: ["class"],
+      theme: {
+        extend: {
+          colors: {
+            border: "hsl(var(--border))",
+            input: "hsl(var(--input))",
+            ring: "hsl(var(--ring))",
+            background: "hsl(var(--background))",
+            foreground: "hsl(var(--foreground))",
+            primary: {
+              DEFAULT: "hsl(var(--primary))",
+              foreground: "hsl(var(--primary-foreground))",
+            },
+            secondary: {
+              DEFAULT: "hsl(var(--secondary))",
+              foreground: "hsl(var(--secondary-foreground))",
+            },
+            muted: {
+              DEFAULT: "hsl(var(--muted))",
+              foreground: "hsl(var(--muted-foreground))",
+            },
+            accent: {
+              DEFAULT: "hsl(var(--accent))",
+              foreground: "hsl(var(--accent-foreground))",
+            },
+          },
+          borderRadius: {
+            lg: "var(--radius)",
+            md: "calc(var(--radius) - 2px)",
+            sm: "calc(var(--radius) - 4px)",
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style type="text/tailwindcss">
+    @layer base {
+      :root {
+        --background: 0 0% 100%;
+        --foreground: 222.2 84% 4.9%;
+        --primary: 191.6 91.4% 36.5%;
+        --primary-foreground: 210 40% 98%;
+        --secondary: 210 40% 96.1%;
+        --secondary-foreground: 222.2 47.4% 11.2%;
+        --muted: 210 40% 96.1%;
+        --muted-foreground: 215.4 16.3% 46.9%;
+        --accent: 210 40% 96.1%;
+        --accent-foreground: 222.2 47.4% 11.2%;
+        --border: 214.3 31.8% 91.4%;
+        --input: 214.3 31.8% 91.4%;
+        --ring: 221.2 83.2% 53.3%;
+        --radius: 0.5rem;
+      }
+      body {
+        @apply bg-[#f8fafc] text-foreground font-sans antialiased h-screen overflow-hidden;
+      }
+      .btn {
+        @apply inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+      }
+      .btn-primary {
+        @apply bg-[#007b8b] text-white hover:bg-[#006673] px-4 py-2;
+      }
+      .btn-outline {
+        @apply border border-input bg-background hover:bg-accent hover:text-accent-foreground px-4 py-2;
+      }
+      .btn-ghost {
+        @apply hover:bg-accent hover:text-accent-foreground px-4 py-2;
+      }
+      .input-field {
+        @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+      }
+      .badge {
+        @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2;
+      }
+      .badge-success {
+        @apply border-transparent bg-green-100 text-green-700;
+      }
+      .badge-warning {
+        @apply border-transparent bg-orange-100 text-orange-700;
+      }
+      .badge-secondary {
+        @apply border-transparent bg-secondary text-secondary-foreground;
+      }
+    }
+  </style>
+
+  <!-- Font Awesome (requerido por el header y sidebar global) -->
+
+  <!-- Header y Sidebar globales del proyecto -->
+  <link rel="stylesheet" href="/header.css" />
+  <link rel="stylesheet" href="/sidebar.css" />
+
+  <!-- Estilos complementarios para resizers, shadcn y adaptación de layout -->
+  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260831r12" />
+
+  <style>
+    /* Superficies coherentes para los tres temas de la interfaz.
+       El lienzo del articulo conserva su apariencia editorial independiente. */
+    html[data-marcie-ui-theme="light"] {
+      --marcie-panel-bg: #f8fafc;
+      --marcie-panel-header: #ffffff;
+      --marcie-panel-card: #ffffff;
+      --marcie-panel-card-hover: #eef2f6;
+    }
+
+    html[data-marcie-ui-theme="medium"] {
+      --marcie-ui-canvas: #c7ccd3;
+      --marcie-ui-surface: #d5d9de;
+      --marcie-ui-surface-raised: #dde1e5;
+      --marcie-ui-surface-soft: #cfd4da;
+      --marcie-ui-surface-hover: #c1c7cf;
+      --marcie-ui-input: #dfe3e7;
+      --marcie-panel-bg: #d1d6dc;
+      --marcie-panel-header: #d9dde2;
+      --marcie-panel-card: #dce0e4;
+      --marcie-panel-card-hover: #c5cbd2;
+    }
+
+    html[data-marcie-ui-theme="dark"] {
+      --marcie-panel-bg: #181b1f;
+      --marcie-panel-header: #20242a;
+      --marcie-panel-card: #24282e;
+      --marcie-panel-card-hover: #2d323a;
+    }
+
+    html[data-marcie-ui-theme] :is(#left-panel, #right-panel) {
+      background-color: var(--marcie-panel-bg) !important;
+      color: var(--marcie-ui-text) !important;
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] #right-panel > div:first-child {
+      background-color: var(--marcie-panel-header) !important;
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] #left-panel > header:first-child {
+      background-color: var(--marcie-panel-bg) !important;
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] :is(.session-filter-tabs, #editorial-steps-list, #trend-insight-container) {
+      background-color: var(--marcie-panel-card) !important;
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] .session-filter-tab {
+      background-color: transparent !important;
+      color: var(--marcie-ui-text-soft) !important;
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] .session-filter-tab:hover,
+    html[data-marcie-ui-theme] .session-filter-tab.is-active {
+      background-color: var(--marcie-panel-card-hover) !important;
+      color: var(--marcie-ui-text) !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list > *,
+    html[data-marcie-ui-theme] .marcie-session-item {
+      background-color: var(--marcie-panel-card) !important;
+      color: var(--marcie-ui-text) !important;
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list > *:hover,
+    html[data-marcie-ui-theme] .marcie-session-item:hover {
+      background-color: var(--marcie-panel-card-hover) !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list .mb-3 {
+      background-color: transparent !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list .marcie-session-item.is-active {
+      background-color: transparent !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list .flex.flex-col[class~="gap-1.5"] {
+      background-color: var(--marcie-panel-bg) !important;
+    }
+
+    html[data-marcie-ui-theme] #right-panel :is(
+      .bg-white,
+      .bg-slate-50,
+      .bg-slate-100,
+      .bg-purple-50,
+      .bg-blue-50,
+      .bg-sky-50,
+      .bg-cyan-50,
+      .bg-teal-50,
+      .bg-green-50,
+      .bg-emerald-50,
+      .bg-amber-50,
+      .bg-orange-50,
+      .bg-red-50,
+      .bg-rose-50,
+      .bg-violet-50
+    ) {
+      background-color: var(--marcie-panel-card) !important;
+    }
+
+    html[data-marcie-ui-theme] #right-panel :is(
+      .border-slate-100,
+      .border-slate-200,
+      .border-purple-100,
+      .border-blue-100,
+      .border-sky-100,
+      .border-teal-100,
+      .border-emerald-100,
+      .border-amber-100,
+      .border-orange-100
+    ) {
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] #right-panel [data-step-id] > div:last-child:hover,
+    html[data-marcie-ui-theme] #right-panel li:hover {
+      background-color: var(--marcie-panel-card-hover) !important;
+    }
+
+    html[data-marcie-ui-theme] :is(#left-panel, #right-panel) hr {
+      border-color: var(--marcie-ui-border) !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list :is(button, .marcie-session-item) {
+      box-shadow: none !important;
+    }
+
+    html[data-marcie-ui-theme] #session-list :is(button, .marcie-session-item):hover {
+      box-shadow: 0 1px 2px color-mix(in srgb, var(--marcie-ui-shadow) 30%, transparent) !important;
+    }
+  </style>
+
+  <style>
+    /* Línea de tiempo horizontal – modal Guía del Asistente */
+    .guide-step-btn[data-active="true"] > div:first-child {
+      transform: scale(1.18);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+      outline: 3px solid white;
+      outline-offset: 2px;
+    }
+    .guide-step-btn[data-active="true"] > span {
+      color: #1e293b;
+      font-weight: 700;
+    }
+    .guide-step-btn > div:first-child {
+      transition: transform 0.2s cubic-bezier(.34,1.56,.64,1), box-shadow 0.2s ease;
+    }
+    .text-lg {
+      font-size: 1.02rem;
+      line-height: 1.75rem;
+    }
+    #guide-step-detail {
+      animation: fadeSlideUp 0.22s ease;
+      border-color: rgb(226, 232, 240);
+      box-shadow: 0 8px 20px -16px rgba(15, 23, 42, 0.45);
+    }
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+  </style>
+
+  <!-- Iconos del sidebar global (Font Awesome local) -->
+  <link rel="stylesheet" href="/vendor/fontawesome/all.min.css">
+
+  <!-- Lucide Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@1.33.0/dist/umd/lucide.min.js" integrity="sha384-tCQ4YYVYKuOFYH+pnSIPOS3PaT3+5AmX2okMauzDJlLLxkQfJfSwmgpZPceZWs1F" crossorigin="anonymous"></script>
+  <script>
+    (() => {
+      const allowedThemes = ["light", "medium", "dark"];
+      let savedTheme = "light";
+      try {
+        const storedTheme = localStorage.getItem("marcie_ui_theme_v1");
+        if (allowedThemes.includes(storedTheme)) savedTheme = storedTheme;
+      } catch (_) {}
+      document.documentElement.dataset.marcieUiTheme = savedTheme;
+    })();
+  </script>
+</head>
+<body data-page="MarcieBlogEditor.html" class="bg-[#f8fafc] text-foreground font-sans antialiased h-screen overflow-hidden">
+
+  <!-- Header Principal Global de CharlyBrown -->
+  <header class="main-header">
+    <div class="header-content">
+      <!-- header-content loaded from chromeLayout.js -->
+    </div>
+  </header>
+
+  <!-- Sidebar Principal Global de CharlyBrown -->
+  <div id="sidebar">
+
+    <div class="sidebar-menu">
+      <!-- sidebar-menu loaded from chromeLayout.js -->
+    </div>
+  </div>
+
+  <!-- Contenedor de Marcie Blog Editor que adapta su ancho y alto automáticamente -->
+  <div id="marcieAppRoot">
+
+    <!-- Topbar secundario de la herramienta Marcie -->
+    <header class="h-14 flex items-center justify-between px-6 bg-white border-b border-border shrink-0 relative z-[100]">
+      <div class="flex items-center gap-3 w-[260px] shrink-0">
+        <img src="/MarcieBlogEditorLogo2.png" alt="Marcie logo" class="w-8 h-8 object-contain rounded-md shadow-xs" />
+        <span class="font-bold text-slate-900 text-base tracking-tight">Marcie Blog Editor</span>
+      </div>
+
+
+      <div class="flex items-center gap-2 justify-end shrink-0 relative">
+	        <button
+	          id="btn-trend-radar-header"
+	          class="marcie-trend-header-button btn h-9 px-3 flex items-center justify-center gap-2 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 shadow-xs transition-all hover:border-purple-300 hover:bg-purple-100"
+	          type="button"
+	          title="Buscar tendencias educativas emergentes"
+	          aria-label="Abrir el radar y buscar tendencias educativas emergentes"
+	          aria-haspopup="dialog"
+	        >
+	          <i data-lucide="radar" class="w-4 h-4" aria-hidden="true"></i>
+	          <span>Radar de tendencias</span>
+	        </button>
+	        <button
+	          id="btn-ui-theme"
+	          class="marcie-ui-theme-toggle btn h-9 w-9 p-0 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 shadow-xs transition-all hover:border-slate-300 hover:bg-slate-100"
+	          type="button"
+	          title="Tema Claro. Cambiar a Medio"
+	          aria-label="Tema actual: Claro. Cambiar a Medio"
+	        >
+	          <svg data-marcie-theme-icon="light" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path stroke-linecap="round" d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"></path></svg>
+	          <svg data-marcie-theme-icon="medium" class="w-4 h-4 hidden" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 0 0 16V4Z" fill="currentColor" stroke="none"></path></svg>
+	          <svg data-marcie-theme-icon="dark" class="w-4 h-4 hidden" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M20.1 15.3A8.5 8.5 0 0 1 8.7 3.9 8.5 8.5 0 1 0 20.1 15.3Z"></path></svg>
+	        </button>
+	        <button
+	          id="btn-fullscreen-article"
+	          class="btn h-9 w-9 p-0 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 shadow-xs transition-all hover:border-slate-300 hover:bg-slate-100"
+	          title="Pantalla completa"
+	          aria-label="Abrir pantalla completa incluyendo el header"
+	        >
+	          <i data-lucide="maximize" class="w-4 h-4"></i>
+	        </button>
+	        <button
+	          id="btn-header-options"
+	          class="btn btn-ghost h-9 w-9 p-0 flex items-center justify-center transition-all rounded-lg"
+	          title="Opciones de herramienta"
+	          aria-label="Abrir opciones de herramienta"
+	        >
+          <i data-lucide="more-vertical" class="w-5 h-5 text-slate-500"></i>
+        </button>
+
+        <!-- Dropdown Menu -->
+        <div id="header-options-menu" class="hidden absolute right-0 top-full mt-2 w-60 bg-white border border-slate-200 rounded-lg shadow-xl py-1 z-[120] animate-in fade-in slide-in-from-top-2">
+
+          <div class="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 text-xs font-bold text-slate-500 tracking-wider">
+            <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+            <span id="sync-status">Sincronizado</span>
+          </div>
+
+          <div class="py-1">
+            <button id="btn-ia-topbar" class="w-full text-left px-4 py-2.5 text-xs font-medium text-purple-700 hover:bg-purple-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="sparkles" class="w-4 h-4 text-purple-500"></i> Asistente IA
+            </button>
+            <button id="btn-editorial-calendar" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="calendar-days" class="w-4 h-4 text-teal-600"></i> Calendario editorial
+            </button>
+            <button id="btn-editorial-trends" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="radar" class="w-4 h-4 text-purple-600"></i> Radar de tendencias
+            </button>
+
+            <button id="opt-gemini-model" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="settings-2" class="w-4 h-4 text-slate-400"></i>
+              <span class="flex-1">Modelo de Gemini</span>
+              <span id="header-gemini-model-badge" class="max-w-20 truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Flash Lite</span>
+            </button>
+
+            <button id="btn-notification-topbar" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors relative">
+              <i data-lucide="bell" class="w-4 h-4 text-slate-400"></i> Notificaciones
+              <span class="absolute right-4 top-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-teal-500 rounded-full"></span>
+            </button>
+          </div>
+
+          <div class="h-px bg-slate-100"></div>
+
+          <div class="py-1">
+            <button id="user-avatar" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <div class="w-5 h-5 bg-teal-700 text-white rounded-full flex items-center justify-center font-bold text-[8px] shrink-0">MB</div>
+              <span class="truncate">Cerrar sesión</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+  <!-- Main Workspace -->
+  <main class="flex flex-1 overflow-hidden">
+
+    <!-- Left Panel: Sesiones y artículos -->
+    <aside id="left-panel" class="w-[320px] bg-[#fbfcfd] border-r border-border flex flex-col shrink-0 relative">
+      <header class="p-4 flex flex-col gap-3.5 border-b border-border/70">
+        <!-- Título Sesiones e Iconos -->
+        <div class="flex items-center justify-between">
+          <h2 class="font-normal text-slate-800 text-base tracking-tight">Sesiones</h2>
+          <div class="flex items-center gap-1.5 text-slate-500">
+	            <button
+	              id="btn-toggle-search"
+	              class="p-1.5 hover:text-slate-700 hover:bg-slate-200/60 rounded-md transition-all cursor-pointer"
+	              title="Buscar sesiones"
+	              aria-label="Mostrar campo de búsqueda de sesiones"
+	            >
+              <i data-lucide="search" class="w-4 h-4"></i>
+            </button>
+	            <button
+	              id="btn-new-session"
+	              class="p-1.5 hover:text-slate-700 hover:bg-slate-200/60 rounded-md transition-all cursor-pointer"
+	              title="Nueva sesión"
+	              aria-label="Crear nueva sesión"
+	            >
+	              <i data-lucide="plus" class="w-4 h-4"></i>
+	            </button>
+	            <button
+	              id="btn-archive-sessions"
+	              class="p-1.5 hover:text-slate-700 hover:bg-slate-200/60 rounded-md transition-all cursor-pointer"
+	              title="Archivadas"
+	              aria-label="Filtrar sesiones archivadas"
+	            >
+              <i data-lucide="archive" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Buscador (oculto por defecto) -->
+        <div id="session-search-container" class="relative hidden">
+          <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"></i>
+          <input type="text" id="session-search" placeholder="Buscar sesiones o artículos..." class="input-field pl-9 h-9 text-sm w-full" />
+        </div>
+
+        <!-- Pestañas de filtro originales -->
+        <div class="session-filter-tabs grid grid-cols-5 w-full overflow-hidden rounded-lg border border-slate-200 divide-x divide-slate-200 bg-white pb-0">
+          <button data-filter="all" title="Todos" aria-label="Mostrar todas las sesiones" aria-pressed="true" class="session-filter-tab is-active w-full min-w-0 px-1.5 py-1.5 text-[10px] tracking-wide font-bold shadow-xs transition-all cursor-pointer">TO</button>
+          <button data-filter="recent" title="Recientes" aria-label="Mostrar sesiones recientes" aria-pressed="false" class="session-filter-tab w-full min-w-0 px-1.5 py-1.5 text-[10px] tracking-wide font-medium transition-all cursor-pointer">RE</button>
+          <button data-filter="draft" title="Borradores" aria-label="Mostrar sesiones en borrador" aria-pressed="false" class="session-filter-tab w-full min-w-0 px-1.5 py-1.5 text-[10px] tracking-wide font-medium transition-all cursor-pointer">BO</button>
+          <button data-filter="review" title="En revisión" aria-label="Mostrar sesiones en revisión" aria-pressed="false" class="session-filter-tab w-full min-w-0 px-1.5 py-1.5 text-[10px] tracking-wide font-medium transition-all cursor-pointer">RV</button>
+          <button data-filter="published" title="Publicados" aria-label="Mostrar sesiones publicadas" aria-pressed="false" class="session-filter-tab w-full min-w-0 px-1.5 py-1.5 text-[10px] tracking-wide font-medium transition-all cursor-pointer">PU</button>
+        </div>
+      </header>
+
+      <div class="flex-1 overflow-y-auto p-3 flex flex-col justify-between">
+        <div id="session-list" class="flex flex-col gap-2">
+          <!-- Generado dinámicamente desde Firestore -->
+        </div>
+        <button id="btn-see-more-sessions" class="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center justify-center gap-1 w-full py-3 mt-4 border-t border-slate-100">
+          Ver todas las sesiones <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Resizer Izquierdo -->
+    <div id="left-resizer" class="panel-resizer panel-resizer-left" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel de sesiones" title="Arrastra para redimensionar (Doble clic para restaurar)"></div>
+
+    <!-- Contenedor para Fullscreen -->
+    <div id="workspace-fullscreen-area" class="flex flex-1 overflow-hidden relative bg-white">
+
+      <!-- Center Panel: Contenido generado -->
+      <section class="flex-1 bg-white flex flex-col min-w-0 relative shadow-[0_0_40px_rgba(0,0,0,0.03)] z-10">
+      <div class="h-11 px-5 py-1.5 border-b border-border flex items-center justify-between shrink-0">
+        <h1 class="editor-toolbar-title text-base font-normal flex items-center gap-2 text-slate-800">
+          Contenido generado
+        </h1>
+        <div class="editor-toolbar-actions flex items-center gap-1 relative">
+          <button
+            id="btn-ai-assistant-header"
+            class="editor-toolbar-action editor-toolbar-action--assistant btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Abrir Asistente Editorial"
+            aria-label="Abrir el modal del Asistente Editorial"
+            aria-haspopup="dialog"
+          >
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+          </button>
+          <button
+            id="btn-article-templates"
+            class="editor-toolbar-action editor-toolbar-action--templates btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Elegir plantilla"
+            aria-label="Elegir plantilla visual para el artículo"
+            aria-haspopup="dialog"
+          >
+            <i data-lucide="palette" class="w-4 h-4"></i>
+          </button>
+          <button
+            id="btn-export-html-header"
+            class="editor-toolbar-action editor-toolbar-action--export btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Exportar HTML"
+            aria-label="Exportar artículo a HTML"
+          >
+            <i data-lucide="file-down" class="w-4 h-4"></i>
+          </button>
+          <button
+            id="btn-publish-wordpress-header"
+            class="editor-toolbar-action editor-toolbar-action--publish btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Publicar en WordPress"
+            aria-label="Preparar publicación en WordPress"
+          >
+            <i data-lucide="send" class="w-4 h-4"></i>
+          </button>
+          <button
+            id="btn-toggle-right-panel-fullscreen"
+            class="editor-toolbar-action editor-toolbar-action--panel btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Mostrar/Ocultar panel del asistente"
+            aria-label="Mostrar u ocultar panel lateral de asistente"
+          >
+            <i data-lucide="panel-right" class="w-4 h-4"></i>
+          </button>
+          <button
+            id="btn-toggle-subheader"
+            class="editor-toolbar-action editor-toolbar-action--view btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Mostrar/Ocultar opciones de vista"
+            aria-label="Mostrar u ocultar subheader"
+          >
+            <i data-lucide="chevrons-up-down" class="w-4 h-4"></i>
+          </button>
+          <button
+            id="btn-article-options"
+            class="editor-toolbar-action editor-toolbar-action--more btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+            title="Opciones del artículo"
+            aria-label="Abrir opciones del artículo"
+          >
+            <i data-lucide="more-vertical" class="w-5 h-5"></i>
+          </button>
+
+          <div id="article-options-menu" class="hidden absolute right-0 top-full mt-2 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 animate-in fade-in slide-in-from-top-2">
+            <button id="btn-copy-article" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="copy" class="w-4 h-4 text-slate-400"></i> Copiar texto
+            </button>
+            <button id="btn-share-article" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="share-2" class="w-4 h-4 text-slate-400"></i> Compartir enlace
+            </button>
+            <div class="h-px bg-slate-100 my-1"></div>
+            <button id="opt-text-settings" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="type" class="w-4 h-4 text-slate-400"></i> Apariencia del texto
+            </button>
+            <div class="h-px bg-slate-100 my-1"></div>
+            <button id="opt-copy-json" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="code" class="w-4 h-4 text-slate-400"></i> Copiar JSON crudo
+            </button>
+            <button id="opt-copy-html" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="clipboard" class="w-4 h-4 text-slate-400"></i> Copiar HTML
+            </button>
+            <button id="opt-export-html" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="file-code-2" class="w-4 h-4 text-slate-400"></i> Exportar a HTML
+            </button>
+            <button id="opt-export-md" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="file-text" class="w-4 h-4 text-slate-400"></i> Exportar a Markdown
+            </button>
+            <div class="h-px bg-slate-100 my-1"></div>
+            <button id="opt-publish-wordpress" class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+              <i data-lucide="send" class="w-4 h-4 text-slate-400"></i> Publicar en WordPress
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="center-subheader" class="px-8 py-3 border-b border-border flex flex-wrap items-center justify-between gap-4 bg-slate-50/50 overflow-hidden transition-all duration-200">
+        <span id="editorial-mode-badge" class="editorial-mode-badge" data-mode="marcie" aria-label="Modo editorial: Marcie" title="Esta sesión usa el modo editorial Marcie" hidden>
+          <span class="editorial-mode-badge__dot" aria-hidden="true"></span>
+          <span id="editorial-mode-badge-label">Modo Marcie</span>
+        </span>
+        <div class="flex items-center gap-1 text-xs font-medium text-slate-500" id="audience-selector">
+          <span class="mr-2 uppercase tracking-wider text-[10px] font-bold text-slate-400">Público:</span>
+          <button data-audience="students" class="audience-btn px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5">
+            <i data-lucide="user" class="w-3.5 h-3.5"></i> Estudiantes
+          </button>
+          <button data-audience="educators" class="audience-btn px-3.5 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 shrink-0 transition-all cursor-pointer font-bold shadow-xs flex items-center gap-1.5">
+            <i data-lucide="users" class="w-3.5 h-3.5"></i> Docentes
+          </button>
+          <button data-audience="parents" class="audience-btn px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5">
+            <i data-lucide="user-check" class="w-3.5 h-3.5"></i> Padres
+          </button>
+          <button data-audience="coordinators" class="audience-btn px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5">
+            <i data-lucide="network" class="w-3.5 h-3.5"></i> Coordinadores
+          </button>
+          <span class="mx-1 h-5 w-px bg-slate-200" aria-hidden="true"></span>
+          <button id="btn-cycle-view" type="button" data-current-view="article" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-teal-200 bg-teal-50 text-teal-700 shadow-xs transition-all hover:bg-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2" title="Artículo · Cambiar a Vista estructurada" aria-label="Vista actual: Artículo. Cambiar a Vista estructurada">
+            <i data-lucide="layers-3" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Toolbar Flotante para Edición -->
+      <div id="inline-toolbar" class="hidden absolute z-[99999] bg-slate-900 text-white rounded-lg shadow-xl flex items-center p-1 gap-1 -translate-x-1/2 -mt-12 transition-opacity">
+        <button
+          id="it-bold"
+          class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-700 transition-colors"
+          title="Negrita (⌘B)"
+          aria-label="Negrita"
+        ><i data-lucide="bold" class="w-4 h-4"></i></button>
+          <button
+            id="it-italic"
+            class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-700 transition-colors"
+            title="Cursiva (⌘I)"
+            aria-label="Cursiva"
+          ><i data-lucide="italic" class="w-4 h-4"></i></button>
+          <button
+            id="it-underline"
+            class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-700 transition-colors"
+            title="Subrayado (⌘U)"
+            aria-label="Subrayado"
+          ><i data-lucide="underline" class="w-4 h-4"></i></button>
+        <div class="w-px h-5 bg-slate-700 mx-1"></div>
+        <button id="it-h2" class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-700 transition-colors text-xs font-bold" title="Subtítulo">H2</button>
+        <button id="it-h3" class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-700 transition-colors text-xs font-bold" title="Sección">H3</button>
+        <div class="w-px h-5 bg-slate-700 mx-1"></div>
+        <button id="it-ai-edit" class="h-8 px-2.5 flex items-center justify-center gap-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white transition-colors text-xs font-semibold cursor-pointer shadow-sm" title="Analizar selección">
+          <i data-lucide="sparkles" class="w-3 h-3"></i> Analizar
+        </button>
+      </div>
+
+      <!-- Toolbar de Bloque para Analizar Párrafos -->
+      <div id="block-ai-toolbar" class="hidden absolute z-[99999] right-2 -top-3">
+        <button id="btn-block-ai-edit" class="h-7 px-2 flex items-center justify-center gap-1.5 rounded-full bg-white border border-slate-200 text-purple-600 shadow-sm hover:bg-purple-50 transition-colors text-[10px] font-bold cursor-pointer" title="Analizar bloque">
+          <i data-lucide="sparkles" class="w-3 h-3"></i> Analizar
+        </button>
+      </div>
+
+      <!-- Vista 1: Artículo (Formato Lectura / Render) -->
+        <div id="editorial-guide-view" class="flex-1 overflow-y-auto px-12 py-8 max-w-4xl mx-auto w-full relative bg-white hidden border-0" style="border: none !important;">
+        <div id="article-guide-shell" class="article-guide-shell mt-2 text-left rounded-2xl bg-transparent p-6 border-0" style="border: none !important;"></div>
+      </div>
+
+      <div id="article-view" class="article-template-surface flex-1 overflow-y-auto px-12 py-8 max-w-4xl mx-auto w-full relative bg-white">
+        <article class="prose prose-slate max-w-none">
+          <h1 id="article-title" data-article-title class="text-slate-900 tracking-tight mb-5 outline-none focus:ring-2 focus:ring-teal-100 rounded px-1 -mx-1 transition-colors" contenteditable="true" spellcheck="false"></h1>
+          <p id="article-subtitle" data-article-subtitle class="text-slate-500 mb-8 leading-relaxed outline-none focus:ring-2 focus:ring-teal-100 rounded px-1 -mx-1 transition-colors" contenteditable="true" spellcheck="false"></p>
+
+          <div data-article-meta-row class="flex flex-wrap items-center gap-3 text-sm text-slate-600 mb-8">
+            <div class="flex items-center gap-1.5 bg-sky-50 text-sky-700 px-3 py-1.5 rounded-md font-medium border border-sky-100 shadow-xs"><i data-lucide="calendar" class="w-4 h-4 text-sky-500"></i> <span id="article-meta-date"></span></div>
+            <div class="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-md font-medium border border-amber-100 shadow-xs"><i data-lucide="user" class="w-4 h-4 text-amber-500"></i> <span id="article-meta-author"></span></div>
+            <div class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-md font-medium border border-emerald-100 shadow-xs"><i data-lucide="clock" class="w-4 h-4 text-emerald-500"></i> <span id="article-meta-readtime"></span></div>
+            <div class="flex items-center gap-1.5 bg-violet-50 text-violet-700 px-3 py-1.5 rounded-md font-medium border border-violet-100 shadow-xs"><i data-lucide="tag" class="w-4 h-4 text-violet-500"></i> <span id="article-meta-tags"></span></div>
+          </div>
+
+          <div id="article-featured-image" class="marcie-cover-host hidden" aria-live="polite"></div>
+
+          <div data-article-divider class="h-px w-full bg-slate-200 mb-10"></div>
+
+          <div id="article-body-container" class="outline-none focus:ring-2 focus:ring-teal-100 rounded px-2 -mx-2" contenteditable="true" spellcheck="false">
+            <!-- Bloques inyectados dinámicamente -->
+          </div>
+
+          <div data-article-sources class="mt-16 pt-10 border-t border-slate-200/60">
+            <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <i data-lucide="book-open" class="w-5 h-5 text-slate-400"></i>
+                <h4 class="text-lg font-bold tracking-tight text-slate-800">Fuentes consultadas</h4>
+              </div>
+              <button id="btn-source-citation-format" type="button" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 shadow-xs transition-all hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2" aria-pressed="false" title="Cambiar fuentes a formato APA">
+                <i data-lucide="book-type" class="h-3.5 w-3.5"></i>
+                <span id="source-citation-format-label">Ver en APA</span>
+              </button>
+            </div>
+            <ul id="article-sources-list" class="article-sources-list grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <!-- Fuentes inyectadas dinámicamente -->
+            </ul>
+          </div>
+          <section id="article-evidence-panel" class="article-evidence-shell mt-8" aria-live="polite" data-state="pending">
+            <div class="article-evidence-header">
+              <div class="article-evidence-status-mark" aria-hidden="true"><i data-lucide="shield-check"></i></div>
+              <div class="min-w-0 flex-1"><p class="article-evidence-kicker">Control de calidad automático</p><h4 id="article-evidence-summary" class="article-evidence-summary">Preparando comprobación…</h4></div>
+              <button id="btn-verify-evidence" type="button" class="article-evidence-retry hidden">Reintentar</button>
+            </div>
+            <div id="article-evidence-blockers" class="article-evidence-notice hidden"></div>
+            <div id="article-evidence-matrix" class="article-evidence-content"></div>
+          </section>
+        </article>
+      </div>
+
+      <!-- Vista 2: Vista Estructurada (JSON Canónico ArticleDocument) -->
+      <div id="structured-view" class="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full hidden">
+        <div class="bg-slate-900 text-slate-100 p-6 rounded-xl font-mono text-xs overflow-x-auto shadow-inner">
+          <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-800 text-slate-400">
+            <span>ArticleDocument JSON (Colección: MarcieBlogEditor)</span>
+            <span>Schema v1.0</span>
+          </div>
+          <pre id="structured-json-code">{}</pre>
+        </div>
+      </div>
+
+      <!-- Vista 3: SEO -->
+      <div id="seo-view" class="flex-1 overflow-y-auto p-8 max-w-3xl mx-auto w-full hidden">
+        <div class="bg-white border border-border rounded-xl p-6 shadow-sm flex flex-col gap-4">
+          <h3 class="font-semibold text-slate-800 text-lg">Optimización y Metadatos SEO</h3>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Título SEO</label>
+            <input id="seo-title-input" type="text" class="input-field mt-1" placeholder="Título para buscadores..." maxlength="70" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Meta Descripción</label>
+            <textarea id="seo-description-input" class="input-field mt-1 h-24" maxlength="155" placeholder="Descripción resumida para Google..."></textarea>
+            <p id="seo-description-counter" class="mt-1 text-right text-[10px] text-slate-400">0 / 155</p>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Palabras Clave</label>
+            <input id="seo-keywords-input" type="text" class="input-field mt-1" placeholder="Separadas por comas" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Slug</label>
+            <input id="seo-slug-input" type="text" class="input-field mt-1" placeholder="titulo-del-articulo" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Resizer Derecho -->
+    <div id="right-resizer" class="panel-resizer panel-resizer-right" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel de asistente IA" title="Arrastra para redimensionar (Doble clic para restaurar)"></div>
+
+    <!-- Right Panel: Asistente editorial IA -->
+    <aside id="right-panel" class="w-[380px] bg-slate-50 border-l border-border flex flex-col shrink-0 overflow-y-auto relative">
+      <div class="h-11 px-5 py-1.5 flex items-center justify-between border-b border-border bg-white sticky top-0 z-[80] shrink-0">
+        <h2 class="font-normal text-base flex items-center gap-2 text-slate-800">
+          <i data-lucide="sparkles" class="w-4 h-4 text-purple-600"></i>
+          Asistente Editorial
+        </h2>
+        <div class="flex items-center gap-2">
+          <button
+            id="btn-toggle-steps-list"
+            class="text-slate-400 hover:text-slate-600 transition-colors transition-transform duration-200"
+            aria-label="Mostrar u ocultar pasos"
+            aria-expanded="true"
+            title="Ocultar pasos">
+            <i id="icon-steps-chevron-down" data-lucide="chevron-down" class="w-5 h-5 hidden"></i>
+            <i id="icon-steps-chevron-up" data-lucide="chevron-up" class="w-5 h-5"></i>
+          </button>
+          <button id="btn-help-assistant" class="text-slate-400 hover:text-slate-600 transition-colors">
+            <i data-lucide="help-circle" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="p-5 flex flex-col gap-6">
+        <!-- Steps List -->
+        <div
+          id="editorial-steps-list"
+          class="editorial-steps-list--compact bg-white border border-border rounded-xl p-4 shadow-sm relative overflow-hidden flex flex-col gap-1">
+
+          <div data-step-id="1" data-merged-step-ids="1,2" class="flex gap-4 relative z-10 items-center group cursor-pointer">
+            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+            </div>
+            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
+              <div class="flex items-center gap-2.5">
+                <div class="font-medium text-sm text-slate-800">Investigar y analizar</div>
+              </div>
+              <div class="step-status-icon"></div>
+            </div>
+          </div>
+
+          <div data-step-id="2" data-merged-step-ids="3,draft,4" class="flex gap-4 relative z-10 items-center group cursor-pointer">
+            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17l4-8 4 4 4-6 4 4"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 17h18"/></svg>
+            </div>
+            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
+              <div class="flex items-center gap-2.5">
+                <div class="font-medium text-sm text-slate-700">Crear, redactar y analizar</div>
+              </div>
+              <div class="step-status-icon"></div>
+            </div>
+          </div>
+
+          <div data-step-id="3" data-merged-step-ids="5" class="flex gap-4 relative z-10 items-center group cursor-pointer">
+            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
+            </div>
+            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
+              <div class="flex items-center gap-2.5">
+                <div class="font-medium text-sm text-slate-700">Exportar y publicar</div>
+              </div>
+              <div class="step-status-icon"></div>
+            </div>
+          </div>
+
+          <div data-step-id="4" class="hidden" aria-hidden="true">
+            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0 1 12 2.944a11.955 11.955 0 0 1-8.618 3.04A12.02 12.02 0 0 0 3 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            </div>
+            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
+              <div class="flex items-center gap-2.5">
+                <div class="font-medium text-sm text-slate-700">Auditoría y Revisión</div>
+              </div>
+              <div class="step-status-icon"></div>
+            </div>
+          </div>
+
+          <div data-step-id="5" class="hidden" aria-hidden="true">
+            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
+            </div>
+            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
+              <div class="flex items-center">
+                <div class="font-medium text-sm text-slate-700">Exportar y Publicar</div>
+              </div>
+              <div class="step-status-icon"></div>
+            </div>
+          </div>
+
+        </div>
+
+        <hr class="border-border">
+
+        <!-- Insight de tendencia (Relleno con datos reales en JS) -->
+        <div id="trend-insight-container" class="hidden bg-white border border-border rounded-xl p-4 shadow-sm relative overflow-hidden mt-6">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <i data-lucide="trending-up" class="w-4 h-4 text-purple-600"></i> Análisis de Tendencia
+            </h3>
+            <span id="trend-insight-score" class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-600 border border-purple-100"></span>
+          </div>
+          <p id="trend-insight-summary" class="text-xs text-slate-600 leading-relaxed z-10 relative mb-3 font-medium"></p>
+
+          <!-- Gráfica de barras mini -->
+          <div class="mb-3">
+            <div class="flex items-end justify-between gap-1 h-16 px-1" id="trend-bar-chart">
+              <!-- Barras generadas dinámicamente por JS -->
+            </div>
+            <div class="flex justify-between text-[9px] text-slate-400 mt-1 px-1" id="trend-bar-labels">
+              <!-- Etiquetas generadas dinámicamente por JS -->
+            </div>
+          </div>
+
+          <!-- Métricas de tendencia -->
+          <div class="grid grid-cols-3 gap-2 mb-3" id="trend-metrics">
+            <!-- Métricas generadas dinámicamente por JS -->
+          </div>
+
+          <div class="pt-3 border-t border-slate-100">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Señales principales</span>
+            <ul id="trend-insight-signals" class="flex flex-col gap-1.5 text-[11px] text-slate-500 font-medium list-disc pl-3"></ul>
+          </div>
+        </div>
+
+        <!-- Resumen compacto del Radar de tendencias -->
+        <section
+          id="compact-trend-widget"
+          class="compact-trend-widget"
+          aria-labelledby="compact-trend-widget-title"
+          aria-live="polite">
+          <div class="compact-trend-widget__empty">
+            <span class="compact-trend-widget__icon" aria-hidden="true"><i data-lucide="radar"></i></span>
+            <div>
+              <h3 id="compact-trend-widget-title">Radar de tendencias</h3>
+              <p>El tema con mayor oportunidad editorial aparecerá aquí.</p>
+            </div>
+          </div>
+          <button type="button" class="compact-trend-widget__open" data-compact-trend-open>
+            Abrir radar <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+          </button>
+        </section>
+
+      </div>
+    </aside>
+    </div> <!-- /workspace-fullscreen-area -->
+    </main>
+  </div>
+
+  <!-- Scripts principales de navegación y Chrome Layout de CharlyBrown -->
+  <script data-theme-manager="1" src="/js/themeManager.js"></script>
+  <script type="module" src="/js/chromeLayout.js"></script>
+  <script type="module" src="/js/sidebar.js"></script>
+  <script src="/vendor/jszip/jszip.min.js"></script>
+
+  <!-- Script principal de la aplicación Marcie Blog Editor -->
+  <script type="module" src="/MarcieBlogEditor/js/editor-app.js?v=20260831r19"></script>
+</body>
+</html>

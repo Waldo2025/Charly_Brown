@@ -5,6 +5,8 @@ import test from "node:test";
 const layoutSource = readFileSync(new URL("../public/js/chromeLayout.js", import.meta.url), "utf8");
 const sidebarSource = readFileSync(new URL("../public/js/sidebar.js", import.meta.url), "utf8");
 const sidebarCss = readFileSync(new URL("../public/sidebar.css", import.meta.url), "utf8");
+const moodleCss = readFileSync(new URL("../public/moodleCourse.css", import.meta.url), "utf8");
+const themeManagerSource = readFileSync(new URL("../public/js/themeManager.js", import.meta.url), "utf8");
 const videoPlayerSource = readFileSync(new URL("../public/video-player.html", import.meta.url), "utf8");
 
 test("agrupa los accesos solicitados sin perder sus guards de rol", () => {
@@ -33,7 +35,20 @@ test("agrupa los accesos solicitados sin perder sus guards de rol", () => {
 
   assert.match(layoutSource, /id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer'/);
   assert.match(layoutSource, /id: 'gestionUsuariosLink', roleVisibility: 'admin'/);
-  assert.match(layoutSource, /id: 'lecturasGameLink', roleVisibility: 'admin'/);
+  assert.doesNotMatch(layoutSource, /href: 'lecturasGame\.html'[^\n]*label: 'Lecturas Game'|lecturasGameLink/);
+  assert.doesNotMatch(sidebarSource, /lecturasGameLink/);
+  assert.match(layoutSource, /href: 'scienceActivities\.html', icon: 'fas fa-flask', label: 'Actividades de ciencias'/);
+});
+
+test("Moodle no sobrescribe la paleta del sidebar principal", () => {
+  assert.match(
+    moodleCss,
+    /button:not\(\.icon-btn\):not\(\.btn-close-modal\):not\(\.sidebar-group-toggle\)/
+  );
+  assert.match(
+    themeManagerSource,
+    /body\[data-page="moodlecourse\.html"\] :where\(#sidebar2, #sidebarTemas, #contenidoEditor, main\) :where\(i, \[class\^="fa-"\], \[class\*=" fa-"\]\)/
+  );
 });
 
 test("mantiene Inicio y Cerrar sesión fuera de la zona desplazable", () => {

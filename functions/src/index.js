@@ -1,9 +1,11 @@
 const express = require("express");
+const { GoogleAuth } = require("google-auth-library");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const {
   REGION,
+  getAdminServices,
   resolveAuthContext,
   asyncRoute,
   installCommonMiddleware,
@@ -24,6 +26,8 @@ const { monitorStalePodcasterJobs } = require("./stale-job-monitor.js");
 const { registerAnalizarPdfDataRoutes } = require("./analizar-pdf-data.js");
 const { registerAnalizarPdfWorkerProxyRoutes } = require("./analizar-pdf-worker-proxy.js");
 const { registerScienceActivitiesRoutes } = require("./science-activities.js");
+const { registerPigPenShareRoutes } = require("./pigpen-share.js");
+const { registerPigpenSheetsRoutes } = require("./pigpen-sheets.js");
 const { registerMarcieWordPressRoutes } = require("./marcie-wordpress.js");
 const { registerMarcieEditorialResearchRoutes } = require("./marcie-editorial-research.js");
 const { monitorMarcieEditorialCalendar } = require("./marcie-editorial-monitor.js");
@@ -58,7 +62,10 @@ const geminiApp = createApp("gemini-api", {
   geminiLiveProxy: true,
   providerAuth: "adc"
 }, { jsonLimit: GEMINI_PROXY_JSON_LIMIT });
-const GEMINI_PROVIDER_TIMEOUT_MS = 45_000;
+// Las generaciones editoriales grandes (por ejemplo, Escape Rooms con varios
+// contextos y preguntas) superan con frecuencia 45 s. La Function dispone de
+// 120 s; reservamos 15 s para serializar la respuesta y cerrar la petición.
+const GEMINI_PROVIDER_TIMEOUT_MS = 105_000;
 
 function generateGeminiContentWithDeadline(client, request) {
   let timeoutId;
@@ -97,6 +104,9 @@ geminiApp.post("/api/gemini/generate", asyncRoute(async (req, res) => {
       payload
     }));
   } catch (error) {
+    if (String(error?.code || error?.message || "") === "gemini_upstream_timeout") {
+      res.set("Retry-After", "2");
+    }
     const status = Number(error?.status || error?.code || error?.response?.status || 0);
     const errorText = String(error?.message || error?.response?.data || error || "");
     const quotaExhausted = status === 429
@@ -145,6 +155,24 @@ installErrorHandler(veoApp, { service: "veo-api" });
 
 const assetApp = createApp("asset-api");
 registerAssetRoutes(assetApp);
+registerPigPenShareRoutes(assetApp);
+const pigpenSheetsAuth = new GoogleAuth({
+  scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+});
+registerPigpenSheetsRoutes(assetApp, {
+  db: getAdminServices().db,
+  verifyFirebaseBearer: async (req) => {
+    const context = await resolveAuthContext(req);
+    return { uid: context.uid, decoded: context.token || { role: context.role } };
+  },
+  getAccessToken: async () => {
+    const client = await pigpenSheetsAuth.getClient();
+    const accessToken = await client.getAccessToken();
+    const token = typeof accessToken === "string" ? accessToken : accessToken?.token;
+    if (!token) throw Object.assign(new Error("google_sheets_access_token_unavailable"), { status: 502 });
+    return token;
+  }
+});
 installErrorHandler(assetApp, { service: "asset-api" });
 
 const analizarPdfApp = createApp("analizar-pdf-api", {

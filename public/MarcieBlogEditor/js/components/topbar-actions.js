@@ -7,8 +7,8 @@ import { showModal, closeActiveModal, showToast } from "./modals.js";
 import { openCommandPalette } from "./command-palette.js";
 import { logOutUser } from "../services/marcie-auth-guard.js";
 import { generateWithGemini, getConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
-import { saveMarcieSession } from "../services/marcie-session-store.js";
-import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
+import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260831r6";
 import { getActiveMarciePrompt } from "../services/marcie-prompt-settings.js";
 
 const escapeHtml = (unsafe) => {

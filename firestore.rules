@@ -497,6 +497,11 @@ service cloud.firestore {
       }
     }
 
+    // Catálogo privado consumido exclusivamente por el backend con Admin SDK.
+    match /pigpenSheetSources/{sourceId} {
+      allow read, write: if false;
+    }
+
     match /image_creator_sessions/{sessionId} {
       allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if isSignedIn() &&

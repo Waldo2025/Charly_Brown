@@ -2,7 +2,7 @@
  * Editor inline con auto-guardado en Firestore para el contenido del artículo
  */
 
-import { saveMarcieSession } from "../services/marcie-session-store.js";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
 import { showToast } from "./modals.js";
 
 let debounceTimer = null;

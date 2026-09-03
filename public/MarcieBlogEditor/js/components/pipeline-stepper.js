@@ -3,18 +3,18 @@
  * Conectado con la API de Gemini / Vertex AI
  */
 
-import { saveMarcieSession } from "../services/marcie-session-store.js";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
 import { showModal, closeActiveModal, showToast } from "./modals.js";
 import {
   sanitizeTrustedSources
-} from "../services/marcie-gemini-service.js";
+} from "../services/marcie-gemini-service.js?v=20260831r6";
 import {
   draftArticleForMode,
   generateProposalsForMode,
   researchTopicForMode,
   reviewArticleForMode,
   sessionUsesAida
-} from "../services/marcie-mode-service.js";
+} from "../services/marcie-mode-service.js?v=20260831r6";
 import { articleVerificationBlockers } from "../contracts/editorial-contracts.js";
 
 function normalizeSourceText(value = "") {
@@ -430,7 +430,7 @@ function handleAnalyzeStep({ getSession, onUpdateSession }) {
   });
 }
 
-// 3. Crear 3 Propuestas editoriales por audiencia con Gemini
+// 3. Crear 4 propuestas editoriales por audiencia con Gemini
 function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationState }) {
   const session = getSession();
   if (!session) return;
@@ -445,6 +445,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
       const art = articlesByAud[p.audience];
       const hasArticle = art && Array.isArray(art.blocks) && art.blocks.length > 0;
       const hasSupplementarySources = Array.isArray(art?.supplementarySources) && art.supplementarySources.length > 0;
+      const proposalSources = Array.isArray(session.researchByAudience?.[p.audience]?.sources) ? session.researchByAudience[p.audience].sources : [];
       const canToggleSourceStyle = Boolean(art && (hasArticle || hasSupplementarySources || Array.isArray(art?.sources)));
       const audBadgeClass = p.audience === "educators"
         ? "badge-success"
@@ -458,6 +459,10 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
             <span class="badge ${audBadgeClass} text-[10px] font-semibold px-2 py-0.5">${p.audienceLabel || p.audience}</span>
             ${hasArticle ? '<span class="badge badge-success text-[10px] px-2 py-0.5"><span class="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 inline-block"></span>Redactado</span>' : '<span class="badge badge-warning text-[10px] px-2 py-0.5"><span class="w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5 inline-block"></span>Sin redactar</span>'}
           </div>
+          <div class="rounded-md border ${Number(p.verifiedSourceCount || 0) >= Number(p.targetSourceCount || 6) ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"} px-2.5 py-1.5 text-[10px] font-semibold">
+            Bibliografía verificada: ${Number(p.verifiedSourceCount || 0)}/${Number(p.targetSourceCount || 6)} fuentes
+          </div>
+          ${proposalSources.length ? `<details data-proposal-sources class="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[10px]"><summary class="cursor-pointer font-semibold text-slate-700">Ver bibliografía de esta propuesta</summary><ol class="mt-2 space-y-1.5">${proposalSources.map((source) => `<li><a class="text-teal-700 hover:underline" href="${escapeHtml(toSafeSourceUrl(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(getSourceCitationText(source, "apa"))}</a></li>`).join("")}</ol></details>` : ""}
           <h4 class="font-bold text-slate-900 text-sm leading-snug">${escapeHtml(p.title)}</h4>
           <div class="flex-1">
             <p id="brief-${p.audience}" class="text-xs text-slate-600 leading-relaxed line-clamp-3 transition-all duration-300">${escapeHtml(p.brief)}</p>
@@ -512,12 +517,12 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
     },
     {
       audience: "coordinators",
-      audienceLabel: "Coordinadores académicos",
-      title: aidaMode ? `${currentTopic}: de la evidencia a una decisión académica` : `${currentTopic}: una oportunidad para la coordinación académica`,
-      brief: aidaMode ? "Propuesta Aida pendiente de generar: problema institucional, evidencia y cambio observable." : "Enfoque institucional para convertir el tema en decisiones pedagógicas concretas."
+      audienceLabel: "Coordinadores académicos y directivos escolares",
+      title: aidaMode ? `${currentTopic}: de la evidencia a una decisión académica` : `Liderazgo neuropedagógico ante ${currentTopic}`,
+      brief: aidaMode ? "Propuesta Aida pendiente de generar: problema institucional, evidencia neuropedagógica y cambio observable." : "Marco para que coordinación y dirección conviertan la evidencia sobre aprendizaje en acompañamiento docente, acuerdos curriculares e indicadores institucionales, sin neuromitos ni recetas familiares."
     }
   ];
-  const requestedAudiences = Array.isArray(session.selectedAudiences) && session.selectedAudiences.length ? session.selectedAudiences : ["educators", "students", "parents"];
+  const requestedAudiences = Array.isArray(session.selectedAudiences) && session.selectedAudiences.length ? session.selectedAudiences : ["educators", "students", "parents", "coordinators"];
   const defaultInitialProposals = allDefaultProposals.filter((proposal) => requestedAudiences.includes(proposal.audience));
 
   const initialCardsHtml = renderProposalsHtml(existingProposals || defaultInitialProposals);
@@ -534,7 +539,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
           Diseñando propuestas personalizadas con Gemini...
         </div>
 
-        <div id="proposals-cards" class="grid grid-cols-3 gap-4">
+        <div id="proposals-cards" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           ${initialCardsHtml}
         </div>
       </div>
@@ -648,7 +653,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
     document.querySelectorAll("[data-proposal-card]").forEach((card) => {
       card.addEventListener("click", async (e) => {
         // Ignorar si se hizo clic en el botón de regeneración
-        if (e.target.closest("[data-regen-audience]")) return;
+        if (e.target.closest("[data-regen-audience], [data-proposal-sources]")) return;
 
         const aud = card.getAttribute("data-proposal-card");
         const titleEl = card.querySelector("h4");
@@ -720,8 +725,15 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
         if (!article.sourceCitationStyle) {
           article.sourceCitationStyle = "apa";
         }
-        article.sources = sanitizeTrustedSources(dossier.sources || []);
+        const previousDossier = session.researchByAudience?.[aud] || {};
+        const mergedSources = sanitizeTrustedSources([...(previousDossier.sources || []), ...(article.sources || []), ...(dossier.sources || [])]);
+        const mergedReferences = [...(previousDossier.attributedReferences || []), ...(dossier.attributedReferences || [])].filter((reference, index, all) => all.findIndex((item) => `${item.sourceId}:${item.type}:${item.text}` === `${reference.sourceId}:${reference.type}:${reference.text}`) === index);
+        session.researchByAudience = { ...(session.researchByAudience || {}), [aud]: { ...dossier, sources: mergedSources, attributedReferences: mergedReferences, verifiedSourceCount: mergedSources.length, targetSourceCount: 6, verificationStatus: mergedSources.length >= 6 ? "verified" : "incomplete" } };
+        const proposal = (session.proposals || []).find((item) => item.audience === aud);
+        if (proposal) Object.assign(proposal, { sourceIds: mergedSources.map((source) => source.id), verifiedSourceCount: mergedSources.length, targetSourceCount: 6, researchStatus: mergedSources.length >= 6 ? "verified" : "incomplete" });
+        article.sources = mergedSources;
         article.researchSources = article.sources;
+        article.researchDossier = session.researchByAudience[aud];
         article.supplementarySources = [];
 
         session.articlesByAudience[aud] = article;
@@ -786,20 +798,27 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
       const resp = await generateProposalsForMode({
         session,
         topic: session.topic || session.title,
-        signals: session.trends?.[0]?.signals || []
+        signals: session.trends?.[0]?.signals || [],
+        onResearchProgress: async ({ proposal, index, total }) => {
+          loadingContainer.textContent = `Verificando bibliografía ${index + 1}/${total}: ${proposal.audienceLabel || proposal.audience}...`;
+          await saveMarcieSession(session);
+        }
       });
 
-      const requiredCount = session.selectedAudiences?.length || 3;
+      const requiredCount = session.selectedAudiences?.length || 4;
       const proposals = Array.isArray(resp?.proposals) ? resp.proposals.slice(0, requiredCount) : [];
       if (proposals.length < requiredCount) {
         throw new Error("Gemini no devolvió un enfoque para cada público seleccionado.");
       }
+      session.proposals = proposals;
+      session.researchByAudience = resp.researchByAudience || session.researchByAudience || {};
+      await saveMarcieSession(session);
 
       const previousArticles = session.articlesByAudience || {};
       const regeneratedArticles = {};
       for (let index = 0; index < proposals.length; index += 1) {
         const proposal = proposals[index];
-        const audience = proposal.audience || ["educators", "students", "parents"][index];
+        const audience = proposal.audience || ["educators", "students", "parents", "coordinators"][index];
         const audienceLabel = proposal.audienceLabel || (audience === "students" ? "Estudiantes" : audience === "parents" ? "Padres y tutores" : audience === "coordinators" ? "Coordinadores académicos" : "Docentes y directivos");
         loadingContainer.textContent = `Redactando artículo ${index + 1} de ${requiredCount}: ${audienceLabel}...`;
 

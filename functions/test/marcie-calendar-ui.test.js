@@ -6,8 +6,22 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "../..");
 const dashboard = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/components/editorial-dashboard.js"), "utf8");
 const editorApp = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/editor-app.js"), "utf8");
-const editorHtml = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/MarcieBlogEditor.html"), "utf8");
+const editorHtml = fs.readFileSync(path.join(root, "public/MarcieBlogEditor.html"), "utf8");
 const styles = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/css/MarcieBlogEditor.css"), "utf8");
+const firebaseConfig = fs.readFileSync(path.join(root, "firebase.json"), "utf8");
+
+test("Lucide usa un CDN permitido por la política CSP", () => {
+  assert.match(editorHtml, /https:\/\/cdn\.jsdelivr\.net\/npm\/lucide@1\.33\.0\/dist\/umd\/lucide\.min\.js/);
+  assert.doesNotMatch(editorHtml, /https:\/\/unpkg\.com\/lucide/);
+  assert.match(firebaseConfig, /connect-src[^\"]*https:\/\/cdn\.jsdelivr\.net/);
+});
+
+test("Marcie configura Firebase antes de iniciar el editor", () => {
+  const runtimeConfigIndex = editorHtml.indexOf('<script src="/js/runtime-config.js');
+  const editorModuleIndex = editorHtml.indexOf('<script type="module" src="/MarcieBlogEditor/js/editor-app.js');
+  assert.ok(runtimeConfigIndex >= 0, "Marcie debe cargar runtime-config.js con una ruta absoluta.");
+  assert.ok(editorModuleIndex > runtimeConfigIndex, "La configuración debe cargarse antes que editor-app.js.");
+});
 
 test("el mes usa una cuadrícula compacta y completa de seis semanas", () => {
   assert.match(dashboard, /while \(cells\.length < 42\)/);
@@ -60,6 +74,19 @@ test("el header abre el radar y conserva la actualización manual", () => {
   assert.match(styles, /\.marcie-modal-panel:has\(\.trend-workspace--modern\)/);
 });
 
+test("el panel lateral resume el radar y elimina la búsqueda redundante en fuentes", () => {
+  assert.match(editorHtml, /id="compact-trend-widget"/);
+  assert.doesNotMatch(editorHtml, /Buscar en fuentes|Búsqueda por tema de sesión|data-source-action/);
+  assert.doesNotMatch(editorApp, /data-source-action/);
+  assert.match(dashboard, /function renderCompactTrendWidget\(options = \{\}\)/);
+  assert.match(dashboard, /latest\?\.opportunities\?\.\[0\]/);
+  assert.match(dashboard, /data-compact-trend-open/);
+  assert.match(dashboard, /data-compact-trend-current/);
+  assert.match(dashboard, /data-compact-trend-new/);
+  assert.match(dashboard, /renderCompactTrendWidget\(options\)/);
+  assert.match(styles, /\.compact-trend-widget \{/);
+});
+
 test("al iniciar el sitio muestra una vez el ganador guardado sin buscar automáticamente", () => {
   assert.match(dashboard, /showSavedTrendWinnerOnStart\(items, options\)/);
   assert.match(dashboard, /let trendWinnerNotificationShown = false/);
@@ -93,9 +120,16 @@ test("el radar conserva el reporte, ofrece regiones amplias y crea sesiones por 
   assert.match(dashboard, /Crear en nueva sesión/);
   assert.match(dashboard, /data-trend-current-session=/);
   assert.match(dashboard, /Crear artículo aquí/);
-  assert.match(dashboard, /createMarcieSession\(\{/);
-  assert.match(dashboard, /status: "trends_ready"/);
-  assert.match(dashboard, /options\.onOpenSession\?\.\(sessionId, "educators"\)/);
+  assert.match(dashboard, /options\.onCreateSessionFromTrend\(trend\)/);
+  assert.doesNotMatch(dashboard, /import .*createMarcieSession/);
+  assert.match(editorApp, /onCreateSessionFromTrend: async \(trend\)/);
+  assert.match(editorApp, /defaultValue: topic/);
+  assert.match(editorApp, /allowBlankSession: false/);
+  assert.match(editorApp, /sourceTrend: trend/);
+  assert.match(editorApp, /const initialStatus = trendSnapshot \? "trends_ready" : "new"/);
+  assert.match(editorApp, /trends: trendSnapshot \? \[trendSnapshot\] : \[\]/);
+  assert.match(editorApp, /generateProposalsForMode\(\{[\s\S]*session: localSession,[\s\S]*topic,[\s\S]*signals:/);
+  assert.match(editorApp, /localSession\.status = localSession\.proposals\.length \? "proposal_ready" : "trends_ready"/);
   assert.match(editorApp, /onUseTrendInCurrentSession: async \(trend\)/);
   assert.match(editorApp, /session\.trends = \[\{ \.\.\.trend, sources: \[\] \}\]/);
   assert.doesNotMatch(dashboard, /class="radar-command"/);

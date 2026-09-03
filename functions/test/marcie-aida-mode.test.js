@@ -101,15 +101,17 @@ test("Aida researches the complete user topic and uses science and history as su
   assert.match(editor, /Investigar el tema · Aida/);
   assert.doesNotMatch(backend, /Investiga científicamente el tema/);
   assert.doesNotMatch(editor, /Investigar ciencia e historia · Aida/);
-  assert.match(backend, /const researchLenses = editorialMode === "aida"/);
+  assert.match(backend, /const researchLenses = audienceResearchLenses\(audience\)/);
+  assert.match(backend, /Voces influyentes y referencias documentales/);
   assert.match(backend, /generatedBatches\.flatMap/);
 });
 
-test("an incomplete Aida dossier is researched again before drafting", () => {
+test("an audience dossier is reused while drafting even when it has fewer than six sources", () => {
   const service = fs.readFileSync(path.resolve(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-aida-service.js"), "utf8");
   const contracts = fs.readFileSync(path.resolve(__dirname, "../../public/MarcieBlogEditor/js/contracts/editorial-contracts.js"), "utf8");
 
-  assert.match(service, /existingDossierIsReady[\s\S]*?verificationStatus === "verified"[\s\S]*?existingCurrentSources\.length >= 3[\s\S]*?uniqueInstitutions\(existingCurrentSources\)\.size >= 3/);
+  assert.match(service, /const dossier = researchDossier \|\| await researchAidaTopicWithGemini/);
+  assert.doesNotMatch(service, /existingDossierIsReady/);
   assert.match(service, /No repitas ni parafrasees una afirmación marcada como no respaldada/);
   assert.match(contracts, /Aida: \$\{verifiedSources\.length\} de 3 páginas mínimas verificadas/);
   assert.match(contracts, /blockerKeys\.has\(key\)/);

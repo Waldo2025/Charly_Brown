@@ -9,6 +9,7 @@ const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const { registerMarcieWordPressRoutes } = require("../functions/src/marcie-wordpress.js");
 const { registerMarcieEditorialResearchRoutes } = require("../functions/src/marcie-editorial-research.js");
+const { registerPigpenSheetsRoutes } = require("./pigpen-sheets.js");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.resolve(REPO_ROOT, "public");
 const {
@@ -1238,6 +1239,21 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 const storageBucket = admin.storage().bucket();
+registerPigpenSheetsRoutes(app, {
+  db,
+  verifyFirebaseBearer,
+  getAccessToken: async () => {
+    const credential = admin.app().options.credential;
+    if (!credential || typeof credential.getAccessToken !== "function") {
+      const error = new Error("La credencial del backend no puede acceder a Google Sheets.");
+      error.status = 503;
+      error.code = "PIGPEN_SHEETS_CREDENTIAL_UNAVAILABLE";
+      throw error;
+    }
+    const token = await credential.getAccessToken();
+    return String(token?.access_token || "").trim();
+  }
+});
 registerMarcieWordPressRoutes(app, {
   resolveAuthContext: async (req) => {
     const localAuth = await verifyFirebaseBearer(req);

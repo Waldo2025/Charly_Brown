@@ -152,6 +152,7 @@ export function normalizeSessionDoc(docSnap) {
     publicationsByAudience,
     approvedAudiences: Array.isArray(data.approvedAudiences) ? data.approvedAudiences.map(String).filter((audience) => !incompatibleAidaAudiences.has(audience)) : [],
     trends: Array.isArray(data.trends) ? data.trends : [],
+    researchByAudience: data.researchByAudience && typeof data.researchByAudience === "object" ? { ...data.researchByAudience } : {},
     proposals: Array.isArray(data.proposals) ? data.proposals : [],
     log: Array.isArray(data.log) ? data.log : []
   };
@@ -267,6 +268,7 @@ export async function createMarcieSession(fields = {}) {
     article: initialArticle,
     articlesByAudience: articlesByAudience,
     trends: Array.isArray(fields.trends) ? fields.trends : [],
+    researchByAudience: normalizeFirestoreJson(fields.researchByAudience || {}, {}),
     proposals: Array.isArray(fields.proposals) ? fields.proposals : [],
     log: [
       { id: `log-${Date.now()}`, at: now.toISOString(), message: "Sesión creada en Firebase" }
@@ -356,6 +358,7 @@ async function persistMarcieSession(session) {
     articlesByAudience: normalizeFirestoreJson(normalizedArticles, {}),
     approvedAudiences: normalizeFirestoreJson(Array.isArray(session.approvedAudiences) ? session.approvedAudiences : [], []),
     trends: normalizeFirestoreJson(Array.isArray(session.trends) ? session.trends : [], []),
+    researchByAudience: normalizeFirestoreJson(session.researchByAudience && typeof session.researchByAudience === "object" ? session.researchByAudience : {}, {}),
     proposals: normalizeFirestoreJson(Array.isArray(session.proposals) ? session.proposals : [], []),
     log: normalizeFirestoreJson(Array.isArray(session.log) ? session.log : [], [])
   };

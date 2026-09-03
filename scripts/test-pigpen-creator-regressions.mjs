@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
+const root = new URL("../", import.meta.url);
 const html = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/PigPenCreator.html",
+  new URL("public/PigPenCreator.html", root),
   "utf8"
 );
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/js/PigPenCreator.js",
+  new URL("public/js/PigPenCreator.js", root),
   "utf8"
 );
 const styles = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/PigPenCreator.css",
+  new URL("public/PigPenCreator.css", root),
   "utf8"
 );
 
@@ -38,6 +39,21 @@ assert.match(
   "El brief debe incluir un selector de estación para secundaria."
 );
 
+assert.match(html, /id="nivelSelect"[\s\S]*<option value="Secundaria" selected>/, "El Brief debe iniciar en Secundaria.");
+assert.match(html, /id="numMisionesInput" value="4"/, "El Brief debe iniciar con 4 salas.");
+assert.match(html, /id="preguntasPorSalaInput" value="4"/, "El Brief debe iniciar con 4 preguntas por sala.");
+assert.match(html, /id="duracionInput"[^>]*value="20"/, "El Brief debe iniciar con 20 minutos.");
+assert.match(
+  source,
+  /function buildInheritedSessionFormState\(\)[\s\S]*serializeFormState\(\)[\s\S]*PigPenSheetsImport\?\.getLastFormState[\s\S]*inherited\.temaInput = "";[\s\S]*inherited\.objetivoInput = "";[\s\S]*return inherited;/,
+  "Una sesión nueva debe heredar la última configuración sin copiar tema ni objetivo."
+);
+assert.match(
+  source,
+  /async function createBlankSession\([^)]*\)[\s\S]*const inheritedFormState = buildInheritedSessionFormState\(\);[\s\S]*formState: inheritedFormState/,
+  "Nueva sesión debe guardar la configuración heredada en su formState."
+);
+
 assert.match(
   html,
   /<form id="escapeRoomForm"[^>]*\bnovalidate\b/,
@@ -46,22 +62,77 @@ assert.match(
 
 assert.match(
   source,
-  /elements\.form\.addEventListener\("submit", async \(event\) => \{[\s\S]*event\.preventDefault\(\)[\s\S]*elements\.btnGenerar\.classList\.add\("is-generating"\)[\s\S]*authFetchJson\(buildVeoApiUrl\("\/api\/gemini\/generate"\)[\s\S]*elements\.btnGenerar\.classList\.remove\("is-generating"\)/,
+  /elements\.form\.addEventListener\("submit", async \(event\) => \{[\s\S]*event\.preventDefault\(\)[\s\S]*elements\.btnGenerar\.classList\.add\("is-generating"\)[\s\S]*authFetchJson\(buildGeminiApiUrl\("\/api\/gemini\/generate"\)[\s\S]*elements\.btnGenerar\.classList\.remove\("is-generating"\)/,
   "El submit debe entrar al generador, mostrar actividad y limpiar su estado al finalizar."
+);
+assert.equal((html.match(/id="btnGenerar"/g) || []).length, 1, "El botón superior original debe conservar su ID único.");
+assert.equal((html.match(/id="btnGenerarBottom"/g) || []).length, 1, "El botón inferior debe tener un ID propio y único.");
+assert.match(
+  html,
+  /<div class="er-actions er-brief-actions">[\s\S]*?<button type="submit" id="btnGenerar" class="er-button er-studio-icon-button"/,
+  "El botón original btnGenerar debe permanecer en las acciones superiores del Brief."
+);
+assert.match(
+  html,
+  /<div class="er-brief-footer">[\s\S]*id="loadingIndicator"[\s\S]*<button type="submit" id="btnGenerarBottom"[^>]*>[\s\S]*Generar escape room[\s\S]*<\/button>[\s\S]*<\/div>/,
+  "El segundo botón debe estar al fondo del Brief, debajo del indicador de carga."
+);
+assert.match(
+  styles,
+  /\.er-brief-generate-button\s*\{[\s\S]*?width:\s*100%;[\s\S]*?background:\s*#16a34a;/,
+  "El botón inferior debe ocupar todo el ancho y usar fondo verde."
+);
+assert.match(
+  styles,
+  /\.er-brief-generate-button\s*\{[\s\S]*?color:\s*#ffffff !important;[\s\S]*?\}[\s\S]*?\.er-brief-generate-button::before\s*\{[\s\S]*?animation:\s*er-brief-button-shine 3s ease-in-out infinite;/,
+  "El botón inferior debe mantener texto blanco y un barrido de brillo periódico."
+);
+assert.match(
+  styles,
+  /\.er-page \.er-brief-footer \.er-brief-generate-button > :where\(i, span\)\s*\{[\s\S]*?color:\s*#ffffff !important;/,
+  "El texto y el icono del botón inferior deben vencer la regla cromática global del formulario."
+);
+assert.match(
+  html,
+  /id="estiloImagenSelect"[\s\S]*?<option value="otro">✏️ Otro estilo\.\.\.<\/option>[\s\S]*?id="estiloImagenCustomField"[\s\S]*?id="estiloImagenCustomInput"/,
+  "El selector visual debe ofrecer Otro y mostrar un campo para describir el estilo personalizado."
+);
+assert.match(
+  source,
+  /function syncImageStyleCustomField\(\)[\s\S]*elements\.estiloImagenSelect\?\.value === "otro"[\s\S]*elements\.estiloImagenCustomField\?\.classList\.toggle\("hidden", !isCustom\)[\s\S]*elements\.estiloImagenCustomInput\.required = Boolean\(isCustom\)/,
+  "El campo de estilo personalizado debe mostrarse y ser obligatorio únicamente al elegir Otro."
+);
+assert.match(
+  source,
+  /const estiloImagenBase = String\(elements\.estiloImagenSelect\?\.value \|\| ""\)\.trim\(\);[\s\S]*const estiloImagenPersonalizado = String\(elements\.estiloImagenCustomInput\?\.value \|\| ""\)\.trim\(\);[\s\S]*const estiloImagen = estiloImagenBase === "otro" \? estiloImagenPersonalizado : estiloImagenBase;/,
+  "La generación debe utilizar literalmente la descripción del estilo personalizado."
+);
+assert.match(
+  styles,
+  /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.er-brief-generate-button::before\s*\{\s*display:\s*none;/,
+  "La animación de brillo debe desactivarse cuando el usuario solicita movimiento reducido."
+);
+assert.match(
+  source,
+  /btnGenerarBottom:\s*document\.getElementById\("btnGenerarBottom"\)[\s\S]*elements\.btnGenerarBottom\.disabled = state\.isLoading;[\s\S]*elements\.btnGenerarBottom\?\.classList\.add\("is-generating"\)[\s\S]*elements\.btnGenerarBottom\?\.classList\.remove\("is-generating"\)/,
+  "Ambos botones deben compartir el submit y sincronizar sus estados de carga."
 );
 
 assert.match(styles, /--er-font-display:\s*var\(--er-font-sans\)/, "Todos los títulos del Creator deben usar la misma familia tipográfica del sitio.");
 assert.match(styles, /\.er-summary-card,[\s\S]*\.er-summary-main\s*\{\s*padding:\s*0;/, "El header del Creator no debe conservar padding interno.");
 assert.match(styles, /margin-left:\s*var\(--cb-sidebar-collapsed-width, 64px\);[\s\S]*width:\s*calc\(100% - var\(--cb-sidebar-collapsed-width, 64px\)\);/, "El Creator debe comenzar junto al sidebar sin conservar el margen izquierdo adicional.");
 assert.match(styles, /\.er-summary-stats\s*\{[\s\S]*margin-left:\s*16px;/, "La separación izquierda del header debe pertenecer al bloque de estadísticas.");
-assert.match(styles, /\.er-studio-shell > \.er-sessions-panel\s*\{[\s\S]*padding:\s*18px 12px 22px 0;/, "El panel de sesiones no debe conservar padding izquierdo.");
+assert.match(styles, /\.er-studio-shell > \.er-sessions-panel\s*\{[\s\S]*padding:\s*16px 10px 18px;[\s\S]*background:\s*#f8fafc;/, "El panel de sesiones debe conservar el rail compacto de estilo shadcn.");
+assert.match(html, /id="btnNewSession"[\s\S]*fa-pen-to-square[\s\S]*Nueva sesión[\s\S]*id="erSessionsCount"[\s\S]*fa-plus[\s\S]*id="erSessionFilters"/, "El rail debe reunir la acción, el contador y el icono más en una sola fila compacta antes de los filtros.");
+assert.doesNotMatch(html, /class="er-sessions-heading"/, "El rail compacto no debe reservar una fila independiente para el título Sesiones.");
+assert.match(styles, /\.er-session-item\.is-active\s*\{[\s\S]*background:\s*#e9eef5;/, "La sesión activa debe usar una superficie tenue en vez de un acento dominante.");
 assert.doesNotMatch(html, /Sesión activa|Sin sesión activa|id="erSaveState"/, "La lista no debe reservar espacio para el resumen redundante de sesión activa.");
 assert.match(styles, /--er-brief-width:\s*340px[\s\S]*--er-inspector-width:\s*220px/, "Los paneles derechos deben iniciar con anchos más compactos.");
 assert.match(source, /const BRIEF_WIDTH_DEFAULT = 340;[\s\S]*const BRIEF_WIDTH_MIN = 280;[\s\S]*const BRIEF_WIDTH_MAX = 560;/, "El resizer debe usar los nuevos límites compactos del Brief.");
 
 assert.match(
   source,
-  /import \{[^}]*authFetchJson[^}]*buildApiUrl[^}]*hasAvailableApiBase[^}]*\} from "\.\/api-client\.js";/,
+  /import \{[^}]*authFetchJson[^}]*buildApiUrl[^}]*buildGeminiApiUrl[^}]*hasAvailableApiBase[^}]*\} from "\.\/api-client\.js\?v=20260902-gemini-direct";/,
   "PigPenCreator debe importar buildApiUrl y hasAvailableApiBase para descargar assets remotos vía backend."
 );
 
@@ -147,15 +218,17 @@ assert.match(
 
 assert.match(
   source,
-  /function resolveRemoteAssetDownloadUrl\(rawUrl = ""\) \{[\s\S]*buildApiUrl\(`\/api\/assets\/proxy-media\?url=\$\{encodeURIComponent\(parsed\.toString\(\)\)\}`\)/,
-  "PigPenCreator debe enrutar Firebase Storage por proxy-media en local y producción."
+  /function isFirebaseStorageDownloadUrl\(value = ""\) \{[\s\S]*host === "firebasestorage\.googleapis\.com"/,
+  "PigPenCreator debe reconocer download URLs de Firebase Storage para descargarlas directamente."
 );
 
 assert.match(
   source,
-  /const finalUrl = isRemoteUrl\(rawUrl\)\s*\? resolveRemoteAssetDownloadUrl\(rawUrl\)[\s\S]*await fetch\(finalUrl,\s*\{\s*mode:\s*"cors"\s*\}\)/,
-  "La descarga binaria debe usar el proxy solo para recursos remotos."
+  /const candidates = isRemote && isFirebaseStorageDownloadUrl\(rawUrl\)[\s\S]*\? \[rawUrl, resolvedUrl\][\s\S]*await fetch\(candidateUrl, \{ mode: "cors" \}\)/,
+  "La descarga binaria debe intentar Firebase directamente antes del proxy de respaldo."
 );
+
+assert.doesNotMatch(html, /allow="fullscreen"[^>]*\ballowfullscreen\b/i, "El iframe no debe declarar dos políticas fullscreen contradictorias.");
 
 assert.match(
   source,
@@ -175,7 +248,9 @@ assert.match(
   "La paleta inicial debe usar el tema o unidad como fondo y combinarlo con el color de la estación."
 );
 
-assert.match(source, /const IMAGE_MODEL = "gemini-3-pro-image";/, "Las imágenes del escape room deben usar el modelo profesional de Gemini para instrucciones complejas.");
+assert.match(source, /const IMAGE_MODEL_DEFAULT = "gemini-3\.1-flash-image";/, "Las imágenes deben usar Flash Image como valor predeterminado para reducir latencia y consumo.");
+assert.match(source, /async function generateGeminiImage\([\s\S]*model = IMAGE_MODEL_DEFAULT[\s\S]*model: imageModel/, "La generación debe respetar el modelo de imagen configurado y conservar un fallback válido.");
+assert.match(source, /buildRoomVisualPrompt[\s\S]*model: context\?\.modeloImagen[\s\S]*buildQuestionVisualPrompt[\s\S]*model: context\?\.modeloImagen/, "Las imágenes de salas y preguntas deben usar el modelo seleccionado en el brief.");
 assert.match(source, /function buildImageTextPolicyLine\([\s\S]*if \(!allowOptionalText \|\| isStrict\)[\s\S]*REGLA NO NEGOCIABLE:[\s\S]*No dibujes letras, palabras, números, rótulos, nombres, coordenadas/, "El modo estricto debe prohibir texto legible en imágenes funcionales.");
 assert.match(source, /TEXTO MÍNIMO EN IMAGEN:[\s\S]*Máximo dos etiquetas, de una o dos palabras cada una;[\s\S]*ortografía exacta y clara/, "El modo normal debe limitar las etiquetas visuales y solicitar ortografía correcta.");
 assert.match(source, /No muestres códigos hexadecimales, nombres de colores, muestras de paleta ni anotaciones técnicas de color\./, "La generación estricta debe impedir códigos y leyendas de paleta dentro de la imagen.");
@@ -226,7 +301,7 @@ assert.ok(
 
 assert.match(
   source,
-  /elements\.btnExportar\.disabled\s*=\s*state\.isLoading\s*\|\|\s*!hasData\s*\|\|\s*state\.isGenerating;/,
+  /elements\.btnExportar\.disabled\s*=\s*state\.isLoading\s*\|\|\s*!hasData\s*\|\|\s*state\.isGenerating\s*\|\|\s*state\.isExporting;/,
   "Exportar debe quedar deshabilitado mientras el creador sigue generando recursos."
 );
 
@@ -311,8 +386,13 @@ assert.match(
 );
 assert.doesNotMatch(
   renderSessionListBody,
-  /er-session-open|er-session-item-meta|<span class="er-badge">Activa<\/span>/,
-  "La lista compacta no debe conservar el botón Abrir, metadata ni el badge Activa."
+  /er-session-open|<span class="er-badge">Activa<\/span>/,
+  "La lista compacta no debe conservar el botón Abrir ni el badge Activa."
+);
+assert.match(
+  renderSessionListBody,
+  /trimester \? `T\$\{trimester\}`[\s\S]*theme \? `Tema \$\{theme\}`[\s\S]*er-session-item-meta/,
+  "La lista debe mostrar metadatos académicos compactos con trimestre y número de tema."
 );
 
 assert.match(
@@ -392,8 +472,8 @@ assert.match(
 
 assert.match(
   source,
-  /await createRemoteSession\(\{\s*title:\s*SESSION_TITLE_DEFAULT,\s*project:\s*null,\s*formState:\s*null,\s*activate:\s*true\s*\}\);/,
-  "Crear una sesión nueva debe iniciar con un nombre simple y vacío."
+  /const inheritedFormState = buildInheritedSessionFormState\(\);[\s\S]*await createRemoteSession\(\{\s*title:\s*SESSION_TITLE_DEFAULT,\s*project:\s*null,\s*formState:\s*inheritedFormState,\s*activate:\s*true\s*\}\);/,
+  "Crear una sesión nueva debe iniciar con nombre simple, contenido vacío y la última configuración del Brief."
 );
 
 assert.match(
@@ -434,21 +514,24 @@ assert.match(
 
 assert.match(
   source,
-  /const remoteAssetStats = await downloadRemoteAssets\(projectClone,\s*remoteFiles,\s*mediaFolder\);/,
+  /const remoteAssetStats = await downloadRemoteAssets\(projectClone,\s*remoteFiles,\s*mediaFolder,\s*\{/,
   "El export debe capturar el resultado de la descarga de assets remotos."
 );
 
 assert.match(
   source,
-  /return \{\s*downloaded,\s*failed\s*\};/,
+  /failedSources:\s*\[\][\s\S]*return stats;/,
   "La descarga de assets remotos debe devolver estadísticas para degradar con seguridad ante CORS."
 );
 
 assert.match(
   source,
-  /Paquete ZIP generado con recursos remotos omitidos por CORS:/,
+  /resources no pudieron optimizarse o descargarse|recursos no pudieron optimizarse o descargarse/,
   "El export debe avisar cuando algunos assets remotos no pudieron embebirse por CORS."
 );
+
+assert.match(source, /const packagedAssets = new Map\(\);/, "El export debe deduplicar recursos repetidos.");
+assert.match(source, /assertExportPackageHasNoEmbeddedImages\(pkg\.files\);/, "El export debe bloquear base64 o blob residual antes de crear el ZIP.");
 
 assert.match(
   source,
@@ -483,5 +566,37 @@ assert.match(
   "El export debe descargar logo.png localmente en vez de enviarlo al proxy remoto."
 );
 assert.match(source, /remoteFiles\["logo\.png"\]/, "El ZIP debe incluir el logo que usa index.html.");
+
+assert.match(
+  html,
+  /<aside class="er-sessions-panel" aria-label="Sesiones de Escape Room">[\s\S]*id="erSessionsResizeHandle"[\s\S]*role="separator"[\s\S]*aria-orientation="vertical"/,
+  "El panel de sesiones debe incluir un separador accesible para redimensionarlo."
+);
+assert.match(
+  html,
+  /id="erSessionFilters"[\s\S]*id="erSessionTrimesterFilter"[\s\S]*id="erSessionSubjectFilter"[\s\S]*id="erSessionThemeFilter"[\s\S]*id="erSessionFiltersModal"[\s\S]*id="erSessionTrimesterFilterModal"[\s\S]*id="erSessionSubjectFilterModal"[\s\S]*id="erSessionThemeFilterModal"/,
+  "Trimestre, materia y tema deben estar disponibles en los filtros rápidos y en el modal."
+);
+assert.match(
+  source,
+  /function getFilteredSessions\(sessions = \[\]\)[\s\S]*sessionTrimester === trimester[\s\S]*sessionSubject === subject[\s\S]*sessionThemes\.includes\(theme\)/,
+  "Los filtros de sesión deben combinar trimestre, materia y tema."
+);
+assert.match(
+  source,
+  /function getSessionThemeFilterValues\(session = \{\}\)[\s\S]*topicSummaries[\s\S]*academicNumber[\s\S]*formState\?\.unidadTemaSelect/,
+  "El filtro de tema debe usar Tema 1, Tema 2, etc. y soportar sesiones antiguas."
+);
+assert.match(source, />Tema \$\{escapeHtml\(theme\)\}<\/option>/, "Las opciones deben mostrarse como Tema 1, Tema 2, etc.");
+assert.match(
+  source,
+  /SESSIONS_WIDTH_STORAGE_KEY[\s\S]*function applySessionsWidth\([\s\S]*--er-sessions-width[\s\S]*localStorage\.setItem\(SESSIONS_WIDTH_STORAGE_KEY/,
+  "El ancho del panel de sesiones debe persistirse."
+);
+assert.match(
+  styles,
+  /\.er-session-filters\s*\{[\s\S]*display:\s*flex;[\s\S]*align-items:\s*center;/,
+  "Los filtros rápidos deben mantenerse en la misma fila."
+);
 
 console.log("PigPenCreator regressions OK.");

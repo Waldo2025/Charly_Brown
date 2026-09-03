@@ -6,6 +6,91 @@ export const IMAGE_OPTIMIZATION_DEFAULTS = Object.freeze({
 
 const OPTIMIZABLE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+function concatByteChunks(chunks = []) {
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  });
+  return output;
+}
+
+function readGifSubBlocksEnd(bytes, start) {
+  let offset = start;
+  while (offset < bytes.length) {
+    const size = bytes[offset];
+    offset += 1;
+    if (size === 0) return offset;
+    if (offset + size > bytes.length) return -1;
+    offset += size;
+  }
+  return -1;
+}
+
+/** Remove comment/XMP/ICC blocks while preserving frames, timing and animation loops. */
+export function stripGifMetadata(bytesLike) {
+  const bytes = bytesLike instanceof Uint8Array ? bytesLike : new Uint8Array(bytesLike || 0);
+  if (bytes.length < 13 || !/^GIF8[79]a$/.test(new TextDecoder().decode(bytes.slice(0, 6)))) return bytes;
+  const globalTableBytes = (bytes[10] & 0x80) ? 3 * (2 ** ((bytes[10] & 0x07) + 1)) : 0;
+  let offset = 13 + globalTableBytes;
+  if (offset > bytes.length) return bytes;
+  const chunks = [bytes.slice(0, offset)];
+  let changed = false;
+
+  while (offset < bytes.length) {
+    const blockStart = offset;
+    const introducer = bytes[offset];
+    if (introducer === 0x3b) {
+      chunks.push(bytes.slice(offset));
+      offset = bytes.length;
+      break;
+    }
+    if (introducer === 0x2c) {
+      if (offset + 10 > bytes.length) return bytes;
+      const localTableBytes = (bytes[offset + 9] & 0x80)
+        ? 3 * (2 ** ((bytes[offset + 9] & 0x07) + 1))
+        : 0;
+      const dataStart = offset + 10 + localTableBytes;
+      if (dataStart >= bytes.length) return bytes;
+      const blockEnd = readGifSubBlocksEnd(bytes, dataStart + 1);
+      if (blockEnd < 0) return bytes;
+      chunks.push(bytes.slice(blockStart, blockEnd));
+      offset = blockEnd;
+      continue;
+    }
+    if (introducer === 0x21) {
+      if (offset + 2 >= bytes.length) return bytes;
+      const label = bytes[offset + 1];
+      const blockEnd = readGifSubBlocksEnd(bytes, offset + 2);
+      if (blockEnd < 0) return bytes;
+      const identifierLength = bytes[offset + 2] || 0;
+      const identifier = new TextDecoder().decode(bytes.slice(offset + 3, offset + 3 + identifierLength));
+      const isMetadata = label === 0xfe
+        || (label === 0xff && /^(?:XMP DataXMP|ICCRGBG1012)/i.test(identifier));
+      if (isMetadata) changed = true;
+      else chunks.push(bytes.slice(blockStart, blockEnd));
+      offset = blockEnd;
+      continue;
+    }
+    return bytes;
+  }
+  return changed ? concatByteChunks(chunks) : bytes;
+}
+
+/** Remove non-rendering SVG metadata without changing its vector content. */
+export function stripSvgMetadata(bytesLike) {
+  const bytes = bytesLike instanceof Uint8Array ? bytesLike : new Uint8Array(bytesLike || 0);
+  const source = new TextDecoder().decode(bytes);
+  const sanitized = source
+    .replace(/<\?xpacket\b[\s\S]*?\?>/gi, "")
+    .replace(/<!--([\s\S]*?)-->/g, "")
+    .replace(/<metadata\b[^>]*>[\s\S]*?<\/metadata\s*>/gi, "")
+    .replace(/<metadata\b[^>]*\/\s*>/gi, "");
+  return sanitized === source ? bytes : new TextEncoder().encode(sanitized);
+}
+
 function normalizeMimeType(value = "") {
   return String(value || "").split(";", 1)[0].trim().toLowerCase();
 }
@@ -105,7 +190,6 @@ export async function optimizeRasterImage(blob, options = {}) {
   const settings = { ...IMAGE_OPTIMIZATION_DEFAULTS, ...options };
   const targetWidth = Number(settings.targetWidth);
   const hasTargetWidth = Number.isFinite(targetWidth) && targetWidth > 0;
-  const forceReencode = settings.forceReencode === true;
   settings.outputMimeType = normalizeMimeType(settings.outputMimeType) || IMAGE_OPTIMIZATION_DEFAULTS.outputMimeType;
   const originalBytes = new Uint8Array(await blob.arrayBuffer());
   const originalMimeType = detectAssetMimeType(originalBytes, blob.type);
@@ -122,7 +206,19 @@ export async function optimizeRasterImage(blob, options = {}) {
   };
 
   if (!OPTIMIZABLE_IMAGE_TYPES.has(originalMimeType)) {
-    return { ...originalResult, status: "unchanged", reason: "unsupported-format" };
+    const sanitizedBytes = originalMimeType === "image/svg+xml"
+      ? stripSvgMetadata(originalBytes)
+      : originalMimeType === "image/gif"
+        ? stripGifMetadata(originalBytes)
+        : originalBytes;
+    const changed = sanitizedBytes !== originalBytes;
+    return {
+      ...originalResult,
+      bytes: sanitizedBytes,
+      optimizedBytes: sanitizedBytes.byteLength,
+      status: changed ? "sanitized" : "unchanged",
+      reason: changed ? "metadata-stripped" : "unsupported-format"
+    };
   }
 
   const decodeImage = options.decodeImage || decodeImageInBrowser;
@@ -139,40 +235,37 @@ export async function optimizeRasterImage(blob, options = {}) {
       ? Math.max(1, Math.round(targetWidth))
       : Math.max(1, Math.round(originalWidth * scale));
     const height = Math.max(1, Math.round(originalHeight * scale));
-    const encodedBlob = await encodeImage({
-      bitmap,
-      width,
-      height,
-      type: settings.outputMimeType,
-      quality: settings.quality
-    });
-    if (normalizeMimeType(encodedBlob.type) !== settings.outputMimeType) {
-      return {
-        ...originalResult,
-        originalWidth,
-        originalHeight,
-        width: originalWidth,
-        height: originalHeight,
-        status: "unchanged",
-        reason: "webp-unavailable"
-      };
+    let encodedBlob = null;
+    try {
+      encodedBlob = await encodeImage({
+        bitmap,
+        width,
+        height,
+        type: settings.outputMimeType,
+        quality: settings.quality
+      });
+    } catch (_) {
+      encodedBlob = null;
+    }
+    let outputMimeType = normalizeMimeType(encodedBlob?.type);
+    let usedFallback = outputMimeType !== settings.outputMimeType;
+    if (usedFallback) {
+      const fallbackMimeType = originalMimeType === "image/jpeg" ? "image/jpeg" : "image/png";
+      encodedBlob = await encodeImage({
+        bitmap,
+        width,
+        height,
+        type: fallbackMimeType,
+        quality: settings.quality
+      });
+      outputMimeType = normalizeMimeType(encodedBlob?.type);
+      if (outputMimeType !== fallbackMimeType) throw new Error("El navegador no pudo recodificar la imagen sin metadatos.");
     }
     const optimizedBytes = new Uint8Array(await encodedBlob.arrayBuffer());
-    if (!forceReencode && optimizedBytes.byteLength >= originalBytes.byteLength) {
-      return {
-        ...originalResult,
-        originalWidth,
-        originalHeight,
-        width: originalWidth,
-        height: originalHeight,
-        status: "unchanged",
-        reason: "not-smaller"
-      };
-    }
     return {
       bytes: optimizedBytes,
-      mimeType: settings.outputMimeType,
-      extension: extensionForMimeType(settings.outputMimeType, "webp"),
+      mimeType: outputMimeType,
+      extension: extensionForMimeType(outputMimeType, "webp"),
       originalBytes: originalBytes.byteLength,
       optimizedBytes: optimizedBytes.byteLength,
       originalWidth,
@@ -180,7 +273,7 @@ export async function optimizeRasterImage(blob, options = {}) {
       width,
       height,
       status: "optimized",
-      reason: ""
+      reason: usedFallback ? "webp-unavailable-fallback" : ""
     };
   } catch (error) {
     return { ...originalResult, status: "failed", reason: error?.message || "decode-failed" };

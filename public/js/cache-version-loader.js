@@ -2,7 +2,7 @@
   if (window.__cbCacheVersionLoaderInit) return;
   window.__cbCacheVersionLoaderInit = true;
 
-  const fallbackVersion = "2026-1.0.10.856";
+  const fallbackVersion = "2026-1.0.10.858";
 
   function resolveCacheVersion() {
     // El loader publicado es la fuente autoritativa del cache-buster. El banner

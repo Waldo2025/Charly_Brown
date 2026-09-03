@@ -1,10 +1,11 @@
 import {
+  applyVerifiedAttributions,
   articleContentHash,
   generateGroundedJson,
   researchArticleEvidence,
   sanitizeTrustedSources,
   verifyArticleEvidence
-} from "./marcie-gemini-service.js";
+} from "./marcie-gemini-service.js?v=20260831r6";
 
 export const AIDA_SERVICE_VERSION = "2.0";
 export const AIDA_DEFAULT_BRAND_LINE = "Aprender no es esforzarse más. Es aprender como el cerebro estaba hecho para aprender.";
@@ -20,6 +21,15 @@ const AUDIENCE_LABELS = {
 
 function audienceLabel(audience = "parents") {
   return AUDIENCE_LABELS[audience] || audience;
+}
+
+function audienceEditorialDirection(audience = "parents") {
+  if (audience === "coordinators") {
+    return `Escribe para coordinadores académicos, directores, subdirectores, jefes de estudio y líderes pedagógicos. Usa lenguaje neuropedagógico profesional y accesible; vincula atención, memoria de trabajo, carga cognitiva, funciones ejecutivas, autorregulación, metacognición o neuroplasticidad únicamente con evidencia del dossier. Traduce la evidencia en acompañamiento docente, observación de aula, alineación curricular, inclusión, clima escolar e indicadores observables. Evita neuromitos y queda prohibido dirigirse a padres, hablar de "tus hijos" o plantear rutinas del hogar.`;
+  }
+  if (audience === "parents") return `Escribe para madres, padres y tutores desde situaciones del hogar, con un tono cálido y orientador.`;
+  if (audience === "students") return `Escribe directamente para estudiantes, con claridad, respeto, autonomía y estrategias aplicables a su aprendizaje.`;
+  return `Escribe para docentes desde la práctica de aula, las decisiones didácticas y su desarrollo profesional.`;
 }
 
 function uniqueInstitutions(sources = []) {
@@ -42,6 +52,7 @@ function dossierForPrompt(dossier = {}) {
     facts: dossier.facts || [],
     currentSignals: dossier.currentSignals || [],
     historicalMilestones: dossier.historicalMilestones || [],
+    attributedReferences: dossier.attributedReferences || [],
     sources: dossier.sources || [],
     researchPeriod: dossier.researchPeriod || "",
     dateWindow: dossier.dateWindow || null,
@@ -85,13 +96,13 @@ export async function researchAidaTopicWithGemini({
   audience = "parents",
   region = "MX",
   period = "6m",
-  minimumSources = 8
+  minimumSources = 6
 } = {}) {
   const dossier = await researchArticleEvidence({
     topic,
     audience,
     mode: "aida",
-    minimumSources: Math.max(8, Math.min(12, Number(minimumSources) || 8)),
+    minimumSources: Math.max(4, Math.min(12, Number(minimumSources) || 6)),
     region,
     period
   });
@@ -130,14 +141,16 @@ Reglas estrictas Aida:
 - Incluye ángulo histórico únicamente si el dossier contiene hitos respaldados.
 - Asocia solo IDs de fuentes presentes en el dossier. No inventes datos, años, personas ni fuentes.
 - No incluyas CTA comercial.
+- Diferencia de forma inequívoca cada público. Instrucciones editoriales por audiencia:
+${audiences.map((audience) => `  - ${audience}: ${audienceEditorialDirection(audience)}`).join("\n")}
 
 Devuelve SOLO JSON válido:
 {"proposals":[{"id":"aida-parents","audience":"parents","audienceLabel":"Padres y tutores","title":"","scene":"","problem":"","centralIdea":"","dominantAnalogy":"","historicalAngle":"","sourceIds":["source-1"],"angle":"","brief":"","estimatedReadTimeMinutes":8,"editorialMode":"aida"}]}`.trim();
   const { parsed } = await generateGroundedJson({ prompt, urls: sources.map((source) => source.url) });
   const generated = Array.isArray(parsed?.proposals) ? parsed.proposals : [];
   const sourceIds = new Set(sources.map((source) => String(source.id)));
-  const proposals = audiences.map((audience, index) => {
-    const candidate = generated.find((item) => String(item?.audience) === audience) || generated[index] || {};
+  const proposals = audiences.map((audience) => {
+    const candidate = generated.find((item) => String(item?.audience || "").toLowerCase() === String(audience).toLowerCase()) || {};
     const centralIdea = String(candidate.centralIdea || candidate.angle || `Explicar con evidencia verificable cómo ${topic} se relaciona con la experiencia de ${audienceLabel(audience)}.`).trim();
     const scene = String(candidate.scene || candidate.problem || `Una situación cotidiana de ${audienceLabel(audience)} relacionada con ${topic}.`).trim();
     const dominantAnalogy = String(candidate.dominantAnalogy || "Una analogía visual única que haga comprensible la idea central.").trim();
@@ -175,15 +188,8 @@ export async function draftAidaArticleWithGemini({
   period = "6m"
 } = {}) {
   const centralTopic = String(topic || title || "Neuroeducación").trim();
-  const minimumSources = Math.max(8, Math.min(12, Number(customRules.minimumSources) || 8));
-  const existingSources = sanitizeTrustedSources(researchDossier?.sources || []);
-  const existingCurrentSources = currentVerifiedSources(existingSources);
-  const existingDossierIsReady = researchDossier?.verificationStatus === "verified"
-    && existingCurrentSources.length >= 3
-    && uniqueInstitutions(existingCurrentSources).size >= 3;
-  const dossier = existingDossierIsReady
-    ? researchDossier
-    : await researchAidaTopicWithGemini({
+  const minimumSources = Math.max(4, Math.min(12, Number(customRules.minimumSources) || 6));
+  const dossier = researchDossier || await researchAidaTopicWithGemini({
         topic: centralTopic,
         audience,
         region,
@@ -196,6 +202,7 @@ Redacta un artículo educativo, riguroso y documentado en español para ${audien
 Tema: ${centralTopic}
 Título provisional: ${title || centralTopic}
 Brief: ${brief || "Sin indicaciones adicionales"}
+Contrato específico de audiencia: ${audienceEditorialDirection(audience)}
 
 Aplica estrictamente la guía editorial Aida:
 1. Titular que nombre un dolor o situación concreta.
@@ -208,6 +215,7 @@ Aplica estrictamente la guía editorial Aida:
 8. Cierre memorable sin CTA comercial; termina exactamente con la frase de marca.
 
 Desarrolla el tema completo usando únicamente datos del dossier. Los hechos científicos y la historia enriquecen el argumento: no sustituyen el tema principal. Integra 2 a 4 hitos como antes → avance intermedio → conocimiento vigente solo si ayudan a explicar el hecho o tema y están respaldados. No inventes testimonios, fechas, científicos, estudios ni descubrimientos.
+Integra entre 2 y 3 referencias atribuidas verificadas del campo attributedReferences cuando existan. Combina citas textuales breves y paráfrasis naturales del tipo "Según X". Una cita directa debe reproducir exactamente el texto verificado y cada bloque factual debe declarar sourceIds con IDs del dossier. Si no hay una frase directa verificada, usa una paráfrasis; nunca inventes una cita.
 Respeta la ventana de actualidad del dossier: las fuentes current solo pueden describirse como noticias, señales o datos actuales si están dentro de dateWindow. Las fuentes historical sirven únicamente como antecedentes explícitos y deben presentarse con su fecha real; nunca las redactes como si fueran del periodo actual.
 Si el brief contiene un hallazgo factual sin respaldo, elimínalo o reescríbelo sin convertirlo en otro dato factual. No repitas ni parafrasees una afirmación marcada como no respaldada. La fase de explicación no obliga a incluir neurociencia cuando el dossier no contiene evidencia neurocientífica pertinente.
 
@@ -218,7 +226,7 @@ Dossier recuperado: ${JSON.stringify(dossierForPrompt(dossier)).slice(0, 22000)}
 Devuelve SOLO JSON válido:
 {"schemaVersion":"1.0","title":"titular","subtitle":"promesa clara","excerpt":"resumen","audience":"${audience}","category":"Neuroeducación","readingTimeMinutes":8,"publishedDateText":"fecha actual en español","tags":["Neuroeducación"],"blocks":[{"id":"aida-problem","type":"paragraph","phase":"problem","text":"escena"},{"id":"aida-deepen","type":"paragraph","phase":"deepen","text":"profundización"},{"id":"aida-agitate","type":"paragraph","phase":"agitate","text":"costo"},{"id":"aida-turn","type":"paragraph","phase":"turn","text":"giro"},{"id":"aida-why","type":"paragraph","phase":"why","text":"explicación científica"},{"id":"aida-change","type":"paragraph","phase":"change","text":"transformación"},{"id":"aida-close","type":"paragraph","phase":"close","text":"cierre y frase de marca"}],"seo":{"title":"título SEO","description":"máximo 155 caracteres","keywords":["palabra clave"],"slug":"slug"}}`.trim();
   const { parsed } = await generateGroundedJson({ prompt, urls: sources.map((source) => source.url) });
-  const article = {
+  const article = applyVerifiedAttributions({
     ...parsed,
     schemaVersion: "1.0",
     audience,
@@ -233,6 +241,7 @@ Devuelve SOLO JSON válido:
       facts: dossier.facts || [],
       currentSignals: dossier.currentSignals || [],
       historicalMilestones: dossier.historicalMilestones || [],
+      attributedReferences: dossier.attributedReferences || [],
       researchPeriod: dossier.researchPeriod || "",
       dateWindow: dossier.dateWindow || null,
       currentSourceCount: dossier.currentSourceCount || 0,
@@ -249,7 +258,7 @@ Devuelve SOLO JSON válido:
       verifiedSourceCount: dossier.verifiedSourceCount || sources.length,
       institutionCount: dossier.institutionCount || uniqueInstitutions(sources).size
     }
-  };
+  }, dossier);
   const verified = {
     ...article,
     verification: { status: "pending", coverage: 0, blockers: [], contradictions: [], verifiedAt: "" }

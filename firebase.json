@@ -162,6 +162,13 @@
     ],
     "rewrites": [
       {
+        "source": "/api/pigpen/**",
+        "function": {
+          "functionId": "assetApi",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "/api/analizar-pdf/**",
         "function": {
           "functionId": "analizarPdfApi",

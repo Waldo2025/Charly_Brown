@@ -137,14 +137,22 @@ function renderQuestion(question = {}, questionIndex = 0, isLast = false, colors
   const primary = String(question.respuesta_correcta || "").trim();
   const isFreeResponse = String(question.subtipo_respuesta || "").trim() === "frase_libre";
   const variants = getAcceptedAnswerVariants(question);
-  const relationshipAnswer = question.tipo_interaccion === "relacion_columnas"
+  const relationshipAnswer = ["relacion_columnas", "drag_drop"].includes(question.tipo_interaccion)
     ? renderRelationshipAnswer(question)
+    : "";
+  const sequenceAnswer = question.tipo_interaccion === "ordenar_secuencia" && Array.isArray(question.elementos)
+    ? `<ol style="margin:6px 0 0;padding-left:22px;">${question.elementos.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
+    : "";
+  const trueFalseAnswer = question.tipo_interaccion === "verdadero_falso"
+    ? (question.respuesta_correcta === true ? "Verdadero" : "Falso")
     : "";
   const title = String(question.titulo || `Pregunta ${questionIndex + 1}`).trim();
   const prompt = String(question.reto || question.enunciado || question.pregunta || title).trim();
   const answerMarkup = isFreeResponse
     ? `<strong style="${STYLES.answer}">Respuesta libre</strong>`
-    : relationshipAnswer || (primary
+    : relationshipAnswer || sequenceAnswer || (trueFalseAnswer
+      ? `<strong style="${STYLES.answer}">${escapeHtml(trueFalseAnswer)}</strong>`
+      : primary
       ? `<strong style="${STYLES.answer}">${escapeHtml(primary)}</strong>`
       : `<span style="${STYLES.empty}">Sin respuesta configurada</span>`);
   const baseQuestionStyle = isLast ? STYLES.question.replace("border-bottom:1px solid #edf0f4;", "") : STYLES.question;

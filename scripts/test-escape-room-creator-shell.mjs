@@ -113,8 +113,8 @@ assert.match(
 );
 assert.doesNotMatch(
   html,
-  /data-studio-panel-close|fa-xmark/,
-  "Brief y subpanel no deben mostrar botones X; se controlan exclusivamente desde el header."
+  /data-studio-panel-close/,
+  "Brief e inspector deben seguir controlándose exclusivamente desde el header."
 );
 assert.doesNotMatch(
   js,
@@ -152,6 +152,11 @@ for (const commandId of [
 }
 assert.match(
   html,
+  /<div class="er-brief-footer">[\s\S]*?<button type="submit" id="btnGenerarBottom" class="er-button er-brief-generate-button"[^>]*>[\s\S]*?<span>Generar escape room<\/span>[\s\S]*?<\/button>/,
+  "El Brief debe conservar una acción principal textual para generar al fondo del panel."
+);
+assert.match(
+  html,
   /data-er-inspector-tab="content"[^>]*>Contenido general<\/button>[\s\S]*data-er-inspector-tab="rooms"[^>]*>Salas<\/button>/,
   "Las pestañas Contenido general y Salas deben volver a mostrar texto."
 );
@@ -183,11 +188,18 @@ assert.match(
   /data-question-card|renderQuestionCard\(/,
   "El creador debe renderizar y editar todas las preguntas internas de cada sala."
 );
+assert.match(html, /id="erMissionWorkspacePanel"[^>]*class="[^"]*er-editor-dock[^"]*"|class="[^"]*er-editor-dock[^"]*"[^>]*id="erMissionWorkspacePanel"/, "El editor contextual debe usar un panel acoplado independiente.");
+assert.match(html, /id="btnCloseMissionWorkspace"[^>]*aria-label="Cerrar editor de sala o pregunta"/, "El panel contextual debe poder cerrarse con un control accesible.");
+assert.match(js, /insertBefore\(elements\.missionWorkspacePanel, elements\.inspectorPanel\)/, "El editor debe montarse inmediatamente a la izquierda del inspector de salas y contenido.");
+assert.match(css, /\.er-studio-shell > \.er-editor-dock[\s\S]*grid-column:\s*2;[\s\S]*grid-row:\s*1;[\s\S]*position:\s*sticky;/, "En escritorio el editor debe superponerse al preview sin empujarlo hacia abajo.");
+assert.match(css, /\.er-editor-dock > \.er-mission-list[\s\S]*overflow-y:\s*auto;/, "El contenido del editor contextual debe desplazarse verticalmente de forma independiente.");
 assert.match(
   js,
   /er-icon-button er-studio-icon-button[^>]*data-question-action="regenerate-question"[^>]*data-er-tooltip="Regenerar pregunta"/,
   "Las acciones dinámicas de preguntas deben usar el mismo comando icónico y tooltip."
 );
+assert.match(js, /data-question-action="regenerate-question-image"/, "Cada pregunta debe permitir regenerar solo su imagen.");
+assert.match(js, /regenerateQuestionImageOnly/, "El control de imagen no debe regenerar el contenido de la pregunta.");
 assert.match(
   js,
   /er-button er-studio-icon-button[^>]*data-action="add-question"[^>]*data-er-tooltip="Añadir pregunta"/,
@@ -203,6 +215,21 @@ assert.match(
   /fieldPath === "respuestas_aceptadas"[\s\S]*question\.respuesta_correcta = acceptedAnswers\[0\] \|\| ""[\s\S]*scheduleOutputRefresh\(\)/,
   "Editar las respuestas aceptadas debe mantener una respuesta canónica coherente."
 );
+assert.match(js, /value="drag_drop"[^>]*>Drag & Drop · Encaja parejas</, "El editor debe ofrecer el nuevo tipo drag & drop.");
+assert.match(js, /máximo una pregunta de tipo drag_drop por sala/i, "El prompt debe limitar drag & drop a una pregunta por sala.");
+assert.match(js, /enum: \["texto", "opcion_multiple", "relacion_columnas", "drag_drop", "multimedia", "verdadero_falso", "ordenar_secuencia", "completar_espacio"\]/, "El esquema de Gemini debe aceptar el catálogo completo.");
+assert.match(html, /data-project-field="clave_final"/, "Contenido general debe exponer la clave final canónica.");
+assert.match(html, /id="btnRegenerateCoverImage"/, "Contenido general debe permitir regenerar la imagen de inicio.");
+assert.doesNotMatch(html, /Regenera únicamente la portada sin cambiar el contenido del escape room\./, "La tarjeta de portada no debe repetir una descripción innecesaria.");
+assert.match(html, /id="btnRegenerateCoverImage"[^>]*aria-label="Regenerar imagen de inicio"[^>]*>[\s\S]*?<i[^>]*fa-wand-magic-sparkles[^>]*><\/i>[\s\S]*?<\/button>/, "La regeneración de portada debe usar un botón solo de icono con nombre accesible.");
+assert.match(js, /regenerateCoverImageOnly/, "La portada debe poder regenerarse sin reconstruir el proyecto.");
+assert.match(js, /data-editor-final-key/, "El editor de actividades debe mostrar el mismo campo de clave final.");
+assert.match(js, /value="verdadero_falso"[^>]*>Verdadero \/ Falso</, "El editor debe ofrecer Verdadero/Falso.");
+assert.match(js, /value="ordenar_secuencia"[^>]*>Ordenar secuencia</, "El editor debe ofrecer Ordenar secuencia.");
+assert.match(js, /value="completar_espacio"[^>]*>Completar espacio</, "El editor debe ofrecer Completar espacio.");
+assert.match(js, /Respeta EXACTAMENTE este orden de tipos/, "El prompt debe recibir un plan explícito por actividad.");
+assert.match(js, /Gemini tardó más de lo esperado\. Reintentando la generación una vez/, "La generación completa debe reintentar una vez los timeouts transitorios de Gemini.");
+assert.match(js, /después de dos intentos/, "La interfaz debe explicar el timeout persistente sin mostrar solo el código técnico.");
 
 assert.match(
   js,
@@ -240,8 +267,17 @@ assert.match(
   /selectedQuestionIndex >= 0[\s\S]*renderQuestionCard\(selectedIndex, selectedQuestionIndex/,
   "Seleccionar una pregunta debe renderizar únicamente su editor en el workspace."
 );
+const focusedQuestionBlock = js.slice(
+  js.indexOf("if (selectedQuestionIndex >= 0)"),
+  js.indexOf("const selectedEntries =", js.indexOf("if (selectedQuestionIndex >= 0)"))
+);
+assert.doesNotMatch(
+  focusedQuestionBlock,
+  /renderFinalKeyEditorCard/,
+  "La edición enfocada de una pregunta no debe incluir datos generales ni la clave final."
+);
 
-assert.match(css, /\.er-new-session-button\s*\{[\s\S]*width:\s*100%[\s\S]*background:\s*#eef5ff/, "Nueva sesión debe ser claro y ocupar todo el panel.");
+assert.match(css, /\.er-new-session-button\s*\{[\s\S]*width:\s*100%[\s\S]*justify-content:\s*flex-start[\s\S]*background:\s*transparent/, "Nueva sesión debe ser una acción ghost clara y ocupar todo el panel.");
 assert.match(
   css,
   /\.er-session-list\s*\{[\s\S]*height:\s*100%[\s\S]*min-height:\s*0[\s\S]*flex:\s*1 1 100%[\s\S]*overflow-x:\s*hidden[\s\S]*border:\s*0[\s\S]*box-shadow:\s*none/,
@@ -289,7 +325,8 @@ assert.match(
 
 const sessionRenderer = js.match(/function renderSessionList\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
 assert.match(sessionRenderer, /er-session-title-button[\s\S]*data-session-menu-toggle/, "Cada sesión debe mostrar título directo y menú de tres puntos.");
-assert.doesNotMatch(sessionRenderer, /er-session-open|er-session-item-meta|>Activa</, "La fila no debe renderizar Abrir, metadata ni el badge Activa.");
+assert.doesNotMatch(sessionRenderer, /er-session-open|>Activa</, "La fila no debe renderizar el botón Abrir ni el badge Activa.");
+assert.match(sessionRenderer, /er-session-item-meta/, "La fila debe incluir metadata académica compacta para facilitar el escaneo.");
 
 assert.match(
   js,

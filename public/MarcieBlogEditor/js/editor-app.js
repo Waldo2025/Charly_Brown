@@ -5,26 +5,26 @@ import {
   deleteMarcieSession,
   seedInitialSessionIfEmpty,
   MARCIE_COLLECTION
-} from "./services/marcie-session-store.js";
+} from "./services/marcie-session-store.js?v=20260831r2";
 import {
   ensureApprovedUserAccess,
   logOutUser,
   findUserProfile
 } from "./services/marcie-auth-guard.js";
 import { initPanelResizers } from "./components/panel-resizer.js";
-import { openSessionContextMenu } from "./components/session-menu.js";
-import { initPipelineStepper, runTrendSearchForSession } from "./components/pipeline-stepper.js";
-import { initCommandPalette, openCommandPalette } from "./components/command-palette.js";
-import { makeArticleEditable } from "./components/inline-editor.js";
-import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js";
-import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260827r9";
+import { openSessionContextMenu } from "./components/session-menu.js?v=20260831r2";
+import { initPipelineStepper, runTrendSearchForSession } from "./components/pipeline-stepper.js?v=20260831r5";
+import { initCommandPalette, openCommandPalette } from "./components/command-palette.js?v=20260831r2";
+import { makeArticleEditable } from "./components/inline-editor.js?v=20260831r2";
+import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260831r3";
+import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260831r12";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
-import { showModal, showNewSessionModal, showToast, closeActiveModal } from "./components/modals.js";
-import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence } from "./services/marcie-gemini-service.js";
-import { draftArticleForMode, generateProposalsForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "./services/marcie-mode-service.js";
-import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js";
+import { showModal, showNewSessionModal, showToast, closeActiveModal } from "./components/modals.js?v=20260831r4";
+import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence } from "./services/marcie-gemini-service.js?v=20260831r6";
+import { draftArticleForMode, generateProposalsForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "./services/marcie-mode-service.js?v=20260831r6";
+import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260831r3";
 import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextModels, listGeminiModels, setConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
-import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js";
+import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260831r3";
 import { cancelScheduledPublication, createWordPressDraft, getWordPressStatus, publishWordPressArticle, testWordPressConnection } from "./services/marcie-wordpress-service.js";
 
 const MARCIE_UI_THEME_STORAGE_KEY = "marcie_ui_theme_v1";
@@ -93,6 +93,7 @@ const appState = {
   isSaving: false,
   currentUser: null,
   isGeneratingArticle: false,
+  articleGenerationProgress: null,
   generatingImageSessionId: null,
   showArchived: false
 };
@@ -280,8 +281,17 @@ async function openGeminiModelSettings() {
   }
 }
 
-window.__marcieSetArticleGenerationState = ({ isGenerating }) => {
+window.__marcieSetArticleGenerationState = ({ isGenerating, current, total, audienceLabel, message, heading } = {}) => {
   appState.isGeneratingArticle = Boolean(isGenerating);
+  appState.articleGenerationProgress = appState.isGeneratingArticle
+    ? {
+        current: Number.isFinite(Number(current)) ? Number(current) : null,
+        total: Number.isFinite(Number(total)) ? Number(total) : null,
+        audienceLabel: String(audienceLabel || "").trim(),
+        message: String(message || "").trim(),
+        heading: String(heading || "").trim()
+      }
+    : null;
   if (appState.currentTab === "article" && dom.articleView && dom.editorialGuideView) {
     if (appState.isGeneratingArticle) {
       dom.editorialGuideView.classList.add("hidden");
@@ -295,8 +305,8 @@ window.__marcieSetArticleGenerationState = ({ isGenerating }) => {
   renderActiveSession();
 };
 
-window.__marcieShowArticleGenerationSpinner = (session = {}) => {
-  window.__marcieSetArticleGenerationState({ isGenerating: true });
+window.__marcieShowArticleGenerationSpinner = (session = {}, progress = {}) => {
+  window.__marcieSetArticleGenerationState({ isGenerating: true, ...progress });
   appState.currentTab = "article";
   if (dom.articleView) {
     dom.articleView.classList.remove("hidden");
@@ -1620,16 +1630,30 @@ function renderArticleGeneratingState(session = {}) {
   dom.articleView.hidden = false;
   hideArticleViewContentForGeneration();
 
-  const audienceLabel = session.audience === "students"
-    ? "estudiantes"
+  const defaultAudienceLabel = session.audience === "students"
+    ? "Estudiantes"
     : session.audience === "parents"
-      ? "padres y tutores"
-      : "docentes y directivos";
+      ? "Padres y tutores"
+      : session.audience === "coordinators"
+        ? "Coordinadores académicos"
+        : "Docentes y directivos";
+  const generationProgress = appState.articleGenerationProgress || {};
+  const audienceLabel = generationProgress.audienceLabel || defaultAudienceLabel;
+  const generationHeading = generationProgress.heading || "Generando artículo con IA";
+  const generationMessage = generationProgress.message
+    || `Estamos redactando el contenido para ${audienceLabel.toLowerCase()}. Esto puede tardar unos segundos.`;
+  const hasCount = generationProgress.current > 0 && generationProgress.total > 0;
+  const generationCount = hasCount
+    ? `<span class="article-generation-count">Artículo ${generationProgress.current} de ${generationProgress.total}</span>`
+    : "";
 
   const spinnerHost = getArticleGenerationSpinnerHost();
   if (!spinnerHost) return;
   dom.articleView.appendChild(spinnerHost);
 
+  spinnerHost.setAttribute("role", "status");
+  spinnerHost.setAttribute("aria-live", "polite");
+  spinnerHost.setAttribute("aria-label", `${generationHeading}. ${generationMessage}`);
   spinnerHost.innerHTML = `
     <div class="w-full py-14 flex flex-col items-center justify-center gap-5 px-6">
       <div class="relative w-44 h-44 flex items-center justify-center">
@@ -1641,8 +1665,10 @@ function renderArticleGeneratingState(session = {}) {
         </div>
       </div>
       <div class="text-center max-w-md">
-        <p class="text-sm font-semibold text-slate-800">Generando artículo con IA</p>
-        <p class="text-xs text-slate-500 mt-2">Estamos redactando tu contenido para ${escapeHtml(audienceLabel)}. Esto puede tardar unos segundos.</p>
+        ${generationCount}
+        <p class="text-sm font-semibold text-slate-800">${escapeHtml(generationHeading)}</p>
+        <p class="text-xs text-slate-500 mt-2">${escapeHtml(generationMessage)}</p>
+        <div class="article-generation-dots" aria-hidden="true"><span></span><span></span><span></span></div>
       </div>
     </div>
   `;
@@ -1728,7 +1754,7 @@ const EDITORIAL_GUIDE_STEP_DEFS = {
     icon: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2a7 7 0 0 1 7 7c0 3.5-2.5 5.5-3 7H8c-.5-1.5-3-3.5-3-7a7 7 0 0 1 7-7z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 21h6m-6-3h6"/></svg>`,
     label: "Propuestas",
     title: "Paso 3 — Crear propuestas",
-    desc: "Genera hasta 3 propuestas de artículo con diferentes enfoques según la audiencia elegida (Docentes, Estudiantes o Padres). Incluye título, subtítulo, estructura y ángulo diferenciador.",
+    desc: "Genera hasta 4 propuestas de artículo con diferentes enfoques para docentes, estudiantes, familias y coordinadores académicos. Incluye título, subtítulo, estructura y ángulo diferenciador.",
     tips: ["Cambia la audiencia en la barra superior antes de generar.", "Puedes seleccionar una propuesta como base y redactar el artículo completo.", "Las propuestas respetan el brief editorial de tu institución."],
     badge: "Creatividad"
   },
@@ -1829,6 +1855,13 @@ const EDITORIAL_PHASE_TABS = {
     { id: "audit", tabLabel: "Analizar", ...EDITORIAL_GUIDE_STEP_DEFS[4], title: "Analizar y revisar el artículo" }
   ]
 };
+
+function getEditorialAudienceLabel(audience = "educators") {
+  if (audience === "students") return "Estudiantes";
+  if (audience === "parents") return "Padres y tutores";
+  if (audience === "coordinators") return "Coordinadores académicos";
+  return "Docentes y directivos";
+}
 
 function openEditorialPhaseModal(phaseId) {
   const tabs = EDITORIAL_PHASE_TABS[phaseId];
@@ -2064,13 +2097,7 @@ function openEditorialPhaseModal(phaseId) {
     });
   };
 
-  const audienceLabel = (audience) => audience === "students"
-    ? "Estudiantes"
-    : audience === "parents"
-      ? "Padres y tutores"
-      : audience === "coordinators"
-        ? "Coordinadores académicos"
-        : "Docentes y directivos";
+  const audienceLabel = getEditorialAudienceLabel;
 
   const renderProposalWorkspace = () => {
     const session = getActiveSession();
@@ -2101,6 +2128,7 @@ function openEditorialPhaseModal(phaseId) {
       .filter(([, article]) => article && (article.title || article.subtitle || article.blocks?.length))
       .forEach(([audience, article]) => {
         const existing = proposalsByAudience.get(audience);
+        const dossier = session?.researchByAudience?.[audience] || {};
         proposalsByAudience.set(audience, {
           ...(existing || {}),
           audience,
@@ -2108,7 +2136,11 @@ function openEditorialPhaseModal(phaseId) {
           title: existing?.title || article.title || session?.topic || "Artículo educativo",
           brief: existing?.brief || article.subtitle || "Estilo de redacción creado manualmente.",
           hasArticle: Boolean(article.blocks?.length),
-          origin: existing?.origin || "manual"
+          origin: existing?.origin || "manual",
+          sourceIds: existing?.sourceIds || (dossier.sources || []).map((source) => String(source.id)),
+          researchStatus: existing?.researchStatus || dossier.verificationStatus || "incomplete",
+          verifiedSourceCount: Number(existing?.verifiedSourceCount ?? dossier.verifiedSourceCount ?? dossier.sources?.length ?? 0),
+          targetSourceCount: Number(existing?.targetSourceCount ?? dossier.targetSourceCount ?? 6)
         });
       });
     const audienceOrder = [...new Set([...(session?.selectedAudiences || []), ...proposalsByAudience.keys()])];
@@ -2118,29 +2150,35 @@ function openEditorialPhaseModal(phaseId) {
         <div class="flex flex-col gap-3 rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50/75 to-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h4 class="text-sm font-semibold text-purple-900">${aidaMode ? "Crear enfoques científicos Aida" : "Crear enfoques editoriales"}</h4>
-            <p class="mt-1 text-xs leading-relaxed text-slate-600">${aidaMode ? "Cada público recibirá una escena, una idea central fiel al tema, una analogía dominante y fuentes concretas; ciencia e historia se usarán como respaldo pertinente." : "Gemini generará propuestas diferenciadas para docentes, estudiantes y familias."}</p>
+            <p class="mt-1 text-xs leading-relaxed text-slate-600">${aidaMode ? "Cada público recibirá una escena, una idea central fiel al tema, una analogía dominante y fuentes concretas; ciencia e historia se usarán como respaldo pertinente." : "Gemini generará propuestas diferenciadas para docentes, estudiantes, familias y coordinadores académicos."}</p>
           </div>
           <button type="button" data-generate-proposals class="btn btn-primary h-9 shrink-0 px-4 text-xs flex items-center gap-1.5">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v18m9-9H3"></path></svg>
-            ${proposals.length ? "Regenerar propuestas y artículos" : `Generar ${session?.selectedAudiences?.length || 3} propuestas`}
+            ${proposals.length ? "Regenerar propuestas y artículos" : `Generar ${session?.selectedAudiences?.length || 4} propuestas`}
           </button>
         </div>
-        <div data-proposals-result class="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div data-proposals-result class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           ${proposals.length ? proposals.map((proposal, proposalIndex) => `
             <article class="flex min-h-[190px] flex-col rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-purple-400 hover:shadow-md">
               <div class="flex flex-wrap items-center gap-1.5">
                 <span class="w-fit rounded-full bg-purple-50 px-2 py-1 text-[10px] font-semibold text-purple-700">${escapeHtml(proposal.audienceLabel || audienceLabel(proposal.audience))}</span>
                 ${proposal.hasArticle ? `<span class="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold text-emerald-700">Artículo existente</span>` : ""}
                 ${proposal.origin === "manual" ? `<span class="w-fit rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-semibold text-slate-600">Creado manualmente</span>` : ""}
+                <span class="w-fit rounded-full border ${Number(proposal.verifiedSourceCount || 0) >= Number(proposal.targetSourceCount || 6) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"} px-2 py-0.5 text-[9px] font-semibold">${Number(proposal.verifiedSourceCount || 0)}/${Number(proposal.targetSourceCount || 6)} fuentes verificadas</span>
               </div>
               <strong class="mt-3 text-sm leading-snug text-slate-900">${escapeHtml(proposal.title || "Propuesta editorial")}</strong>
               <span class="mt-2 flex-1 text-[11px] leading-relaxed text-slate-600">${escapeHtml(proposal.brief || "")}</span>
+              ${(session?.researchByAudience?.[proposal.audience]?.sources || []).length ? `<details class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-[10px]"><summary class="cursor-pointer font-semibold text-slate-700">Ver bibliografía de la propuesta</summary><ol class="mt-2 space-y-1.5">${session.researchByAudience[proposal.audience].sources.map((source) => `<li><a class="text-teal-700 hover:underline" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.apaCitation || source.title || "Fuente verificada")}</a></li>`).join("")}</ol></details>` : ""}
               ${aidaMode ? `<div class="mt-3 space-y-1.5 rounded-lg border border-purple-100 bg-purple-50/60 p-2.5 text-[10px] leading-relaxed text-purple-900"><p><b>Idea central:</b> ${escapeHtml(proposal.centralIdea || proposal.angle || "Pendiente")}</p><p><b>Analogía:</b> ${escapeHtml(proposal.dominantAnalogy || "Pendiente")}</p><p><b>Evidencia:</b> ${escapeHtml(proposal.sourceIds?.length || 0)} fuentes del dossier</p></div>` : ""}
               <div class="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                 <button type="button" data-regenerate-proposal="${proposalIndex}" class="inline-flex items-center gap-1.5 rounded-md border border-purple-200 px-2.5 py-1.5 text-[10px] font-semibold text-purple-700 transition hover:bg-purple-50">
                   <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.6m15.3 2A8 8 0 004.6 9m0 0H9m11 11v-5h-.6m0 0A8 8 0 014.1 13m15.3 2H15"></path></svg>
                   Re-hacer
                 </button>
+                ${proposal.hasArticle ? `<button type="button" data-generate-proposal-image="${proposalIndex}" class="inline-flex items-center gap-1.5 rounded-md border border-sky-200 px-2.5 py-1.5 text-[10px] font-semibold text-sky-700 transition hover:bg-sky-50">
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg>
+                  ${articlesByAudience[proposal.audience]?.featuredImage?.url ? "Regenerar imagen" : "Crear imagen"}
+                </button>` : ""}
                 <button type="button" data-select-proposal="${proposalIndex}" class="inline-flex items-center gap-1 rounded-md bg-teal-50 px-2.5 py-1.5 text-[10px] font-semibold text-teal-700 transition hover:bg-teal-100">
                   ${proposal.hasArticle ? "Abrir" : "Redactar"}
                   <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7"></path></svg>
@@ -2165,11 +2203,18 @@ function openEditorialPhaseModal(phaseId) {
         const response = await generateProposalsForMode({
           session: activeSession,
           topic: activeSession.topic || activeSession.title,
-          signals: activeSession.trends?.[0]?.signals || []
+          signals: activeSession.trends?.[0]?.signals || [],
+          onResearchProgress: async ({ proposal, index, total }) => {
+            button.innerHTML = `<svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Verificando fuentes ${index + 1}/${total}: ${audienceLabel(proposal.audience)}...`;
+            await saveMarcieSession(activeSession);
+          }
         });
-        const requiredCount = activeSession.selectedAudiences?.length || 3;
+        const requiredCount = activeSession.selectedAudiences?.length || 4;
         const nextProposals = Array.isArray(response?.proposals) ? response.proposals.slice(0, requiredCount) : [];
         if (nextProposals.length < requiredCount) throw new Error("Gemini no devolvió un enfoque para cada público seleccionado.");
+        activeSession.proposals = nextProposals;
+        activeSession.researchByAudience = response.researchByAudience || activeSession.researchByAudience || {};
+        await saveMarcieSession(activeSession);
 
         const previousArticles = activeSession.articlesByAudience || {};
         const regeneratedArticles = {};
@@ -2220,7 +2265,7 @@ function openEditorialPhaseModal(phaseId) {
         console.error("[MarcieBlogEditor] Error regenerando propuestas y artículos:", error);
         showToast(`No fue posible regenerar los artículos: ${error.message}`, "error");
         button.disabled = false;
-        button.textContent = proposals.length ? "Regenerar propuestas y artículos" : "Generar 3 propuestas";
+        button.textContent = proposals.length ? "Regenerar propuestas y artículos" : "Generar 4 propuestas";
       }
     });
 
@@ -2247,6 +2292,44 @@ function openEditorialPhaseModal(phaseId) {
           showToast(`Artículo existente abierto para ${audienceLabel(activeSession.audience)}.`, "success");
         } else {
           activateTab("draft");
+        }
+      });
+    });
+
+    panel.querySelectorAll("[data-generate-proposal-image]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const activeSession = getActiveSession();
+        const proposal = proposals[Number(button.getAttribute("data-generate-proposal-image"))];
+        const audience = proposal?.audience || "educators";
+        const targetArticle = activeSession?.articlesByAudience?.[audience];
+        if (!activeSession || !targetArticle?.blocks?.length || appState.generatingImageSessionId) return;
+        const originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = `<svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M12 2a10 10 0 0110 10"></path></svg> Creando...`;
+        appState.generatingImageSessionId = activeSession.id;
+        setSyncStatus(`Generando portada para ${audienceLabel(audience)}...`);
+        try {
+          targetArticle.featuredImage = await generateArticleImageWithGemini({
+            article: targetArticle,
+            sessionId: activeSession.id,
+            approachId: audience,
+            approachLabel: audienceLabel(audience)
+          });
+          activeSession.articlesByAudience[audience] = targetArticle;
+          if ((activeSession.audience || activeSession.article?.audience) === audience) activeSession.article = targetArticle;
+          await saveMarcieSession(activeSession);
+          setSyncStatus("🟢 Sincronizado con Firebase");
+          renderActiveSession();
+          renderProposalWorkspace();
+          showToast(`Portada creada para ${audienceLabel(audience)}.`, "success");
+        } catch (error) {
+          console.error(`[MarcieBlogEditor] Error al generar portada para ${audience}:`, error);
+          setSyncStatus("⚠️ Error al generar la portada", true);
+          showToast(`No se pudo generar la portada de ${audienceLabel(audience)}: ${error.message}`, "error");
+          button.disabled = false;
+          button.innerHTML = originalHtml;
+        } finally {
+          appState.generatingImageSessionId = null;
         }
       });
     });
@@ -3121,6 +3204,13 @@ function renderActiveSession() {
   // Renderizar bloques del artículo o informe de tendencias descubiertas
   if (dom.articleBodyContainer) {
     const blocks = Array.isArray(article.blocks) ? article.blocks : [];
+    const audienceResearch = session.researchByAudience?.[session.audience || article.audience] || article.researchDossier || {};
+    const articleVerifiedSourceCount = Array.isArray(article.sources) ? article.sources.filter((source) => source?.verificationStatus === "verified").length : null;
+    const verifiedSourceCount = Number(articleVerifiedSourceCount ?? audienceResearch.verifiedSourceCount ?? 0);
+    const targetSourceCount = Number(audienceResearch.targetSourceCount || 6);
+    const incompleteResearchHtml = blocks.length && verifiedSourceCount < targetSourceCount
+      ? `<div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><strong>Bibliografía incompleta:</strong> este artículo se redactó únicamente con ${verifiedSourceCount} fuente(s) real(es) verificada(s) de un objetivo de ${targetSourceCount}. No se incorporaron fuentes no comprobadas.</div>`
+      : "";
     if (blocks.length === 0) {
       const trend = session.trends?.[0];
       if (trend) {
@@ -3180,7 +3270,7 @@ function renderActiveSession() {
             <div class="p-4 bg-purple-50/80 border border-purple-200 rounded-xl flex items-center justify-between gap-4">
               <div>
                 <div class="font-bold text-purple-900 text-xs">Siguiente paso del flujo editorial:</div>
-                <div class="text-purple-700 text-[11px]">Genera 3 propuestas por audiencia o redacta directamente el artículo completo.</div>
+                <div class="text-purple-700 text-[11px]">Genera 4 propuestas por audiencia o redacta directamente el artículo completo.</div>
               </div>
             <button id="btn-quick-draft" class="btn btn-primary h-8 px-4 text-xs font-semibold shadow-xs shrink-0 cursor-pointer flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
@@ -3206,7 +3296,7 @@ function renderActiveSession() {
         `;
       }
     } else {
-      dom.articleBodyContainer.innerHTML = blocks.map((block) => renderBlock(block)).join("");
+      dom.articleBodyContainer.innerHTML = `${incompleteResearchHtml}${blocks.map((block) => renderBlock(block)).join("")}`;
     }
   }
 
@@ -3217,6 +3307,7 @@ function renderActiveSession() {
     const articleSourcesSection = dom.articleSourcesList.closest("[data-article-sources]");
     articleSourcesSection?.setAttribute("data-source-citation-format", isApa ? "apa" : "default");
     dom.articleSourcesList.classList.toggle("is-apa", isApa);
+    dom.articleSourcesList.classList.toggle("sm:grid-cols-2", !isApa);
     if (dom.btnSourceCitationFormat) {
       const label = dom.btnSourceCitationFormat.querySelector("#source-citation-format-label");
       dom.btnSourceCitationFormat.disabled = sources.length === 0;
@@ -3344,8 +3435,8 @@ function renderArticleFeaturedImage(session, article = {}) {
           <img src="/MarcieBlogEditorLogo2.png" alt="" />
         </div>
         <div>
-          <p class="marcie-cover-state__title">Creando las 3 portadas editoriales</p>
-          <p class="marcie-cover-state__copy">Gemini está preparando una propuesta para docentes, estudiantes y familias.</p>
+          <p class="marcie-cover-state__title">Creando la portada de este artículo</p>
+          <p class="marcie-cover-state__copy">Gemini está preparando una imagen específica para ${escapeHtml(getEditorialAudienceLabel(session.audience || article.audience || "educators"))}.</p>
         </div>
       </div>
     `;
@@ -3359,7 +3450,7 @@ function renderArticleFeaturedImage(session, article = {}) {
         <figcaption class="marcie-cover-actions">
           <button type="button" class="marcie-cover-button marcie-cover-button--overlay" data-generate-article-image>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
-            Regenerar 3 portadas
+            Regenerar portada
           </button>
         </figcaption>
       </figure>
@@ -3373,11 +3464,11 @@ function renderArticleFeaturedImage(session, article = {}) {
         <div class="marcie-cover-state__content">
           <p class="marcie-cover-state__eyebrow">Imagen destacada</p>
           <p class="marcie-cover-state__title">Dale una identidad visual al artículo</p>
-          <p class="marcie-cover-state__copy">Crearemos tres portadas 16:9, una para cada enfoque editorial y audiencia.</p>
+          <p class="marcie-cover-state__copy">Crearemos una portada 16:9 específica para este artículo y su audiencia.</p>
         </div>
         <button type="button" class="marcie-cover-button" data-generate-article-image>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3Z"/><path d="m19 14 .8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z"/></svg>
-          Generar 3 portadas con IA
+          Generar portada con IA
         </button>
       </div>
     `;
@@ -3386,53 +3477,26 @@ function renderArticleFeaturedImage(session, article = {}) {
   host.querySelector("[data-generate-article-image]")?.addEventListener("click", async () => {
     if (appState.generatingImageSessionId) return;
     const currentAudience = session.audience || article.audience || "educators";
-    const articlesByAudience = { ...(session.articlesByAudience || {}), [currentAudience]: article };
-    const coverEntries = ARTICLE_EXPORT_AUDIENCES.map((approach) => ({
-      ...approach,
-      article: articlesByAudience[approach.id]
-    }));
-    const missingApproaches = coverEntries.filter((entry) => !Array.isArray(entry.article?.blocks) || !entry.article.blocks.length);
-    if (missingApproaches.length) {
-      showToast(`Genera primero los artículos de: ${missingApproaches.map((entry) => entry.label).join(", ")}.`, "warning");
-      return;
-    }
-
     appState.generatingImageSessionId = session.id;
     renderArticleFeaturedImage(session, article);
-    setSyncStatus("Generando 3 portadas editoriales...");
+    setSyncStatus(`Generando portada para ${getEditorialAudienceLabel(currentAudience)}...`);
 
     try {
-      const failures = [];
-      for (let index = 0; index < coverEntries.length; index += 1) {
-        const entry = coverEntries[index];
-        setSyncStatus(`Generando portada ${index + 1}/3: ${entry.label}...`);
-        try {
-          entry.article.featuredImage = await generateArticleImageWithGemini({
-            article: entry.article,
-            sessionId: session.id,
-            approachId: entry.id,
-            approachLabel: entry.label
-          });
-          articlesByAudience[entry.id] = entry.article;
-        } catch (error) {
-          failures.push({ label: entry.label, error });
-          console.error(`[MarcieBlogEditor] Error al generar portada para ${entry.id}:`, error);
-        }
-      }
-
-      session.articlesByAudience = articlesByAudience;
-      session.article = articlesByAudience[currentAudience];
+      article.featuredImage = await generateArticleImageWithGemini({
+        article,
+        sessionId: session.id,
+        approachId: currentAudience,
+        approachLabel: getEditorialAudienceLabel(currentAudience)
+      });
+      session.articlesByAudience = { ...(session.articlesByAudience || {}), [currentAudience]: article };
+      session.article = article;
       await saveMarcieSession(session);
       setSyncStatus("🟢 Sincronizado con Firebase");
-      if (failures.length) {
-        showToast(`Se generaron ${3 - failures.length}/3 portadas. Fallaron: ${failures.map((item) => item.label).join(", ")}.`, "warning");
-      } else {
-        showToast("Las 3 portadas editoriales fueron generadas y guardadas.", "success");
-      }
+      showToast(`Portada generada para ${getEditorialAudienceLabel(currentAudience)}.`, "success");
     } catch (error) {
-      console.error("[MarcieBlogEditor] Error al generar las portadas:", error);
-      setSyncStatus("⚠️ Error al generar portadas", true);
-      showToast(`No se pudieron generar las portadas: ${error.message}`, "error");
+      console.error(`[MarcieBlogEditor] Error al generar portada para ${currentAudience}:`, error);
+      setSyncStatus("⚠️ Error al generar la portada", true);
+      showToast(`No se pudo generar la portada: ${error.message}`, "error");
     } finally {
       appState.generatingImageSessionId = null;
       renderArticleFeaturedImage(session, article);
@@ -4461,7 +4525,9 @@ function startAutomationProgressAnimations(root) {
     };
     addAnimation(root.querySelector("[data-agent-avatar]"), { translateY: [-5, 5], rotate: [-1.5, 1.5], duration: 1900, alternate: true, loop: true, ease: "inOutSine" });
     addAnimation(root.querySelector("[data-agent-orbit]"), { rotate: [0, 360], duration: 12000, loop: true, ease: "linear" });
+    addAnimation(root.querySelectorAll("[data-agent-orbit] > [data-agent-orbit-label]"), { rotate: [0, -360], duration: 12000, loop: true, ease: "linear" });
     addAnimation(root.querySelector("[data-agent-orbit-reverse]"), { rotate: [360, 0], duration: 9000, loop: true, ease: "linear" });
+    addAnimation(root.querySelectorAll("[data-agent-orbit-reverse] > [data-agent-orbit-label]"), { rotate: [0, 360], duration: 9000, loop: true, ease: "linear" });
     addAnimation(root.querySelectorAll("[data-agent-spark]"), { scale: [0.65, 1.25], opacity: [0.35, 1], duration: 1250, alternate: true, loop: true, ease: "inOutSine" });
     addAnimation(root.querySelector("[data-agent-bubble]"), { translateY: [0, -4], scale: [0.98, 1.015], duration: 1600, alternate: true, loop: true, ease: "inOutSine" });
     addAnimation(root.querySelectorAll("[data-automation-stage]"), { translateY: [14, 0], opacity: [0, 1], duration: 620, ease: "out(3)" });
@@ -4493,8 +4559,8 @@ function showAutomatedSessionProgress(session) {
           <span data-agent-confetti class="automation-agent-confetti is-two"></span>
           <span data-agent-confetti class="automation-agent-confetti is-three"></span>
           <div class="automation-agent-visual">
-            <div data-agent-orbit class="automation-agent-orbit is-outer"><span>Idea</span><span>Texto</span><span>SEO</span></div>
-            <div data-agent-orbit-reverse class="automation-agent-orbit is-inner"><span>✦</span><span>Imagen</span></div>
+            <div data-agent-orbit class="automation-agent-orbit is-outer" aria-hidden="true"><span data-agent-orbit-label class="automation-agent-orbit-label">Idea</span><span data-agent-orbit-label class="automation-agent-orbit-label">Texto</span><span data-agent-orbit-label class="automation-agent-orbit-label">SEO</span></div>
+            <div data-agent-orbit-reverse class="automation-agent-orbit is-inner" aria-hidden="true"><span class="automation-agent-orbit-glyph">✦</span><span data-agent-orbit-label class="automation-agent-orbit-label">Imagen</span></div>
             <div data-agent-avatar class="automation-agent-avatar">
               <div class="automation-agent-halo"></div>
               <img src="/MarcieBlogEditorLogo2.png" alt="Agente editorial Marcie trabajando" />
@@ -4506,7 +4572,7 @@ function showAutomatedSessionProgress(session) {
             <h4>${escapeHtml(session.topic || session.title)}</h4>
             <div data-agent-bubble class="automation-agent-bubble">
               <span class="automation-agent-bubble-face">✦</span>
-              <p data-automation-message>Estoy organizando las ideas y preparando tres enfoques únicos...</p>
+              <p data-automation-message>Estoy organizando las ideas y preparando cuatro enfoques únicos...</p>
             </div>
             <div class="automation-agent-progress-meta"><span>Producción completa</span><strong data-automation-percent>0%</strong></div>
             <div class="automation-agent-progress-track"><div data-automation-bar class="automation-agent-progress-bar"></div></div>
@@ -4514,7 +4580,7 @@ function showAutomatedSessionProgress(session) {
         </section>
         <div class="automation-agent-steps">
           ${[
-            ["proposals", "✦", "Enfoques", "3 propuestas"],
+            ["proposals", "✦", "Enfoques", "4 propuestas"],
             ["articles", "✎", "Artículos", "Redacción"],
             ["covers", "▧", "Portadas", "Imagen IA"],
             ["review", "◎", "Análisis", "Calidad + SEO"],
@@ -4578,20 +4644,38 @@ async function saveAutomationStage(session, stage, progress, message) {
   await saveMarcieSession(session);
 }
 
+const AUTOMATED_COVER_GAP_MS = 20_000;
+const AUTOMATED_COVER_RETRY_DELAY_MS = 30_000;
+
+function waitForAutomatedCover(delayMs) {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(delayMs) || 0)));
+}
+
+async function generateAutomatedCoverWithRetry(options, onQuotaWait) {
+  try {
+    return await generateArticleImageWithGemini(options);
+  } catch (error) {
+    if (Number(error?.status) !== 429) throw error;
+    if (typeof onQuotaWait === "function") onQuotaWait(AUTOMATED_COVER_RETRY_DELAY_MS);
+    await waitForAutomatedCover(AUTOMATED_COVER_RETRY_DELAY_MS);
+    return generateArticleImageWithGemini(options);
+  }
+}
+
 async function runAutomatedSessionWorkflow(session, specifications = []) {
   const toneSpecifications = specifications
     .filter((item) => String(item || "").toLowerCase().startsWith("#tono "))
     .map((item) => String(item).replace(/^#tono\s+/i, "").trim())
     .filter(Boolean);
   const toneInstruction = toneSpecifications.length
-    ? `\nTonos transversales obligatorios: ${toneSpecifications.join(", ")}. Conserva estos tonos en los tres enfoques y adáptalos sin perder su esencia: para docentes, voz de colega experto; para estudiantes, lenguaje directo y motivador sin infantilizar; para familias, voz clara, empática y práctica.`
+    ? `\nTonos transversales obligatorios: ${toneSpecifications.join(", ")}. Conserva estos tonos en los cuatro enfoques y adáptalos sin perder su esencia: para docentes, voz de colega experto; para estudiantes, lenguaje directo y motivador sin infantilizar; para familias, voz clara, empática y práctica; para coordinadores, voz estratégica, institucional y accionable.`
     : "";
   const specificationText = specifications.length
     ? `\nEspecificaciones obligatorias del usuario:\n${specifications.map((item) => `- ${item}`).join("\n")}${toneInstruction}`
     : toneInstruction;
   const selectedAudienceIds = Array.isArray(session.selectedAudiences) && session.selectedAudiences.length
     ? session.selectedAudiences
-    : ["educators", "students", "parents"];
+    : ["educators", "students", "parents", "coordinators"];
   const audiences = ARTICLE_EXPORT_AUDIENCES.filter(({ id }) => selectedAudienceIds.includes(id));
   try {
     if (sessionUsesAida(session) && session.trends?.[0]?.editorialMode !== "aida") {
@@ -4607,50 +4691,74 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
     const proposalResponse = await generateProposalsForMode({
       session,
       topic: session.topic,
-      signals: toneInstruction ? [...specifications, toneInstruction.trim()] : specifications
+      signals: toneInstruction ? [...specifications, toneInstruction.trim()] : specifications,
+      onResearchProgress: async ({ proposal, index, total }) => {
+        updateAutomatedSessionProgress("proposals", `Investigando propuesta ${index + 1}/${total}: ${proposal.audienceLabel || proposal.audience}...`, 10 + Math.round(((index + 1) / total) * 8));
+        await saveMarcieSession(session);
+      }
     });
     const proposals = Array.isArray(proposalResponse?.proposals) ? proposalResponse.proposals : [];
     if (proposals.length < audiences.length) throw new Error("Gemini no devolvió una propuesta para cada público seleccionado.");
     session.proposals = proposals;
     session.status = "proposal_ready";
-    await saveAutomationStage(session, "articles", 20, "Propuestas listas. Comenzando la redacción de los tres artículos...");
+    await saveAutomationStage(session, "articles", 20, `Propuestas listas. Comenzando la redacción de ${audiences.length} artículos...`);
 
     const articlesByAudience = {};
-    for (let index = 0; index < audiences.length; index += 1) {
-      const audience = audiences[index];
-      const proposal = proposals.find((item) => item.audience === audience.id) || proposals[index];
-      updateAutomatedSessionProgress("articles", `Redactando ${index + 1}/${audiences.length}: ${audience.label}...`, 25 + index * 9);
-      const article = await draftArticleForMode({
-        session,
-        title: proposal.title || session.topic,
-        topic: session.topic,
-        audience: audience.id,
-        brief: `${proposal.brief || proposal.angle || session.topic}${specificationText}`
-      });
-      article.automationSpecifications = [...specifications];
-      articlesByAudience[audience.id] = article;
-      session.articlesByAudience = articlesByAudience;
-      session.article = article;
-      session.audience = audience.id;
-      await saveMarcieSession(session);
+    try {
+      for (let index = 0; index < audiences.length; index += 1) {
+        const audience = audiences[index];
+        const proposal = proposals.find((item) => item.audience === audience.id) || proposals[index];
+        session.audience = audience.id;
+        window.__marcieShowArticleGenerationSpinner?.(session, {
+          current: index + 1,
+          total: audiences.length,
+          audienceLabel: audience.label,
+          message: `Marcie está redactando el enfoque para ${audience.label.toLowerCase()} y organizando sus fuentes.`
+        });
+        updateAutomatedSessionProgress("articles", `Redactando ${index + 1}/${audiences.length}: ${audience.label}...`, 25 + index * 9);
+        const article = await draftArticleForMode({
+          session,
+          title: proposal.title || session.topic,
+          topic: session.topic,
+          audience: audience.id,
+          brief: `${proposal.brief || proposal.angle || session.topic}${specificationText}`
+        });
+        article.automationSpecifications = [...specifications];
+        articlesByAudience[audience.id] = article;
+        session.articlesByAudience = articlesByAudience;
+        session.article = article;
+        await saveMarcieSession(session);
+      }
+    } finally {
+      window.__marcieHideArticleGenerationSpinner?.();
     }
 
     session.articlesByAudience = articlesByAudience;
-    await saveAutomationStage(session, "covers", 50, "Artículos listos. Generando las tres imágenes de portada...");
+    await saveAutomationStage(session, "covers", 50, `Artículos listos. Generando ${audiences.length} portadas, una por una...`);
     const coverErrors = [];
     for (let index = 0; index < audiences.length; index += 1) {
       const audience = audiences[index];
-      updateAutomatedSessionProgress("covers", `Creando portada ${index + 1}/${audiences.length}: ${audience.label}...`, 53 + index * 7);
+      if (index > 0) {
+        updateAutomatedSessionProgress("covers", `Esperando antes de la portada ${index + 1}/${audiences.length} para proteger la cuota de Gemini...`, 52 + index * 4);
+        await waitForAutomatedCover(AUTOMATED_COVER_GAP_MS);
+      }
+      updateAutomatedSessionProgress("covers", `Creando portada ${index + 1}/${audiences.length}: ${audience.label}...`, 54 + index * 4);
       try {
-        articlesByAudience[audience.id].featuredImage = await generateArticleImageWithGemini({
+        articlesByAudience[audience.id].featuredImage = await generateAutomatedCoverWithRetry({
           article: articlesByAudience[audience.id],
           sessionId: session.id,
           approachId: audience.id,
           approachLabel: audience.label
+        }, (retryDelayMs) => {
+          updateAutomatedSessionProgress("covers", `Cuota temporal alcanzada para ${audience.label}. Reintentando en ${Math.round(retryDelayMs / 1000)} segundos...`, 54 + index * 4);
         });
       } catch (error) {
         coverErrors.push(`${audience.label}: ${error.message}`);
+        console.error(`[MarcieBlogEditor] Error al generar portada automatizada para ${audience.id}:`, error);
       }
+      session.articlesByAudience = articlesByAudience;
+      session.article = articlesByAudience[audience.id];
+      session.audience = audience.id;
       await saveMarcieSession(session);
     }
 
@@ -4709,7 +4817,9 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
       progress: 100,
       message: remainingFindings
         ? `Automatización terminada con ${remainingFindings} hallazgos pendientes.`
-        : coverErrors.length ? "Automatización terminada con incidencias en algunas portadas." : "Producción editorial completada.",
+        : coverErrors.length
+          ? `Automatización terminada con ${coverErrors.length} portada(s) pendiente(s); pueden reintentarse individualmente.`
+          : "Producción editorial completada con sus portadas.",
       coverErrors,
       remainingFindings,
       completedAt: new Date().toISOString()
@@ -4731,6 +4841,113 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
     updateAutomatedSessionProgress(session.automation.stage || "proposals", `La automatización se detuvo: ${error.message}`, session.automation.progress || 0);
     throw error;
   }
+}
+
+async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSession = true, sourceTrend = null } = {}) {
+  const editorialProfiles = await listEditorialProfilesOnce().catch(() => []);
+  const request = await showNewSessionModal({
+    defaultValue,
+    allowBlankSession,
+    freeModeDefault: getActiveMarciePromptProfileId() === FREE_PROMPT_PROFILE_ID,
+    activePromptProfileId: getActiveMarciePromptProfileId(),
+    promptProfiles: listMarciePromptProfiles().map(({ id, name }) => ({ id, name })),
+    editorialProfiles,
+    onRefineTopic: (topic, specifications, editorialMode, editorialProfileSnapshot) => refineTopicForMode({ editorialMode, editorialProfileSnapshot, topic, specifications })
+  });
+  if (!request) return null;
+
+  if (request.mode === "automated") {
+    setActiveMarciePromptProfile(request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID);
+  }
+  if (request.editorialMode === "custom") {
+    const savedProfile = await saveEditorialProfile({ ...(request.editorialProfileSnapshot || {}), id: request.editorialProfileSnapshot?.id || undefined });
+    request.editorialProfileId = savedProfile.id;
+    request.editorialProfileVersion = savedProfile.version;
+    request.editorialProfileSnapshot = savedProfile;
+  }
+
+  const title = request.title;
+  const topic = request.topic;
+  const initialAudience = request.selectedAudiences?.[0] || (request.editorialMode === "aida" ? "parents" : "educators");
+  const trendSnapshot = sourceTrend ? { ...sourceTrend, sources: [] } : null;
+  const initialStatus = trendSnapshot ? "trends_ready" : "new";
+  const initialArticle = {
+    schemaVersion: "1.0",
+    title,
+    subtitle: trendSnapshot?.summary || "",
+    audience: initialAudience,
+    blocks: [],
+    sources: [],
+    researchSources: [],
+    editorialMode: request.editorialMode || "marcie",
+    modeCompatibility: request.editorialMode === "aida" ? "empty" : "compatible",
+    seo: { title, description: trendSnapshot?.summary || "", keywords: [], slug: "" }
+  };
+  const automation = request.mode === "automated"
+    ? { mode: "automated", promptMode: request.freeMode ? "free" : "configured", promptProfileId: request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID, status: "queued", stage: "proposals", progress: 0 }
+    : null;
+  const sessionPayload = {
+    title,
+    topic,
+    status: initialStatus,
+    audience: initialAudience,
+    article: initialArticle,
+    specifications: request.specifications,
+    editorialMode: request.editorialMode || "marcie",
+    editorialProfileId: request.editorialProfileId || request.editorialMode || "marcie",
+    editorialProfileVersion: request.editorialProfileVersion || 1,
+    editorialProfileSnapshot: request.editorialProfileSnapshot || { name: "Marcie" },
+    selectedAudiences: request.selectedAudiences || ["educators", "students", "parents", "coordinators"],
+    automation,
+    trends: trendSnapshot ? [trendSnapshot] : [],
+    log: trendSnapshot ? [{ id: `log-${Date.now()}`, at: new Date().toISOString(), message: `Sesión creada desde el radar: ${String(sourceTrend.topic || sourceTrend.title || title)}` }] : []
+  };
+
+  setSyncStatus("Creando sesión en Firebase...");
+  const newId = await createMarcieSession(sessionPayload);
+  const now = Date.now();
+  const localSession = {
+    id: newId,
+    ...sessionPayload,
+    articlesByAudience: { [initialAudience]: initialArticle },
+    createdAt: now,
+    updatedAt: now
+  };
+  appState.sessions = [localSession, ...appState.sessions.filter((session) => session.id !== newId)];
+  appState.activeSessionId = newId;
+  appState.currentTab = "article";
+  renderSessionList();
+  renderActiveSession();
+  setSyncStatus("🟢 Sincronizado con Firebase");
+
+  if (request.mode === "automated") {
+    showAutomatedSessionProgress(localSession);
+    await runAutomatedSessionWorkflow(localSession, request.specifications);
+  } else if (trendSnapshot) {
+    setSyncStatus("Generando propuestas desde la tendencia...");
+    try {
+      const proposalResponse = await generateProposalsForMode({
+        session: localSession,
+        topic,
+        signals: Array.isArray(trendSnapshot.signals) ? trendSnapshot.signals : []
+      });
+      localSession.proposals = Array.isArray(proposalResponse?.proposals) ? proposalResponse.proposals : [];
+      localSession.status = localSession.proposals.length ? "proposal_ready" : "trends_ready";
+      await saveMarcieSession(localSession);
+      renderSessionList();
+      renderActiveSession();
+      setSyncStatus("🟢 Sesión y propuestas sincronizadas");
+      showToast(localSession.proposals.length ? "Sesión creada con propuestas editoriales." : "Sesión creada con la tendencia seleccionada.", "success");
+    } catch (error) {
+      console.error("[MarcieBlogEditor] No se pudieron generar propuestas desde el radar:", error);
+      setSyncStatus("🟡 Sesión creada; propuestas pendientes");
+      showToast("La sesión se creó con la tendencia, pero las propuestas deben reintentarse.", "warning");
+    }
+  } else {
+    showToast(request.mode === "blank" ? "Sesión en blanco creada." : "Sesión creada exitosamente", "success");
+  }
+
+  return newId;
 }
 
 function setupEventListeners() {
@@ -4859,87 +5076,7 @@ function setupEventListeners() {
   if (dom.btnNewSession) {
     dom.btnNewSession.addEventListener("click", async () => {
       try {
-        const editorialProfiles = await listEditorialProfilesOnce().catch(() => []);
-        const request = await showNewSessionModal({
-          allowBlankSession: true,
-          freeModeDefault: getActiveMarciePromptProfileId() === FREE_PROMPT_PROFILE_ID,
-          activePromptProfileId: getActiveMarciePromptProfileId(),
-          promptProfiles: listMarciePromptProfiles().map(({ id, name }) => ({ id, name })),
-          editorialProfiles,
-          onRefineTopic: (topic, specifications, editorialMode, editorialProfileSnapshot) => refineTopicForMode({ editorialMode, editorialProfileSnapshot, topic, specifications })
-        });
-        if (!request) return;
-        if (request.mode === "automated") {
-          setActiveMarciePromptProfile(request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID);
-        }
-        const title = request.title;
-        const topic = request.topic;
-        if (request.editorialMode === "custom") {
-          const savedProfile = await saveEditorialProfile({ ...(request.editorialProfileSnapshot || {}), id: request.editorialProfileSnapshot?.id || undefined });
-          request.editorialProfileId = savedProfile.id;
-          request.editorialProfileVersion = savedProfile.version;
-          request.editorialProfileSnapshot = savedProfile;
-        }
-        setSyncStatus("Creando sesión en Firebase...");
-        const initialAudience = request.selectedAudiences?.[0] || (request.editorialMode === "aida" ? "parents" : "educators");
-        const initialArticle = {
-          schemaVersion: "1.0",
-          title,
-          audience: initialAudience,
-          blocks: [],
-          sources: [],
-          researchSources: [],
-          editorialMode: request.editorialMode || "marcie",
-          modeCompatibility: request.editorialMode === "aida" ? "empty" : "compatible",
-          seo: { title, description: "", keywords: [], slug: "" }
-        };
-
-        const newId = await createMarcieSession({
-          title,
-          topic,
-          status: "new",
-          audience: initialAudience,
-          article: initialArticle,
-          specifications: request.specifications,
-          editorialMode: request.editorialMode || "marcie",
-          editorialProfileId: request.editorialProfileId || request.editorialMode || "marcie",
-          editorialProfileVersion: request.editorialProfileVersion || 1,
-          editorialProfileSnapshot: request.editorialProfileSnapshot || { name: "Marcie" },
-          selectedAudiences: request.selectedAudiences || ["educators", "students", "parents"],
-          automation: request.mode === "automated" ? { mode: "automated", promptMode: request.freeMode ? "free" : "configured", promptProfileId: request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID, status: "queued", stage: "proposals", progress: 0 } : null
-        });
-
-        const now = Date.now();
-        const localSession = {
-          id: newId,
-          title,
-          topic,
-          status: "new",
-          audience: initialAudience,
-          article: initialArticle,
-          articlesByAudience: { [initialAudience]: initialArticle },
-          specifications: request.specifications,
-          editorialMode: request.editorialMode || "marcie",
-          editorialProfileId: request.editorialProfileId || request.editorialMode || "marcie",
-          editorialProfileVersion: request.editorialProfileVersion || 1,
-          editorialProfileSnapshot: request.editorialProfileSnapshot || { name: "Marcie" },
-          selectedAudiences: request.selectedAudiences || ["educators", "students", "parents"],
-          automation: request.mode === "automated" ? { mode: "automated", promptMode: request.freeMode ? "free" : "configured", promptProfileId: request.promptProfileId || DEFAULT_PROMPT_PROFILE_ID, status: "queued", stage: "proposals", progress: 0 } : null,
-          trends: [],
-          createdAt: now,
-          updatedAt: now
-        };
-        appState.sessions = [localSession, ...appState.sessions.filter((session) => session.id !== newId)];
-        appState.activeSessionId = newId;
-        renderSessionList();
-        renderActiveSession();
-        setSyncStatus("🟢 Sincronizado con Firebase");
-        if (request.mode === "automated") {
-          showAutomatedSessionProgress(localSession);
-          await runAutomatedSessionWorkflow(localSession, request.specifications);
-        } else {
-          showToast(request.mode === "blank" ? "Sesión en blanco creada." : "Sesión creada exitosamente", "success");
-        }
+        await createEditorialSessionFromModal({ allowBlankSession: true });
       } catch (error) {
         console.error("Error al crear sesión:", error);
         setSyncStatus("⚠️ Error al crear sesión", true);
@@ -5002,7 +5139,13 @@ function setupEventListeners() {
       session.audience = audience;
       if (!session.articlesByAudience) session.articlesByAudience = {};
 
-      const audLabel = audience === "educators" ? "Docentes y directivos" : audience === "students" ? "Estudiantes" : "Padres y tutores";
+      const audLabel = audience === "educators"
+        ? "Docentes y directivos"
+        : audience === "students"
+          ? "Estudiantes"
+          : audience === "coordinators"
+            ? "Coordinadores académicos y directivos escolares"
+            : "Padres y tutores";
       updateAudienceSelector(audience);
 
       // Si ya existe el artículo redactado para esta audiencia, conmutarlo inmediatamente
@@ -5086,7 +5229,7 @@ function setupEventListeners() {
           <div class="flex flex-col gap-3">
             <p class="text-xs text-slate-500">Enlace de lectura para el artículo seleccionado:</p>
             <div class="flex gap-2">
-              <input type="text" class="input-field text-xs" readonly value="${window.location.origin}/MarcieBlogEditor/MarcieBlogEditor.html?session=${session.id}" />
+              <input type="text" class="input-field text-xs" readonly value="${window.location.origin}/MarcieBlogEditor.html?session=${session.id}" />
             </div>
             <p class="text-[11px] text-slate-400">Solo usuarios con acceso autorizado pueden revisar y editar este contenido.</p>
           </div>
@@ -5245,7 +5388,7 @@ function setupEventListeners() {
         3: {
           color:   "purple",
           title:   "Paso 3 — Crear propuestas",
-          desc:    "Genera hasta 3 propuestas de artículo con diferentes enfoques según la audiencia elegida (Docentes, Estudiantes o Padres). Incluye título, subtítulo, estructura y ángulo diferenciador.",
+          desc:    "Genera hasta 4 propuestas de artículo con diferentes enfoques para docentes, estudiantes, familias y coordinadores académicos. Incluye título, subtítulo, estructura y ángulo diferenciador.",
           tips:    ["Cambia la audiencia en la barra superior antes de generar.", "Puedes seleccionar una propuesta como base y redactar el artículo completo.", "Las propuestas respetan el brief editorial de tu institución."],
           badge:   "Creatividad"
         },
@@ -5843,22 +5986,6 @@ function setupEventListeners() {
     });
   }
 
-  // Botones de fuentes externas — URLs dinámicas según el tema de la sesión
-  document.querySelectorAll("[data-source-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const source = btn.getAttribute("data-source-action");
-      const session = getActiveSession();
-      const query = encodeURIComponent(session?.topic || session?.title || "educación IA");
-
-      const urls = {
-        "google-trends": `https://trends.google.es/trends/explore?q=${query}&geo=MX`,
-        "twitter":       `https://twitter.com/search?q=${query}&src=typed_query&f=live`,
-        "forums":        `https://scholar.google.com/scholar?q=${query}`
-      };
-      window.open(urls[source] || `https://www.google.com/search?q=${query}`, "_blank", "noopener");
-    });
-  });
-
   // Avatar / Cierre de sesión
   if (dom.userAvatar) {
     dom.userAvatar.addEventListener("click", () => {
@@ -6142,6 +6269,14 @@ export async function initApp() {
       await saveMarcieSession(session);
       renderSessionList();
       renderActiveSession();
+    },
+    onCreateSessionFromTrend: async (trend) => {
+      const topic = String(trend?.topic || trend?.title || "Tema educativo emergente").trim();
+      return createEditorialSessionFromModal({
+        defaultValue: topic,
+        allowBlankSession: false,
+        sourceTrend: trend
+      });
     },
     onOpenSession: (sessionId, audience) => {
       appState.activeSessionId = sessionId;

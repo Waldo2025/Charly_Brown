@@ -24,14 +24,14 @@ Marcie Blog Editor es un **MVP funcional avanzado / beta interna de un copiloto 
 ### Inteligencia editorial con Gemini
 
 - Análisis del tema y síntesis de tendencias.
-- Generación de tres propuestas diferenciadas por audiencia.
+- Generación de cuatro propuestas diferenciadas por audiencia.
 - Refinamiento del tema.
 - Redacción de artículos estructurados.
 - Revisión de calidad, tono, SEO y hallazgos editoriales.
 - Regeneración/corrección de artículos.
 - Generación de portadas 16:9 y optimización WebP/JPEG para web.
 - Perfiles de instrucciones editoriales configurables y modo libre.
-- Flujo automatizado actual: propuestas → tres artículos → portadas → revisión → correcciones.
+- Flujo automatizado actual: propuestas → cuatro artículos → cuatro portadas secuenciales con control de cuota → revisión → correcciones; la regeneración manual sigue siendo individual por propuesta.
 
 ### Datos, seguridad y exportación
 
@@ -40,7 +40,7 @@ Marcie Blog Editor es un **MVP funcional avanzado / beta interna de un copiloto 
 - Copia local de respaldo y suscripción en tiempo real.
 - Reglas de Firestore para propietario y roles editoriales.
 - Contratos canónicos para sesiones, fuentes, propuestas y artículos.
-- Exportación del artículo actual o los tres artículos como HTML/ZIP.
+- Exportación del artículo actual o los cuatro artículos como HTML/ZIP.
 - Portadas incluidas en el paquete y estilos coherentes entre vista previa y exportación.
 
 ## Limitaciones reales del estado actual

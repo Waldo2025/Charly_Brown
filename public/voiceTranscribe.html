@@ -820,7 +820,80 @@
             }
 
             .session-item .btn-session-menu {
+            appearance: none;
+            -webkit-appearance: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            width: 1.85rem;
+            height: 1.85rem;
+            min-width: 1.85rem;
+            padding: 0;
+            border: 0;
+            border-radius: 0.55rem;
+            background: transparent;
+            box-shadow: none;
             color: rgba(71, 85, 105, 0.9) !important;
+            cursor: pointer;
+            transition: color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+            }
+
+            .session-item .btn-session-menu:hover,
+            .session-item .btn-session-menu:focus-visible,
+            .session-item.menu-open .btn-session-menu {
+            color: var(--cb-chrome-bg, #4f46e5) !important;
+            background: rgba(79, 70, 229, 0.09);
+            }
+
+            .session-item .btn-session-menu:focus-visible {
+            outline: 2px solid rgba(99, 102, 241, 0.55);
+            outline-offset: 2px;
+            }
+
+            #sessionList .menu-session {
+            width: 10.5rem;
+            padding: 0.35rem;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            border-radius: 0.75rem;
+            background: var(--app-bg-color, #ffffff) !important;
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14) !important;
+            overflow: hidden;
+            }
+
+            #sessionList .menu-session button {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 100%;
+            min-height: 2.15rem;
+            padding: 0.5rem 0.65rem;
+            border: 0;
+            border-radius: 0.5rem;
+            background: transparent;
+            box-shadow: none;
+            color: var(--app-text-color, #334155);
+            font: inherit;
+            line-height: 1.2;
+            text-align: left;
+            cursor: pointer;
+            }
+
+            #sessionList .menu-session button:hover,
+            #sessionList .menu-session button:focus-visible {
+            background: rgba(99, 102, 241, 0.09);
+            color: var(--cb-chrome-bg, #4f46e5);
+            outline: none;
+            }
+
+            #sessionList .menu-session .btn-delete-session:hover,
+            #sessionList .menu-session .btn-delete-session:focus-visible {
+            background: rgba(220, 38, 38, 0.09);
+            color: #dc2626;
+            }
+
+            body[data-page="voicetranscribe.html"] #sessionList .btn-session-menu i,
+            body[data-page="voicetranscribe.html"] #sessionList .menu-session button :where(i, span) {
+            color: inherit !important;
             }
 
             .session-item-date {
@@ -847,6 +920,16 @@
 
             body.theme-dark .session-item .btn-session-menu {
             color: rgba(203, 213, 225, 0.9) !important;
+            }
+
+            body.theme-dark #sessionList .menu-session {
+            border-color: rgba(100, 116, 139, 0.45);
+            box-shadow: 0 18px 38px rgba(2, 6, 23, 0.48) !important;
+            }
+
+            body.theme-dark #sessionList .menu-session button:hover,
+            body.theme-dark #sessionList .menu-session button:focus-visible {
+            background: rgba(129, 140, 248, 0.15);
             }
 
             body.theme-dark .tone-badge {
@@ -1816,8 +1899,8 @@
 
         <script src="js/html-docx.js"></script>
         <script src="vendor/lamejs/lame.min.js"></script>
-        <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.833"></script>
-  <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
+        <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.858"></script>
+  <script type="module" src="js/sidebar.js?v=2026-1.0.10.858"></script>
 
 
         <!-- MAIN SCRIPT (MODULE) -->

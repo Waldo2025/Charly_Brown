@@ -142,8 +142,7 @@ function applySidebarRoleVisibility(role = "") {
 
   // Hard guard por enlace para que cada opción respete su rol real.
   const roleLockedIds = {
-    gestionUsuariosLink: ["admin"],
-    lecturasGameLink: ["admin"]
+    gestionUsuariosLink: ["admin"]
   };
   Object.entries(roleLockedIds).forEach(([id, allowedRoles]) => {
     const el = document.getElementById(id);
@@ -454,7 +453,6 @@ async function initializeSidebarAuth() {
         try { role = await resolveUserRole(user); } catch (_) { role = null; }
       }
       applySidebarRoleVisibility(role);
-      setTimeout(() => applySidebarRoleVisibility(role), 100);
       const analisisLink = document.getElementById("analisisEditorialLink");
       if (analisisLink && !analisisLink.dataset.roleVisibility) {
         const permitidos = ["admin","author","editor","developer"];
@@ -462,8 +460,6 @@ async function initializeSidebarAuth() {
       }
       const gestionUsuariosLink = document.getElementById("gestionUsuariosLink");
       if (gestionUsuariosLink && !gestionUsuariosLink.dataset.roleVisibility) gestionUsuariosLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
-      const lecturasGameLink = document.getElementById("lecturasGameLink");
-      if (lecturasGameLink && !lecturasGameLink.dataset.roleVisibility) lecturasGameLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
       await startSidebarUnreadListener(user.uid);
     });
   });

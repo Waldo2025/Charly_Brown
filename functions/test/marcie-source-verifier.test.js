@@ -2,10 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   extractPageContent,
+  extractBibliographicMetadata,
+  formatApaCitation,
   retrieveSourcePage,
   verifyCandidateSources
 } = require("../src/marcie-source-verifier.js");
-const { generateJson, parseJsonResponse, rankTrendOpportunities, refreshMarcieTrends, researchDateWindow, verifyArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
+const { extractAttributedReferences, generateJson, parseJsonResponse, rankTrendOpportunities, refreshMarcieTrends, researchDateWindow, verifyArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
 
 const publicDns = async () => [{ address: "93.184.216.34", family: 4 }];
 const html = (title, text) => `<!doctype html><html><head><title>${title}</title></head><body><main><h1>${title}</h1><p>${text.repeat(8)}</p></main></body></html>`;
@@ -55,6 +57,38 @@ test("HTML extraction removes executable chrome and keeps the real title and art
   assert.equal(page.title, "Título real");
   assert.match(page.text, /Contenido documental/);
   assert.doesNotMatch(page.text, /secreto|Menú/);
+});
+
+test("bibliographic metadata produces APA 7 without inventing missing fields", () => {
+  const metadata = extractBibliographicMetadata(`<script type="application/ld+json">{"@type":"ScholarlyArticle","author":[{"name":"María Pérez"}],"publisher":{"name":"Revista Educación"},"identifier":"https://doi.org/10.1234/abc.5"}</script>`);
+  assert.deepEqual(metadata.authors, ["María Pérez"]);
+  assert.equal(metadata.publisher, "Revista Educación");
+  assert.equal(metadata.doi, "10.1234/abc.5");
+  assert.equal(formatApaCitation({ authors: metadata.authors, publishedAt: "2026-08-10", title: "Aprendizaje y memoria", publisher: metadata.publisher, doi: metadata.doi }), "María Pérez (10 de agosto de 2026). Aprendizaje y memoria. Revista Educación. https://doi.org/10.1234/abc.5");
+  assert.equal(formatApaCitation({ authors: [], title: "Guía docente", publisher: "UNESCO", url: "https://unesco.example/guia" }), "UNESCO (s. f.). Guía docente. https://unesco.example/guia");
+});
+
+test("direct quotations survive only when they are short and literally present in the verified page", async () => {
+  const client = { models: { generateContent: async () => modelJson({ attributedReferences: [
+    { personOrInstitution: "María Pérez", role: "investigadora", text: "La curiosidad activa el aprendizaje", type: "direct_quote", sourceId: "s1", locator: "Introducción" },
+    { personOrInstitution: "María Pérez", role: "investigadora", text: "Esta frase no aparece en la página", type: "direct_quote", sourceId: "s1", locator: "Introducción" },
+    { personOrInstitution: "UNESCO", text: "La educación necesita contextos seguros", type: "paraphrase", sourceId: "s2" }
+  ] }) } };
+  const references = await extractAttributedReferences({
+    client,
+    verifiedSources: [
+      { id: "s1", authors: ["María Pérez"], publisher: "Universidad Ejemplo", domain: "example.edu", verificationStatus: "verified" },
+      { id: "s2", authors: [], publisher: "UNESCO", domain: "unesco.org", verificationStatus: "verified" }
+    ],
+    retrievedPages: [
+      { id: "s1", text: "María Pérez, investigadora, sostiene: La curiosidad activa el aprendizaje en contextos significativos." },
+      { id: "s2", text: "UNESCO analiza la importancia de contextos seguros para la educación." }
+    ]
+  });
+  assert.equal(references.length, 2);
+  assert.equal(references[0].type, "direct_quote");
+  assert.equal(references[0].text, "La curiosidad activa el aprendizaje");
+  assert.equal(references[1].type, "paraphrase");
 });
 
 test("publication date is recovered from the page and current sources outside the selected month are rejected", async () => {

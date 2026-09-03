@@ -123,6 +123,64 @@ function publicationDateFromJsonLd(source = "") {
   return "";
 }
 
+function jsonLdDocuments(source = "") {
+  const documents = [];
+  for (const match of String(source).matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const value = JSON.parse(decodeHtml(match[1]).trim());
+      documents.push(...(Array.isArray(value) ? value : [value]));
+    } catch (_) { /* malformed metadata is ignored */ }
+  }
+  return documents;
+}
+
+function metadataNames(value) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values.map((item) => clampText(typeof item === "string" ? item : item?.name, 300)).filter(Boolean);
+}
+
+function extractBibliographicMetadata(source = "") {
+  const authors = [];
+  let publisher = "";
+  let doi = "";
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    metadataNames(value.author || value.creator).forEach((name) => authors.push(name));
+    if (!publisher) publisher = metadataNames(value.publisher)[0] || clampText(value.isPartOf?.name, 300);
+    const identifiers = [value.doi, value.identifier, value.sameAs].flat().filter(Boolean).map(String);
+    if (!doi) doi = identifiers.map((item) => item.match(/(?:https?:\/\/doi\.org\/|doi:\s*)?(10\.\d{4,9}\/[-._;()/:a-z0-9]+)/i)?.[1] || "").find(Boolean) || "";
+    Object.values(value).forEach((nested) => {
+      if (nested && typeof nested === "object") visit(nested);
+    });
+  };
+  jsonLdDocuments(source).forEach(visit);
+  for (const tag of String(source).match(/<meta\b[^>]*>/gi) || []) {
+    const key = (htmlAttribute(tag, "name") || htmlAttribute(tag, "property")).toLowerCase();
+    const content = clampText(htmlAttribute(tag, "content"), 500);
+    if (["author", "citation_author", "dc.creator"].includes(key) && content) authors.push(content);
+    if (!publisher && ["og:site_name", "citation_journal_title", "dc.publisher"].includes(key)) publisher = content;
+    if (!doi && ["citation_doi", "dc.identifier"].includes(key)) doi = content.match(/10\.\d{4,9}\/[-._;()/:a-z0-9]+/i)?.[0] || "";
+  }
+  return { authors: [...new Set(authors)].slice(0, 12), publisher, doi };
+}
+
+function formatApaDate(publishedAt = "") {
+  const date = new Date(publishedAt);
+  if (!publishedAt || !Number.isFinite(date.getTime())) return "s. f.";
+  return new Intl.DateTimeFormat("es-ES", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(date);
+}
+
+function formatApaCitation(source = {}) {
+  const authorList = Array.isArray(source.authors) ? source.authors.filter(Boolean) : [clampText(source.authors, 500)].filter(Boolean);
+  const author = authorList.length ? authorList.join(", ") : clampText(source.publisher || source.domain, 500) || "Fuente sin autor";
+  const date = formatApaDate(source.publishedAt);
+  const title = clampText(source.title, 800) || "Documento sin título";
+  const publisher = clampText(source.publisher, 500);
+  const site = publisher && publisher.toLowerCase() !== author.toLowerCase() ? ` ${publisher}.` : "";
+  const locator = source.doi ? `https://doi.org/${String(source.doi).replace(/^https?:\/\/doi\.org\//i, "")}` : clampText(source.url || source.finalUrl, 3000);
+  return `${author} (${date}). ${title}.${site}${locator ? ` ${locator}` : ""}`.replace(/\s+/g, " ").trim();
+}
+
 function extractPublicationDate(source = "", pageUrl = "") {
   const jsonLdDate = publicationDateFromJsonLd(source);
   if (jsonLdDate) return { publishedAt: jsonLdDate, dateSource: "json_ld" };
@@ -161,7 +219,8 @@ function extractPageContent(raw = "", contentType = "text/html", pageUrl = "") {
   return {
     title: decodeHtml(titleMatch?.[1] || "").replace(/\s+/g, " ").trim().slice(0, 500),
     text: decodeHtml(stripped).replace(/[ \t]+/g, " ").replace(/\n\s*/g, "\n").trim().slice(0, 24000),
-    ...extractPublicationDate(source, pageUrl)
+    ...extractPublicationDate(source, pageUrl),
+    ...extractBibliographicMetadata(source)
   };
 }
 
@@ -214,7 +273,7 @@ async function retrieveSourcePage(candidate = {}, options = {}) {
     text: extracted.text, publishedAt: extracted.publishedAt, dateSource: extracted.dateSource,
     httpStatus: response.status, contentType,
     contentHash: crypto.createHash("sha256").update(extracted.text).digest("hex"), retrievedAt: new Date().toISOString(),
-    metadata: candidate
+    metadata: { ...candidate, pageAuthors: extracted.authors, pagePublisher: extracted.publisher, pageDoi: extracted.doi }
   };
 }
 
@@ -311,25 +370,27 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
       continue;
     }
     acceptedDomains.add(page.domain);
-    verifiedSources.push({
+    const verifiedSource = {
       id: page.id, title: page.retrievedTitle, url: page.finalUrl, requestedUrl: page.requestedUrl,
-      finalUrl: page.finalUrl, domain: page.domain, publisher: clampText(page.metadata.publisher || page.metadata.organization, 300),
-      authors: page.metadata.authors || page.metadata.author || "",
+      finalUrl: page.finalUrl, domain: page.domain, publisher: clampText(page.metadata.pagePublisher || page.domain, 300),
+      authors: Array.isArray(page.metadata.pageAuthors) ? page.metadata.pageAuthors : [],
       publishedAt: page.publishedAt || "", dateSource: page.dateSource || "unknown",
       year: page.publishedAt ? String(new Date(page.publishedAt).getUTCFullYear()) : clampText(page.metadata.year || page.metadata.publishedYear, 20),
       evidenceRole: page.metadata.evidenceRole || "current",
-      doi: clampText(page.metadata.doi, 300), sourceType: clampText(page.metadata.sourceType, 80) || "web",
+      doi: clampText(page.metadata.pageDoi, 300), sourceType: clampText(page.metadata.sourceType, 80) || "web",
       qualityTier: classifySourceQuality(page), verificationStatus: "verified", retrievalStatus: "success",
       verifiedAt: page.retrievedAt, retrievedAt: page.retrievedAt, contentHash: page.contentHash,
       supportSummary: clampText(assessment.supportSummary, 600), locator: clampText(assessment.locator, 300),
       supports: Array.isArray(assessment.supports) ? assessment.supports.map((value) => clampText(value, 160)).filter(Boolean).slice(0, 20) : []
-    });
+    };
+    verifiedSource.apaCitation = formatApaCitation(verifiedSource);
+    verifiedSources.push(verifiedSource);
   }
   return { verifiedSources, rejectedSources, retrievedPages: retrieved };
 }
 
 module.exports = {
   MAX_REDIRECTS, MAX_SOURCE_BYTES, SUPPORTED_CONTENT_TYPES,
-  assertPublicUrl, extractPageContent, extractPublicationDate, normalizedSourceUrl, retrieveSourcePage,
+  assertPublicUrl, extractPageContent, extractPublicationDate, extractBibliographicMetadata, formatApaCitation, normalizedSourceUrl, retrieveSourcePage,
   verifyCandidateSources
 };

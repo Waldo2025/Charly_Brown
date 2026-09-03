@@ -151,6 +151,8 @@ const sectionMenuProject = normalizeEscapeRoomProject({
     {
       id: "actividad-1",
       titulo: "Observa el patrón",
+      contexto: "El patrón alterna triángulos y círculos; el triángulo inicia cada serie.",
+      datos_clave: ["El triángulo inicia la serie.", "Las figuras se alternan."],
       media: { tipo: "imagen", url: "https://example.com/patron.png", alt: "Patrón geométrico" },
       preguntas: [{ id: "menu-q1", titulo: "Patrón", reto: "Responde.", respuesta_correcta: "triángulo" }]
     },
@@ -171,6 +173,8 @@ const sectionCardCount = (sectionMenuHtml.match(/<button\b[^>]*\bdata-menu-card(
 
 assert.equal(sectionMenuJson.modo_presentacion, "menu_secciones", "El paquete debe conservar el modo por secciones.");
 assert.equal(sectionMenuJson.instrucciones, sectionMenuProject.instrucciones, "El paquete debe conservar las instrucciones editables.");
+assert.equal(sectionMenuJson.misiones[0].contexto, sectionMenuProject.misiones[0].contexto, "El manifiesto debe conservar el expediente de contexto.");
+assert.deepEqual(sectionMenuJson.misiones[0].datos_clave, sectionMenuProject.misiones[0].datos_clave, "El manifiesto debe conservar las evidencias clave.");
 assert.equal(sectionCardCount, sectionMenuProject.misiones.length + 3, "El menú debe incluir exactamente N + 3 cards.");
 assert.match(sectionMenuHtml, /data-gallery-screen="menu"/, "El modo por secciones debe incluir un menú principal dedicado.");
 assert.match(sectionMenuHtml, /data-gallery-screen="instructions"/, "El modo por secciones debe incluir una vista dedicada de instrucciones.");
@@ -189,12 +193,14 @@ assert.match(sectionMenuCss, /@media \(max-width: 560px\)[\s\S]*\.sections-grid\
   "El menú debe usar una columna en móvil.");
 assert.match(sectionMenuCss, /@media \(prefers-reduced-motion: reduce\)/, "El CSS debe respetar movimiento reducido.");
 assert.match(sectionMenuJs, /ESCAPE_ROOM_PRESENTATION_MODE = "menu_secciones"/, "El runtime debe hidratar el modo por secciones.");
-assert.match(sectionMenuJs, /ESCAPE_ROOM_PROGRESS_VERSION = 2/, "La persistencia debe estar versionada.");
+assert.match(sectionMenuJs, /ESCAPE_ROOM_PROGRESS_VERSION = 3/, "La persistencia debe estar versionada.");
 assert.match(sectionMenuJs, /ESCAPE_ROOM_PROGRESS_FINGERPRINT = "[a-z0-9]+"/, "La persistencia debe incluir una huella estable.");
 assert.match(sectionMenuJs, /if \(!raw && !IS_MENU_MODE\)/, "Solo el modo salas debe migrar el progreso legacy.");
 assert.match(sectionMenuJs, /function syncMenuUnlocksFromProgress\(/, "El menú debe reconstruir el desbloqueo secuencial.");
 assert.match(sectionMenuJs, /window\.render_game_to_text = renderGameToText/, "El runtime debe exponer una salida textual estable.");
 assert.match(sectionMenuJs, /window\.advanceTime = advanceTime/, "El runtime debe exponer control temporal determinista.");
+assert.match(sectionMenuJs, /readBriefings: new Set\(/, "El runtime debe persistir la lectura del expediente.");
+assert.match(sectionMenuCss, /\.investigation-board\s*\{/, "El ZIP debe incluir el tablero de investigación.");
 assert.match(sectionMenuJs, /const ESCAPE_ROOM_FINAL_PASSCODE = "NOVA";/, "La clave final debe extraerse completa y no confundir la palabra 'final'.");
 assert.doesNotThrow(() => new vm.Script(sectionMenuJs), "El runtime por secciones debe tener sintaxis válida.");
 
@@ -369,6 +375,8 @@ const freeResponseJson = JSON.parse(freeResponsePackage.files["assets/escape-roo
 assert.equal(freeResponseJson.misiones[0].preguntas[0].subtipo_respuesta, "frase_libre", "El ZIP debe conservar la configuración de frase libre.");
 assert.match(freeResponsePackage.files["assets/game.js"], /spellcheck="true"/, "El runtime exportado debe activar la ayuda ortográfica.");
 assert.match(freeResponsePackage.files["assets/game.js"], /question\.subtipo_respuesta === 'frase_libre'/, "El runtime exportado debe validar cualquier frase no vacía.");
+assert.match(freeResponsePackage.files["assets/game.css"], /\.game-header \.is-concealed/, "El ZIP debe incluir el estado visual que oculta Previous en la portada.");
+assert.match(freeResponsePackage.files["index.html"], /data-gallery-prev aria-hidden="true" tabindex="-1" disabled/, "Previous debe iniciar oculto e inactivo en el ZIP.");
 
 const editedInteractiveTypesProject = {
   modo_presentacion: "menu_secciones",

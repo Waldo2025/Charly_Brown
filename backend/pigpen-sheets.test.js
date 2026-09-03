@@ -1,0 +1,6 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict");
+const { buildHeaderMap, columnLetter, normalizeRows, parseSpreadsheetId } = require("./pigpen-sheets.js");
+test("normalizes English headers", () => assert.deepEqual(buildHeaderMap(["Creador","Estatus","Level","Grade","Trim","Subject","Chapter","Curricular Topic"]), { creator:0,status:1,level:2,grade:3,trimester:4,subject:5,unit:6,curricularTopic:7 }));
+test("normalizes Spanish rows", () => { const result = normalizeRows([["Nivel","Grado","Trimestre","Materia","Tema","Tema curricular","Objetivo final","Narrativa","Estilo de ilustración","Número de salas","Preguntas","Duración (minutos)"],["Secundaria","1.º","2","Español","Tema 1","La entrevista","Comprender","Misterio","Acuarela","3","4","15"]]); assert.equal(result.rows[0].curricularTopic,"La entrevista"); assert.equal(result.rows[0].roomCount,"3"); assert.equal(result.rows[0].durationMinutes,"15"); });
+test("bounds rows, columns and ids", () => { assert.deepEqual(normalizeRows([["Tema curricular"],[""],["Tema válido"]]).rows,[{rowNumber:3,curricularTopic:"Tema válido"}]); assert.equal(columnLetter(50),"AX"); assert.equal(parseSpreadsheetId("https://docs.google.com/spreadsheets/d/1KeIukb-Cu_iv9eiJii3Jg1O2P4-bMgaE7K2OvKSgerg/edit"),"1KeIukb-Cu_iv9eiJii3Jg1O2P4-bMgaE7K2OvKSgerg"); });

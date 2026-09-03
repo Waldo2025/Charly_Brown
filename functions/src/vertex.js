@@ -104,7 +104,9 @@ function buildVertexGenerateRequest({ model, payload = {} } = {}) {
     ...(toolConfig && typeof toolConfig === "object" ? { toolConfig } : {}),
     ...(cachedContent ? { cachedContent } : {})
   };
-  if (normalizedModel === "gemini-3.6-flash" || normalizedModel === "gemini-3.5-flash-lite") {
+  if (normalizedModel === "gemini-3.5-flash-lite"
+    || /^gemini-3\.[6-9](?:-|$)/.test(normalizedModel)
+    || /^gemini-[4-9](?:\.|-|$)/.test(normalizedModel)) {
     delete config.temperature;
     delete config.topP;
     delete config.topK;

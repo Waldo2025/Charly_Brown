@@ -133,6 +133,50 @@ function createSourceAssessor(client) {
   };
 }
 
+function normalizedComparableText(value = "") {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[“”„‟«»'’‘]/g, '"').replace(/[^a-z0-9\s"]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function extractAttributedReferences({ client, verifiedSources = [], retrievedPages = [] } = {}) {
+  const pagesById = new Map(retrievedPages.map((page) => [String(page.id), page]));
+  const usable = verifiedSources.map((source) => ({ source, page: pagesById.get(String(source.id)) })).filter(({ page }) => page).slice(0, 8);
+  if (!usable.length) return [];
+  const prompt = `Extrae referencias atribuibles para un artículo educativo. Devuelve frases textuales solo cuando aparezcan literalmente en la página y limita cada una a 25 palabras. También puedes proponer paráfrasis fieles iniciables como "Según X". La persona o institución debe aparecer en la página o en sus metadatos. No inventes cargos, autores ni frases.\nFUENTES:\n${usable.map(({ source, page }) => `ID ${source.id}\nAUTORÍA: ${(Array.isArray(source.authors) ? source.authors : [source.authors]).filter(Boolean).join(", ")}\nINSTITUCIÓN: ${source.publisher || source.domain}\nTEXTO: ${page.text.slice(0, 2800)}`).join("\n\n")}\nSOLO JSON: {"attributedReferences":[{"personOrInstitution":"","role":"","text":"","type":"direct_quote|paraphrase","sourceId":"","locator":""}]}`;
+  const parsed = (await generateJson({ client, prompt })).parsed;
+  const sourcesById = new Map(verifiedSources.map((source) => [String(source.id), source]));
+  return (Array.isArray(parsed.attributedReferences) ? parsed.attributedReferences : []).map((item, index) => {
+    const sourceId = String(item?.sourceId || "");
+    const source = sourcesById.get(sourceId);
+    const page = pagesById.get(sourceId);
+    if (!source || !page) return null;
+    const personOrInstitution = clampText(item.personOrInstitution, 300);
+    const text = clampText(item.text, 800);
+    const type = item.type === "direct_quote" ? "direct_quote" : "paraphrase";
+    const knownNames = [...(Array.isArray(source.authors) ? source.authors : [source.authors]), source.publisher, source.domain].filter(Boolean).map(normalizedComparableText);
+    const normalizedPerson = normalizedComparableText(personOrInstitution);
+    const pageText = normalizedComparableText(page.text);
+    if (!personOrInstitution || !text || (!knownNames.some((name) => name && (name.includes(normalizedPerson) || normalizedPerson.includes(name))) && !pageText.includes(normalizedPerson))) return null;
+    if (type === "direct_quote" && (text.split(/\s+/).filter(Boolean).length > 25 || !pageText.includes(normalizedComparableText(text)))) return null;
+    const rawRole = clampText(item.role, 200);
+    const role = rawRole && pageText.includes(normalizedComparableText(rawRole)) ? rawRole : "";
+    return { id: `reference-${index + 1}`, personOrInstitution, role, text, type, sourceId, locator: clampText(item.locator || source.locator, 300), verificationStatus: "verified" };
+  }).filter(Boolean).slice(0, 6);
+}
+
+function audienceResearchLenses(audience = "educators") {
+  const specific = {
+    educators: "práctica docente, didáctica, carga profesional, evaluación formativa y aprendizaje en el aula",
+    students: "hábitos de estudio, motivación, autonomía, atención, bienestar y experiencia directa del estudiante",
+    parents: "acompañamiento familiar, desarrollo, bienestar, comunicación y límites en el hogar",
+    coordinators: "liderazgo neuropedagógico, acompañamiento docente, currículo, inclusión, clima escolar e indicadores institucionales"
+  }[audience] || "educación y aprendizaje";
+  return [
+    `Evidencia académica, oficial y educativa actual sobre ${specific}. Prioriza páginas concretas y datos directamente aplicables a esta audiencia.`,
+    `Voces influyentes y referencias documentales relacionadas con ${specific}. Busca entrevistas, discursos, libros accesibles, artículos institucionales o académicos que permitan atribuir una frase breve o una paráfrasis real. Marca como historical cualquier fuente anterior a la ventana actual.`,
+    `Perspectivas independientes, implementación y casos verificables sobre ${specific}. Evita repetir dominios y prioriza universidades, organismos públicos y publicaciones profesionales.`
+  ];
+}
+
 function periodKey(cadence, now = new Date()) {
   const iso = now.toISOString().slice(0, 10);
   if (cadence === "monthly") return iso.slice(0, 7);
@@ -272,18 +316,12 @@ async function researchArticleEvidenceServer({
   const now = dependencies.now instanceof Date ? dependencies.now : new Date();
   const dateWindow = researchDateWindow(period, now);
   const editorialMode = normalizeToken(mode) === "aida" ? "aida" : "marcie";
-  const requestedMinimum = editorialMode === "aida"
-    ? Math.max(8, Math.min(12, Number(minimumSources) || 8))
-    : Math.max(4, Math.min(12, Number(minimumSources) || 6));
-  const researchLenses = editorialMode === "aida" ? [
-    "Costos familiares, precios, consumo e impacto económico en México. Prioriza páginas concretas de INEGI, Profeco, Banxico, asociaciones de consumidores y medios económicos con datos atribuibles.",
-    "Contexto educativo oficial y regional. Prioriza páginas HTML específicas de SEP, gobiernos, universidades, UNICEF, UNESCO, Banco Mundial y organizaciones profesionales accesibles sin iniciar sesión.",
-    "Evidencia académica, evolución documentada y perspectivas independientes directamente pertinentes. No fuerces neurociencia o historia; inclúyelas solo si respaldan una afirmación necesaria. Evita repetir dominios."
-  ] : ["Fuentes oficiales, académicas y educativas directamente pertinentes al tema."];
+  const requestedMinimum = Math.max(4, Math.min(12, Number(minimumSources) || 6));
+  const researchLenses = audienceResearchLenses(audience);
   const generatedBatches = await Promise.all(researchLenses.map(async (lens, batchIndex) => {
     const prompt = editorialMode === "aida"
       ? `Investiga de forma integral el tema "${clampText(topic, 500)}" para ${audience}, región ${clampText(region, 80)}. VENTANA ACTUAL OBLIGATORIA: desde ${dateWindow.from.slice(0, 10)} hasta ${dateWindow.to.slice(0, 10)} (${dateWindow.period}). Toda fuente marcada current y toda señal actual debe haber sido publicada dentro de esas fechas; no presentes información anterior como actualidad. Las fuentes anteriores solo se permiten como historical para explicar un antecedente o hito explícito y nunca cuentan como evidencia reciente. El tema indicado por el usuario es el centro de la investigación: no lo reemplaces por ciencia o historia. ENFOQUE DE ESTA BÚSQUEDA: ${lens} Propón seis páginas concretas de dominios independientes. Cada URL debe apuntar a una página con contenido legible, no a una portada, buscador, visor vacío ni ruta inventada. Cubre hechos y señales pertinentes; añade ciencia o evolución histórica únicamente cuando exista evidencia. No inventes autores, fechas, métricas, científicos ni descubrimientos. SOLO JSON: {"summary":"síntesis integral","facts":[{"id":"fact-1","claim":"","sourceIds":["source-1"],"risk":"low|medium|high"}],"currentSignals":[{"id":"signal-1","signal":"cambio comprobable dentro de la ventana","sourceIds":["source-1"]}],"sources":[{"id":"source-1","title":"","url":"https://pagina-concreta","authors":[""],"publishedAt":"fecha ISO comprobable","publisher":"","doi":"","sourceType":"paper|official|science_magazine|education_blog","evidenceRole":"current|historical"}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["source-1","source-2"]}]}`
-      : `Investiga el tema "${clampText(topic, 500)}" para ${audience}, región ${clampText(region, 80)}. VENTANA OBLIGATORIA: desde ${dateWindow.from.slice(0, 10)} hasta ${dateWindow.to.slice(0, 10)} (${dateWindow.period}). Solo acepta páginas publicadas dentro de esas fechas y no presentes datos anteriores como actuales. ${lens} Encuentra entre ${requestedMinimum} y 12 páginas específicas. No inventes rutas, autores, fechas o descubrimientos. SOLO JSON: {"summary":"síntesis editorial","facts":[{"id":"fact-1","claim":"","sourceIds":["source-1"],"risk":"low|medium|high"}],"currentSignals":[{"id":"signal-1","signal":"señal comprobable dentro de la ventana","sourceIds":["source-1"]}],"sources":[{"id":"source-1","title":"","url":"https://pagina-concreta","authors":[""],"publishedAt":"fecha ISO comprobable","publisher":"","doi":"","sourceType":"paper|official|science_magazine|education_blog","evidenceRole":"current"}],"historicalMilestones":[]}`;
+      : `Investiga el tema "${clampText(topic, 500)}" para ${audience}, región ${clampText(region, 80)}. VENTANA ACTUAL: desde ${dateWindow.from.slice(0, 10)} hasta ${dateWindow.to.slice(0, 10)} (${dateWindow.period}). Las fuentes actuales deben estar dentro de esa ventana. Se permiten fuentes anteriores únicamente como historical para antecedentes o voces influyentes; nunca las presentes como actualidad. ${lens} Encuentra entre ${requestedMinimum} y 12 páginas específicas. No inventes rutas, autores, fechas, frases o descubrimientos. SOLO JSON: {"summary":"síntesis editorial","facts":[{"id":"fact-1","claim":"","sourceIds":["source-1"],"risk":"low|medium|high"}],"currentSignals":[{"id":"signal-1","signal":"señal comprobable dentro de la ventana","sourceIds":["source-1"]}],"sources":[{"id":"source-1","title":"","url":"https://pagina-concreta","authors":[""],"publishedAt":"fecha ISO comprobable","publisher":"","doi":"","sourceType":"paper|official|science_magazine|education_blog","evidenceRole":"current|historical"}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["source-1"]}]}`;
     const generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }] });
     const idMap = new Map();
     const candidates = [...(generated.parsed.sources || []), ...groundingSources(generated.response)].slice(0, 10).map((source, sourceIndex) => {
@@ -320,7 +358,7 @@ async function researchArticleEvidenceServer({
     retrievalConcurrency: editorialMode === "aida" ? 6 : 4,
     retrieveOptions: dependencies.retrieveOptions
     , dateWindow
-    , allowHistorical: editorialMode === "aida"
+    , allowHistorical: true
   });
   const currentSourceIds = new Set(verified.verifiedSources.filter((source) => source.evidenceRole !== "historical").map((source) => String(source.id)));
   const historicalSourceIds = new Set(verified.verifiedSources.filter((source) => source.evidenceRole === "historical").map((source) => String(source.id)));
@@ -356,12 +394,14 @@ async function researchArticleEvidenceServer({
   const verifiedSummary = [...new Set(currentSources.map((source) => clampText(source.supportSummary, 600)).filter(Boolean))].slice(0, 6).join(" ");
   const blockers = [];
   const requiredMinimum = editorialMode === "aida" ? AIDA_MINIMUM_VERIFIED_SOURCES : requestedMinimum;
-  if (currentSources.length < requiredMinimum) blockers.push(`${editorialMode === "aida" ? "Aida" : "La investigación"} requiere al menos ${requiredMinimum} páginas actuales verificadas dentro del periodo ${dateWindow.from.slice(0, 10)}–${dateWindow.to.slice(0, 10)}.`);
+  if (editorialMode === "aida" && currentSources.length < requiredMinimum) blockers.push(`Aida requiere al menos ${requiredMinimum} páginas actuales verificadas.`);
+  if (editorialMode !== "aida" && verified.verifiedSources.length < requiredMinimum) blockers.push(`La propuesta tiene ${verified.verifiedSources.length} de ${requiredMinimum} fuentes verificadas objetivo.`);
   if (editorialMode === "aida" && institutionCount < AIDA_MINIMUM_INDEPENDENT_INSTITUTIONS) blockers.push("Aida requiere al menos tres publicaciones o instituciones independientes.");
   const recommendations = editorialMode === "aida" ? [
     ...(currentSources.length < requestedMinimum ? [`Objetivo editorial Aida: ampliar de ${currentSources.length} a ${requestedMinimum} páginas actuales verificadas cuando existan fuentes pertinentes.`] : []),
     ...(institutionCount < 4 ? [`Recomendación Aida: ampliar de ${institutionCount} a 4 publicaciones o instituciones independientes.`] : [])
   ] : [];
+  const attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages });
   return {
     schemaVersion: "2.0",
     editorialMode,
@@ -375,6 +415,7 @@ async function researchArticleEvidenceServer({
     currentSourceCount: currentSources.length,
     historicalSourceCount: verified.verifiedSources.length - currentSources.length,
     historicalMilestones,
+    attributedReferences,
     rejectedSources: verified.rejectedSources,
     verifiedSourceCount: verified.verifiedSources.length,
     institutionCount,
@@ -396,7 +437,7 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   const client = dependencies.client || createVertexClient({ location: "global" });
   const text = articleText(article, topic);
   let candidates = Array.isArray(article.researchSources || article.sources) ? (article.researchSources || article.sources) : [];
-  const verified = await verifyCandidateSources({ candidates, context: text, assessSources: createSourceAssessor(client), retrieveOptions: dependencies.retrieveOptions });
+  const verified = await verifyCandidateSources({ candidates, context: text, assessSources: createSourceAssessor(client), retrieveOptions: dependencies.retrieveOptions, allowHistorical: true });
   const pagesById = new Map(verified.retrievedPages.map((page) => [page.id, page]));
   const usablePages = verified.verifiedSources.map((source) => ({ source, page: pagesById.get(source.id) })).filter((item) => item.page);
   let result = { claims: [], contradictions: [] };
@@ -481,6 +522,6 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
 module.exports = {
   DEFAULT_SETTINGS, TREND_SCHEMA_VERSION, AIDA_MINIMUM_VERIFIED_SOURCES, AIDA_MINIMUM_INDEPENDENT_INSTITUTIONS, AIDA_TARGET_VERIFIED_SOURCES, EVIDENCE_VERIFY_DEADLINE_MS, RESEARCH_PERIOD_DAYS, assertEditorialAccess, createSourceAssessor, periodKey, researchDateWindow,
   parseJsonResponse, repairAdjacentJsonContainers, generateJson,
-  rankTrendOpportunities, refreshMarcieTrends, researchArticleEvidenceServer, verifyArticleEvidenceServer,
+  rankTrendOpportunities, refreshMarcieTrends, researchArticleEvidenceServer, verifyArticleEvidenceServer, extractAttributedReferences,
   registerMarcieEditorialResearchRoutes
 };

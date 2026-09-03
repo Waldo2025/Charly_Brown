@@ -1,7 +1,7 @@
 /**
  * Menú contextual y acciones de sesiones para Marcie Blog Editor
  */
-import { saveMarcieSession, deleteMarcieSession, createMarcieSession } from "../services/marcie-session-store.js";
+import { saveMarcieSession, deleteMarcieSession, createMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
 import { showModal, closeActiveModal, showToast } from "./modals.js";
 import { articleVerificationBlockers } from "../contracts/editorial-contracts.js";
 

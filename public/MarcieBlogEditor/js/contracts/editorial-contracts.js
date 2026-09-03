@@ -100,7 +100,7 @@ function normalizeEditorialMode(value = "marcie") {
 function normalizeSelectedAudiences(value, mode = "marcie") {
   const defaults = normalizeEditorialMode(mode) === "aida"
     ? ["parents", "educators"]
-    : ["educators", "students", "parents"];
+    : ["educators", "students", "parents", "coordinators"];
   const selected = Array.isArray(value)
     ? value.map(String).filter((audience) => SESSION_AUDIENCES.includes(audience))
     : defaults;

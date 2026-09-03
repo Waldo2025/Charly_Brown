@@ -118,7 +118,7 @@ export function showNewSessionModal({ defaultValue = "", allowBlankSession = fal
               <label><input type="checkbox" name="session-audience" value="educators" checked> Docentes</label>
               <label><input type="checkbox" name="session-audience" value="parents" checked> Padres</label>
               <label><input type="checkbox" name="session-audience" value="students" checked> Estudiantes</label>
-              <label><input type="checkbox" name="session-audience" value="coordinators"> Coordinadores</label>
+              <label><input type="checkbox" name="session-audience" value="coordinators" checked> Coordinadores</label>
             </div>
             <div id="new-session-custom-profile" class="mt-3 hidden grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
               <label class="col-span-2">Perfil reutilizable<select id="custom-profile-select" class="input-field mt-1"><option value="">Crear perfil nuevo</option>${editorialProfiles.map((profile) => `<option value="${escapeModalHtml(profile.id)}">${escapeModalHtml(profile.name || profile.id)} · v${Number(profile.version || 1)}</option>`).join("")}</select></label>
@@ -142,7 +142,7 @@ export function showNewSessionModal({ defaultValue = "", allowBlankSession = fal
             </button>
             <button type="button" role="tab" data-new-session-mode="automated" aria-selected="false" aria-pressed="false" class="new-session-mode">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3ZM19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z"/></svg>
-              <span><strong>Automatizada</strong><small>Tres enfoques completos</small></span>
+              <span><strong>Automatizada</strong><small>Cuatro enfoques completos</small></span>
             </button>
           </div>
 
@@ -232,6 +232,12 @@ export function showNewSessionModal({ defaultValue = "", allowBlankSession = fal
                       <button type="button" data-session-spec-category="extension" data-session-spec-value="Lectura de 5 minutos, entre 700 y 900 palabras" data-session-spec-exclusive="true">5 min</button>
                       <button type="button" data-session-spec-category="extension" data-session-spec-value="Lectura de 8 minutos, entre 1100 y 1400 palabras" data-session-spec-exclusive="true">8 min</button>
                       <button type="button" data-session-spec-category="extension" data-session-spec-value="Lectura de 12 minutos, entre 1700 y 2100 palabras" data-session-spec-exclusive="true">12 min</button>
+                      <button type="button" data-session-spec-category="extension" data-session-spec-value="Una cuartilla, entre 250 y 300 palabras" data-session-spec-exclusive="true">1 cuartilla</button>
+                      <button type="button" data-session-spec-category="extension" data-session-spec-value="Dos cuartillas, entre 500 y 600 palabras" data-session-spec-exclusive="true">2 cuartillas</button>
+                      <button type="button" data-session-spec-category="extension" data-session-spec-value="Tres cuartillas, entre 750 y 900 palabras" data-session-spec-exclusive="true">3 cuartillas</button>
+                      <button type="button" data-session-spec-category="extension" data-session-spec-value="Cuatro cuartillas, entre 1000 y 1200 palabras" data-session-spec-exclusive="true">4 cuartillas</button>
+                      <button type="button" data-session-spec-category="extension" data-session-spec-value="Cinco cuartillas, entre 1250 y 1500 palabras" data-session-spec-exclusive="true">5 cuartillas</button>
+                      <button type="button" data-session-spec-category="extension" data-session-spec-value="Seis cuartillas, entre 1500 y 1800 palabras" data-session-spec-exclusive="true">6 cuartillas</button>
                       <button type="button" data-session-spec-custom-trigger="extension" class="new-session-spec-other">+ Otra</button>
                     </div>
                     <div data-session-spec-custom-panel="extension" class="new-session-group-custom hidden"><input type="text" maxlength="120" placeholder="Ej. Entre 1300 y 1500 palabras"><button type="button" data-add-group-spec="extension">Añadir</button></div>

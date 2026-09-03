@@ -1,5 +1,5 @@
 (function () { // IIFE starts here
-  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.10.833';
+  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.10.858';
 
   function normalizePageId(pageId, fallback = 'index.html') {
     const normalized = String(pageId || '').trim().toLowerCase();
@@ -282,12 +282,11 @@
         icon: 'fas fa-pen-nib',
         links: [
           { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Análisis editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
-          { href: '/MarcieBlogEditor/MarcieBlogEditor.html', icon: 'fas fa-pen', label: 'Marcie Blog Editor', id: 'marcieBlogEditorLink', requiresAuth: true },
+          { href: '/MarcieBlogEditor.html', icon: 'fas fa-pen', label: 'Marcie Blog Editor', id: 'marcieBlogEditorLink', requiresAuth: true },
           { href: 'charly-brown.html', icon: 'fas fa-wand-magic-sparkles', label: 'Charly Brown', id: 'charlyBrownLink', roleVisibility: 'admin,author,editor,developer' },
           { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear cursos de Moodle' },
           { href: 'PeppermintPattyAnalizer.html', icon: 'fas fa-file-pdf', label: 'Peppermint Patty Analizer' },
           { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
-          { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' }
         ]
       },
       {
@@ -296,7 +295,7 @@
         icon: 'fas fa-photo-film',
         links: [
           { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
-          { href: '/scienceActivities', icon: 'fas fa-flask', label: 'Actividades de ciencias' },
+          { href: 'scienceActivities.html', icon: 'fas fa-flask', label: 'Actividades de ciencias' },
           { href: 'PigPenCreator.html', icon: 'fas fa-door-closed', label: 'PigPen Escape Rooms' },
           { href: 'experienciaMenu.html', icon: 'fas fa-layer-group', label: 'Experiencias' },
           { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' }

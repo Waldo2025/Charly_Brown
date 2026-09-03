@@ -2,6 +2,7 @@ const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_GOOGLE_API_BASE = "https://charly-brown.web.app/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
 const DEFAULT_GEMINI_API_BASE = "/api";
+const DEFAULT_GEMINI_DIRECT_API_BASE = "https://us-central1-charly-brown.cloudfunctions.net/geminiApi";
 const DEFAULT_MARCIE_API_BASE = "https://us-central1-charly-brown.cloudfunctions.net/geminiApi";
 const DEFAULT_VEO_API_BASE = "/api";
 const DEFAULT_EXPORT_API_BASE = "/api";
@@ -49,6 +50,13 @@ export function getMarcieApiBase() {
   return String(
     window.__CHARLY_CONFIG__?.marcieApiBaseUrl
     || DEFAULT_MARCIE_API_BASE
+  ).trim().replace(/\/+$/, "");
+}
+
+export function getGeminiDirectApiBase() {
+  return String(
+    window.__CHARLY_CONFIG__?.geminiDirectApiBaseUrl
+    || DEFAULT_GEMINI_DIRECT_API_BASE
   ).trim().replace(/\/+$/, "");
 }
 
@@ -182,6 +190,19 @@ export function buildMarcieApiUrl(path = "") {
     return buildApiUrlFromBase(configured, input);
   }
   return buildApiUrlFromBase(getMarcieApiBase(), input);
+}
+
+// Las respuestas generativas extensas pueden superar el límite del proxy de
+// Firebase Hosting. Esta ruta llama directamente a la Function y conserva el
+// backend local cuando el desarrollador lo habilita explícitamente.
+export function buildGeminiApiUrl(path = "") {
+  const input = String(path || "").trim();
+  if (/^https?:\/\//i.test(input)) return input;
+  const configured = getConfiguredApiBase();
+  if (isLocalHostRuntime() && window.__CHARLY_CONFIG__?.useLocalApi === true && configured && isLoopbackApiBase(configured)) {
+    return buildApiUrlFromBase(configured, input);
+  }
+  return buildApiUrlFromBase(getGeminiDirectApiBase(), input);
 }
 
 export function buildVeoApiUrl(path = "") {

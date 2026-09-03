@@ -13,6 +13,7 @@
     "api:dev": "node backend/server.js",
     "api:start": "node backend/server.js",
     "api:worker": "node backend/workers/podcaster-montage-export-worker.js",
+    "seed:pigpen-sheets": "node scripts/seed-pigpen-sheet-source.cjs",
     "languagetool:check": "node scripts/check-languagetool-local.mjs",
     "security:scan-secrets": "bash scripts/scan-secrets.sh",
     "security:verify-public": "bash scripts/verify-public-security.sh",

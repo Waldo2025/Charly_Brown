@@ -1,4 +1,5 @@
-import { normalizeEscapeRoomProject, getMissionAcceptedAnswers } from "./escape-room-creator-model.mjs";
+import { normalizeEscapeRoomProject, getMissionAcceptedAnswers, resolveFinalPasscode } from "./escape-room-creator-model.mjs";
+import { formatGameMessage, getGameMessages } from "./escape-room-game-i18n.mjs";
 
 function escapeHtml(value = "") {
   return String(value ?? "")
@@ -66,30 +67,6 @@ function buildRuntimeMission(mission = {}, unlockedIds = []) {
   };
 }
 
-function extractExplicitFinalPasscode(text = "") {
-  const raw = String(text || "");
-  if (!raw) return "";
-  const quotedMatch = raw.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
-  if (quotedMatch) return String(quotedMatch[1] || "").toUpperCase();
-  const keywordMatch = raw.match(/(?:clave final|c[oó]digo final|clave|c[oó]digo)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
-  if (keywordMatch) return String(keywordMatch[1] || "").toUpperCase();
-  return "";
-}
-
-function buildFallbackFinalPasscode(project = {}) {
-  const slug = sanitizeFileName(project?.titulo || "escape-room", "ESCAPE").replace(/_/g, "").toUpperCase();
-  const base = `${slug}${Array.isArray(project?.misiones) ? project.misiones.length : 0}X9`;
-  return (base.replace(/[^A-Z0-9]/g, "") || "ESC9").slice(0, 6);
-}
-
-function resolveFinalPasscode(project = {}) {
-  const explicit = extractExplicitFinalPasscode(project?.conclusion || "");
-  if (explicit) {
-    return { code: explicit, isFallback: false };
-  }
-  return { code: buildFallbackFinalPasscode(project), isFallback: true };
-}
-
 function buildProgressFingerprint(project = {}) {
   const source = JSON.stringify({
     modo_presentacion: project?.modo_presentacion === "menu_secciones" ? "menu_secciones" : "salas",
@@ -98,6 +75,9 @@ function buildProgressFingerprint(project = {}) {
       id: String(mission?.id || ""),
       titulo: String(mission?.titulo || ""),
       historia: String(mission?.historia || ""),
+      contexto: String(mission?.contexto || ""),
+      contexto_requerido: mission?.contexto_requerido !== false,
+      datos_clave: Array.isArray(mission?.datos_clave) ? mission.datos_clave.map((item) => String(item ?? "")) : [],
       reto: String(mission?.reto || ""),
       preguntas: (Array.isArray(mission?.preguntas) ? mission.preguntas : []).map((question) => ({
         id: String(question?.id || ""),
@@ -110,6 +90,8 @@ function buildProgressFingerprint(project = {}) {
           ? question.respuestas_aceptadas.map((answer) => String(answer ?? ""))
           : [String(question?.respuesta_correcta || "")],
         opciones: Array.isArray(question?.opciones) ? question.opciones.map((option) => String(option ?? "")) : [],
+        elementos: Array.isArray(question?.elementos) ? question.elementos.map((item) => String(item ?? "")) : [],
+        texto_con_hueco: String(question?.texto_con_hueco || ""),
         parejas: Array.isArray(question?.parejas)
           ? question.parejas.map((pair) => [String(pair?.izquierda || ""), String(pair?.derecha || "")])
           : []
@@ -489,6 +471,22 @@ html.is-immersive-fallback body {
   min-height: 100%;
   background: var(--bg);
 }
+html:fullscreen,
+html:fullscreen body,
+html.is-fullscreen,
+html.is-fullscreen body {
+  overflow: hidden;
+}
+html:fullscreen .game-shell,
+html.is-fullscreen .game-shell {
+  max-width: none;
+  width: 100%;
+  padding: 14px;
+}
+html:fullscreen .game-card,
+html.is-fullscreen .game-card {
+  width: min(100%, 100%);
+}
 html.is-immersive-fallback,
 html.is-immersive-fallback body {
   width: 100%;
@@ -624,6 +622,10 @@ html.is-immersive-fallback body {
   backdrop-filter: blur(14px);
   overflow: visible;
 }
+.game-header .is-concealed {
+  visibility: hidden;
+  pointer-events: none;
+}
 .gallery-nav {
   display: flex;
   align-items: center;
@@ -722,6 +724,54 @@ html.is-immersive-fallback body {
   gap: 18px;
   margin-top: 18px;
 }
+.investigation-board {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding: clamp(18px, 3vw, 30px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--room-station-color, var(--accent)) 45%, var(--line));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--room-theme-color, var(--accent-2)) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in srgb, var(--room-theme-color, var(--accent-2)) 10%, transparent) 1px, transparent 1px),
+    color-mix(in srgb, var(--panel-soft) 94%, black 6%);
+  background-size: 28px 28px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 38px rgba(2,6,23,0.24);
+}
+.investigation-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, transparent 42%, color-mix(in srgb, var(--room-station-color, var(--accent)) 20%, transparent) 42.2%, transparent 42.7%);
+}
+.investigation-board > * { position: relative; z-index: 1; }
+.investigation-board-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.investigation-board-title { margin: 5px 0 0; font-size: clamp(1.2rem, 2.4vw, 1.7rem); }
+.investigation-board-lead { margin: 0; color: var(--paragraph-color); }
+.investigation-document,
+.investigation-objective,
+.evidence-card {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 93%, white 7%);
+  box-shadow: 0 10px 24px rgba(2,6,23,0.2);
+}
+.investigation-document { padding: 18px; border-radius: 4px 16px 6px 14px; transform: rotate(-0.15deg); }
+.investigation-document p { margin: 0; color: var(--paragraph-color); line-height: 1.72; white-space: pre-line; }
+.investigation-evidence-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.evidence-card { min-height: 88px; padding: 15px; border-radius: 12px 4px 14px 5px; font-weight: 700; line-height: 1.45; }
+.evidence-card:nth-child(even) { transform: rotate(0.35deg); }
+.evidence-index { display: block; margin-bottom: 8px; color: var(--room-station-color, var(--accent)); font-size: 0.7rem; letter-spacing: 0.16em; }
+.investigation-objective { padding: 16px 18px; border-radius: var(--radius-md); border-left: 4px solid var(--room-theme-color, var(--accent-2)); }
+.investigation-objective strong { display: block; margin-bottom: 6px; color: var(--title-color); }
+.investigation-objective p { margin: 0; color: var(--paragraph-color); line-height: 1.55; }
+.investigation-board-actions { display: flex; justify-content: flex-end; }
+.briefing-review { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel-soft) 92%, white 8%); }
+.investigation-board { margin-bottom: 16px; }
+.briefing-review summary { min-height: 44px; padding: 13px 16px; cursor: pointer; color: var(--title-color); font-weight: 800; }
+.briefing-review .investigation-board { margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-md) var(--radius-md); box-shadow: none; }
 .question-card.is-complete {
   border-color: rgba(52, 211, 153, 0.52);
   box-shadow:
@@ -851,6 +901,92 @@ html.is-immersive-fallback body {
 .free-response-note {
   font-size: 0.82rem;
   line-height: 1.4;
+}
+.true-false-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+.true-false-choice,
+.sequence-item,
+.sequence-move {
+  min-height: 44px;
+}
+.fill-blank-block,
+.sequence-board {
+  display: grid;
+  gap: 10px;
+}
+.fill-blank-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.7;
+  font-weight: 700;
+}
+.fill-blank-input {
+  width: min(100%, 240px) !important;
+  border-style: dashed !important;
+  text-align: center;
+}
+.sequence-list {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sequence-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+  border-radius: 14px;
+}
+.sequence-row.is-selected {
+  outline: 3px solid color-mix(in srgb, var(--accent) 62%, white 38%);
+  outline-offset: 2px;
+}
+.sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 13px;
+  background: color-mix(in srgb, var(--panel-soft) 90%, white 10%);
+  color: var(--text);
+  text-align: left;
+  touch-action: none;
+  cursor: grab;
+}
+.sequence-item.is-dragging { opacity: .78; cursor: grabbing; z-index: 10; }
+.sequence-number {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--button-text);
+  font-weight: 900;
+}
+.sequence-controls { display: grid; grid-template-columns: repeat(2, 44px); gap: 4px; }
+.sequence-move {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 1.1rem;
+}
+.sequence-move:disabled { opacity: .38; }
+@media (max-width: 560px) {
+  .sequence-row { grid-template-columns: 1fr; }
+  .sequence-controls { justify-self: end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sequence-item { transition: none !important; }
 }
 .question-card .media-card {
   margin: 12px 0 24px;
@@ -1076,6 +1212,110 @@ h1, h2, h3, p { margin-top: 0; }
   color: var(--text);
 }
 .match-select:focus { outline: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 58%, transparent); }
+.drag-match-board {
+  display: grid;
+  gap: 14px;
+}
+.drag-match-help {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--paragraph-color);
+}
+.drag-match-tray,
+.drag-match-targets {
+  display: grid;
+  gap: 10px;
+}
+.drag-match-tray {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  min-height: 64px;
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--room-station-color, var(--accent)) 56%, var(--line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--room-theme-color, var(--accent-2)) 8%, var(--panel));
+}
+.drag-match-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.drag-match-tile,
+.drag-match-target {
+  position: relative;
+  min-height: 52px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  font: inherit;
+  font-weight: 750;
+  transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+.drag-match-tile {
+  z-index: 1;
+  padding: 12px 14px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--room-theme-color, var(--accent-2)) 18%, var(--panel-soft)), var(--panel-soft));
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.drag-match-tile:active,
+.drag-match-tile.is-dragging { cursor: grabbing; }
+.drag-match-tile.is-selected {
+  border-color: var(--room-theme-color, var(--accent-2));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--room-station-color, var(--accent)) 24%, transparent), 0 12px 24px rgba(2, 6, 23, 0.24);
+  transform: translateY(-2px);
+}
+.drag-match-target {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.9fr) minmax(112px, 1.1fr);
+  align-items: stretch;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel-soft) 92%, black 8%);
+  text-align: left;
+}
+.drag-match-target-label,
+.drag-match-target-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  padding: 11px 13px;
+}
+.drag-match-target-label { border-right: 1px solid var(--line); }
+.drag-match-target-slot {
+  justify-content: center;
+  color: var(--paragraph-color);
+  background: color-mix(in srgb, var(--room-theme-color, var(--accent-2)) 7%, transparent);
+}
+.drag-match-target.is-filled .drag-match-target-slot {
+  color: var(--text);
+  font-weight: 800;
+}
+.drag-match-target.is-drop-ready,
+.drag-match-target:hover {
+  border-color: var(--room-theme-color, var(--accent-2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--room-station-color, var(--accent)) 20%, transparent);
+}
+.drag-match-target.is-correct {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--panel));
+}
+.drag-match-target.is-wrong { animation: drag-match-shake 360ms ease both; border-color: var(--danger); }
+.drag-match-empty { grid-column: 1 / -1; align-self: center; text-align: center; color: var(--paragraph-color); }
+@keyframes drag-match-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-7px) rotate(-0.5deg); }
+  55% { transform: translateX(6px) rotate(0.5deg); }
+  80% { transform: translateX(-3px); }
+}
+@media (max-width: 720px) {
+  .drag-match-targets { grid-template-columns: 1fr; }
+  .drag-match-target { grid-template-columns: minmax(88px, 0.8fr) minmax(112px, 1.2fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drag-match-tile,
+  .drag-match-target { transition: none; }
+  .drag-match-target.is-wrong { animation: none; }
+}
 .media-card-empty {
   padding: 16px;
   border-radius: var(--radius-md);
@@ -1786,6 +2026,7 @@ button:focus-visible,
 
 export function buildGameRuntime(project) {
   const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
+  const messages = getGameMessages(normalized.idioma);
   const isMenuMode = normalized.modo_presentacion === "menu_secciones";
   const initialUnlocked = isMenuMode
     ? []
@@ -1798,10 +2039,11 @@ export function buildGameRuntime(project) {
   };
 
   return `const ESCAPE_ROOM_DATA = ${serializeForJavaScript(runtimeProject)};
+const ESCAPE_ROOM_I18N = ${serializeForJavaScript(messages)};
 const ESCAPE_ROOM_FINAL_PASSCODE = ${JSON.stringify(finalPasscode.code)};
 const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "true" : "false"};
 const ESCAPE_ROOM_PRESENTATION_MODE = ${JSON.stringify(isMenuMode ? "menu_secciones" : "salas")};
-const ESCAPE_ROOM_PROGRESS_VERSION = 2;
+const ESCAPE_ROOM_PROGRESS_VERSION = 3;
 const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 
 // ${isMenuMode
@@ -1810,6 +2052,10 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 (function initEscapeRoomGame() {
   const IS_MENU_MODE = ESCAPE_ROOM_PRESENTATION_MODE === "menu_secciones";
   const DEFAULT_DURATION_MINUTES = ${JSON.stringify(normalized.duracion_minutos || 35)};
+  function t(key, params = {}) {
+    const template = String(ESCAPE_ROOM_I18N[key] ?? key);
+    return template.replace(/\\{([a-zA-Z0-9_]+)\\}/g, (_, name) => String(params[name] ?? "{" + name + "}"));
+  }
   function getMissionPaletteStyle(mission) {
     const palette = mission?.paleta_academica || {};
     const safeColor = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : fallback;
@@ -1825,9 +2071,18 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     unlocked: new Set(IS_MENU_MODE ? [] : ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id)),
     completed: new Set(),
     completedQuestions: new Set(),
+    readBriefings: new Set(ESCAPE_ROOM_DATA.misiones.filter((mission) => mission.contexto_requerido === false).map((mission) => mission.id)),
     questionAnswers: {},
     questionChoices: {},
     questionMatches: {},
+    questionDragMatches: {},
+    questionDragLocked: {},
+    selectedDragTiles: {},
+    questionSequenceOrders: {},
+    selectedSequenceItems: {},
+    activeSequencePointer: null,
+    activeDragPointer: null,
+    suppressDragClickUntil: 0,
     currentMissionId: IS_MENU_MODE
       ? (ESCAPE_ROOM_DATA.misiones[0]?.id || null)
       : (ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null),
@@ -1880,9 +2135,13 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       fingerprint: ESCAPE_ROOM_PROGRESS_FINGERPRINT,
       completed: [...state.completed],
       completedQuestions: [...state.completedQuestions],
+      readBriefings: [...state.readBriefings],
       questionAnswers: state.questionAnswers,
       questionChoices: state.questionChoices,
       questionMatches: state.questionMatches,
+      questionDragMatches: state.questionDragMatches,
+      questionDragLocked: state.questionDragLocked,
+      questionSequenceOrders: state.questionSequenceOrders,
       currentMissionId: state.currentMissionId,
       galleryScreen: state.galleryScreen,
       unlocked: [...state.unlocked],
@@ -1936,9 +2195,16 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         state.completed = new Set(sequentialCompleted);
       }
       state.completedQuestions = new Set(Array.isArray(parsed.completedQuestions) ? parsed.completedQuestions.filter((key) => String(key || "").includes("::")) : []);
+      state.readBriefings = new Set([
+        ...ESCAPE_ROOM_DATA.misiones.filter((mission) => mission.contexto_requerido === false).map((mission) => mission.id),
+        ...(Array.isArray(parsed.readBriefings) ? parsed.readBriefings.filter((id) => missionIds.has(id)) : [])
+      ]);
       state.questionAnswers = parsed.questionAnswers && typeof parsed.questionAnswers === "object" ? parsed.questionAnswers : {};
       state.questionChoices = parsed.questionChoices && typeof parsed.questionChoices === "object" ? parsed.questionChoices : {};
       state.questionMatches = parsed.questionMatches && typeof parsed.questionMatches === "object" ? parsed.questionMatches : {};
+      state.questionDragMatches = parsed.questionDragMatches && typeof parsed.questionDragMatches === "object" ? parsed.questionDragMatches : {};
+      state.questionDragLocked = parsed.questionDragLocked && typeof parsed.questionDragLocked === "object" ? parsed.questionDragLocked : {};
+      state.questionSequenceOrders = parsed.questionSequenceOrders && typeof parsed.questionSequenceOrders === "object" ? parsed.questionSequenceOrders : {};
       state.unlocked = new Set(Array.isArray(parsed.unlocked) ? parsed.unlocked.filter((id) => missionIds.has(id)) : ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id));
       state.currentMissionId = missionIds.has(parsed.currentMissionId)
         ? parsed.currentMissionId
@@ -2017,7 +2283,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     const isActive = Boolean(getFullscreenElement()) || state.isImmersiveFallback;
     document.documentElement.classList.toggle("is-fullscreen", isActive);
     els.fullscreenButtons.forEach((button) => {
-      const label = isActive ? "Salir de pantalla completa" : "Pantalla completa";
+      const label = isActive ? t("exitFullscreen") : t("fullscreen");
       button.classList.toggle("is-active", isActive);
       button.disabled = false;
       button.setAttribute("aria-pressed", String(isActive));
@@ -2034,7 +2300,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     document.documentElement.classList.add("is-immersive-fallback");
     document.body.classList.add("is-immersive-fallback");
     window.scrollTo({ top: 0, behavior: "smooth" });
-    announceFullscreen("Modo inmersivo activado. En iPhone puedes añadir el juego a la pantalla de inicio para ocultar completamente Safari.");
+    announceFullscreen(t("immersiveOn"));
     syncFullscreenControls();
   }
 
@@ -2043,8 +2309,23 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     document.documentElement.classList.remove("is-immersive-fallback");
     document.body.classList.remove("is-immersive-fallback");
     window.scrollTo({ top: state.immersiveScrollY, behavior: "auto" });
-    announceFullscreen("Modo inmersivo desactivado.");
+    announceFullscreen(t("immersiveOff"));
     syncFullscreenControls();
+  }
+
+  async function requestFullscreenTarget(target) {
+    if (!target || !document.fullscreenEnabled && !target.webkitRequestFullscreen) {
+      return false;
+    }
+    if (target.requestFullscreen) {
+      await target.requestFullscreen({ navigationUI: "hide" });
+      return true;
+    }
+    if (target.webkitRequestFullscreen) {
+      await target.webkitRequestFullscreen();
+      return true;
+    }
+    return false;
   }
 
   async function toggleFullscreen() {
@@ -2059,13 +2340,27 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         syncFullscreenControls();
         return;
       }
-      const root = document.documentElement;
       if (!isNativeFullscreenAvailable()) {
         enterImmersiveFallback();
         return;
       }
-      if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: "hide" });
-      else await root.webkitRequestFullscreen();
+      const candidates = [document.documentElement, document.body].filter(Boolean);
+      let entered = false;
+      for (const target of candidates) {
+        try {
+          entered = await requestFullscreenTarget(target);
+          if (entered) break;
+        } catch (error) {
+          if (error?.name === "TypeError" && target !== document.body) {
+            continue;
+          }
+          throw error;
+        }
+      }
+      if (!entered) {
+        enterImmersiveFallback();
+        return;
+      }
       syncFullscreenControls();
     } catch (error) {
       console.warn("No se pudo cambiar el modo de pantalla completa:", error);
@@ -2197,11 +2492,12 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   function setGameInteractionState(isDisabled) {
     const disabled = Boolean(isDisabled);
     const targets = document.querySelectorAll(
-      "[data-question-choice], [data-question-verify], [data-question-hint], [data-question-match-select], [data-question-answer]"
+      "[data-question-choice], [data-question-verify], [data-question-hint], [data-question-match-select], [data-question-answer], [data-drag-tile], [data-drag-target]"
     );
     targets.forEach((node) => {
-      if ("disabled" in node) node.disabled = disabled;
-      if (disabled) node.setAttribute("aria-disabled", "true");
+      const staysLocked = !disabled && node.getAttribute("data-drag-locked") === "true";
+      if ("disabled" in node) node.disabled = disabled || staysLocked;
+      if (disabled || staysLocked) node.setAttribute("aria-disabled", "true");
       else node.removeAttribute("aria-disabled");
     });
   }
@@ -2229,7 +2525,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     els.startButtons.forEach((button) => {
       button.hidden = state.isStarted;
       button.disabled = state.isStarted;
-      button.textContent = state.isStarted ? "Escape room iniciado" : "Iniciar escape room";
+      button.textContent = state.isStarted ? t("started") : t("start");
     });
     els.resetButtons.forEach((button) => {
       button.disabled = false;
@@ -2246,7 +2542,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     updateTimerUi();
     persistProgressState();
     if (els.roomStatusBox) {
-      setRoomStatus("El tiempo terminó. Reinicia el escape room para volver a intentarlo.", "bad");
+      setRoomStatus(t("timeExpired"), "bad");
     }
   }
 
@@ -2344,7 +2640,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       else els.endingPanel.appendChild(timeDisplay);
     }
     const elapsed = Math.max(0, state.durationSeconds - getRemainingSeconds());
-    timeDisplay.innerHTML = \`¡Felicidades! Lograste escapar en <span>\${formatDuration(elapsed)}</span>.\`;
+    timeDisplay.innerHTML = escapeHtml(t("congratulationsTime", { time: formatDuration(elapsed) })).replace(formatDuration(elapsed), "<span>" + formatDuration(elapsed) + "</span>");
   }
 
   function renderMenuGallery() {
@@ -2383,27 +2679,31 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 
     const activeIndex = galleryOrder.indexOf(state.galleryScreen);
     if (els.galleryStep) {
-      els.galleryStep.textContent = "Sección " + (activeIndex + 1) + " de " + galleryOrder.length;
+      els.galleryStep.textContent = t("sectionCounter", { current: activeIndex + 1, total: galleryOrder.length });
     }
 
     els.galleryPrevButtons.forEach((button) => {
-      button.disabled = state.galleryScreen === "intro";
+      const isFirstScreen = state.galleryScreen === "intro";
+      button.disabled = isFirstScreen;
+      button.classList.toggle("is-concealed", isFirstScreen);
+      button.setAttribute("aria-hidden", isFirstScreen ? "true" : "false");
+      button.tabIndex = isFirstScreen ? -1 : 0;
     });
 
     els.galleryNextButtons.forEach((button) => {
       if (state.galleryScreen === "intro") {
         button.disabled = false;
-        button.textContent = "Siguiente";
+        button.textContent = t("next");
         return;
       }
       if (state.galleryScreen === "mission") {
         const complete = areAllMissionsCompleted();
         button.disabled = !complete;
-        button.textContent = complete ? "Ver victoria" : "Completa todas las salas";
+        button.textContent = complete ? t("seeVictory") : t("completeAllRooms");
         return;
       }
       button.disabled = true;
-      button.textContent = "Final";
+      button.textContent = t("final");
     });
 
     renderEndingPanelState();
@@ -2462,14 +2762,14 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   function getMenuCardState(button) {
     const section = button?.dataset?.menuSection || "";
     if (section === "intro" || section === "instructions") {
-      return { locked: false, complete: false, status: "Disponible" };
+      return { locked: false, complete: false, status: t("available") };
     }
     if (section === "ending") {
       const complete = areAllMissionsCompleted();
       return {
         locked: !complete,
         complete: complete && state.isMasterSolved,
-        status: complete ? (state.isMasterSolved ? "Completado" : "Clave final disponible") : "Bloqueado · completa todas las actividades"
+        status: complete ? (state.isMasterSolved ? t("completedMasc") : t("finalCodeAvailable")) : t("lockedCompleteActivities")
       };
     }
     const missionId = button?.dataset?.menuMission || "";
@@ -2480,14 +2780,14 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       locked,
       complete,
       status: complete
-        ? "Completada"
+        ? t("completed")
         : state.isFinished
-          ? "Bloqueada · tiempo agotado"
+          ? t("lockedExpired")
           : unlocked
-            ? "Disponible"
+            ? t("available")
             : state.isStarted
-              ? "Bloqueada · completa la actividad anterior"
-              : "Bloqueada · inicia el escape room"
+              ? t("lockedPreviousActivity")
+              : t("lockedStart")
     };
   }
 
@@ -2502,7 +2802,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       button.classList.toggle("is-complete", cardState.complete);
       const status = button.querySelector("[data-menu-card-status]");
       if (status) status.textContent = cardState.status;
-      const title = button.querySelector(".section-card-title")?.textContent?.trim() || "Sección";
+      const title = button.querySelector(".section-card-title")?.textContent?.trim() || t("section");
       button.setAttribute("aria-label", title + ". " + cardState.status + ".");
     });
   }
@@ -2579,7 +2879,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       const locked = !state.unlocked.has(mission.id);
       const complete = state.completed.has(mission.id);
       const active = state.currentMissionId === mission.id;
-      const roomLabel = \`Sala \${String(index + 1).padStart(2, "0")}\`;
+      const roomLabel = t("room") + " " + String(index + 1).padStart(2, "0");
       const button = document.createElement("button");
       button.type = "button";
       button.className = \`map-card \${locked ? "is-locked" : ""} \${complete ? "is-complete" : ""} \${active ? "is-active" : ""}\`;
@@ -2609,9 +2909,16 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       const scrollTarget = missionPanel || els.missionStage || document.querySelector('[data-gallery-screen="mission"]');
       if (scrollTarget && typeof scrollTarget.scrollIntoView === "function") {
         scrollTarget.scrollIntoView({ block: "start", behavior: "auto" });
+      } else {
+        window.scrollTo({ top: 0, behavior: "auto" });
+      }
+      const missionTitle = missionPanel?.querySelector(".mission-title");
+      const focusTarget = missionTitle || missionPanel || scrollTarget;
+      if (focusTarget) {
+        focusTarget.setAttribute("tabindex", "-1");
+        focusTarget.focus({ preventScroll: true });
         return;
       }
-      window.scrollTo({ top: 0, behavior: "auto" });
     });
   }
 
@@ -2629,7 +2936,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   }
 
   function getQuestionAutofillText(question) {
-    if (question?.subtipo_respuesta === "frase_libre") return "Esta es una respuesta libre de prueba.";
+    if (question?.subtipo_respuesta === "frase_libre") return t("trialFreeResponse");
     const correctAnswer = String(question?.respuesta_correcta || "").trim();
     if (correctAnswer) return correctAnswer;
     const firstAccepted = Array.isArray(question?.respuestas_aceptadas)
@@ -2659,12 +2966,12 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 
   function renderMissionTextBlock(question, key) {
     const placeholderBySubtype = {
-      palabra: "Escribe una palabra",
-      letra: "Escribe una letra",
-      numero: "Escribe un numero",
-      codigo_corto: "Escribe el codigo",
-      frase_corta: "Escribe tu respuesta",
-      frase_libre: "Escribe tu respuesta libre"
+      palabra: t("writeAnswer"),
+      letra: t("writeAnswer"),
+      numero: t("writeAnswer"),
+      codigo_corto: t("writeAnswer"),
+      frase_corta: t("writeAnswer"),
+      frase_libre: t("writeAnswer")
     };
     const maxLength = question.subtipo_respuesta === "letra" ? 1 : (question.subtipo_respuesta === "palabra" ? 32 : "");
     const type = "text";
@@ -2672,9 +2979,9 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     const inputClass = 'field question-answer-input' + (question.subtipo_respuesta === "numero" ? ' is-number' : '');
     const currentValue = state.questionAnswers[key] || "";
     if (question.subtipo_respuesta === "frase_libre") {
-      return '<div class="free-response-field"><textarea id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + ' is-free-response" data-question-answer="' + escapeHtmlAttr(key) + '" rows="4" spellcheck="true" autocapitalize="sentences" placeholder="Escribe tu respuesta libre">' + escapeHtml(currentValue) + '</textarea><div class="muted free-response-note">Cualquier respuesta no vacía es válida. Revisa las sugerencias ortográficas antes de verificar.</div></div>';
+      return '<div class="free-response-field"><textarea id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + ' is-free-response" data-question-answer="' + escapeHtmlAttr(key) + '" rows="4" spellcheck="true" autocapitalize="sentences" placeholder="' + escapeHtmlAttr(t("writeAnswer")) + '">' + escapeHtml(currentValue) + '</textarea><div class="muted free-response-note">' + escapeHtml(t("freeResponseNote")) + '</div></div>';
     }
-    return '<input id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + '" data-question-answer="' + escapeHtmlAttr(key) + '" type="' + type + '"' + inputMode + (maxLength ? ' maxlength="' + maxLength + '"' : '') + ' value="' + escapeHtmlAttr(currentValue) + '" placeholder="' + escapeHtmlAttr(placeholderBySubtype[question.subtipo_respuesta] || "Escribe tu respuesta") + '">';
+    return '<input id="questionAnswer-' + escapeHtmlAttr(key) + '" class="' + inputClass + '" data-question-answer="' + escapeHtmlAttr(key) + '" type="' + type + '"' + inputMode + (maxLength ? ' maxlength="' + maxLength + '"' : '') + ' value="' + escapeHtmlAttr(currentValue) + '" placeholder="' + escapeHtmlAttr(placeholderBySubtype[question.subtipo_respuesta] || t("writeAnswer")) + '">';
   }
 
   function renderMissionChoiceBlock(question, key) {
@@ -2685,16 +2992,125 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     }).join('') + '</div>';
   }
 
+  function renderTrueFalseBlock(question, key) {
+    const selected = state.questionChoices[key];
+    return '<div class="choice-grid true-false-grid" role="group" aria-label="' + escapeHtmlAttr(t("selectOption")) + '">' +
+      [true, false].map((value) => {
+        const label = value ? t("trueLabel") : t("falseLabel");
+        const isSelected = selected === value ? ' is-selected' : '';
+        return '<button type="button" class="choice-card true-false-choice' + isSelected + '" data-question-boolean="' + escapeHtmlAttr(key) + '" data-boolean-value="' + value + '" aria-pressed="' + (selected === value ? 'true' : 'false') + '">' + escapeHtml(label) + '</button>';
+      }).join('') + '</div>';
+  }
+
+  function renderFillBlankBlock(question, key) {
+    const template = String(question.texto_con_hueco || question.reto || '___');
+    const markerIndex = template.indexOf('___');
+    const before = markerIndex >= 0 ? template.slice(0, markerIndex) : template;
+    const after = markerIndex >= 0 ? template.slice(markerIndex + 3) : '';
+    const currentValue = state.questionAnswers[key] || '';
+    return '<div class="fill-blank-block"><p class="drag-match-help">' + escapeHtml(t("fillBlankInstruction")) + '</p><div class="fill-blank-sentence"><span>' + escapeHtml(before) + '</span><label class="sr-only" for="questionAnswer-' + escapeHtmlAttr(key) + '">' + escapeHtml(t("writeAnswer")) + '</label><input id="questionAnswer-' + escapeHtmlAttr(key) + '" class="field question-answer-input fill-blank-input" data-question-answer="' + escapeHtmlAttr(key) + '" type="text" value="' + escapeHtmlAttr(currentValue) + '" placeholder="___"><span>' + escapeHtml(after) + '</span></div></div>';
+  }
+
+  function getSequenceOrder(question, key) {
+    const count = Array.isArray(question.elementos) ? question.elementos.length : 0;
+    const current = state.questionSequenceOrders[key];
+    if (Array.isArray(current) && current.length === count && new Set(current).size === count && current.every((value) => Number.isInteger(value) && value >= 0 && value < count)) return current;
+    const shuffled = getStableDragTileOrder(key + '::sequence', count);
+    state.questionSequenceOrders[key] = shuffled;
+    return shuffled;
+  }
+
+  function renderSequenceBlock(question, key) {
+    const items = Array.isArray(question.elementos) ? question.elementos : [];
+    const order = getSequenceOrder(question, key);
+    const selected = Number(state.selectedSequenceItems[key]);
+    const rows = order.map((sourceIndex, position) => {
+      const label = String(items[sourceIndex] || '');
+      const isSelected = selected === position;
+      return '<li class="sequence-row' + (isSelected ? ' is-selected' : '') + '" data-sequence-drop="' + escapeHtmlAttr(key) + '" data-sequence-position="' + position + '">' +
+        '<button type="button" class="sequence-item" data-sequence-item="' + escapeHtmlAttr(key) + '" data-sequence-position="' + position + '" aria-pressed="' + (isSelected ? 'true' : 'false') + '"><span class="sequence-number">' + (position + 1) + '</span><span>' + escapeHtml(label) + '</span></button>' +
+        '<span class="sequence-controls"><button type="button" class="sequence-move" data-sequence-move="' + escapeHtmlAttr(key) + '" data-sequence-position="' + position + '" data-sequence-delta="-1" aria-label="' + escapeHtmlAttr(t("sequenceMoveUp") + ': ' + label) + '"' + (position === 0 ? ' disabled' : '') + '>↑</button><button type="button" class="sequence-move" data-sequence-move="' + escapeHtmlAttr(key) + '" data-sequence-position="' + position + '" data-sequence-delta="1" aria-label="' + escapeHtmlAttr(t("sequenceMoveDown") + ': ' + label) + '"' + (position === order.length - 1 ? ' disabled' : '') + '>↓</button></span>' +
+      '</li>';
+    }).join('');
+    return '<div class="sequence-board" data-sequence-board="' + escapeHtmlAttr(key) + '"><p class="drag-match-help">' + escapeHtml(t("sequenceInstructions")) + '</p><ol class="sequence-list">' + rows + '</ol><div class="sr-only" data-sequence-live="' + escapeHtmlAttr(key) + '" aria-live="polite" aria-atomic="true"></div></div>';
+  }
+
   function renderMissionMatchingBlock(question, key) {
     const selections = state.questionMatches[key] || {};
     const options = [...question.parejas]
       .map((pair) => pair.derecha)
-      .sort((a, b) => a.localeCompare(b, "es"));
+      .sort((a, b) => a.localeCompare(b, ESCAPE_ROOM_DATA.idioma));
     const rows = question.parejas.map((pair, index) => {
       const currentValue = selections[String(index)] || "";
-      return '<div class="match-row-grid"><div class="match-item">' + escapeHtml(pair.izquierda) + '</div><select class="match-select" data-question-match-select="' + escapeHtmlAttr(key) + '" data-match-index="' + index + '"><option value="">Selecciona una opcion</option>' + options.map((option) => '<option value="' + escapeHtmlAttr(option) + '"' + (currentValue === option ? ' selected' : '') + '>' + escapeHtml(option) + '</option>').join('') + '</select></div>';
+      return '<div class="match-row-grid"><div class="match-item">' + escapeHtml(pair.izquierda) + '</div><select class="match-select" data-question-match-select="' + escapeHtmlAttr(key) + '" data-match-index="' + index + '"><option value="">' + escapeHtml(t("selectOption")) + '</option>' + options.map((option) => '<option value="' + escapeHtmlAttr(option) + '"' + (currentValue === option ? ' selected' : '') + '>' + escapeHtml(option) + '</option>').join('') + '</select></div>';
     }).join('');
     return '<div class="match-grid">' + rows + '</div>';
+  }
+
+  function getStableDragTileOrder(key, count) {
+    const values = Array.from({ length: count }, (_, index) => index);
+    let hash = 2166136261;
+    const seed = String(ESCAPE_ROOM_PROGRESS_FINGERPRINT) + "::" + String(key);
+    for (let index = 0; index < seed.length; index += 1) {
+      hash ^= seed.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    for (let index = values.length - 1; index > 0; index -= 1) {
+      hash = Math.imul(hash ^ (hash >>> 15), 2246822519) >>> 0;
+      const swapIndex = hash % (index + 1);
+      const current = values[index];
+      values[index] = values[swapIndex];
+      values[swapIndex] = current;
+    }
+    if (values.length > 1 && values.every((value, index) => value === index)) {
+      values.push(values.shift());
+    }
+    return values;
+  }
+
+  function getDragAssignments(key) {
+    if (!state.questionDragMatches[key] || typeof state.questionDragMatches[key] !== "object") {
+      state.questionDragMatches[key] = {};
+    }
+    return state.questionDragMatches[key];
+  }
+
+  function getDragLockedTargets(key) {
+    if (!state.questionDragLocked[key] || typeof state.questionDragLocked[key] !== "object") {
+      state.questionDragLocked[key] = {};
+    }
+    return state.questionDragLocked[key];
+  }
+
+  function renderMissionDragDropBlock(question, key) {
+    const pairs = Array.isArray(question.parejas) ? question.parejas : [];
+    const assignments = getDragAssignments(key);
+    const locked = getDragLockedTargets(key);
+    const selectedTile = Number(state.selectedDragTiles[key]);
+    const assignedTiles = new Set(Object.values(assignments).map((value) => Number(value)).filter(Number.isInteger));
+    const tileOrder = getStableDragTileOrder(key, pairs.length);
+    const tray = tileOrder.filter((tileIndex) => !assignedTiles.has(tileIndex)).map((tileIndex) => {
+      const selected = selectedTile === tileIndex;
+      const pair = pairs[tileIndex] || {};
+      return '<button type="button" class="drag-match-tile' + (selected ? ' is-selected' : '') + '" data-drag-tile="' + escapeHtmlAttr(key) + '" data-drag-tile-index="' + tileIndex + '" aria-pressed="' + (selected ? 'true' : 'false') + '" aria-label="' + escapeHtmlAttr(t("dragTileLabel", { tile: pair.derecha || "" })) + '">' + escapeHtml(pair.derecha || "") + '</button>';
+    }).join('');
+    const targets = pairs.map((pair, targetIndex) => {
+      const assignedTile = Number(assignments[String(targetIndex)]);
+      const hasTile = Number.isInteger(assignedTile) && pairs[assignedTile];
+      const isLocked = locked[String(targetIndex)] === true;
+      const tileLabel = hasTile ? String(pairs[assignedTile].derecha || "") : "";
+      const targetClass = 'drag-match-target' + (hasTile ? ' is-filled' : '') + (isLocked ? ' is-correct' : '');
+      const ariaLabel = hasTile
+        ? t("dragTargetFilledLabel", { target: pair.izquierda || "", tile: tileLabel })
+        : t("dragTargetLabel", { target: pair.izquierda || "" });
+      return '<button type="button" class="' + targetClass + '" data-drag-target="' + escapeHtmlAttr(key) + '" data-drag-target-index="' + targetIndex + '"' + (hasTile ? ' data-assigned-tile-index="' + assignedTile + '"' : '') + (isLocked ? ' data-drag-locked="true" disabled aria-disabled="true"' : '') + ' aria-label="' + escapeHtmlAttr(ariaLabel) + '"><span class="drag-match-target-label">' + escapeHtml(pair.izquierda || "") + '</span><span class="drag-match-target-slot">' + escapeHtml(hasTile ? tileLabel : t("dragEmptySlot")) + '</span></button>';
+    }).join('');
+    return '<div class="drag-match-board" data-drag-board="' + escapeHtmlAttr(key) + '">' +
+      '<p class="drag-match-help">' + escapeHtml(t("dragInstructions")) + '</p>' +
+      '<div class="drag-match-tray" aria-label="' + escapeHtmlAttr(t("dragTray")) + '">' + (tray || '<div class="drag-match-empty">' + escapeHtml(t("dragTrayEmpty")) + '</div>') + '</div>' +
+      '<div class="drag-match-targets">' + targets + '</div>' +
+      '<div class="sr-only" data-drag-live="' + escapeHtmlAttr(key) + '" aria-live="polite" aria-atomic="true"></div>' +
+    '</div>';
   }
 
   function isDuplicateMediaNote(note, fallbackText) {
@@ -2722,7 +3138,11 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 
   function renderQuestionInteraction(question, key) {
     if (question.tipo_interaccion === "opcion_multiple") return renderMissionChoiceBlock(question, key);
+    if (question.tipo_interaccion === "verdadero_falso") return renderTrueFalseBlock(question, key);
     if (question.tipo_interaccion === "relacion_columnas") return renderMissionMatchingBlock(question, key);
+    if (question.tipo_interaccion === "drag_drop") return renderMissionDragDropBlock(question, key);
+    if (question.tipo_interaccion === "ordenar_secuencia") return renderSequenceBlock(question, key);
+    if (question.tipo_interaccion === "completar_espacio") return renderFillBlankBlock(question, key);
     return renderMissionTextBlock(question, key);
   }
 
@@ -2731,15 +3151,15 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     const total = getRoomQuestions(mission).length || 1;
     const complete = state.completedQuestions.has(key);
     const cardClass = 'mission-panel question-card' + (complete ? ' is-complete' : '');
-    const statusText = complete ? (question.retroalimentacion_correcta || 'Correcto.') : 'Resuelve esta pregunta para avanzar.';
+    const statusText = complete ? (question.retroalimentacion_correcta || t("correct")) : t("defaultChallenge");
     const mediaHtml = renderQuestionMedia(question, question.reto);
-    const interactionHtml = complete ? '<div class="status-box is-good">Pregunta completada.</div>' : renderQuestionInteraction(question, key);
+    const interactionHtml = complete ? '<div class="status-box is-good">' + escapeHtml(t("questionCompleted")) + '</div>' : renderQuestionInteraction(question, key);
     const isInlineAnswer = question.tipo_interaccion === 'texto' && question.subtipo_respuesta === 'numero';
     const responseRowClass = 'question-response-row' + (isInlineAnswer ? ' is-inline-answer' : '');
     return '<article class="' + cardClass + '" data-question-card data-question-key="' + escapeHtmlAttr(key) + '">' +
       '<div class="question-head">' +
         '<div>' +
-          '<div class="label">Pregunta ' + String(questionIndex + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0') + '</div>' +
+          '<div class="label">' + escapeHtml(t("questionCounter", { current: String(questionIndex + 1).padStart(2, '0'), total: String(total).padStart(2, '0') })) + '</div>' +
           '<h3 class="question-title">' + escapeHtml(question.titulo) + '</h3>' +
         '</div>' +
       '</div>' +
@@ -2748,13 +3168,32 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       '<div class="' + responseRowClass + '">' +
         '<div class="question-challenge">' + interactionHtml + '</div>' +
         '<div class="button-row question-actions">' +
-          '<button type="button" class="primary" data-question-verify="' + escapeHtmlAttr(key) + '"' + (complete ? ' disabled' : '') + '>' + (complete ? 'Completada' : 'Verificar') + '</button>' +
-          '<button type="button" class="secondary" data-question-hint="' + escapeHtmlAttr(key) + '"' + (complete ? ' disabled' : '') + '>Ver pista</button>' +
+          '<button type="button" class="primary" data-question-verify="' + escapeHtmlAttr(key) + '"' + (complete ? ' disabled' : '') + '>' + escapeHtml(complete ? t("completed") : t("verify")) + '</button>' +
+          '<button type="button" class="secondary" data-question-hint="' + escapeHtmlAttr(key) + '"' + (complete ? ' disabled' : '') + '>' + escapeHtml(t("revealHint")) + '</button>' +
         '</div>' +
       '</div>' +
       '<div class="hint-box hidden" data-question-hint-box="' + escapeHtmlAttr(key) + '">' + escapeHtml(question.pista) + '</div>' +
       '<div class="status-box" data-question-status="' + escapeHtmlAttr(key) + '">' + escapeHtml(statusText) + '</div>' +
     '</article>';
+  }
+
+  function renderInvestigationBoard(mission, includeAcknowledge = false) {
+    const evidence = Array.isArray(mission?.datos_clave) ? mission.datos_clave.filter(Boolean) : [];
+    const evidenceHtml = evidence.length
+      ? '<div><div class="label">' + escapeHtml(t("keyEvidence")) + '</div><div class="investigation-evidence-grid">' + evidence.map((item, index) => (
+          '<div class="evidence-card"><span class="evidence-index">' + String(index + 1).padStart(2, '0') + '</span>' + escapeHtml(item) + '</div>'
+        )).join('') + '</div></div>'
+      : '';
+    const actionHtml = includeAcknowledge
+      ? '<div class="investigation-board-actions"><button type="button" class="primary" data-briefing-ack="' + escapeHtmlAttr(mission.id) + '">' + escapeHtml(t("briefingAcknowledge")) + '</button></div>'
+      : '';
+    return '<section class="investigation-board" data-briefing-board="' + escapeHtmlAttr(mission.id) + '" aria-labelledby="briefing-title-' + escapeHtmlAttr(mission.id) + '">' +
+      '<div class="investigation-board-head"><div><div class="label">' + escapeHtml(mission.release || t("section")) + '</div><h3 class="investigation-board-title" id="briefing-title-' + escapeHtmlAttr(mission.id) + '">' + escapeHtml(t("investigationBoard")) + '</h3></div><p class="investigation-board-lead">' + escapeHtml(t("briefingLead")) + '</p></div>' +
+      '<article class="investigation-document"><p>' + escapeHtml(mission.contexto || mission.historia) + '</p></article>' +
+      evidenceHtml +
+      '<div class="investigation-objective"><strong>' + escapeHtml(t("missionObjective")) + '</strong><p>' + escapeHtml(mission.reto) + '</p></div>' +
+      actionHtml +
+    '</section>';
   }
 
   function setRoomStatus(message, type) {
@@ -2779,7 +3218,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       field.disabled = true;
     });
     const verify = card.querySelector('[data-question-verify]');
-    if (verify) verify.textContent = 'Completada';
+    if (verify) verify.textContent = t("completed");
   }
 
   function checkMatchingQuestion(question, key) {
@@ -2791,24 +3230,158 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     });
   }
 
+  function announceDrag(key, message) {
+    const text = String(message || "");
+    const live = els.missionStage?.querySelector('[data-drag-live="' + CSS.escape(key) + '"]');
+    if (live) live.textContent = text;
+    if (els.liveStatus) els.liveStatus.textContent = text;
+  }
+
+  function findDragQuestion(key) {
+    const mission = missionById(state.currentMissionId);
+    if (!mission) return null;
+    const question = getRoomQuestions(mission).find((item) => getQuestionKey(mission, item) === key) || null;
+    return question ? { mission, question } : null;
+  }
+
+  function removeDragTileFromAssignments(assignments, tileIndex) {
+    Object.keys(assignments).forEach((targetIndex) => {
+      if (Number(assignments[targetIndex]) === Number(tileIndex)) delete assignments[targetIndex];
+    });
+  }
+
+  function refreshDragBoard(key, focusSelector, announcement) {
+    renderMission();
+    window.requestAnimationFrame(() => {
+      const focusTarget = focusSelector ? els.missionStage?.querySelector(focusSelector) : null;
+      if (focusTarget && !focusTarget.disabled) focusTarget.focus({ preventScroll: true });
+      if (announcement) announceDrag(key, announcement);
+    });
+  }
+
+  function selectDragTile(key, tileIndex) {
+    const found = findDragQuestion(key);
+    if (!found || !state.isStarted || state.isFinished) return;
+    const pair = found.question.parejas?.[tileIndex];
+    if (!pair) return;
+    const assignments = getDragAssignments(key);
+    const locked = getDragLockedTargets(key);
+    const lockedTarget = Object.keys(assignments).find((targetIndex) => Number(assignments[targetIndex]) === tileIndex && locked[targetIndex] === true);
+    if (lockedTarget != null) return;
+    removeDragTileFromAssignments(assignments, tileIndex);
+    state.selectedDragTiles[key] = tileIndex;
+    persistProgressState();
+    refreshDragBoard(
+      key,
+      '[data-drag-target="' + CSS.escape(key) + '"]:not(:disabled)',
+      t("dragTileSelected", { tile: pair.derecha || "" })
+    );
+  }
+
+  function placeDragTile(key, targetIndex, explicitTileIndex = null) {
+    const found = findDragQuestion(key);
+    if (!found || !state.isStarted || state.isFinished) return false;
+    const pairs = found.question.parejas || [];
+    const locked = getDragLockedTargets(key);
+    if (locked[String(targetIndex)] === true || !pairs[targetIndex]) return false;
+    const selectedTile = explicitTileIndex == null ? Number(state.selectedDragTiles[key]) : Number(explicitTileIndex);
+    if (!Number.isInteger(selectedTile) || !pairs[selectedTile]) return false;
+    const assignments = getDragAssignments(key);
+    removeDragTileFromAssignments(assignments, selectedTile);
+    assignments[String(targetIndex)] = selectedTile;
+    delete state.selectedDragTiles[key];
+    persistProgressState();
+    refreshDragBoard(
+      key,
+      '[data-drag-tile="' + CSS.escape(key) + '"]',
+      t("dragTilePlaced", { tile: pairs[selectedTile].derecha || "", target: pairs[targetIndex].izquierda || "" })
+    );
+    return true;
+  }
+
+  function checkDragDropQuestion(question, key) {
+    const assignments = getDragAssignments(key);
+    return question.parejas.every((_, targetIndex) => Number(assignments[String(targetIndex)]) === targetIndex);
+  }
+
+  function rejectIncorrectDragMatches(question, key) {
+    const assignments = getDragAssignments(key);
+    const locked = getDragLockedTargets(key);
+    const wrongTargets = [];
+    question.parejas.forEach((_, targetIndex) => {
+      const assignedTile = Number(assignments[String(targetIndex)]);
+      if (assignedTile === targetIndex) {
+        locked[String(targetIndex)] = true;
+      } else if (Number.isInteger(assignedTile)) {
+        wrongTargets.push(targetIndex);
+      }
+    });
+    wrongTargets.forEach((targetIndex) => {
+      const target = els.missionStage?.querySelector('[data-drag-target="' + CSS.escape(key) + '"][data-drag-target-index="' + targetIndex + '"]');
+      if (target) target.classList.add("is-wrong");
+    });
+    announceDrag(key, t("dragTryAgain"));
+    persistProgressState();
+    window.setTimeout(() => {
+      wrongTargets.forEach((targetIndex) => delete assignments[String(targetIndex)]);
+      delete state.selectedDragTiles[key];
+      persistProgressState();
+      refreshDragBoard(key, '[data-drag-tile="' + CSS.escape(key) + '"]', t("dragIncorrectReturned"));
+      setQuestionStatus(key, question.retroalimentacion_incorrecta || t("incorrect"), "bad");
+    }, 380);
+  }
+
+  function announceSequence(key, message) {
+    const text = String(message || '');
+    const live = els.missionStage?.querySelector('[data-sequence-live="' + CSS.escape(key) + '"]');
+    if (live) live.textContent = text;
+    if (els.liveStatus) els.liveStatus.textContent = text;
+  }
+
+  function moveSequenceItem(key, fromPosition, toPosition) {
+    const found = findDragQuestion(key);
+    if (!found || found.question.tipo_interaccion !== 'ordenar_secuencia') return false;
+    const order = getSequenceOrder(found.question, key);
+    const from = Math.max(0, Math.min(order.length - 1, Number(fromPosition)));
+    const to = Math.max(0, Math.min(order.length - 1, Number(toPosition)));
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
+    const [moved] = order.splice(from, 1);
+    order.splice(to, 0, moved);
+    state.questionSequenceOrders[key] = order;
+    delete state.selectedSequenceItems[key];
+    persistProgressState();
+    const label = found.question.elementos?.[moved] || '';
+    renderMission();
+    window.requestAnimationFrame(() => {
+      const focus = els.missionStage?.querySelector('[data-sequence-item="' + CSS.escape(key) + '"][data-sequence-position="' + to + '"]');
+      focus?.focus({ preventScroll: true });
+      announceSequence(key, t("sequenceMoved", { item: label, position: to + 1 }));
+    });
+    return true;
+  }
+
+  function checkSequenceQuestion(question, key) {
+    return getSequenceOrder(question, key).every((sourceIndex, position) => sourceIndex === position);
+  }
+
   function markQuestionComplete(mission, question) {
     const key = getQuestionKey(mission, question);
     state.completedQuestions.add(key);
     setQuestionCardCompleteState(key);
-    setQuestionStatus(key, question.retroalimentacion_correcta || 'Correcto.', 'good');
+    setQuestionStatus(key, question.retroalimentacion_correcta || t("correct"), 'good');
     persistProgressState();
     const completedCount = getCompletedQuestionCount(mission);
     const totalQuestions = getRoomQuestions(mission).length || 1;
     if (els.questionProgress) {
-      els.questionProgress.innerHTML = 'Preguntas resueltas: <strong>' + completedCount + ' / ' + totalQuestions + '</strong>';
+      els.questionProgress.textContent = t("questionsSolved", { done: completedCount, total: totalQuestions });
     }
     if (areMissionQuestionsCompleted(mission)) {
       markMissionComplete(mission);
-      setRoomStatus(IS_MENU_MODE ? 'Actividad completada. Ya puedes volver al menú y continuar.' : 'Sala completada. Se desbloquearon nuevas rutas.', 'good');
+      setRoomStatus(IS_MENU_MODE ? t("activityComplete") : t("roomComplete"), 'good');
       renderMission();
       return;
     }
-    setRoomStatus(IS_MENU_MODE ? 'Continúa resolviendo las preguntas de esta actividad.' : 'Continúa resolviendo las preguntas de esta sala.', 'info');
+    setRoomStatus(IS_MENU_MODE ? t("continueActivity") : t("continueRoom"), 'info');
   }
 
   function renderMission() {
@@ -2817,7 +3390,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     if (!mission) {
       els.missionStage.innerHTML = '';
       if (els.questionProgress) {
-        els.questionProgress.innerHTML = 'Preguntas resueltas: <strong>0 / 0</strong>';
+        els.questionProgress.textContent = t("questionsSolved", { done: 0, total: 0 });
       }
       return;
     }
@@ -2825,17 +3398,19 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     const questions = getRoomQuestions(mission);
     const completedCount = getCompletedQuestionCount(mission);
     const roomComplete = areMissionQuestionsCompleted(mission);
+    const briefingRead = state.readBriefings.has(mission.id);
+    const canReviewBriefing = briefingRead && !state.isStarted;
     const roomStatusText = roomComplete
-      ? (IS_MENU_MODE ? 'Actividad completada. Vuelve al menú para continuar.' : 'Sala completada. Listo para avanzar.')
-      : (IS_MENU_MODE ? 'Resuelve las preguntas en cualquier orden para desbloquear la siguiente actividad.' : 'Resuelve las preguntas en cualquier orden para desbloquear la siguiente sala.');
-    const questionCards = questions.map((question, index) => renderQuestionCard(mission, question, index)).join('');
+      ? (IS_MENU_MODE ? t("activityReady") : t("roomReady"))
+      : (IS_MENU_MODE ? t("solveActivityQuestions") : t("solveRoomQuestions"));
+    const questionCards = briefingRead ? questions.map((question, index) => renderQuestionCard(mission, question, index)).join('') : '';
     if (els.questionProgress) {
-      els.questionProgress.innerHTML = 'Preguntas resueltas: <strong>' + completedCount + ' / ' + questions.length + '</strong>';
+      els.questionProgress.textContent = t("questionsSolved", { done: completedCount, total: questions.length });
     }
     const nextActionSlot = document.querySelector('[data-menu-next-slot]');
     if (nextActionSlot) {
       nextActionSlot.innerHTML = IS_MENU_MODE && roomComplete
-        ? '<button type="button" class="primary" data-menu-next>' + (areAllMissionsCompleted() ? 'Siguiente: mensaje final' : 'Siguiente') + '</button>'
+        ? '<button type="button" class="primary" data-menu-next>' + escapeHtml(areAllMissionsCompleted() ? t("nextFinal") : t("next")) + '</button>'
         : '';
     }
 
@@ -2843,13 +3418,18 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       '<section class="mission-panel" data-room-palette style="' + escapeHtmlAttr(getMissionPaletteStyle(mission)) + '">' +
         '<h2 class="mission-title">' + escapeHtml(mission.titulo) + '</h2>' +
         '<p class="mission-story">' + escapeHtml(mission.historia) + '</p>' +
+        (briefingRead
+          ? (canReviewBriefing ? '<details class="briefing-review"><summary>' + escapeHtml(t("briefingReview")) + '</summary>' + renderInvestigationBoard(mission, false) + '</details>' : '')
+          : renderInvestigationBoard(mission, true)) +
+        (briefingRead ? (
         '<div class="mission-layout">' +
           renderQuestionMedia(mission, mission.reto) +
-          '<div class="label">Reto</div>' +
+          '<div class="label">' + escapeHtml(t("challenge")) + '</div>' +
           '<div class="challenge-box">' + escapeHtml(mission.reto) + '</div>' +
           '<div class="status-box room-status-box" id="roomStatusBox">' + roomStatusText + '</div>' +
         '</div>' +
-        '<div class="question-list">' + questionCards + '</div>' +
+        '<div class="question-list">' + questionCards + '</div>'
+        ) : '') +
       '</section>';
 
     els.questionProgress = document.getElementById('questionProgress');
@@ -2894,8 +3474,8 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     if (!button) return;
     const shouldVerify = action === "verify";
     button.dataset.editorialAction = shouldVerify ? "verify" : "autofill";
-    button.textContent = shouldVerify ? "Verificar respuestas" : "Autocompletar pantalla";
-    button.setAttribute("aria-label", shouldVerify ? "Verificar todas las respuestas" : "Autocompletar todas las respuestas");
+    button.textContent = shouldVerify ? t("verifyAnswers") : t("autofillScreen");
+    button.setAttribute("aria-label", shouldVerify ? t("verifyAllAnswers") : t("autofillAllAnswers"));
     if (window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ === true && window.parent !== window) {
       // El preview editorial vive en un sandbox de origen opaco; el padre valida event.source y el esquema.
       window.parent.postMessage({ type: "pigpen-editorial-action", action: button.dataset.editorialAction }, "*");
@@ -2913,18 +3493,18 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     if (state.galleryScreen === "ending") {
       const verifyMasterButton = document.getElementById("btnVerifyMasterPasscode");
       if (!verifyMasterButton) {
-        setRoomStatus("No se encontró la validación de la clave final.", "bad");
+        setRoomStatus(t("finalCodeMissing"), "bad");
         return;
       }
       verifyMasterButton.click();
       setEditorialReviewAction("autofill");
-      setRoomStatus("Clave final verificada para revisión editorial.", "good");
+      setRoomStatus(t("finalCodeEditorialVerified"), "good");
       return;
     }
 
     const mission = missionById(state.currentMissionId);
     if (state.galleryScreen !== "mission" || !mission) {
-      setRoomStatus("No hay respuestas listas para verificar en esta pantalla.", "info");
+      setRoomStatus(t("noAnswersToVerify"), "info");
       setEditorialReviewAction("autofill");
       return;
     }
@@ -2945,8 +3525,8 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     setEditorialReviewAction(allValidated ? "autofill" : "verify");
     setRoomStatus(
       allValidated
-        ? 'Se verificaron correctamente ' + validated + ' respuesta(s) de esta pantalla.'
-        : 'Se validaron ' + validated + ' de ' + pendingQuestions.length + ' respuesta(s). Revisa las pendientes.',
+        ? t("verifiedCount", { count: validated })
+        : t("validatedCount", { count: validated, total: pendingQuestions.length }),
       allValidated ? 'good' : 'bad'
     );
   }
@@ -2985,19 +3565,19 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       if (input && finalCode) {
         input.value = finalCode;
         setEditorialReviewAction("verify");
-        setRoomStatus("Clave final autocompletada. Pulsa Verificar para validarla.", "good");
+        setRoomStatus(t("finalCodeAutofilled"), "good");
         return;
       }
     }
 
     if (state.galleryScreen !== "mission") {
-      setRoomStatus("No hay respuestas editables en esta pantalla.", "info");
+      setRoomStatus(t("noEditableAnswers"), "info");
       return;
     }
 
     const mission = missionById(state.currentMissionId);
     if (!mission) {
-      setRoomStatus(IS_MENU_MODE ? "No se encontró la actividad activa." : "No se encontró la sala activa.", "bad");
+      setRoomStatus(IS_MENU_MODE ? t("activeActivityMissing") : t("activeRoomMissing"), "bad");
       return;
     }
 
@@ -3032,6 +3612,30 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         return;
       }
 
+      if (question.tipo_interaccion === "drag_drop") {
+        state.questionDragMatches[key] = {};
+        state.questionDragLocked[key] = {};
+        question.parejas.forEach((_, index) => {
+          state.questionDragMatches[key][String(index)] = index;
+        });
+        delete state.selectedDragTiles[key];
+        filled += 1;
+        return;
+      }
+
+      if (question.tipo_interaccion === "verdadero_falso") {
+        state.questionChoices[key] = question.respuesta_correcta === true;
+        filled += 1;
+        return;
+      }
+
+      if (question.tipo_interaccion === "ordenar_secuencia") {
+        state.questionSequenceOrders[key] = question.elementos.map((_, index) => index);
+        delete state.selectedSequenceItems[key];
+        filled += 1;
+        return;
+      }
+
       const autofillText = getQuestionAutofillText(question);
       state.questionAnswers[key] = autofillText;
       const input = els.missionStage?.querySelector('[data-question-answer="' + CSS.escape(key) + '"]');
@@ -3041,10 +3645,11 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 
     persistProgressState();
     if (filled > 0) {
+      renderMission();
       setEditorialReviewAction("verify");
-      setRoomStatus('Se autocompletaron ' + filled + ' respuesta(s). Pulsa Verificar para validarlas.', 'good');
+      setRoomStatus(t("autofilledCount", { count: filled }), 'good');
     } else {
-      setRoomStatus("No había respuestas pendientes para autocompletar.", "info");
+      setRoomStatus(t("noPendingAutofill"), "info");
     }
   }
 
@@ -3053,23 +3658,42 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     state.missionEventsBound = true;
 
     els.missionStage.addEventListener('click', (event) => {
+      const briefingButton = event.target.closest('[data-briefing-ack]');
+      if (briefingButton) {
+        const missionId = briefingButton.getAttribute('data-briefing-ack') || '';
+        if (!missionId || state.isFinished) return;
+        // En modo Salas se puede consultar el expediente desde "Siguiente"
+        // antes de pulsar el botón global de inicio. La propia etiqueta de este
+        // control promete iniciar la experiencia, así que debe activar también
+        // el reloj en lugar de ignorar silenciosamente el clic.
+        if (!state.isStarted) startEscapeRoom();
+        if (!state.isStarted || state.isFinished) return;
+        state.currentMissionId = missionId;
+        state.galleryScreen = 'mission';
+        state.readBriefings.add(missionId);
+        persistProgressState();
+        renderMission();
+        if (els.liveStatus) els.liveStatus.textContent = t("briefingReady");
+        scrollMissionStageToTop();
+        return;
+      }
       const hintButton = event.target.closest('[data-question-hint]');
       if (hintButton) {
         if (!state.isStarted || state.isFinished) {
-          setRoomStatus(state.isFinished ? 'El tiempo terminó. Reinicia el escape room para volver a jugar.' : 'Primero inicia el escape room para interactuar.', state.isFinished ? 'bad' : 'info');
+          setRoomStatus(state.isFinished ? t("restartToPlay") : t("interactStart"), state.isFinished ? 'bad' : 'info');
           return;
         }
         const key = hintButton.getAttribute('data-question-hint');
         const hintBox = els.missionStage?.querySelector('[data-question-hint-box="' + CSS.escape(key || '') + '"]');
         if (hintBox) hintBox.classList.remove('hidden');
-        setQuestionStatus(key || '', 'Pista revelada. Ajusta tu lectura del reto.', 'good');
+        setQuestionStatus(key || '', t("hintRevealed"), 'good');
         return;
       }
 
       const choiceButton = event.target.closest('[data-question-choice]');
       if (choiceButton) {
         if (!state.isStarted || state.isFinished) {
-          setRoomStatus(state.isFinished ? 'El tiempo terminó. Reinicia el escape room para volver a jugar.' : 'Primero inicia el escape room para interactuar.', state.isFinished ? 'bad' : 'info');
+          setRoomStatus(state.isFinished ? t("restartToPlay") : t("interactStart"), state.isFinished ? 'bad' : 'info');
           return;
         }
         const key = choiceButton.getAttribute('data-question-choice') || '';
@@ -3082,10 +3706,93 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         return;
       }
 
+      const booleanButton = event.target.closest('[data-question-boolean]');
+      if (booleanButton) {
+        if (!state.isStarted || state.isFinished) {
+          setRoomStatus(state.isFinished ? t("restartToPlay") : t("interactStart"), state.isFinished ? 'bad' : 'info');
+          return;
+        }
+        const key = booleanButton.getAttribute('data-question-boolean') || '';
+        state.questionChoices[key] = booleanButton.getAttribute('data-boolean-value') === 'true';
+        persistProgressState();
+        renderMission();
+        return;
+      }
+
+      const sequenceMove = event.target.closest('[data-sequence-move]');
+      if (sequenceMove) {
+        if (!state.isStarted || state.isFinished) return;
+        const key = sequenceMove.getAttribute('data-sequence-move') || '';
+        const position = Number(sequenceMove.getAttribute('data-sequence-position'));
+        const delta = Number(sequenceMove.getAttribute('data-sequence-delta'));
+        moveSequenceItem(key, position, position + delta);
+        return;
+      }
+
+      const sequenceItem = event.target.closest('[data-sequence-item]');
+      if (sequenceItem) {
+        if (Date.now() < state.suppressDragClickUntil || !state.isStarted || state.isFinished) return;
+        const key = sequenceItem.getAttribute('data-sequence-item') || '';
+        const position = Number(sequenceItem.getAttribute('data-sequence-position'));
+        const selected = Number(state.selectedSequenceItems[key]);
+        if (Number.isInteger(selected)) {
+          if (selected === position) {
+            delete state.selectedSequenceItems[key];
+            renderMission();
+          } else {
+            moveSequenceItem(key, selected, position);
+          }
+        } else {
+          state.selectedSequenceItems[key] = position;
+          persistProgressState();
+          const found = findDragQuestion(key);
+          const sourceIndex = getSequenceOrder(found?.question || {}, key)[position];
+          const label = found?.question?.elementos?.[sourceIndex] || '';
+          renderMission();
+          window.requestAnimationFrame(() => announceSequence(key, t("sequenceSelected", { item: label })));
+        }
+        return;
+      }
+
+      const dragTileButton = event.target.closest('[data-drag-tile]');
+      if (dragTileButton) {
+        if (Date.now() < state.suppressDragClickUntil) return;
+        if (!state.isStarted || state.isFinished) {
+          setRoomStatus(state.isFinished ? t("restartToPlay") : t("interactStart"), state.isFinished ? 'bad' : 'info');
+          return;
+        }
+        const key = dragTileButton.getAttribute('data-drag-tile') || '';
+        const tileIndex = Number(dragTileButton.getAttribute('data-drag-tile-index'));
+        selectDragTile(key, tileIndex);
+        return;
+      }
+
+      const dragTargetButton = event.target.closest('[data-drag-target]');
+      if (dragTargetButton) {
+        if (!state.isStarted || state.isFinished) {
+          setRoomStatus(state.isFinished ? t("restartToPlay") : t("interactStart"), state.isFinished ? 'bad' : 'info');
+          return;
+        }
+        const key = dragTargetButton.getAttribute('data-drag-target') || '';
+        const targetIndex = Number(dragTargetButton.getAttribute('data-drag-target-index'));
+        const selectedTile = Number(state.selectedDragTiles[key]);
+        if (Number.isInteger(selectedTile)) {
+          placeDragTile(key, targetIndex, selectedTile);
+          return;
+        }
+        const assignedTile = Number(dragTargetButton.getAttribute('data-assigned-tile-index'));
+        if (Number.isInteger(assignedTile)) {
+          selectDragTile(key, assignedTile);
+        } else {
+          announceDrag(key, t("dragSelectFirst"));
+        }
+        return;
+      }
+
       const verifyButton = event.target.closest('[data-question-verify]');
       if (verifyButton) {
         if (!state.isStarted || state.isFinished) {
-          setRoomStatus(state.isFinished ? 'El tiempo terminó. Reinicia el escape room para volver a jugar.' : 'Primero inicia el escape room para resolver las preguntas.', state.isFinished ? 'bad' : 'info');
+          setRoomStatus(state.isFinished ? t("restartToPlay") : t("solveStart"), state.isFinished ? 'bad' : 'info');
           return;
         }
         const key = verifyButton.getAttribute('data-question-verify') || '';
@@ -3094,7 +3801,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         const question = getRoomQuestions(mission).find((item) => getQuestionKey(mission, item) === key);
         if (!question) return;
         if (state.completedQuestions.has(key)) {
-          setQuestionStatus(key, 'Esta pregunta ya estaba completada.', 'good');
+          setQuestionStatus(key, t("alreadyCompleted"), 'good');
           return;
         }
 
@@ -3103,8 +3810,18 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
           const selectedIndex = Number(state.questionChoices[key] ?? -1);
           const selected = question.opciones[selectedIndex] || '';
           isCorrect = getQuestionAcceptedAnswers(question).includes(normalizePlayerAnswer(selected, question));
+        } else if (question.tipo_interaccion === 'verdadero_falso') {
+          isCorrect = typeof state.questionChoices[key] === 'boolean' && state.questionChoices[key] === question.respuesta_correcta;
         } else if (question.tipo_interaccion === 'relacion_columnas') {
           isCorrect = checkMatchingQuestion(question, key);
+        } else if (question.tipo_interaccion === 'drag_drop') {
+          isCorrect = checkDragDropQuestion(question, key);
+          if (!isCorrect) {
+            rejectIncorrectDragMatches(question, key);
+            return;
+          }
+        } else if (question.tipo_interaccion === 'ordenar_secuencia') {
+          isCorrect = checkSequenceQuestion(question, key);
         } else {
           const answerInput = els.missionStage.querySelector('[data-question-answer="' + CSS.escape(key) + '"]');
           const answer = answerInput ? answerInput.value || '' : (state.questionAnswers[key] || '');
@@ -3122,11 +3839,141 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         setQuestionStatus(
           key,
           question.subtipo_respuesta === 'frase_libre'
-            ? 'Escribe una respuesta antes de verificar.'
-            : (question.retroalimentacion_incorrecta || 'Respuesta incorrecta. Intenta otra vez.'),
+            ? t("answerRequired")
+            : (question.retroalimentacion_incorrecta || t("incorrect")),
           'bad'
         );
       }
+    });
+
+    els.missionStage.addEventListener('pointerdown', (event) => {
+      const sequenceItem = event.target.closest('[data-sequence-item]');
+      if (sequenceItem && state.isStarted && !state.isFinished && event.button <= 0) {
+        state.activeSequencePointer = {
+          pointerId: event.pointerId,
+          key: sequenceItem.getAttribute('data-sequence-item') || '',
+          position: Number(sequenceItem.getAttribute('data-sequence-position')),
+          startX: event.clientX,
+          startY: event.clientY,
+          node: sequenceItem,
+          moved: false
+        };
+        sequenceItem.setPointerCapture?.(event.pointerId);
+        return;
+      }
+      const tile = event.target.closest('[data-drag-tile]');
+      if (!tile || !state.isStarted || state.isFinished || event.button > 0) return;
+      const key = tile.getAttribute('data-drag-tile') || '';
+      const tileIndex = Number(tile.getAttribute('data-drag-tile-index'));
+      if (!key || !Number.isInteger(tileIndex)) return;
+      state.activeDragPointer = {
+        pointerId: event.pointerId,
+        key,
+        tileIndex,
+        startX: event.clientX,
+        startY: event.clientY,
+        node: tile,
+        moved: false
+      };
+      if (typeof tile.setPointerCapture === 'function') tile.setPointerCapture(event.pointerId);
+    });
+
+    els.missionStage.addEventListener('pointermove', (event) => {
+      const sequence = state.activeSequencePointer;
+      if (sequence && sequence.pointerId === event.pointerId && sequence.node?.isConnected) {
+        const deltaX = event.clientX - sequence.startX;
+        const deltaY = event.clientY - sequence.startY;
+        if (!sequence.moved && Math.hypot(deltaX, deltaY) < 6) return;
+        sequence.moved = true;
+        sequence.node.classList.add('is-dragging');
+        sequence.node.style.transform = 'translate3d(0,' + deltaY + 'px,0)';
+        event.preventDefault();
+        return;
+      }
+      const active = state.activeDragPointer;
+      if (!active || active.pointerId !== event.pointerId || !active.node?.isConnected) return;
+      const deltaX = event.clientX - active.startX;
+      const deltaY = event.clientY - active.startY;
+      if (!active.moved && Math.hypot(deltaX, deltaY) < 6) return;
+      active.moved = true;
+      active.node.classList.add('is-dragging');
+      active.node.style.transform = 'translate3d(' + deltaX + 'px,' + deltaY + 'px,0) scale(1.03)';
+      active.node.style.zIndex = '20';
+      els.missionStage.querySelectorAll('[data-drag-target="' + CSS.escape(active.key) + '"]:not(:disabled)').forEach((target) => {
+        const rect = target.getBoundingClientRect();
+        const over = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        target.classList.toggle('is-drop-ready', over);
+      });
+      event.preventDefault();
+    });
+
+    const finishPointerDrag = (event, cancelled = false) => {
+      const sequence = state.activeSequencePointer;
+      if (sequence && sequence.pointerId === event.pointerId) {
+        state.activeSequencePointer = null;
+        sequence.node?.classList.remove('is-dragging');
+        if (sequence.node) sequence.node.style.transform = '';
+        if (sequence.moved && !cancelled) {
+          state.suppressDragClickUntil = Date.now() + 300;
+          const targets = Array.from(els.missionStage.querySelectorAll('[data-sequence-drop="' + CSS.escape(sequence.key) + '"]'));
+          const target = targets.find((candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            return event.clientY >= rect.top && event.clientY <= rect.bottom;
+          });
+          if (target) moveSequenceItem(sequence.key, sequence.position, Number(target.getAttribute('data-sequence-position')));
+        }
+        return;
+      }
+      const active = state.activeDragPointer;
+      if (!active || active.pointerId !== event.pointerId) return;
+      state.activeDragPointer = null;
+      const node = active.node;
+      if (node?.isConnected) {
+        node.classList.remove('is-dragging');
+        node.style.transform = '';
+        node.style.zIndex = '';
+        if (typeof node.releasePointerCapture === 'function' && node.hasPointerCapture?.(event.pointerId)) {
+          node.releasePointerCapture(event.pointerId);
+        }
+      }
+      els.missionStage.querySelectorAll('.is-drop-ready').forEach((target) => target.classList.remove('is-drop-ready'));
+      if (!active.moved || cancelled) return;
+      state.suppressDragClickUntil = Date.now() + 300;
+      const candidates = Array.from(els.missionStage.querySelectorAll('[data-drag-target="' + CSS.escape(active.key) + '"]:not(:disabled)'));
+      const target = candidates.find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+      });
+      if (target) {
+        placeDragTile(active.key, Number(target.getAttribute('data-drag-target-index')), active.tileIndex);
+      } else {
+        announceDrag(active.key, t("dragCancelled"));
+      }
+    };
+
+    els.missionStage.addEventListener('pointerup', (event) => finishPointerDrag(event, false));
+    els.missionStage.addEventListener('pointercancel', (event) => finishPointerDrag(event, true));
+
+    els.missionStage.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      const sequenceBoard = event.target.closest('[data-sequence-board]');
+      if (sequenceBoard) {
+        const sequenceKey = sequenceBoard.getAttribute('data-sequence-board') || '';
+        delete state.selectedSequenceItems[sequenceKey];
+        state.activeSequencePointer = null;
+        persistProgressState();
+        renderMission();
+        event.preventDefault();
+        return;
+      }
+      const board = event.target.closest('[data-drag-board]');
+      if (!board) return;
+      const key = board.getAttribute('data-drag-board') || '';
+      delete state.selectedDragTiles[key];
+      state.activeDragPointer = null;
+      persistProgressState();
+      refreshDragBoard(key, '[data-drag-tile="' + CSS.escape(key) + '"]', t("dragCancelled"));
+      event.preventDefault();
     });
 
     els.missionStage.addEventListener('change', (event) => {
@@ -3134,7 +3981,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
       if (!select) return;
       if (!state.isStarted || state.isFinished) {
         event.preventDefault();
-        setRoomStatus(state.isFinished ? 'El tiempo terminó. Reinicia el escape room para volver a jugar.' : 'Primero inicia el escape room para interactuar.', state.isFinished ? 'bad' : 'info');
+        setRoomStatus(state.isFinished ? t("restartToPlay") : t("interactStart"), state.isFinished ? 'bad' : 'info');
         return;
       }
       const key = select.getAttribute('data-question-match-select') || '';
@@ -3181,9 +4028,17 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     state.unlocked = new Set(IS_MENU_MODE ? [] : ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id));
     state.completed = new Set();
     state.completedQuestions = new Set();
+    state.readBriefings = new Set(ESCAPE_ROOM_DATA.misiones.filter((mission) => mission.contexto_requerido === false).map((mission) => mission.id));
     state.questionAnswers = {};
     state.questionChoices = {};
     state.questionMatches = {};
+    state.questionDragMatches = {};
+    state.questionDragLocked = {};
+    state.selectedDragTiles = {};
+    state.questionSequenceOrders = {};
+    state.selectedSequenceItems = {};
+    state.activeSequencePointer = null;
+    state.activeDragPointer = null;
     state.currentMissionId = IS_MENU_MODE
       ? (ESCAPE_ROOM_DATA.misiones[0]?.id || null)
       : (ESCAPE_ROOM_DATA.misiones.find((mission) => !mission.bloqueada_inicial)?.id || ESCAPE_ROOM_DATA.misiones[0]?.id || null);
@@ -3242,7 +4097,25 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         completed: state.completed.size,
         total: ESCAPE_ROOM_DATA.misiones.length
       },
-      currentActivity: currentMission ? { id: currentMission.id, title: currentMission.titulo } : null,
+      currentActivity: currentMission ? {
+        id: currentMission.id,
+        title: currentMission.titulo,
+        briefingRead: state.readBriefings.has(currentMission.id),
+        briefing: currentMission.contexto,
+        keyEvidence: Array.isArray(currentMission.datos_clave) ? [...currentMission.datos_clave] : [],
+        questions: getRoomQuestions(currentMission).map((question) => {
+          const key = getQuestionKey(currentMission, question);
+          return {
+            id: question.id,
+            title: question.titulo,
+            type: question.tipo_interaccion,
+            completed: state.completedQuestions.has(key),
+            dragAssignments: question.tipo_interaccion === "drag_drop" ? { ...(state.questionDragMatches[key] || {}) } : undefined,
+            dragLocked: question.tipo_interaccion === "drag_drop" ? { ...(state.questionDragLocked[key] || {}) } : undefined,
+            sequenceOrder: question.tipo_interaccion === "ordenar_secuencia" ? [...getSequenceOrder(question, key)] : undefined
+          };
+        })
+      } : null,
       activities,
       sections: IS_MENU_MODE
         ? [
@@ -3263,21 +4136,21 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     if (!els.liveStatus) return;
     const current = getGameTextState();
     const screenLabel = current.screen === "menu"
-      ? "Menú principal"
+      ? t("menu")
       : current.screen === "mission"
-        ? (IS_MENU_MODE ? "Actividad" : "Sala")
+        ? (IS_MENU_MODE ? t("activity") : t("room"))
         : current.screen === "instructions"
-          ? "Instrucciones"
+          ? t("instructions")
           : current.screen === "ending"
-            ? "Mensaje final"
-            : "Introducción";
-    els.liveStatus.textContent = screenLabel
-      + ". Progreso " + current.progress.completed + " de " + current.progress.total
-      + ". " + (current.started
-        ? (current.finished
-          ? (current.masterSolved ? "Escape room completado." : "Tiempo agotado.")
-          : "Juego en curso.")
-        : "Juego listo para iniciar.");
+            ? t("finalMessage")
+            : t("introduction");
+    const status = current.started
+      ? (current.finished ? t("statusFinished") : t("statusInProgress"))
+      : t("statusNotStarted");
+    els.liveStatus.textContent = t("currentScreen", { screen: screenLabel }) + " "
+      + t("currentProgress", { done: current.progress.completed, total: current.progress.total }) + " "
+      + t("gameStatus", { status })
+      + (current.masterSolved ? " " + t("gameCompleted") + "." : "");
   }
 
   function advanceTime(milliseconds = 0) {
@@ -3320,7 +4193,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
   });
   document.addEventListener("fullscreenchange", syncFullscreenControls);
   document.addEventListener("webkitfullscreenchange", syncFullscreenControls);
-  document.addEventListener("fullscreenerror", () => announceFullscreen("No fue posible activar la pantalla completa en este navegador."));
+  document.addEventListener("fullscreenerror", () => announceFullscreen(t("fullscreen")));
 
   els.menuCards.forEach((button) => {
     button.addEventListener("click", () => openMenuCard(button));
@@ -3341,14 +4214,8 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     editorialAutofillButton.addEventListener("click", autocompleteCurrentScreen);
   }
 
-  function extractFinalPasscode(text) {
-    if (ESCAPE_ROOM_FINAL_PASSCODE) return ESCAPE_ROOM_FINAL_PASSCODE;
-    if (!text) return null;
-    const quotedMatch = text.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
-    if (quotedMatch) return quotedMatch[1];
-    const keywordMatch = text.match(/(?:clave final|c[oó]digo final|clave|c[oó]digo)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
-    if (keywordMatch) return keywordMatch[1];
-    return null;
+  function extractFinalPasscode() {
+    return ESCAPE_ROOM_FINAL_PASSCODE || null;
   }
 
   function verifyMasterPasscode() {
@@ -3357,10 +4224,10 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
     if (!input || !statusBox) return;
 
     const value = String(input.value || "").trim().toLowerCase();
-    const finalCode = String(extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion) || "").trim().toLowerCase();
+    const finalCode = String(extractFinalPasscode() || "").trim().toLowerCase();
 
     if (value === finalCode) {
-      statusBox.textContent = "¡Clave correcta! Desactivando el sistema...";
+      statusBox.textContent = t("correctSystem");
       statusBox.className = "status-box is-good";
       statusBox.classList.remove("hidden");
       stopAlertSound();
@@ -3385,7 +4252,7 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
         render();
       }, 2000);
     } else {
-      statusBox.textContent = "Clave de acceso incorrecta. El sistema sigue en peligro.";
+      statusBox.textContent = t("incorrectSystem");
       statusBox.className = "status-box is-bad";
       statusBox.classList.remove("hidden");
     }
@@ -3424,15 +4291,18 @@ const ESCAPE_ROOM_PROGRESS_FINGERPRINT = ${JSON.stringify(progressFingerprint)};
 `;
 }
 
-function buildFullscreenButton() {
-  return `<button type="button" class="fullscreen-toggle" data-fullscreen-toggle aria-label="Pantalla completa" aria-pressed="false" title="Pantalla completa">
+function buildFullscreenButton(messages) {
+  const label = escapeHtmlAttr(messages.fullscreen);
+  return `<button type="button" class="fullscreen-toggle" data-fullscreen-toggle aria-label="${label}" aria-pressed="false" title="${label}">
     <svg class="fullscreen-enter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
     <svg class="fullscreen-exit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M8 21v-3a2 2 0 0 0-2-2H3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
-    <span data-fullscreen-label>Pantalla completa</span>
+    <span data-fullscreen-label>${escapeHtml(messages.fullscreen)}</span>
   </button>`;
 }
 
 function buildMenuSectionsHtml(normalized, finalPasscode) {
+  const messages = getGameMessages(normalized.idioma);
+  const msg = (key, params = {}) => formatGameMessage(messages, key, params);
   const title = escapeHtml(normalized.titulo);
   const subtitle = escapeHtml(normalized.subtitulo);
   const introduction = escapeHtml(normalized.introduccion);
@@ -3441,33 +4311,33 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
   const endingImageUrl = resolveEndingImage(normalized);
   const introductionMedia = buildSectionCardMedia(
     normalized.backgroundImage,
-    normalized.titulo || "Introducción del escape room",
+    normalized.titulo || messages.introduction,
     "intro"
   );
   const endingMedia = buildSectionCardMedia(
     endingImageUrl,
-    normalized.titulo || "Mensaje final del escape room",
+    normalized.titulo || messages.finalMessage,
     "final"
   );
-  const detailTimer = () => `<div class="timer-shell is-ready" data-timer-shell aria-label="Cuenta regresiva"><strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong></div>`;
+  const detailTimer = () => `<div class="timer-shell is-ready" data-timer-shell aria-label="${escapeHtmlAttr(messages.countdown)}"><strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong></div>`;
   const missionCards = normalized.misiones.map((mission, index) => {
     const activityNumber = String(index + 1).padStart(2, "0");
     const missionTitle = escapeHtml(mission.titulo);
     const paletteStyle = buildMissionPaletteStyle(normalized, mission, index);
     return `<button type="button" class="section-card is-locked" data-menu-card data-menu-section="mission" data-menu-mission="${escapeHtmlAttr(mission.id)}" style="${escapeHtmlAttr(paletteStyle)}" aria-disabled="true" disabled>
       ${buildSectionCardMedia(resolveMissionCardImage(mission), mission.imagen_alt || mission.titulo, "activity")}
-      <span class="section-card-kicker">Actividad ${activityNumber}</span>
+      <span class="section-card-kicker">${escapeHtml(messages.activity)} ${activityNumber}</span>
       <strong class="section-card-title">${missionTitle}</strong>
-      <span class="section-card-status" data-menu-card-status>Bloqueada · inicia el escape room</span>
+      <span class="section-card-status" data-menu-card-status>${escapeHtml(messages.lockedStart)}</span>
     </button>`;
   }).join("\n");
-  const heroProgressSteps = normalized.misiones.map((mission, index) => `<li class="menu-progress-step${index === 0 ? " is-active" : ""}" data-step="${index + 1}"><span>${escapeHtml(mission.titulo || `Actividad ${index + 1}`)}</span></li>`).join("");
+  const heroProgressSteps = normalized.misiones.map((mission, index) => `<li class="menu-progress-step${index === 0 ? " is-active" : ""}" data-step="${index + 1}"><span>${escapeHtml(mission.titulo || `${messages.activity} ${index + 1}`)}</span></li>`).join("");
   const endingImageHtml = endingImageUrl
-    ? `<div class="ending-media"><img src="${escapeHtmlAttr(endingImageUrl)}" alt="${escapeHtmlAttr(normalized.titulo || "Escape room completado")}"></div>`
+    ? `<div class="ending-media"><img src="${escapeHtmlAttr(endingImageUrl)}" alt="${escapeHtmlAttr(normalized.titulo || messages.gameCompleted)}"></div>`
     : buildSectionCardFallback("final");
 
   return `<!DOCTYPE html>
-<html lang="es">
+<html lang="${escapeHtmlAttr(normalized.idioma)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -3479,7 +4349,7 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
 </head>
 <body class="menu-mode">
   <img src="logo.png" alt="PigPen" class="game-logo-brand">
-  ${buildFullscreenButton()}
+  ${buildFullscreenButton(messages)}
   <p id="gameLiveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
   <main class="game-shell">
     <section class="game-card menu-game-card">
@@ -3491,62 +4361,62 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="15" cy="9" r="4"></circle><path d="m12.2 11.8-8 8M7 17l-2-2m5-1-2-2"></path></svg>
               </div>
               <div class="menu-hero-copy">
-                <div class="label">Escape room · Menú por secciones</div>
+                <div class="label">${escapeHtml(messages.menuModeLabel)}</div>
                 <h1 class="title">${title}</h1>
                 <p class="subtitle">${subtitle}</p>
               </div>
             </div>
             <div class="menu-hero-meta">
               <div class="menu-progress-area">
-                <p class="menu-progress-eyebrow">Tu progreso</p>
-                <p class="menu-progress-lead">Resuelve las actividades para descubrir la clave final.</p>
+                <p class="menu-progress-eyebrow">${escapeHtml(messages.yourProgress)}</p>
+                <p class="menu-progress-lead">${escapeHtml(messages.progressLead)}</p>
                 <div class="menu-progress-line">
-                  <ol class="menu-progress-steps" aria-label="Progreso de actividades">${heroProgressSteps}</ol>
-                  <div class="menu-progress-count"><strong id="progressText">0 / ${normalized.misiones.length}</strong><span>actividades completadas</span></div>
+                  <ol class="menu-progress-steps" aria-label="${escapeHtmlAttr(messages.activitiesProgressAria)}">${heroProgressSteps}</ol>
+                  <div class="menu-progress-count"><strong id="progressText">0 / ${normalized.misiones.length}</strong><span>${escapeHtml(messages.activitiesCompleted)}</span></div>
                 </div>
                 <div class="progress-shell menu-progress" aria-hidden="true"><div class="progress-bar"><span id="progressBar"></span></div></div>
               </div>
               <div class="menu-hero-controls">
                 ${detailTimer()}
                 <div class="hero-controls">
-                  <button type="button" class="primary" data-game-start>Iniciar escape room</button>
-                  <button type="button" class="secondary" data-game-reset>Reiniciar escape room</button>
+                  <button type="button" class="primary" data-game-start>${escapeHtml(messages.start)}</button>
+                  <button type="button" class="secondary" data-game-reset>${escapeHtml(messages.reset)}</button>
                 </div>
               </div>
             </div>
-            <aside class="menu-hero-tip" aria-label="Consejo">
+            <aside class="menu-hero-tip" aria-label="${escapeHtmlAttr(messages.tip)}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 22h4M8.7 14.2A6.5 6.5 0 1 1 15.3 14c-.8.6-1.3 1.4-1.3 2.4H10c0-1-.5-1.8-1.3-2.2Z"></path><path d="M12 2v1M4.9 4.9l.7.7M2 12h1M19 12h3M18.4 5.6l.7-.7"></path></svg>
-              <div><strong>Consejo</strong><p>Explora cada sección con atención: la clave puede estar en los detalles.</p></div>
+              <div><strong>${escapeHtml(messages.tip)}</strong><p>${escapeHtml(messages.tipText)}</p></div>
             </aside>
           </header>
 
           <section class="sections-panel" aria-labelledby="sectionsMenuTitle">
             <div class="sections-panel-heading">
               <div>
-                <div class="label">Recorrido</div>
-                <h2 id="sectionsMenuTitle">Elige una sección</h2>
+                <div class="label">${escapeHtml(messages.route)}</div>
+                <h2 id="sectionsMenuTitle">${escapeHtml(messages.chooseSection)}</h2>
               </div>
-              <p class="muted">Las actividades se desbloquean en orden.</p>
+              <p class="muted">${escapeHtml(messages.unlockOrder)}</p>
             </div>
             <div class="sections-grid" id="sectionsMenu">
               <button type="button" class="section-card" data-menu-card data-menu-section="intro" aria-disabled="false">
                 ${introductionMedia}
-                <span class="section-card-kicker">Antes de comenzar</span>
-                <strong class="section-card-title">Introducción</strong>
-                <span class="section-card-status" data-menu-card-status>Disponible</span>
+                <span class="section-card-kicker">${escapeHtml(messages.beforeStart)}</span>
+                <strong class="section-card-title">${escapeHtml(messages.introduction)}</strong>
+                <span class="section-card-status" data-menu-card-status>${escapeHtml(messages.available)}</span>
               </button>
               <button type="button" class="section-card" data-menu-card data-menu-section="instructions" aria-disabled="false">
                 ${buildSectionCardFallback("instructions")}
-                <span class="section-card-kicker">Cómo jugar</span>
-                <strong class="section-card-title">Instrucciones</strong>
-                <span class="section-card-status" data-menu-card-status>Disponible</span>
+                <span class="section-card-kicker">${escapeHtml(messages.howToPlay)}</span>
+                <strong class="section-card-title">${escapeHtml(messages.instructions)}</strong>
+                <span class="section-card-status" data-menu-card-status>${escapeHtml(messages.available)}</span>
               </button>
               ${missionCards}
               <button type="button" class="section-card is-locked" data-menu-card data-menu-section="ending" aria-disabled="true" disabled>
                 ${endingMedia}
-                <span class="section-card-kicker">Cierre</span>
-                <strong class="section-card-title">Mensaje final</strong>
-                <span class="section-card-status" data-menu-card-status>Bloqueado · completa todas las actividades</span>
+                <span class="section-card-kicker">${escapeHtml(messages.closing)}</span>
+                <strong class="section-card-title">${escapeHtml(messages.finalMessage)}</strong>
+                <span class="section-card-status" data-menu-card-status>${escapeHtml(messages.lockedCompleteActivities)}</span>
               </button>
             </div>
           </section>
@@ -3555,14 +4425,14 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
         <section class="gallery-screen menu-detail-screen" data-gallery-screen="intro" aria-hidden="true">
           <article class="menu-detail-shell">
             <div class="menu-detail-toolbar">
-              <button type="button" class="secondary" data-menu-back>Volver al menú</button>
+              <button type="button" class="secondary" data-menu-back>${escapeHtml(messages.backToMenu)}</button>
               ${detailTimer()}
             </div>
             <div>
-              <div class="label">Introducción</div>
+              <div class="label">${escapeHtml(messages.introduction)}</div>
               <h2 class="mission-title">${title}</h2>
             </div>
-            ${normalized.backgroundImage ? `<div class="menu-detail-media"><img src="${escapeHtmlAttr(normalized.backgroundImage)}" alt="${escapeHtmlAttr(normalized.titulo || "Introducción del escape room")}"></div>` : buildSectionCardFallback("intro")}
+            ${normalized.backgroundImage ? `<div class="menu-detail-media"><img src="${escapeHtmlAttr(normalized.backgroundImage)}" alt="${escapeHtmlAttr(normalized.titulo || messages.introduction)}"></div>` : buildSectionCardFallback("intro")}
             <p class="menu-detail-copy">${introduction}</p>
           </article>
         </section>
@@ -3570,12 +4440,12 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
         <section class="gallery-screen menu-detail-screen" data-gallery-screen="instructions" aria-hidden="true">
           <article class="menu-detail-shell">
             <div class="menu-detail-toolbar">
-              <button type="button" class="secondary" data-menu-back>Volver al menú</button>
+              <button type="button" class="secondary" data-menu-back>${escapeHtml(messages.backToMenu)}</button>
               ${detailTimer()}
             </div>
             <div>
-              <div class="label">Cómo jugar</div>
-              <h2 class="mission-title">Instrucciones</h2>
+              <div class="label">${escapeHtml(messages.howToPlay)}</div>
+              <h2 class="mission-title">${escapeHtml(messages.instructions)}</h2>
             </div>
             ${buildSectionCardFallback("instructions")}
             <p class="menu-detail-copy">${instructions}</p>
@@ -3584,9 +4454,9 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
 
         <section class="gallery-screen menu-detail-screen" data-gallery-screen="mission" aria-hidden="true">
           <article class="menu-mission-shell">
-            <div class="menu-detail-toolbar" aria-label="Controles de actividad">
-              <button type="button" class="secondary" data-menu-back>Menú</button>
-              <div class="question-progress" id="questionProgress" aria-live="polite">Preguntas resueltas: <strong>0 / 0</strong></div>
+            <div class="menu-detail-toolbar" aria-label="${escapeHtmlAttr(messages.activityControls)}">
+              <button type="button" class="secondary" data-menu-back>${escapeHtml(messages.menu)}</button>
+              <div class="question-progress" id="questionProgress" aria-live="polite">${escapeHtml(msg("questionsSolved", { done: 0, total: 0 }))}</div>
               ${detailTimer()}
               <div class="menu-detail-toolbar-actions" data-menu-next-slot></div>
             </div>
@@ -3596,26 +4466,26 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
 
         <section class="gallery-screen menu-detail-screen" data-gallery-screen="ending" aria-hidden="true">
           <div class="menu-detail-toolbar">
-            <button type="button" class="secondary" data-menu-back>Volver al menú</button>
+            <button type="button" class="secondary" data-menu-back>${escapeHtml(messages.backToMenu)}</button>
             ${detailTimer()}
           </div>
           <section id="endingPanel" class="ending-panel hidden">
             <div id="masterPanelContainer" class="master-panel-container hidden" style="text-align: center; max-width: 500px; margin: 0 auto; padding: 20px;">
-              <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">Panel de Control Maestro</div>
-              <h2 style="margin-bottom: 15px;">Sistema en estado crítico</h2>
-              <p class="muted" style="margin-bottom: 25px;">Introduce la clave final para desactivar el sistema y detener el temporizador.</p>
-              ${finalPasscode.isFallback ? `<p class="muted" style="margin-bottom: 18px;">Clave final de respaldo: <strong>${escapeHtml(finalPasscode.code)}</strong></p>` : ""}
+              <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">${escapeHtml(messages.masterControlPanel)}</div>
+              <h2 style="margin-bottom: 15px;">${escapeHtml(messages.criticalSystem)}</h2>
+              <p class="muted" style="margin-bottom: 25px;">${escapeHtml(messages.finalCodePrompt)}</p>
+              <p class="final-code-reveal" style="margin-bottom: 18px;"><strong>${escapeHtml(msg("finalCodeReveal", { code: finalPasscode.code }))}</strong></p>
               <div class="button-row" style="justify-content: center; margin-bottom: 20px; align-items: center;">
-                <label class="sr-only" for="masterPasscodeInput">Clave final</label>
-                <input class="field" type="text" id="masterPasscodeInput" placeholder="Clave final" autocomplete="off" style="max-width: 220px; text-align: center; letter-spacing: 2px; font-weight: bold;">
-                <button type="button" class="primary" id="btnVerifyMasterPasscode">Desactivar</button>
+                <label class="sr-only" for="masterPasscodeInput">${escapeHtml(messages.finalCode)}</label>
+                <input class="field" type="text" id="masterPasscodeInput" placeholder="${escapeHtmlAttr(messages.finalCode)}" autocomplete="off" style="max-width: 220px; text-align: center; letter-spacing: 2px; font-weight: bold;">
+                <button type="button" class="primary" id="btnVerifyMasterPasscode">${escapeHtml(messages.deactivate)}</button>
               </div>
               <div id="masterStatusBox" class="status-box hidden" role="status" aria-live="polite"></div>
             </div>
 
             <div id="victoryContainer">
-              <div class="label">Victoria</div>
-              <h2>Escape room completado</h2>
+              <div class="label">${escapeHtml(messages.victory)}</div>
+              <h2>${escapeHtml(messages.gameCompleted)}</h2>
               ${endingImageHtml}
               <p class="muted">${conclusion}</p>
             </div>
@@ -3631,6 +4501,8 @@ function buildMenuSectionsHtml(normalized, finalPasscode) {
 
 export function buildGameHtml(project) {
   const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
+  const messages = getGameMessages(normalized.idioma);
+  const msg = (key, params = {}) => formatGameMessage(messages, key, params);
   const finalPasscode = resolveFinalPasscode(normalized);
   if (normalized.modo_presentacion === "menu_secciones") {
     return buildMenuSectionsHtml(normalized, finalPasscode);
@@ -3660,12 +4532,12 @@ export function buildGameHtml(project) {
   const endingImageHtml = endingImageUrl
     ? `
         <div class="ending-media">
-          <img src="${escapeHtmlAttr(endingImageUrl)}" alt="${escapeHtmlAttr(normalized.titulo || "Escape room completado")}">
+          <img src="${escapeHtmlAttr(endingImageUrl)}" alt="${escapeHtmlAttr(normalized.titulo || messages.gameCompleted)}">
         </div>`
     : "";
 
   return `<!DOCTYPE html>
-<html lang="es">
+<html lang="${escapeHtmlAttr(normalized.idioma)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -3677,17 +4549,17 @@ export function buildGameHtml(project) {
 </head>
 <body>
   <img src="logo.png" alt="Logo" class="game-logo-brand">
-  ${buildFullscreenButton()}
+  ${buildFullscreenButton(messages)}
   <p id="gameLiveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
   <main class="game-shell">
     <header class="game-header">
-      <button type="button" class="secondary" data-gallery-prev>Anterior</button>
+      <button type="button" class="secondary is-concealed" data-gallery-prev aria-hidden="true" tabindex="-1" disabled>${escapeHtml(messages.previous)}</button>
       <div class="game-header-center">
-        <div class="gallery-step" id="galleryStep">Sección 1 de 3</div>
+        <div class="gallery-step" id="galleryStep">${escapeHtml(msg("sectionCounter", { current: 1, total: 3 }))}</div>
       </div>
-      <button type="button" class="secondary" data-gallery-next>Siguiente</button>
+      <button type="button" class="secondary" data-gallery-next>${escapeHtml(messages.next)}</button>
     </header>
-    <div class="timer-shell timer-fab is-ready" data-timer-shell aria-label="Cuenta regresiva"><strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong></div>
+    <div class="timer-shell timer-fab is-ready" data-timer-shell aria-label="${escapeHtmlAttr(messages.countdown)}"><strong class="timer-value" data-timer-value>${formatDuration((normalized.duracion_minutos || 35) * 60)}</strong></div>
     <section class="game-card">
       <div class="gallery-stage">
         <section class="gallery-screen is-active" data-gallery-screen="intro">
@@ -3697,13 +4569,13 @@ export function buildGameHtml(project) {
             <p class="subtitle">${subtitle}</p>
             <p class="muted">${introduction}</p>
             <div class="hero-controls">
-              <button type="button" class="primary" data-game-start>Iniciar escape room</button>
-              <button type="button" class="secondary" data-game-reset>Reiniciar escape room</button>
+              <button type="button" class="primary" data-game-start>${escapeHtml(messages.start)}</button>
+              <button type="button" class="secondary" data-game-reset>${escapeHtml(messages.reset)}</button>
             </div>
             ${heroImageHtml}
             <div class="progress-shell">
               <div class="progress-bar"><span id="progressBar"></span></div>
-              <p class="status-note">Progreso <strong id="progressText">0 / ${normalized.misiones.length}</strong></p>
+              <p class="status-note">${escapeHtml(messages.progress)} <strong id="progressText">0 / ${normalized.misiones.length}</strong></p>
             </div>
           </section>
         </section>
@@ -3720,21 +4592,21 @@ export function buildGameHtml(project) {
           <section id="endingPanel" class="ending-panel hidden">
             <!-- Contenedor del Panel de Control Maestro (Clave Final) -->
             <div id="masterPanelContainer" class="master-panel-container hidden" style="text-align: center; max-width: 500px; margin: 0 auto; padding: 20px;">
-              <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">Panel de Control Maestro</div>
-              <h3 style="margin-bottom: 15px;">Sistema en Estado Crítico</h3>
-              <p class="muted" style="margin-bottom: 25px;">Introduce la clave final para desactivar el sistema y detener el temporizador.</p>
-              ${finalPasscode.isFallback ? `<p class="muted" style="margin-bottom: 18px;">Clave final de respaldo: <strong>${escapeHtml(finalPasscode.code)}</strong></p>` : ""}
+              <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">${escapeHtml(messages.masterControlPanel)}</div>
+              <h3 style="margin-bottom: 15px;">${escapeHtml(messages.criticalSystem)}</h3>
+              <p class="muted" style="margin-bottom: 25px;">${escapeHtml(messages.finalCodePrompt)}</p>
+              <p class="final-code-reveal" style="margin-bottom: 18px;"><strong>${escapeHtml(msg("finalCodeReveal", { code: finalPasscode.code }))}</strong></p>
               <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; align-items: center;">
-                <input type="text" id="masterPasscodeInput" placeholder="Clave final" style="padding: 12px 20px; border-radius: 12px; border: 2px solid var(--line); background: var(--panel-soft); color: var(--text); font-size: 1.5rem; text-align: center; width: 180px; letter-spacing: 2px; font-weight: bold; outline: none; transition: border-color 0.2s;" />
-                <button type="button" class="primary" id="btnVerifyMasterPasscode" style="padding: 12px 24px; border-radius: 12px; font-weight: bold;">Desactivar</button>
+                <input type="text" id="masterPasscodeInput" placeholder="${escapeHtmlAttr(messages.finalCode)}" style="padding: 12px 20px; border-radius: 12px; border: 2px solid var(--line); background: var(--panel-soft); color: var(--text); font-size: 1.5rem; text-align: center; width: 180px; letter-spacing: 2px; font-weight: bold; outline: none; transition: border-color 0.2s;" />
+                <button type="button" class="primary" id="btnVerifyMasterPasscode" style="padding: 12px 24px; border-radius: 12px; font-weight: bold;">${escapeHtml(messages.deactivate)}</button>
               </div>
               <div id="masterStatusBox" class="status-box hidden" style="margin-top: 15px; padding: 10px; border-radius: 8px;"></div>
             </div>
 
             <!-- Contenedor de Éxito / Victoria -->
             <div id="victoryContainer">
-              <div class="label">Victoria</div>
-              <h2>Escape room completado</h2>
+              <div class="label">${escapeHtml(messages.victory)}</div>
+              <h2>${escapeHtml(messages.gameCompleted)}</h2>
               ${endingImageHtml}
               <p class="muted">${conclusion}</p>
             </div>
@@ -3750,6 +4622,7 @@ export function buildGameHtml(project) {
 
 export function buildPreviewDocument(project, options = {}) {
   const normalized = hydrateAcademicMissionPalettes(normalizeEscapeRoomProject(project));
+  const messages = getGameMessages(normalized.idioma);
   const styleProject = { ...normalized, themeConfig: normalized.themeConfig };
   const fullHtml = buildGameHtml(normalized);
   const bodyMatch = fullHtml.match(/<body([^>]*)>([\s\S]*?)<script src="assets\/game\.js"><\/script>\s*<\/body>/i);
@@ -3760,10 +4633,10 @@ export function buildPreviewDocument(project, options = {}) {
     ? `<script>window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ = true;</script>`
     : "";
   const editorialButton = editorialReview
-    ? `<button type="button" data-editorial-autofill data-editorial-action="autofill" aria-label="Autocompletar todas las respuestas" hidden style="position: fixed; right: 20px; bottom: 20px; z-index: 9999; border: 0; border-radius: 999px; padding: 12px 16px; background: #ec4899; color: #fff; font-weight: 700; box-shadow: 0 12px 30px rgba(236,72,153,.35);">Autocompletar pantalla</button>`
+    ? `<button type="button" data-editorial-autofill data-editorial-action="autofill" aria-label="${escapeHtmlAttr(messages.autofillAllAnswers)}" hidden style="position: fixed; right: 20px; bottom: 20px; z-index: 9999; border: 0; border-radius: 999px; padding: 12px 16px; background: #ec4899; color: #fff; font-weight: 700; box-shadow: 0 12px 30px rgba(236,72,153,.35);">${escapeHtml(messages.autofillScreen)}</button>`
     : "";
   return `<!DOCTYPE html>
-<html lang="es">
+<html lang="${escapeHtmlAttr(normalized.idioma)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">

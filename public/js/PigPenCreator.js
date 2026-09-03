@@ -22,7 +22,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-import { authFetchJson, buildApiUrl, buildVeoApiUrl, hasAvailableApiBase } from "./api-client.js";
+import { authFetchJson, buildApiUrl, buildGeminiApiUrl, hasAvailableApiBase } from "./api-client.js?v=20260902-gemini-direct";
 import {
   normalizeEscapeRoomProject,
   normalizeMission,
@@ -30,6 +30,7 @@ import {
   normalizeQuestionList,
   normalizeAcceptedAnswers,
   normalizeTextList,
+  normalizeSequenceItems,
   normalizePairList,
   normalizeMediaValue,
   normalizeString,
@@ -41,8 +42,10 @@ import {
   extractSingleWordAnswer,
   buildSingleWordChallenge,
   buildMissionId,
+  resolveFinalPasscode,
+  normalizeConcreteQuestionHint,
   validateQuestionAnswer
-} from "./escape-room-creator-model.mjs";
+} from "./escape-room-creator-model.mjs?v=20260903-smart-question-images";
 import {
   buildEscapeRoomPackage,
   buildPreviewDocument
@@ -55,12 +58,14 @@ import {
 import {
   buildMoodleAnswerKeyHtml
 } from "./escape-room-answer-export.mjs";
+import { buildInteractionPlan, formatInteractionPlanForPrompt } from "./escape-room-interaction-plan.mjs";
+import { formatGameMessage, getGameMessages, normalizeGameLocale } from "./escape-room-game-i18n.mjs";
 import {
   dataUrlToBlob,
   detectAssetMimeType,
   extensionForMimeType,
   optimizeRasterImage
-} from "./escape-room-image-optimizer.mjs";
+} from "./escape-room-image-optimizer.mjs?v=20260831-web-image-assets";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -68,10 +73,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const TEXT_MODEL_DEFAULT = "gemini-2.5-flash";
-// Gemini 3 Pro Image prioriza instrucciones complejas y renderizado de texto cuando
-// sea inevitable. En PigPen, el texto evaluable se mantiene fuera de la imagen.
-const IMAGE_MODEL = "gemini-3-pro-image";
-const ALLOWED_TEXT_MODELS = new Set([
+// Flash Image reduce la latencia interactiva; el proxy cambia a Pro si se agota
+// la cuota del modelo principal.
+const IMAGE_MODEL_DEFAULT = "gemini-3.1-flash-image";
+const FALLBACK_TEXT_MODELS = Object.freeze([
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.5-pro",
@@ -79,11 +84,18 @@ const ALLOWED_TEXT_MODELS = new Set([
   "gemini-3-pro-preview",
   "gemini-flash-latest"
 ]);
+const FALLBACK_IMAGE_MODELS = Object.freeze([
+  "gemini-3.1-flash-image",
+  "gemini-3-pro-image"
+]);
+const ALLOWED_TEXT_MODELS = new Set(FALLBACK_TEXT_MODELS);
+const ALLOWED_IMAGE_MODELS = new Set(FALLBACK_IMAGE_MODELS);
 const FORM_STORAGE_KEY = "PigPenCreator.formState.v2";
 const PROJECT_STORAGE_KEY = "PigPenCreator.projectState.v1";
 const ACTIVE_SESSION_STORAGE_KEY = "PigPenCreator.activeSessionId.v1";
 const THEME_STORAGE_KEY = "PigPenCreator.theme.v1";
 const PREVIEW_THEME_STORAGE_KEY = "PigPenCreator.previewTheme.v1";
+const SESSION_FILTERS_STORAGE_KEY = "PigPenCreator.sessionFilters.v1";
 const BRIEF_WIDTH_STORAGE_KEY = "PigPenCreator.briefWidth.v1";
 const BRIEF_WIDTH_DEFAULT = 340;
 const BRIEF_WIDTH_MIN = 280;
@@ -92,6 +104,10 @@ const INSPECTOR_WIDTH_STORAGE_KEY = "PigPenCreator.inspectorWidth.v1";
 const INSPECTOR_WIDTH_DEFAULT = 220;
 const INSPECTOR_WIDTH_MIN = 200;
 const INSPECTOR_WIDTH_MAX = 480;
+const SESSIONS_WIDTH_STORAGE_KEY = "PigPenCreator.sessionsWidth.v1";
+const SESSIONS_WIDTH_DEFAULT = 340;
+const SESSIONS_WIDTH_MIN = 280;
+const SESSIONS_WIDTH_MAX = 560;
 const STUDIO_MAIN_MIN_WIDTH = 360;
 const CREATOR_LOGO_URL = new URL("../logo.png", import.meta.url);
 // El estudio multipanel cabe desde una tablet grande / laptop compacta.
@@ -180,7 +196,12 @@ const THEME_COMBINE_COLORS = {
   1: "#2da6b1",
   2: "#ea5a5a",
   3: "#952e89",
-  4: "#e48119"
+  4: "#e48119",
+  5: "#708e2c",
+  6: "#4a7cb1",
+  7: "#cb2637",
+  8: "#bd348c",
+  9: "#f2a85d"
 };
 const SUPPORT_GRAPHIC_UPLOAD_ENDPOINT = "/api/unidades/support-graphics/upload";
 const DATA_URL_PATTERN = /^data:([^;,]+)(;[^,]*)?,(.*)$/i;
@@ -200,7 +221,14 @@ const GENERIC_PISTA_MARKERS = [
   "instrucción de pista",
   "introducción de pista",
   "sugerencia",
-  "pista breve"
+  "pista breve",
+  "use the detail",
+  "read the prompt carefully",
+  "utilise le détail",
+  "lis attentivement l'énoncé",
+  "use o detalhe",
+  "leia o enunciado com atenção",
+  "en el enunciado"
 ];
 const QUESTION_HINT_MIN_LENGTH = 24;
 const QUESTION_HINT_STOP_WORDS = new Set([
@@ -247,25 +275,95 @@ function extractQuestionHintKeywords(text = "") {
   return unique.slice(0, 3);
 }
 
-function buildFallbackHint({ reto = "", missionTitle = "", respuestas = [] }, fallbackLabel = "" ) {
+function formatHintList(values = [], locale = "es-419") {
+  const clean = [...new Set(values.map((value) => cleanHintText(value)).filter(Boolean))].slice(0, 3);
+  if (!clean.length) return "";
+  const quoted = clean.map((value) => `«${value}»`);
+  try {
+    return new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(quoted);
+  } catch (_) {
+    return quoted.join(", ");
+  }
+}
+
+function buildStructuredQuestionHint(question = {}, locale = "es-419") {
+  const language = normalizeGameLocale(locale).split("-")[0];
+  const templates = {
+    es: {
+      pairs: (items) => `Usa ${items} como puntos de partida: compáralos con palabras conocidas que compartan su raíz o significado. Después contrástalos con las fichas disponibles; cada significado se utiliza una sola vez.`,
+      sequence: (items) => `Entre ${items}, identifica qué paso debe ocurrir antes de que los demás sean posibles. Después sigue las relaciones de causa, tiempo o dependencia.`,
+      choices: (items) => `Contrasta la condición exacta del enunciado con ${items}. Descarta primero cualquier opción que contradiga un dato del expediente.`,
+      blank: (text) => `Lee completa la oración «${text}». Las palabras inmediatamente anteriores y posteriores al espacio indican qué concepto y qué forma gramatical encajan.`,
+      boolean: () => "Separa la afirmación en sujeto y acción. Comprueba ambos contra un dato exacto del expediente antes de elegir Verdadero o Falso.",
+      text: (title) => `Busca en el expediente la oración que define «${title}» y usa el término exacto empleado allí; no respondas con una idea más general.`
+    },
+    en: {
+      pairs: (items) => `Use ${items} as anchors: compare them with familiar words that share the same root or meaning. Then contrast them with the available tiles; each meaning is used once.`,
+      sequence: (items) => `Among ${items}, identify which step must happen before the others are possible. Then follow cause, time, or dependency relationships.`,
+      choices: (items) => `Compare the prompt’s exact condition with ${items}. First eliminate any option that contradicts a fact in the briefing.`,
+      blank: (text) => `Read the complete sentence “${text}”. The words immediately before and after the blank show which concept and grammatical form fit.`,
+      boolean: () => "Separate the statement into its subject and action. Check both against an exact fact in the briefing before choosing True or False.",
+      text: (title) => `Find the sentence in the briefing that defines “${title}” and use the exact term written there, not a broader idea.`
+    },
+    fr: {
+      pairs: (items) => `Utilise ${items} comme points de départ : compare-les à des mots connus qui partagent la même racine ou le même sens. Puis confronte-les aux fiches disponibles ; chaque sens ne sert qu’une fois.`,
+      sequence: (items) => `Parmi ${items}, repère l’étape qui doit avoir lieu avant que les autres soient possibles. Suis ensuite les liens de cause, de temps ou de dépendance.`,
+      choices: (items) => `Compare la condition exacte de l’énoncé avec ${items}. Écarte d’abord toute option qui contredit une information du dossier.`,
+      blank: (text) => `Lis la phrase complète « ${text} ». Les mots juste avant et après le blanc indiquent le concept et la forme grammaticale attendus.`,
+      boolean: () => "Sépare l’affirmation en sujet et en action. Vérifie les deux avec une information précise du dossier avant de choisir Vrai ou Faux.",
+      text: (title) => `Retrouve dans le dossier la phrase qui définit « ${title} » et utilise le terme exact qui y apparaît, pas une idée plus générale.`
+    },
+    pt: {
+      pairs: (items) => `Use ${items} como pontos de partida: compare-os com palavras conhecidas que tenham a mesma raiz ou significado. Depois confronte-os com as fichas disponíveis; cada significado é usado uma única vez.`,
+      sequence: (items) => `Entre ${items}, identifique qual etapa precisa acontecer antes que as demais sejam possíveis. Depois siga as relações de causa, tempo ou dependência.`,
+      choices: (items) => `Compare a condição exata do enunciado com ${items}. Primeiro elimine qualquer opção que contradiga um dado do dossiê.`,
+      blank: (text) => `Leia a frase completa “${text}”. As palavras imediatamente antes e depois do espaço indicam qual conceito e forma gramatical se encaixam.`,
+      boolean: () => "Separe a afirmação em sujeito e ação. Verifique ambos com um dado exato do dossiê antes de escolher Verdadeiro ou Falso.",
+      text: (title) => `Procure no dossiê a frase que define “${title}” e use o termo exato empregado ali, não uma ideia mais ampla.`
+    }
+  };
+  const copy = templates[language] || templates.es;
+  if (["relacion_columnas", "drag_drop"].includes(question.tipo_interaccion)) {
+    const pairHints = (question.parejas || []).map((pair) => cleanHintText(pair?.pista)).filter(Boolean);
+    if (pairHints.length) return pairHints[0];
+    const items = formatHintList((question.parejas || []).map((pair) => pair?.izquierda), locale);
+    if (items) return copy.pairs(items);
+  }
+  if (question.tipo_interaccion === "ordenar_secuencia") {
+    const items = formatHintList(question.elementos || [], locale);
+    if (items) return copy.sequence(items);
+  }
+  if (question.tipo_interaccion === "opcion_multiple") {
+    const items = formatHintList(question.opciones || [], locale);
+    if (items) return copy.choices(items);
+  }
+  if (question.tipo_interaccion === "completar_espacio" && question.texto_con_hueco) return copy.blank(question.texto_con_hueco);
+  if (question.tipo_interaccion === "verdadero_falso") return copy.boolean();
+  return copy.text(question.titulo || question.reto || "el concepto central");
+}
+
+function buildFallbackHint(question = {}, fallbackLabel = "", locale = "es-419" ) {
+  const messages = getGameMessages(locale);
+  const structuredHint = buildStructuredQuestionHint(question, locale);
+  if (structuredHint) return structuredHint;
+  const { reto = "", missionTitle = "", respuestas = [] } = question;
   const answerList = Array.isArray(respuestas) ? respuestas : [respuestas];
   const answerHints = extractQuestionHintKeywords(answerList.join(" "));
   const tokens = extractQuestionHintKeywords(`${reto} ${missionTitle} ${fallbackLabel}`).filter((token) => !answerHints.includes(token));
   if (tokens.length) {
     const sample = tokens.slice(0, 2).map((token) => `"${token}"`).join(" y ");
-    return `En el enunciado${fallbackLabel ? ` ${fallbackLabel}` : ""}, usa el detalle ${sample} para descartar opciones que no cumplan esa condición.`;
+    return formatGameMessage(messages, "fallbackHintDetails", { details: sample });
   }
-
-  const missionContext = missionTitle ? ` Usa el contexto de ${missionTitle}.` : "";
-  return `Lee con atención el enunciado y busca una pista concreta (número, acción, personaje, lugar o condición). No des la respuesta; identifica qué detalle permite descartar opciones incorrectas.${missionContext}`.trim();
+  return messages.fallbackHintGeneric || messages.defaultHint;
 }
 
-function normalizeQuestionHint(question = {}, missionTitle = "", fallbackLabel = "") {
+function normalizeQuestionHint(question = {}, missionTitle = "", fallbackLabel = "", locale = "es-419") {
   const current = cleanHintText(question.pista);
   const reto = cleanHintText(question.reto || "");
-  const corrected = isGenericHint(current)
-    ? buildFallbackHint({ reto, missionTitle, respuestas: question.respuestas_aceptadas || [] }, fallbackLabel)
-    : current;
+  const centrallyNormalized = normalizeConcreteQuestionHint({ ...question, pista: current, reto }, locale);
+  const corrected = isGenericHint(centrallyNormalized)
+    ? buildFallbackHint({ ...question, reto, missionTitle, respuestas: question.respuestas_aceptadas || [] }, fallbackLabel, locale)
+    : centrallyNormalized;
   return cleanHintText(corrected);
 }
 
@@ -274,8 +372,13 @@ const elements = {
   missionEditorList: document.getElementById("missionEditorList"),
   missionEmpty: document.getElementById("erMissionEmpty"),
   btnGenerar: document.getElementById("btnGenerar"),
+  btnGenerarBottom: document.getElementById("btnGenerarBottom"),
   btnLimpiar: document.getElementById("btnLimpiar"),
   btnExportar: document.getElementById("btnExportar"),
+  btnShareEscapeRoom: document.getElementById("btnShareEscapeRoom"),
+  shareMenu: document.getElementById("erShareMenu"),
+  shareMenuStatus: document.getElementById("erShareMenuStatus"),
+  shareMenuActions: Array.from(document.querySelectorAll("[data-er-share-action]")),
   zipExportModal: document.getElementById("erZipExportModal"),
   zipExportStatus: document.getElementById("erZipExportStatus"),
   btnCopyAllAnswers: document.getElementById("btnCopyAllAnswers"),
@@ -294,11 +397,18 @@ const elements = {
   previewPanel: document.getElementById("escapeRoomPreviewPanel"),
   previewFrame: document.getElementById("escapeRoomPreviewFrame"),
   previewSpinner: document.getElementById("erPreviewSpinner"),
+  previewSpinnerTitle: document.getElementById("erPreviewSpinnerTitle"),
+  previewSpinnerDetail: document.getElementById("erPreviewSpinnerDetail"),
+  previewProgressBar: document.getElementById("erPreviewProgressBar"),
+  previewSpinnerLog: document.getElementById("erPreviewSpinnerLog"),
   resultadoContainer: document.getElementById("resultadoContainer"),
   jsonPreview: document.getElementById("jsonPreview"),
   statusBanner: document.getElementById("erStatusBanner"),
   tabButtons: Array.from(document.querySelectorAll("[data-er-tab]")),
+  modelConfigModal: document.getElementById("modelConfigModal"),
   modeloSelect: document.getElementById("modeloSelect"),
+  imagenModeloSelect: document.getElementById("imagenModeloSelect"),
+  geminiModelCatalogStatus: document.getElementById("geminiModelCatalogStatus"),
   preguntasPorSalaInput: document.getElementById("preguntasPorSalaInput"),
   nivelSelect: document.getElementById("nivelSelect"),
   gradoSelect: document.getElementById("gradoSelect"),
@@ -312,6 +422,8 @@ const elements = {
   narrativaCustomField: document.getElementById("narrativaCustomField"),
   narrativaCustomInput: document.getElementById("narrativaCustomInput"),
   estiloImagenSelect: document.getElementById("estiloImagenSelect"),
+  estiloImagenCustomField: document.getElementById("estiloImagenCustomField"),
+  estiloImagenCustomInput: document.getElementById("estiloImagenCustomInput"),
   missionCount: document.getElementById("erMissionCount"),
   unlockedCount: document.getElementById("erUnlockedCount"),
   typeSummary: document.getElementById("erTypeSummary"),
@@ -326,11 +438,23 @@ const elements = {
   newSessionModal: document.getElementById("erNewSessionModal"),
   btnCreateBlankSession: document.getElementById("btnCreateBlankSession"),
   btnImportZipSession: document.getElementById("btnImportZipSession"),
+  btnCreateSheetsSession: document.getElementById("btnCreateSheetsSession"),
+  sheetsImportModal: document.getElementById("erSheetsImportModal"),
   importZipInput: document.getElementById("erImportZipInput"),
   importZipStatus: document.getElementById("erImportZipStatus"),
   sessionList: document.getElementById("erSessionList"),
   sessionsLoading: document.getElementById("erSessionsLoading"),
   sessionsEmpty: document.getElementById("erSessionsEmpty"),
+  sessionsFilteredEmpty: document.getElementById("erSessionsFilteredEmpty"),
+  sessionsCount: document.getElementById("erSessionsCount"),
+  sessionFilters: document.getElementById("erSessionFilters"),
+  sessionFiltersModal: document.getElementById("erSessionFiltersModal"),
+  sessionTrimesterFilters: Array.from(document.querySelectorAll("[data-session-trimester-filter]")),
+  sessionSubjectFilters: Array.from(document.querySelectorAll("[data-session-subject-filter]")),
+  sessionThemeFilters: Array.from(document.querySelectorAll("[data-session-theme-filter]")),
+  sessionLevelFilters: Array.from(document.querySelectorAll("[data-session-level-filter]")),
+  sessionGradeFilters: Array.from(document.querySelectorAll("[data-session-grade-filter]")),
+  btnResetSessionFilters: document.getElementById("btnResetSessionFilters"),
   themeBgStart: document.getElementById("themeBgStart"),
   themeBgEnd: document.getElementById("themeBgEnd"),
   themePrimary: document.getElementById("themePrimary"),
@@ -354,12 +478,17 @@ const elements = {
   unlockedCountLabel: document.getElementById("erUnlockedCountLabel"),
   studioKicker: document.getElementById("erStudioKicker"),
   studioTitle: document.getElementById("erStudioTitle"),
-  studioHelp: document.getElementById("erStudioHelp"),
+  btnRegenerateSelectedMission: document.getElementById("btnRegenerateSelectedMission"),
   generalContentCard: document.getElementById("erGeneralContentCard"),
   generalContentHelp: document.getElementById("erGeneralContentHelp"),
   generalContentInputs: Array.from(document.querySelectorAll("[data-project-field]")),
+  generalCoverPreview: document.getElementById("generalCoverPreview"),
+  generalCoverEmpty: document.getElementById("generalCoverEmpty"),
+  btnRegenerateCoverImage: document.getElementById("btnRegenerateCoverImage"),
   summaryCard: document.querySelector(".er-summary-card"),
   studioWorkspace: document.getElementById("erStudioWorkspace"),
+  sessionsPanel: document.querySelector(".er-sessions-panel"),
+  sessionsResizeHandle: document.getElementById("erSessionsResizeHandle"),
   briefPanel: document.getElementById("briefCollapse"),
   briefResizeHandle: document.getElementById("erBriefResizeHandle"),
   inspectorPanel: document.getElementById("erInspectorPanel"),
@@ -378,6 +507,7 @@ const elements = {
 let objectiveIdeaModalInstance = null;
 let newSessionModalInstance = null;
 let newTopicModalInstance = null;
+let createSessionFromSheetsPending = false;
 
 const state = {
   project: null,
@@ -387,6 +517,9 @@ const state = {
   isGenerating: false,
   isExporting: false,
   exportReturnFocus: null,
+  shareMenuOpen: false,
+  shareLink: "",
+  shareInFlight: false,
   answerCopyInFlight: false,
   formPersistenceSuspended: false,
   refreshHandle: null,
@@ -403,6 +536,12 @@ const state = {
   sessionMenuReturnFocus: null,
   briefWidth: BRIEF_WIDTH_DEFAULT,
   inspectorWidth: INSPECTOR_WIDTH_DEFAULT,
+  sessionsWidth: SESSIONS_WIDTH_DEFAULT,
+  sessionTrimesterFilter: "",
+  sessionSubjectFilter: "",
+  sessionThemeFilter: "",
+  sessionLevelFilter: "",
+  sessionGradoFilter: "",
   projectStorageNoticeShown: false,
   sessions: [],
   topics: [],
@@ -433,6 +572,9 @@ function mountStudioPanels() {
   }
   if (elements.briefPanel && elements.studioBackdrop) {
     elements.studioWorkspace.insertBefore(elements.briefPanel, elements.studioBackdrop);
+  }
+  if (elements.missionWorkspacePanel && elements.inspectorPanel) {
+    elements.studioWorkspace.insertBefore(elements.missionWorkspacePanel, elements.inspectorPanel);
   }
 }
 
@@ -472,13 +614,38 @@ function getPanelWidthBounds(panelName) {
     return { min: configuredMin, max: configuredMax };
   }
   const workspaceWidth = elements.studioWorkspace.clientWidth || window.innerWidth;
-  const sessionsWidth = document.querySelector(".er-sessions-panel")?.offsetWidth || 220;
+  const sessionsWidth = elements.sessionsPanel?.offsetWidth || state.sessionsWidth;
   const otherWidth = isBrief
     ? (state.inspectorOpen ? state.inspectorWidth : 0)
     : (state.briefOpen ? state.briefWidth : 0);
   const available = Math.max(0, workspaceWidth - sessionsWidth - otherWidth - STUDIO_MAIN_MIN_WIDTH);
   const max = Math.min(configuredMax, available);
   return { min: Math.min(configuredMin, max), max };
+}
+
+function getSessionsWidthBounds() {
+  if (!elements.studioWorkspace || !isStudioDesktop()) {
+    return { min: SESSIONS_WIDTH_MIN, max: SESSIONS_WIDTH_MAX };
+  }
+  const workspaceWidth = elements.studioWorkspace.clientWidth || window.innerWidth;
+  const sidePanelsWidth = (state.briefOpen ? state.briefWidth : 0)
+    + (state.inspectorOpen ? state.inspectorWidth : 0);
+  const available = Math.max(0, workspaceWidth - sidePanelsWidth - STUDIO_MAIN_MIN_WIDTH);
+  const max = Math.max(SESSIONS_WIDTH_MIN, Math.min(SESSIONS_WIDTH_MAX, available));
+  return { min: SESSIONS_WIDTH_MIN, max };
+}
+
+function applySessionsWidth(width, { persist = false } = {}) {
+  const bounds = getSessionsWidthBounds();
+  const nextWidth = Math.round(Math.min(bounds.max, Math.max(bounds.min, Number(width) || SESSIONS_WIDTH_DEFAULT)));
+  state.sessionsWidth = nextWidth;
+  elements.studioWorkspace?.style.setProperty("--er-sessions-width", `${nextWidth}px`);
+  elements.sessionsResizeHandle?.setAttribute("aria-valuemin", String(bounds.min));
+  elements.sessionsResizeHandle?.setAttribute("aria-valuemax", String(bounds.max));
+  elements.sessionsResizeHandle?.setAttribute("aria-valuenow", String(nextWidth));
+  if (persist && isLocalStorageAvailable()) {
+    window.localStorage.setItem(SESSIONS_WIDTH_STORAGE_KEY, String(nextWidth));
+  }
 }
 
 function applyBriefWidth(width, { persist = false } = {}) {
@@ -523,6 +690,14 @@ function restoreInspectorWidth() {
   applyInspectorWidth(savedWidth);
 }
 
+function restoreSessionsWidth() {
+  let savedWidth = SESSIONS_WIDTH_DEFAULT;
+  if (isLocalStorageAvailable()) {
+    savedWidth = Number(window.localStorage.getItem(SESSIONS_WIDTH_STORAGE_KEY)) || SESSIONS_WIDTH_DEFAULT;
+  }
+  applySessionsWidth(savedWidth);
+}
+
 function getPanelByName(panelName) {
   return panelName === "brief" ? elements.briefPanel : elements.inspectorPanel;
 }
@@ -550,6 +725,7 @@ function syncStudioPanels() {
   document.body.classList.toggle("er-drawer-open", drawerOpen);
   applyBriefWidth(state.briefWidth);
   applyInspectorWidth(state.inspectorWidth);
+  applySessionsWidth(state.sessionsWidth);
 }
 
 function focusPanel(panelName) {
@@ -611,7 +787,7 @@ function trapDrawerFocus(event) {
   }
 }
 
-function wirePanelResizer({ handle, stateKey, applyWidth, getBounds, defaultWidth }) {
+function wirePanelResizer({ handle, stateKey, applyWidth, getBounds, defaultWidth, direction = "left" }) {
   if (!handle) return;
   handle.addEventListener("pointerdown", (event) => {
     if (!isStudioDesktop()) return;
@@ -620,7 +796,10 @@ function wirePanelResizer({ handle, stateKey, applyWidth, getBounds, defaultWidt
     const startWidth = state[stateKey];
     handle.setPointerCapture?.(event.pointerId);
     handle.classList.add("is-resizing");
-    const onMove = (moveEvent) => applyWidth(startWidth + startX - moveEvent.clientX);
+    const onMove = (moveEvent) => {
+      const delta = moveEvent.clientX - startX;
+      applyWidth(startWidth + (direction === "right" ? delta : -delta));
+    };
     const onEnd = () => {
       handle.classList.remove("is-resizing");
       window.removeEventListener("pointermove", onMove);
@@ -636,9 +815,23 @@ function wirePanelResizer({ handle, stateKey, applyWidth, getBounds, defaultWidt
     const bounds = getBounds();
     if (event.key === "Home") applyWidth(bounds.min, { persist: true });
     else if (event.key === "End") applyWidth(bounds.max, { persist: true });
-    else applyWidth(state[stateKey] + (event.key === "ArrowLeft" ? 16 : -16), { persist: true });
+    else {
+      const grows = direction === "right" ? event.key === "ArrowRight" : event.key === "ArrowLeft";
+      applyWidth(state[stateKey] + (grows ? 16 : -16), { persist: true });
+    }
   });
   handle.addEventListener("dblclick", () => applyWidth(defaultWidth, { persist: true }));
+}
+
+function wireSessionsResizer() {
+  wirePanelResizer({
+    handle: elements.sessionsResizeHandle,
+    stateKey: "sessionsWidth",
+    applyWidth: applySessionsWidth,
+    getBounds: getSessionsWidthBounds,
+    defaultWidth: SESSIONS_WIDTH_DEFAULT,
+    direction: "right"
+  });
 }
 
 function wireBriefResizer() {
@@ -679,6 +872,7 @@ function wireStudioShell() {
     }
   });
   window.addEventListener("resize", syncStudioPanels);
+  wireSessionsResizer();
   wireBriefResizer();
   wireInspectorResizer();
 }
@@ -780,13 +974,38 @@ function renderGeneralContentEditor() {
     const nextValue = hasProject && projectField ? normalizeString(state.project?.[projectField], "") : "";
     if (field.value !== nextValue) field.value = nextValue;
   });
+  const coverSource = hasProject ? normalizeString(state.project?.backgroundImage, "") : "";
+  if (elements.generalCoverPreview) {
+    elements.generalCoverPreview.hidden = !coverSource;
+    if (coverSource && elements.generalCoverPreview.src !== coverSource) elements.generalCoverPreview.src = coverSource;
+    elements.generalCoverPreview.alt = hasProject ? `Imagen de inicio de ${state.project.titulo || "escape room"}` : "Vista previa de la imagen de inicio";
+  }
+  if (elements.generalCoverEmpty) elements.generalCoverEmpty.hidden = Boolean(coverSource);
+  if (elements.btnRegenerateCoverImage) elements.btnRegenerateCoverImage.disabled = !hasProject || state.isGenerating || state.isLoading;
+}
+
+function normalizeEditableFinalKey(value = "") {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 12);
 }
 
 function updateGeneralProjectField(field, value) {
   if (!state.project || !field) return;
   const projectField = String(field.dataset.projectField || "").trim();
   if (!projectField) return;
-  state.project[projectField] = String(value ?? "");
+  state.project[projectField] = projectField === "clave_final"
+    ? normalizeEditableFinalKey(value)
+    : String(value ?? "");
+  if (projectField === "clave_final") {
+    field.value = state.project.clave_final;
+    document.querySelectorAll('[data-editor-final-key]').forEach((input) => {
+      if (input !== field) input.value = state.project.clave_final;
+    });
+  }
   scheduleOutputRefresh();
 }
 
@@ -1172,17 +1391,18 @@ function setRemoteSaveState(nextState = "idle", detail = "") {
 }
 
 function setActiveSessionStorage(sessionId = "") {
-  if (!isLocalStorageAvailable()) return;
+  const storage = getTabWorkspaceStorage();
+  if (!storage) return;
   if (sessionId) {
-    window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
+    storage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
     return;
   }
-  window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+  storage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
 }
 
 function getStoredActiveSessionId() {
-  if (!isLocalStorageAvailable()) return "";
-  return String(window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) || "").trim();
+  const storage = getTabWorkspaceStorage();
+  return storage ? String(storage.getItem(ACTIVE_SESSION_STORAGE_KEY) || "").trim() : "";
 }
 
 function isVerboseDraftSessionTitle(value = "") {
@@ -1202,7 +1422,7 @@ function normalizeSessionTitle(title, project = null) {
 }
 
 function getAcademicFieldMode() {
-  return String(elements.nivelSelect?.value || "Primaria").trim() === "Secundaria" ? "Secundaria" : "Primaria";
+  return String(elements.nivelSelect?.value || "Secundaria").trim() === "Secundaria" ? "Secundaria" : "Primaria";
 }
 
 function normalizePaletteIndex(value, fallback = 1) {
@@ -1272,7 +1492,10 @@ function resolveRoomColorPalette({ index = 0, formData = {} }) {
     ? parseStationIndex(stationSource, safeRoomIndex)
     : normalizePaletteIndex(safeRoomIndex, safeRoomIndex);
   const themeSource = isSecondary ? normalizeString(formData.temaSecundaria, "1") : normalizeString(formData.unidad, "1");
-  const themeIndex = normalizePaletteIndex(parseInt(themeSource, 10), 1);
+  const requestedThemeIndex = Number.parseInt(themeSource, 10);
+  const themeIndex = Object.prototype.hasOwnProperty.call(THEME_COMBINE_COLORS, requestedThemeIndex)
+    ? requestedThemeIndex
+    : 1;
   return {
     levelColor: MISSION_LEVEL_COLORS[levelIndex] || MISSION_LEVEL_COLORS[1],
     themeColor: THEME_COMBINE_COLORS[themeIndex] || THEME_COMBINE_COLORS[1],
@@ -1346,6 +1569,7 @@ function buildAcademicFormState(project = {}) {
   const isSecondary = nivel === "Secundaria";
   return {
     modoPresentacionSelect: normalizePresentationMode(project.modo_presentacion),
+    idiomaSelect: project.idioma || "es-419",
     ...(nivel ? { nivelSelect: nivel } : {}),
     ...(project.grado ? { gradoSelect: project.grado } : {}),
     ...(project.trimestre ? { trimestreSelect: project.trimestre } : {}),
@@ -1411,6 +1635,9 @@ function serializeFormState() {
   if (elements.modeloSelect?.id) {
     formState[elements.modeloSelect.id] = elements.modeloSelect.value;
   }
+  if (elements.imagenModeloSelect?.id) {
+    formState[elements.imagenModeloSelect.id] = elements.imagenModeloSelect.value;
+  }
   return formState;
 }
 
@@ -1421,6 +1648,9 @@ function applyFormState(formState = {}) {
     Object.entries(formState).forEach(([fieldId, value]) => {
       const field = document.getElementById(fieldId);
       if (!field) return;
+      if ((fieldId === "modeloSelect" || fieldId === "imagenModeloSelect") && value) {
+        field.dataset.pendingModelValue = String(value);
+      }
       if (field.type === "checkbox") {
         field.checked = Boolean(value);
         return;
@@ -1435,6 +1665,7 @@ function applyFormState(formState = {}) {
   }
   syncAcademicFields();
   syncNarrativaCustomField();
+  syncImageStyleCustomField();
   syncPresentationModeUi();
 }
 
@@ -1763,9 +1994,9 @@ function resetEditorState({ preserveForm = false } = {}) {
     state.formPersistenceSuspended = true;
     try {
       elements.form?.reset();
-      document.getElementById("duracionInput").value = 35;
+      document.getElementById("duracionInput").value = 20;
       document.getElementById("numMisionesInput").value = 4;
-      document.getElementById("preguntasPorSalaInput").value = 1;
+      document.getElementById("preguntasPorSalaInput").value = 4;
       document.getElementById("ritmoSelect").value = "progresivo";
       document.getElementById("dificultadSelect").value = "equilibrada";
       document.getElementById("pistasSelect").value = "moderadas";
@@ -1775,6 +2006,7 @@ function resetEditorState({ preserveForm = false } = {}) {
     }
     syncAcademicFields();
     syncNarrativaCustomField();
+    syncImageStyleCustomField();
     syncPresentationModeUi();
   }
   state.project = null;
@@ -1790,23 +2022,307 @@ function resetEditorState({ preserveForm = false } = {}) {
   renderOutputsNow();
 }
 
+function getSessionAcademicFilterValue(session = {}, field = "") {
+  const formField = field === "trimestre"
+    ? "trimestreSelect"
+    : field === "materia"
+      ? "materiaSelect"
+      : field === "nivel"
+        ? "nivelSelect"
+        : field === "grado"
+          ? "gradoSelect"
+          : "";
+  return normalizeString(
+    session?.[field]
+      || session?.project?.[field]
+      || (formField ? session?.formState?.[formField] : ""),
+    ""
+  );
+}
+
+function normalizeSessionTrimesterFilter(value = "") {
+  const clean = String(value || "").trim().toLowerCase();
+  const match = clean.match(/[123]/);
+  return match?.[0] || "";
+}
+
+function normalizeSessionThemeNumber(value = "") {
+  const match = String(value || "").trim().match(/(?:tema\s*)?(\d+)/i);
+  const number = Number(match?.[1] || 0);
+  return Number.isSafeInteger(number) && number > 0 ? String(number) : "";
+}
+
+function getSessionThemeFilterValues(session = {}) {
+  const topicNumbers = (Array.isArray(session?.topicSummaries) ? session.topicSummaries : [])
+    .map((topic) => normalizeSessionThemeNumber(topic?.academicNumber))
+    .filter(Boolean);
+  if (topicNumbers.length) return [...new Set(topicNumbers)];
+  const fallbackCandidates = [
+    session?.tema,
+    session?.project?.tema,
+    session?.unidad,
+    session?.project?.unidad,
+    session?.formState?.unidadTemaSelect
+  ];
+  const fallbackNumbers = fallbackCandidates.map(normalizeSessionThemeNumber).filter(Boolean);
+  return [...new Set(fallbackNumbers)];
+}
+
+function syncSessionFilterSelect(select, optionsMarkup, value) {
+  if (!select) return;
+  if (select.innerHTML !== optionsMarkup) select.innerHTML = optionsMarkup;
+  const normalizedValue = String(value || "");
+  if (select.value !== normalizedValue) select.value = normalizedValue;
+}
+
+function syncSessionLevelFilterOptions(sessions = []) {
+  if (!elements.sessionLevelFilters?.length) return;
+  const levelByKey = new Map();
+  sessions.forEach((session) => {
+    const nivel = getSessionAcademicFilterValue(session, "nivel");
+    const key = normalizeString(nivel, "").toLocaleLowerCase("es");
+    if (nivel && !levelByKey.has(key)) levelByKey.set(key, nivel);
+  });
+  const selectedLevel = normalizeString(state.sessionLevelFilter, "");
+  const selectedLevelKey = selectedLevel.toLocaleLowerCase("es");
+  if (selectedLevel && !levelByKey.has(selectedLevelKey)) levelByKey.set(selectedLevelKey, selectedLevel);
+  const levels = [...levelByKey.values()].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  const optionsMarkup = [
+    '<option value="">Nivel</option>',
+    ...levels.map((nivel) => `<option value="${escapeHtmlAttr(nivel)}">${escapeHtml(nivel)}</option>`)
+  ].join("");
+  elements.sessionLevelFilters.forEach((select) => {
+    syncSessionFilterSelect(select, optionsMarkup, state.sessionLevelFilter);
+  });
+}
+
+function syncSessionGradoFilterOptions(sessions = []) {
+  if (!elements.sessionGradeFilters?.length) return;
+  const gradoByKey = new Map();
+  const standardGrades = ["Primero", "Segundo", "Tercero", "Cuarto", "Quinto", "Sexto"];
+  const selectedLevel = normalizeString(state.sessionLevelFilter, "").toLocaleLowerCase("es");
+  const availableStandardGrades = selectedLevel.includes("secundaria") || selectedLevel.includes("secondary") || selectedLevel.includes("junior high")
+    ? standardGrades.slice(0, 3)
+    : standardGrades;
+  availableStandardGrades.forEach((grado) => gradoByKey.set(grado.toLocaleLowerCase("es"), grado));
+  sessions.forEach((session) => {
+    const grado = getSessionAcademicFilterValue(session, "grado");
+    const key = normalizeString(grado, "").toLocaleLowerCase("es");
+    if (grado && !gradoByKey.has(key)) gradoByKey.set(key, grado);
+  });
+  const selectedGrade = normalizeString(state.sessionGradoFilter, "");
+  const selectedGradeKey = selectedGrade.toLocaleLowerCase("es");
+  if (selectedGrade && !gradoByKey.has(selectedGradeKey)) gradoByKey.set(selectedGradeKey, selectedGrade);
+  const grados = [...gradoByKey.values()].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  const optionsMarkup = [
+    '<option value="">Grado</option>',
+    ...grados.map((grado) => `<option value="${escapeHtmlAttr(grado)}">${escapeHtml(grado)}</option>`)
+  ].join("");
+  elements.sessionGradeFilters.forEach((select) => {
+    syncSessionFilterSelect(select, optionsMarkup, state.sessionGradoFilter);
+  });
+}
+
+function syncSessionSubjectFilterOptions(sessions = []) {
+  if (!elements.sessionSubjectFilters?.length) return;
+  const subjectsByKey = new Map();
+  Array.from(elements.materiaSelect?.options || []).forEach((option) => {
+    const subject = normalizeString(option.value || option.textContent, "");
+    const key = subject.toLocaleLowerCase("es");
+    if (subject && !subjectsByKey.has(key)) subjectsByKey.set(key, subject);
+  });
+  sessions.forEach((session) => {
+    const subject = getSessionAcademicFilterValue(session, "materia");
+    const key = subject.toLocaleLowerCase("es");
+    if (subject && !subjectsByKey.has(key)) subjectsByKey.set(key, subject);
+  });
+  const selectedSubject = normalizeString(state.sessionSubjectFilter, "");
+  const selectedSubjectKey = selectedSubject.toLocaleLowerCase("es");
+  if (selectedSubject && !subjectsByKey.has(selectedSubjectKey)) subjectsByKey.set(selectedSubjectKey, selectedSubject);
+  const subjects = [...subjectsByKey.values()].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  const optionsMarkup = [
+    '<option value="">Materia</option>',
+    ...subjects.map((subject) => `<option value="${escapeHtmlAttr(subject)}">${escapeHtml(subject)}</option>`)
+  ].join("");
+  elements.sessionSubjectFilters.forEach((select) => {
+    syncSessionFilterSelect(select, optionsMarkup, state.sessionSubjectFilter);
+  });
+}
+
+function syncSessionThemeFilterOptions(sessions = []) {
+  if (!elements.sessionThemeFilters?.length) return;
+  const themes = [...new Set([
+    ...Array.from({ length: 15 }, (_, index) => String(index + 1)),
+    ...(state.sessionThemeFilter ? [String(state.sessionThemeFilter)] : []),
+    ...sessions.flatMap(getSessionThemeFilterValues)
+  ])]
+    .sort((a, b) => Number(a) - Number(b));
+  const optionsMarkup = [
+    '<option value="">Tema</option>',
+    ...themes.map((theme) => `<option value="${escapeHtmlAttr(theme)}">Tema ${escapeHtml(theme)}</option>`)
+  ].join("");
+  elements.sessionThemeFilters.forEach((select) => {
+    syncSessionFilterSelect(select, optionsMarkup, state.sessionThemeFilter);
+  });
+}
+
+function getFilteredSessions(sessions = []) {
+  const trimester = normalizeSessionTrimesterFilter(state.sessionTrimesterFilter);
+  const subject = String(state.sessionSubjectFilter || "").trim().toLocaleLowerCase("es");
+  const theme = normalizeSessionThemeNumber(state.sessionThemeFilter);
+  const level = normalizeString(state.sessionLevelFilter || "", "").toLocaleLowerCase("es");
+  const grado = normalizeString(state.sessionGradoFilter || "", "").toLocaleLowerCase("es");
+  return sessions.filter((session) => {
+    const sessionTrimester = normalizeSessionTrimesterFilter(getSessionAcademicFilterValue(session, "trimestre"));
+    const sessionSubject = getSessionAcademicFilterValue(session, "materia").toLocaleLowerCase("es");
+    const sessionThemes = getSessionThemeFilterValues(session);
+    const sessionLevel = normalizeString(getSessionAcademicFilterValue(session, "nivel"), "").toLocaleLowerCase("es");
+    const sessionGrado = normalizeString(getSessionAcademicFilterValue(session, "grado"), "").toLocaleLowerCase("es");
+    return (!trimester || sessionTrimester === trimester)
+      && (!subject || sessionSubject === subject)
+      && (!theme || sessionThemes.includes(theme))
+      && (!level || sessionLevel === level)
+      && (!grado || sessionGrado === grado);
+  });
+}
+
+function syncSessionFiltersModalTheme() {
+  if (!elements.sessionFiltersModal) return;
+  const formData = getFormData();
+  const palette = resolveRoomColorPalette({ index: 0, formData });
+  const levelColor = normalizeHexColor(palette.levelColor, MISSION_LEVEL_COLORS[1]);
+  const themeColor = normalizeHexColor(palette.themeColor, THEME_COMBINE_COLORS[1]);
+  elements.sessionFiltersModal.style.setProperty("--room-level-color", levelColor);
+  elements.sessionFiltersModal.style.setProperty("--room-theme-color", themeColor);
+  elements.sessionFiltersModal.style.setProperty("--room-level-color-soft", `color-mix(in srgb, ${levelColor} 18%, transparent)`);
+  elements.sessionFiltersModal.style.setProperty("--room-theme-color-soft", `color-mix(in srgb, ${themeColor} 18%, transparent)`);
+  elements.sessionFiltersModal.style.setProperty("--er-studio-accent", themeColor);
+  elements.sessionFiltersModal.style.setProperty("--er-studio-accent-soft", `color-mix(in srgb, ${themeColor} 12%, transparent)`);
+}
+
+function normalizeSessionFilterState(raw = {}) {
+  return {
+    sessionTrimesterFilter: normalizeSessionTrimesterFilter(raw?.sessionTrimesterFilter),
+    sessionSubjectFilter: String(raw?.sessionSubjectFilter || "").trim(),
+    sessionThemeFilter: String(raw?.sessionThemeFilter || "").trim(),
+    sessionLevelFilter: String(raw?.sessionLevelFilter || "").trim(),
+    sessionGradoFilter: String(raw?.sessionGradoFilter || "").trim()
+  };
+}
+
+function persistSessionFilters() {
+  if (!isLocalStorageAvailable()) return;
+  try {
+    const payload = normalizeSessionFilterState({
+      sessionTrimesterFilter: state.sessionTrimesterFilter,
+      sessionSubjectFilter: state.sessionSubjectFilter,
+      sessionThemeFilter: state.sessionThemeFilter,
+      sessionLevelFilter: state.sessionLevelFilter,
+      sessionGradoFilter: state.sessionGradoFilter
+    });
+    window.localStorage.setItem(SESSION_FILTERS_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    const isQuota = error?.name === "QuotaExceededError" || String(error?.message || "").toLowerCase().includes("quota");
+    if (!isQuota) {
+      console.warn("No se pudo guardar los filtros de sesiones:", error);
+    }
+  }
+}
+
+function restoreSessionFiltersFromStorage() {
+  if (!isLocalStorageAvailable()) return;
+  const raw = window.localStorage.getItem(SESSION_FILTERS_STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return;
+    const normalized = normalizeSessionFilterState(parsed);
+    state.sessionTrimesterFilter = normalizeSessionTrimesterFilter(normalized.sessionTrimesterFilter);
+    state.sessionSubjectFilter = normalized.sessionSubjectFilter;
+    state.sessionThemeFilter = normalized.sessionThemeFilter;
+    state.sessionLevelFilter = normalized.sessionLevelFilter;
+    state.sessionGradoFilter = normalized.sessionGradoFilter;
+  } catch (error) {
+    console.warn("No se pudieron restaurar los filtros de sesiones:", error);
+  }
+}
+
+function setSessionFilters(nextState = {}, { persist = true } = {}) {
+  const normalized = normalizeSessionFilterState(nextState);
+  state.sessionTrimesterFilter = normalized.sessionTrimesterFilter;
+  state.sessionSubjectFilter = normalized.sessionSubjectFilter;
+  state.sessionThemeFilter = normalized.sessionThemeFilter;
+  state.sessionLevelFilter = normalized.sessionLevelFilter;
+  state.sessionGradoFilter = normalized.sessionGradoFilter;
+  if (persist) persistSessionFilters();
+  renderSessionList();
+}
+
+function resetSessionFilters() {
+  setSessionFilters({
+    sessionTrimesterFilter: "",
+    sessionSubjectFilter: "",
+    sessionThemeFilter: "",
+    sessionLevelFilter: "",
+    sessionGradoFilter: ""
+  }, { persist: true });
+}
+
 function renderSessionList() {
   if (!elements.sessionList || !elements.sessionsLoading || !elements.sessionsEmpty) return;
   const sessions = Array.isArray(state.sessions) ? state.sessions : [];
+  if (!state.sessionsLoading) {
+    syncSessionSubjectFilterOptions(sessions);
+    syncSessionThemeFilterOptions(sessions);
+    syncSessionLevelFilterOptions(sessions);
+    syncSessionGradoFilterOptions(sessions);
+  }
+  const filteredSessions = getFilteredSessions(sessions);
+  const hasSessions = sessions.length > 0;
+  const hasFilteredSessions = filteredSessions.length > 0;
+  if (elements.sessionsCount) {
+    elements.sessionsCount.textContent = state.sessionsLoading
+      ? "…"
+      : (filteredSessions.length === sessions.length
+        ? String(sessions.length)
+        : `${filteredSessions.length}/${sessions.length}`);
+    elements.sessionsCount.setAttribute(
+      "aria-label",
+      state.sessionsLoading
+        ? "Cargando sesiones"
+        : `${filteredSessions.length} de ${sessions.length} sesiones visibles`
+    );
+  }
   elements.sessionsLoading.classList.toggle("hidden", !state.sessionsLoading);
-  elements.sessionsEmpty.classList.toggle("hidden", state.sessionsLoading || sessions.length > 0);
-  elements.sessionList.classList.toggle("hidden", state.sessionsLoading || sessions.length === 0);
-  if (state.sessionsLoading || sessions.length === 0) {
+  elements.sessionsEmpty.classList.toggle("hidden", state.sessionsLoading || hasSessions);
+  elements.sessionsFilteredEmpty?.classList.toggle("hidden", state.sessionsLoading || !hasSessions || hasFilteredSessions);
+  elements.sessionFilters?.classList.toggle("hidden", state.sessionsLoading || !hasSessions);
+  elements.sessionTrimesterFilters?.forEach((select) => {
+    if (!select) return;
+    select.value = normalizeSessionTrimesterFilter(state.sessionTrimesterFilter);
+  });
+  elements.sessionList.classList.toggle("hidden", state.sessionsLoading || !hasFilteredSessions);
+  if (state.sessionsLoading || !hasFilteredSessions) {
     elements.sessionList.innerHTML = "";
     return;
   }
-  if (state.sessionMenuId && !sessions.some((session) => session.id === state.sessionMenuId)) {
+  if (state.sessionMenuId && !filteredSessions.some((session) => session.id === state.sessionMenuId)) {
     state.sessionMenuId = null;
   }
-  elements.sessionList.innerHTML = sessions.map((session) => `
+  elements.sessionList.innerHTML = filteredSessions.map((session) => {
+    const trimester = normalizeSessionTrimesterFilter(getSessionAcademicFilterValue(session, "trimestre"));
+    const subject = getSessionAcademicFilterValue(session, "materia");
+    const theme = getSessionThemeFilterValues(session)[0] || "";
+    const metadata = [
+      trimester ? `T${trimester}` : "",
+      subject,
+      theme ? `Tema ${theme}` : ""
+    ].filter(Boolean).join(" · ");
+    return `
     <article class="er-session-item ${session.id === state.activeSessionId ? "is-active" : ""}" data-session-id="${escapeHtmlAttr(session.id)}">
       <button type="button" class="er-session-title-button" data-session-action="open" data-session-id="${escapeHtmlAttr(session.id)}" title="${escapeHtmlAttr(session.title || SESSION_TITLE_DEFAULT)}">
-        <span>${escapeHtml(session.title || SESSION_TITLE_DEFAULT)}</span>
+        <span class="er-session-title-text">${escapeHtml(session.title || SESSION_TITLE_DEFAULT)}</span>
+        ${metadata ? `<small class="er-session-item-meta">${escapeHtml(metadata)}</small>` : ""}
       </button>
       <div class="er-session-menu-wrap">
         <button type="button" class="er-session-kebab er-studio-icon-button" data-session-menu-toggle data-session-id="${escapeHtmlAttr(session.id)}" data-er-tooltip="Opciones de sesión" aria-label="Opciones de ${escapeHtmlAttr(session.title || SESSION_TITLE_DEFAULT)}" aria-haspopup="menu" aria-expanded="${state.sessionMenuId === session.id ? "true" : "false"}">
@@ -1818,7 +2334,8 @@ function renderSessionList() {
         </div>
       </div>
     </article>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function closeSessionMenu({ restoreFocus = false } = {}) {
@@ -1849,6 +2366,9 @@ function toggleSessionMenu(sessionId, trigger) {
 
 async function loadSessionIntoEditor(session) {
   closeSessionMenu();
+  if (state.activeSessionId && state.activeSessionId !== session.id && !state.isHydratingFromRemote) {
+    await flushPendingTopicSave();
+  }
   state.isHydratingFromRemote = true;
   try {
     state.activeSessionId = session.id;
@@ -1944,6 +2464,37 @@ function buildInheritedTopicFormState(academicNumber) {
   inherited.temaInput = "";
   inherited.objetivoInput = "";
   return inherited;
+}
+
+function buildInheritedSessionFormState() {
+  const inherited = {
+    ...serializeFormState(),
+    ...(window.PigPenSheetsImport?.getLastFormState?.() || {})
+  };
+  inherited.temaInput = "";
+  inherited.objetivoInput = "";
+  return inherited;
+}
+
+async function createBlankSession({ announce = true } = {}) {
+  try {
+    setRemoteSaveState("saving");
+    const inheritedFormState = buildInheritedSessionFormState();
+    const sessionId = await createRemoteSession({
+      title: SESSION_TITLE_DEFAULT,
+      project: null,
+      formState: inheritedFormState,
+      activate: true
+    });
+    if (announce) setStatus("Nueva sesión vacía creada.", "success");
+    setRemoteSaveState("saved");
+    return sessionId;
+  } catch (error) {
+    console.error("No se pudo crear la sesión:", error);
+    setRemoteSaveState("error", "Error al crear");
+    setStatus("No fue posible crear la sesión.", "bad");
+    throw error;
+  }
 }
 
 function openNewTopicDialog() {
@@ -2506,6 +3057,22 @@ function isLocalStorageAvailable() {
   }
 }
 
+function isSessionStorageAvailable() {
+  try {
+    const key = "__er_creator_tab_test__";
+    window.sessionStorage.setItem(key, "1");
+    window.sessionStorage.removeItem(key);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function getTabWorkspaceStorage() {
+  if (isSessionStorageAvailable()) return window.sessionStorage;
+  return isLocalStorageAvailable() ? window.localStorage : null;
+}
+
 function parseTopicLines(value = "") {
   return String(value)
     .split(/\r?\n+/)
@@ -2514,11 +3081,12 @@ function parseTopicLines(value = "") {
 }
 
 function saveFormState() {
-  if (!elements.form || state.formPersistenceSuspended || !isLocalStorageAvailable()) return;
+  const storage = getTabWorkspaceStorage();
+  if (!elements.form || state.formPersistenceSuspended || !storage) return;
   try {
     const formState = serializeFormState();
-    window.localStorage.removeItem(FORM_STORAGE_KEY);
-    window.localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formState));
+    storage.removeItem(FORM_STORAGE_KEY);
+    storage.setItem(FORM_STORAGE_KEY, JSON.stringify(formState));
   } catch (error) {
     const isQuota = error?.name === "QuotaExceededError" || String(error?.message || "").toLowerCase().includes("quota");
     if (!isQuota) {
@@ -2620,7 +3188,7 @@ function buildImportedFormState(project = {}) {
     ...buildAcademicFormState(project),
     temaInput: project.tema_curricular || project.titulo || "",
     objetivoInput: project.introduccion || "",
-    duracionInput: String(Math.min(120, Math.max(10, Number(project.duracion_minutos) || 35))),
+    duracionInput: String(Math.min(120, Math.max(10, Number(project.duracion_minutos) || 20))),
     numMisionesInput: String(Math.min(8, Math.max(2, missionCount))),
     preguntasPorSalaInput: String(Math.min(6, questionCount)),
     narrativaSelect: "otro",
@@ -2701,8 +3269,9 @@ async function importZipAsNewSession(file) {
 }
 
 function restoreFormState() {
-  if (!elements.form || !isLocalStorageAvailable()) return;
-  const rawState = window.localStorage.getItem(FORM_STORAGE_KEY);
+  const storage = getTabWorkspaceStorage();
+  if (!elements.form || !storage) return;
+  const rawState = storage.getItem(FORM_STORAGE_KEY);
   if (!rawState) return;
   try {
     const formState = JSON.parse(rawState);
@@ -2713,8 +3282,7 @@ function restoreFormState() {
 }
 
 function clearFormState() {
-  if (!isLocalStorageAvailable()) return;
-  window.localStorage.removeItem(FORM_STORAGE_KEY);
+  getTabWorkspaceStorage()?.removeItem(FORM_STORAGE_KEY);
 }
 
 function isDataUrl(value = "") {
@@ -2801,13 +3369,14 @@ function stripHeavyAssetsFromProject(project) {
 }
 
 function saveProjectState() {
-  if (!state.project || state.formPersistenceSuspended || !isLocalStorageAvailable()) return;
+  const storage = getTabWorkspaceStorage();
+  if (!state.project || state.formPersistenceSuspended || !storage) return;
   try {
     const projectToStore = containsEmbeddedDataUrl(state.project)
       ? stripHeavyAssetsFromProject(state.project)
       : state.project;
-    window.localStorage.removeItem(PROJECT_STORAGE_KEY);
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(projectToStore));
+    storage.removeItem(PROJECT_STORAGE_KEY);
+    storage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(projectToStore));
     if (projectToStore !== state.project && !state.projectStorageNoticeShown) {
       state.projectStorageNoticeShown = true;
       setStatus("El proyecto se guardó sin imágenes embebidas para no superar el límite del navegador.", "warning");
@@ -2821,8 +3390,8 @@ function saveProjectState() {
 
     try {
       const lightweightProject = stripHeavyAssetsFromProject(state.project);
-      window.localStorage.removeItem(PROJECT_STORAGE_KEY);
-      window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(lightweightProject));
+      storage.removeItem(PROJECT_STORAGE_KEY);
+      storage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(lightweightProject));
       if (!state.projectStorageNoticeShown) {
         state.projectStorageNoticeShown = true;
         console.warn("El proyecto excedía la cuota del navegador; se guardó sin imágenes embebidas.");
@@ -2839,8 +3408,9 @@ function saveProjectState() {
 }
 
 function restoreProjectState() {
-  if (!isLocalStorageAvailable()) return;
-  const rawState = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+  const storage = getTabWorkspaceStorage();
+  if (!storage) return;
+  const rawState = storage.getItem(PROJECT_STORAGE_KEY);
   if (!rawState) return;
   try {
     const parsed = JSON.parse(rawState);
@@ -2852,14 +3422,19 @@ function restoreProjectState() {
 }
 
 function clearProjectState() {
-  if (!isLocalStorageAvailable()) return;
-  window.localStorage.removeItem(PROJECT_STORAGE_KEY);
+  getTabWorkspaceStorage()?.removeItem(PROJECT_STORAGE_KEY);
 }
 
 function syncNarrativaCustomField() {
   const isCustom = elements.narrativaSelect?.value === "otro";
   elements.narrativaCustomField?.classList.toggle("hidden", !isCustom);
   if (elements.narrativaCustomInput) elements.narrativaCustomInput.required = Boolean(isCustom);
+}
+
+function syncImageStyleCustomField() {
+  const isCustom = elements.estiloImagenSelect?.value === "otro";
+  elements.estiloImagenCustomField?.classList.toggle("hidden", !isCustom);
+  if (elements.estiloImagenCustomInput) elements.estiloImagenCustomInput.required = Boolean(isCustom);
 }
 
 function setStatus(message = "", type = "info") {
@@ -2873,6 +3448,98 @@ function setStatus(message = "", type = "info") {
   elements.statusBanner.textContent = message;
 }
 
+function buildPigPenViewerUrl({ sessionId = "", shareToken = "", topicId = "" } = {}) {
+  const url = new URL("PigPen-Visor.html", window.location.href);
+  url.searchParams.set("session", sessionId);
+  url.searchParams.set("token", shareToken);
+  if (topicId) url.searchParams.set("topic", topicId);
+  return url.href;
+}
+
+function renderShareMenuState() {
+  if (!elements.shareMenu || !elements.btnShareEscapeRoom) return;
+  elements.shareMenu.hidden = !state.shareMenuOpen;
+  elements.btnShareEscapeRoom.setAttribute("aria-expanded", String(state.shareMenuOpen));
+  elements.btnShareEscapeRoom.classList.toggle("is-active", state.shareMenuOpen);
+  elements.btnShareEscapeRoom.classList.toggle("is-sharing", state.shareInFlight);
+  const linkIsReady = Boolean(state.shareLink) && !state.shareInFlight;
+  elements.shareMenuActions.forEach((button) => {
+    button.disabled = !linkIsReady;
+  });
+  if (elements.shareMenuStatus) {
+    elements.shareMenuStatus.textContent = state.shareInFlight
+      ? "Guardando y preparando enlace…"
+      : (linkIsReady ? "Enlace listo para compartir" : "No fue posible preparar el enlace");
+    elements.shareMenuStatus.classList.toggle("is-error", !state.shareInFlight && !linkIsReady);
+  }
+}
+
+function closeShareMenu({ restoreFocus = false } = {}) {
+  if (!state.shareMenuOpen) return;
+  state.shareMenuOpen = false;
+  renderShareMenuState();
+  if (restoreFocus) elements.btnShareEscapeRoom?.focus();
+}
+
+async function prepareShareLink() {
+  if (!state.project || !state.currentUser?.uid || state.isGenerating) return;
+  state.shareLink = "";
+  state.shareInFlight = true;
+  renderShareMenuState();
+  syncActionButtons();
+  try {
+    if (state.activeSessionId && state.activeTopicId) {
+      await flushPendingTopicSave();
+    } else {
+      await persistActiveSession();
+    }
+    if (!state.activeSessionId) throw new Error("No hay una sesión guardada para compartir.");
+    const response = await authFetchJson("/api/pigpen/share", {
+      method: "POST",
+      sameOrigin: true,
+      body: { sessionId: state.activeSessionId }
+    });
+    if (!response?.sessionId || !response?.shareToken) {
+      throw new Error("El servidor no devolvió un enlace válido.");
+    }
+    state.shareLink = buildPigPenViewerUrl({
+      sessionId: response.sessionId,
+      shareToken: response.shareToken,
+      topicId: state.activeTopicId || response.activeTopicId
+    });
+  } catch (error) {
+    console.error("No se pudo preparar el enlace compartido de PigPen:", error);
+    setStatus(`No se pudo compartir el escape room: ${error.message}`, "bad");
+  } finally {
+    state.shareInFlight = false;
+    renderShareMenuState();
+    syncActionButtons();
+  }
+}
+
+async function toggleShareMenu() {
+  if (state.shareMenuOpen) {
+    closeShareMenu();
+    return;
+  }
+  state.shareMenuOpen = true;
+  await prepareShareLink();
+}
+
+async function handleShareMenuAction(action = "") {
+  if (!state.shareLink) return;
+  if (action === "copy") {
+    const copied = await copyTextToClipboard(state.shareLink);
+    setStatus(copied ? "Enlace del escape room copiado." : "No fue posible copiar el enlace.", copied ? "success" : "warning");
+    if (copied) closeShareMenu({ restoreFocus: true });
+    return;
+  }
+  if (action === "open") {
+    window.open(state.shareLink, "_blank", "noopener,noreferrer");
+    closeShareMenu({ restoreFocus: true });
+  }
+}
+
 function isPublishedSession() {
   return normalizeString(state.activeSessionMeta?.status, "draft") === "published";
 }
@@ -2882,6 +3549,7 @@ function syncActionButtons() {
   const canPublish = Boolean(state.currentUser?.uid) && hasData && !state.isGenerating;
 
   elements.btnGenerar.disabled = state.isLoading;
+  if (elements.btnGenerarBottom) elements.btnGenerarBottom.disabled = state.isLoading;
   elements.btnLimpiar.disabled = state.isLoading;
   elements.btnAddMission.disabled = state.isLoading;
   if (elements.btnAddTopic) {
@@ -2891,6 +3559,9 @@ function syncActionButtons() {
     elements.modoPresentacionSelect.disabled = state.isLoading || state.isGenerating;
   }
   elements.btnExportar.disabled = state.isLoading || !hasData || state.isGenerating || state.isExporting;
+  if (elements.btnShareEscapeRoom) {
+    elements.btnShareEscapeRoom.disabled = state.isLoading || !hasData || state.isGenerating || state.shareInFlight || !state.currentUser?.uid;
+  }
   if (elements.btnCopyAllAnswers) {
     elements.btnCopyAllAnswers.disabled = state.isLoading || state.isGenerating || state.answerCopyInFlight || !state.activeSessionId || state.topics.length === 0;
   }
@@ -2900,6 +3571,13 @@ function syncActionButtons() {
   }
   if (elements.btnPreviewAutofill) {
     elements.btnPreviewAutofill.disabled = state.isLoading || !hasData || state.isGenerating;
+  }
+  if (elements.btnRegenerateCoverImage) {
+    elements.btnRegenerateCoverImage.disabled = state.isLoading || !hasData || state.isGenerating;
+  }
+  if (elements.btnRegenerateSelectedMission) {
+    const hasSelectedMission = Boolean(state.project?.misiones?.some((mission) => mission.id === state.selectedMissionId));
+    elements.btnRegenerateSelectedMission.disabled = state.isLoading || state.isGenerating || !hasSelectedMission;
   }
 
   if (elements.publishToggle) {
@@ -2915,6 +3593,151 @@ function setLoading(isLoading) {
   state.isLoading = isLoading;
   syncActionButtons();
   elements.loading.classList.toggle("hidden", !isLoading);
+}
+
+const previewGenerationSteps = [];
+let geminiModelCatalogPromise = null;
+
+function normalizeGeminiCatalogModelId(value = "") {
+  return String(value || "").trim()
+    .replace(/^.*\/models\//i, "")
+    .replace(/^models\//i, "")
+    .replace(/:(?:generateContent|streamGenerateContent)$/i, "");
+}
+
+function formatGeminiCatalogModelLabel(model = {}) {
+  const id = normalizeGeminiCatalogModelId(model?.name || model?.model || model?.id || "");
+  return normalizeString(model?.displayName, "") || id
+    .replace(/^gemini-/i, "Gemini ")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function geminiCatalogMethods(model = {}) {
+  return [
+    ...(Array.isArray(model?.supportedGenerationMethods) ? model.supportedGenerationMethods : []),
+    ...(Array.isArray(model?.supportedActions) ? model.supportedActions : [])
+  ].map((method) => String(method || "").toLowerCase());
+}
+
+function supportsGeminiContentGeneration(model = {}) {
+  const methods = geminiCatalogMethods(model);
+  const id = normalizeGeminiCatalogModelId(model?.name || model?.model || model?.id || "").toLowerCase();
+  return methods.length
+    ? methods.some((method) => method === "generatecontent" || method.endsWith(":generatecontent"))
+    : id.startsWith("gemini-") || id.includes("learnlm");
+}
+
+function isGeminiImageContentModel(id = "") {
+  const value = normalizeGeminiCatalogModelId(id).toLowerCase();
+  return value.startsWith("gemini-") && (value.includes("-image") || value.includes("image-generation"));
+}
+
+function isGeminiTextContentModel(id = "") {
+  const value = normalizeGeminiCatalogModelId(id).toLowerCase();
+  if (!value || (!value.startsWith("gemini-") && !value.includes("learnlm"))) return false;
+  return !/(?:image|imagen|tts|audio|live|veo|embedding|aqa|robotics|computer-use|deep-research)/i.test(value);
+}
+
+function renderGeminiModelOptions(select, models = [], selectedValue = "", fallbackValue = "") {
+  if (!select) return;
+  const selected = normalizeGeminiCatalogModelId(selectedValue || fallbackValue);
+  const catalog = new Map(models.map((model) => [model.id, model]));
+  select.replaceChildren(...[...catalog.values()].map((model) => {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.label;
+    return option;
+  }));
+  select.value = catalog.has(selected)
+    ? selected
+    : (catalog.has(fallbackValue) ? fallbackValue : (catalog.keys().next().value || ""));
+  delete select.dataset.pendingModelValue;
+}
+
+async function loadGeminiModelCatalog() {
+  const selectedTextModel = normalizeGeminiCatalogModelId(elements.modeloSelect?.dataset.pendingModelValue || elements.modeloSelect?.value || TEXT_MODEL_DEFAULT);
+  const selectedImageModel = normalizeGeminiCatalogModelId(elements.imagenModeloSelect?.dataset.pendingModelValue || elements.imagenModeloSelect?.value || IMAGE_MODEL_DEFAULT);
+  if (elements.geminiModelCatalogStatus) elements.geminiModelCatalogStatus.textContent = "Consultando todos los modelos disponibles en la API…";
+  if (elements.modeloSelect) elements.modeloSelect.disabled = true;
+  if (elements.imagenModeloSelect) elements.imagenModeloSelect.disabled = true;
+  try {
+    geminiModelCatalogPromise ||= authFetchJson(buildGeminiApiUrl("/api/gemini/models"), { method: "GET" });
+    const payload = await geminiModelCatalogPromise;
+    const unique = new Map();
+    (Array.isArray(payload?.models) ? payload.models : []).forEach((model) => {
+      const id = normalizeGeminiCatalogModelId(model?.name || model?.model || "");
+      if (!id || unique.has(id) || !supportsGeminiContentGeneration(model)) return;
+      unique.set(id, { id, label: formatGeminiCatalogModelLabel(model) });
+    });
+    const available = [...unique.values()].sort((a, b) => a.label.localeCompare(b.label, "es", { numeric: true, sensitivity: "base" }));
+    const apiTextModels = available.filter((model) => isGeminiTextContentModel(model.id));
+    const apiImageModels = available.filter((model) => isGeminiImageContentModel(model.id));
+    const textModels = apiTextModels.length
+      ? apiTextModels
+      : FALLBACK_TEXT_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+    const imageModels = apiImageModels.length
+      ? apiImageModels
+      : FALLBACK_IMAGE_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+
+    ALLOWED_TEXT_MODELS.clear();
+    textModels.forEach((model) => ALLOWED_TEXT_MODELS.add(model.id));
+    ALLOWED_IMAGE_MODELS.clear();
+    imageModels.forEach((model) => ALLOWED_IMAGE_MODELS.add(model.id));
+    renderGeminiModelOptions(elements.modeloSelect, textModels, selectedTextModel, TEXT_MODEL_DEFAULT);
+    renderGeminiModelOptions(elements.imagenModeloSelect, imageModels, selectedImageModel, IMAGE_MODEL_DEFAULT);
+    if (elements.geminiModelCatalogStatus) {
+      const fallbackNote = !apiTextModels.length || !apiImageModels.length ? " Los tipos no publicados por Vertex usan el catálogo de respaldo." : "";
+      elements.geminiModelCatalogStatus.textContent = `${apiTextModels.length} modelos de texto y ${apiImageModels.length} modelos de imagen disponibles desde la API.${fallbackNote}`;
+    }
+  } catch (error) {
+    geminiModelCatalogPromise = null;
+    const textModels = FALLBACK_TEXT_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+    const imageModels = FALLBACK_IMAGE_MODELS.map((id) => ({ id, label: formatGeminiCatalogModelLabel({ name: id }) }));
+    renderGeminiModelOptions(elements.modeloSelect, textModels, selectedTextModel, TEXT_MODEL_DEFAULT);
+    renderGeminiModelOptions(elements.imagenModeloSelect, imageModels, selectedImageModel, IMAGE_MODEL_DEFAULT);
+    if (elements.geminiModelCatalogStatus) elements.geminiModelCatalogStatus.textContent = `No se pudo consultar la API. Se muestran modelos de respaldo: ${error?.message || "error de red"}.`;
+  } finally {
+    if (elements.modeloSelect) elements.modeloSelect.disabled = false;
+    if (elements.imagenModeloSelect) elements.imagenModeloSelect.disabled = false;
+  }
+}
+
+function updatePreviewGenerationProgress({ title = "Procesando el escape room", detail = "", current = 0, total = 0, reset = false } = {}) {
+  const safeTitle = normalizeString(title, "Procesando el escape room");
+  const safeDetail = normalizeString(detail, "");
+  const safeTotal = Math.max(0, Number(total) || 0);
+  const safeCurrent = Math.min(safeTotal || Number.MAX_SAFE_INTEGER, Math.max(0, Number(current) || 0));
+  if (reset) previewGenerationSteps.length = 0;
+
+  if (elements.previewSpinnerTitle) elements.previewSpinnerTitle.textContent = safeTitle;
+  if (elements.previewSpinnerDetail) {
+    elements.previewSpinnerDetail.textContent = safeTotal
+      ? `${safeDetail}${safeDetail ? " · " : ""}Paso ${safeCurrent} de ${safeTotal}`
+      : safeDetail;
+  }
+  if (elements.previewSpinner) elements.previewSpinner.setAttribute("aria-label", `${safeTitle}${safeDetail ? `. ${safeDetail}` : ""}`);
+
+  const progress = safeTotal ? Math.round((safeCurrent / safeTotal) * 100) : 8;
+  if (elements.previewProgressBar) elements.previewProgressBar.style.width = `${Math.max(8, Math.min(100, progress))}%`;
+  const progressRoot = elements.previewProgressBar?.parentElement;
+  if (progressRoot) {
+    progressRoot.setAttribute("aria-valuemax", String(safeTotal || 1));
+    progressRoot.setAttribute("aria-valuenow", String(safeTotal ? safeCurrent : 0));
+  }
+
+  if (!previewGenerationSteps.length || previewGenerationSteps.at(-1) !== safeTitle) {
+    previewGenerationSteps.push(safeTitle);
+    if (previewGenerationSteps.length > 4) previewGenerationSteps.shift();
+  }
+  if (elements.previewSpinnerLog) {
+    elements.previewSpinnerLog.replaceChildren(...previewGenerationSteps.map((step, index) => {
+      const item = document.createElement("li");
+      item.textContent = step;
+      if (index === previewGenerationSteps.length - 1) item.classList.add("is-current");
+      return item;
+    }));
+  }
 }
 
 function setActiveTab(tabName = "preview") {
@@ -2950,34 +3773,41 @@ function getFormData() {
   const narrativaBase = elements.narrativaSelect?.value || "";
   const narrativaPersonalizada = String(elements.narrativaCustomInput?.value || "").trim();
   const narrativa = narrativaBase === "otro" ? (narrativaPersonalizada || "Otro") : narrativaBase;
-  const estiloImagen = String(elements.estiloImagenSelect?.value || "").trim();
+  const estiloImagenBase = String(elements.estiloImagenSelect?.value || "").trim();
+  const estiloImagenPersonalizado = String(elements.estiloImagenCustomInput?.value || "").trim();
+  const estiloImagen = estiloImagenBase === "otro" ? estiloImagenPersonalizado : estiloImagenBase;
   const unidadTemaModo = getAcademicFieldMode();
   const unidadTemaValor = String(document.getElementById("unidadTemaSelect")?.value || "").trim();
   return {
     modoPresentacion: normalizePresentationMode(elements.modoPresentacionSelect?.value || PRESENTATION_MODE_ROOMS),
     idioma: elements.idiomaSelect?.value || "es-419",
     strictImagePromptMode: Boolean(elements.strictImagePromptMode?.checked),
-    nivel: document.getElementById("nivelSelect")?.value || "Primaria",
+    nivel: document.getElementById("nivelSelect")?.value || "Secundaria",
     grado: document.getElementById("gradoSelect")?.value || "Primero",
     trimestre: document.getElementById("trimestreSelect")?.value || "1",
     materia: document.getElementById("materiaSelect")?.value || "Español",
     unidad: unidadTemaModo === "Primaria" ? unidadTemaValor : "",
     temaSecundaria: unidadTemaModo === "Secundaria" ? unidadTemaValor : "",
     publico: document.getElementById("publicoSelect")?.value || "Grupo completo",
-    duracion: Number(document.getElementById("duracionInput")?.value || 35),
+    duracion: Number(document.getElementById("duracionInput")?.value || 20),
     tema: temaLines.join(" / "),
     temaPrincipal: temaLines[0] || "",
     temas: temaLines,
     estacion: unidadTemaModo === "Secundaria" ? (document.getElementById("estacionSelect")?.value || "Todas") : "",
     misiones: Number(document.getElementById("numMisionesInput")?.value || 4),
-    preguntasPorSala: Number(document.getElementById("preguntasPorSalaInput")?.value || 1),
+    preguntasPorSala: Number(document.getElementById("preguntasPorSalaInput")?.value || 4),
     modelo: ALLOWED_TEXT_MODELS.has(String(elements.modeloSelect?.value || "").trim())
       ? String(elements.modeloSelect?.value || TEXT_MODEL_DEFAULT).trim()
       : TEXT_MODEL_DEFAULT,
+    modeloImagen: ALLOWED_IMAGE_MODELS.has(String(elements.imagenModeloSelect?.value || "").trim())
+      ? String(elements.imagenModeloSelect?.value || IMAGE_MODEL_DEFAULT).trim()
+      : IMAGE_MODEL_DEFAULT,
     narrativa,
     narrativaBase,
     narrativaPersonalizada,
     estiloImagen,
+    estiloImagenBase,
+    estiloImagenPersonalizado,
     ritmo: document.getElementById("ritmoSelect")?.value || "progresivo",
     dificultad: document.getElementById("dificultadSelect")?.value || "equilibrada",
     pistas: document.getElementById("pistasSelect")?.value || "moderadas",
@@ -2994,6 +3824,7 @@ function buildRoomsPrompt(data) {
     : data.narrativa;
   const estiloImagen = normalizeString(data.estiloImagen, "Ilustración editorial educativa coherente con la narrativa");
   const languageMode = resolvePromptLanguageDirective(data.idioma);
+  const interactionPlan = Array.isArray(data.interactionPlan) ? data.interactionPlan : buildInteractionPlan(data.misiones, data.preguntasPorSala, data.interactionPlanSeed || "rooms");
 
   return `
 Eres un experto en gamificación, narrativa educativa y diseño de escape rooms profesionales.
@@ -3020,20 +3851,30 @@ ${objetivosTematicos}
 - Pistas: ${data.pistas}
 - Objetivo final: ${objetivoFinal}
 - Elementos base: narrativa inicial, objetivo claro, reglas implícitas, pistas graduales, retos encadenados, progreso visible, ambientación coherente, clímax y cierre satisfactorio.
-- Variedad de interacción: mezcla texto, opción múltiple, relación de columnas y multimedia.
+- Catálogo: texto, opción múltiple, relación de columnas, drag & drop, multimedia, verdadero/falso, ordenar secuencia y completar espacio.
+- Respeta EXACTAMENTE este orden de tipos por sala; no lo reordenes ni sustituyas:
+${formatInteractionPlanForPrompt(interactionPlan)}
+- Incluye como máximo una pregunta de tipo drag_drop por sala. Para drag_drop usa entre 3 y 5 parejas breves: "izquierda" es el destino y "derecha" es la ficha que el estudiante moverá.
 - En los retos de texto usa palabra, letra, numero, codigo_corto o frase_libre.
 - Para palabra, letra, numero y codigo_corto exige una única respuesta objetiva de máximo 32 caracteres. Formula esos retos como identificar, nombrar o completar una clave inequívoca.
 - Usa frase_libre únicamente cuando la intención sea reflexionar, proponer, justificar, explicar o describir. En frase_libre cualquier texto no vacío se considera correcto: deja respuesta_correcta vacía y respuestas_aceptadas como arreglo vacío.
 - Si una solución cerrada necesita dos o más palabras, usa opción múltiple o relación de columnas; no intentes validarla como texto exacto.
 - Para opción múltiple incluye 3 a 5 opciones plausibles y solo una correcta.
 - En opción múltiple, la respuesta correcta debe coincidir exactamente con una de las opciones.
-- Para relación de columnas incluye 3 o 4 pares claros.
+- Para relación de columnas incluye 3 o 4 pares claros. Para drag_drop incluye 3 a 5 pares claros y autocontenidos.
+- Para verdadero_falso usa respuesta_correcta booleana. Para ordenar_secuencia usa "elementos" con 3 a 6 textos únicos ya ordenados correctamente. Para completar_espacio usa "texto_con_hueco" con exactamente un marcador ___ y una respuesta objetiva.
 - Para multimedia incluye media con tipo, url o referencia, y alt.
-- CRÍTICO PARA IMÁGENES COHERENTES Y DE APOYO: Cada "imagen_prompt" debe describir objetos, composición, colores, personajes y ambiente. Los colores son solo una decisión visual: nunca pidas ni incluyas códigos hexadecimales, nombres de colores, paletas escritas o anotaciones técnicas de color dentro de la imagen. El texto es excepcional: solo se permiten hasta dos etiquetas de una o dos palabras, con ortografía exacta en el idioma objetivo; nunca frases, párrafos, listas, coordenadas, leyendas extensas ni la respuesta. Si el ejercicio necesita datos escritos, colócalos en "reto", "opciones", "parejas" o "pista". El "alt" sí debe describir el contenido visual para accesibilidad. La imagen nunca debe revelar explícitamente la respuesta.
+- CRÍTICO PARA IMÁGENES COHERENTES Y DE APOYO: Cada pregunta debe incluir "requiere_imagen". Márcalo true solo si observar una imagen, mapa, diagrama, gráfica, anatomía, geometría, escena o relación espacial aporta evidencia necesaria para resolver el reto; usa false para preguntas textuales o cuando la imagen sería decorativa o repetida. Marca como máximo 2 preguntas por sala con true. Si es false, deja "imagen_prompt", "imagen_alt" e "imagen" vacíos. Si es true, "imagen_prompt" debe describir objetos, composición, personajes y ambiente sin revelar la respuesta. Nunca incluyas códigos hexadecimales, paletas escritas ni anotaciones técnicas de color dentro de la imagen.
 - Cada sala del mapa debe incluir una lista "preguntas" con exactamente ${data.preguntasPorSala} preguntas internas.
+- Cada sala debe incluir "contexto": una lectura autosuficiente de 120 a 250 palabras con todos los conocimientos necesarios para resolver sus preguntas, y "datos_clave": entre 3 y 5 evidencias breves extraídas de esa lectura.
+- Todas las preguntas, respuestas y pistas deben poder justificarse únicamente con "contexto" y "datos_clave". No preguntes datos externos, arbitrarios ni ausentes del expediente.
+- Escribe "contexto" y "datos_clave" exclusivamente en ${languageMode.name}.
 - Las preguntas internas de una misma sala pueden resolverse en cualquier orden.
 - Cada pregunta interna debe tener su propio "tipo_interaccion", "reto", "respuesta_correcta" o estructura equivalente, y feedback no vacío.
 - Cada pregunta interna debe tener su propia pista escrita y accionable (no vacía y no genérica), basada en una pista textual concreta del reto, sin revelar la respuesta.
+- Cada pista debe mencionar al menos un término académico, dato, relación o condición que aparezca literalmente en "contexto", "datos_clave", las opciones, las parejas o la secuencia. No uses como pista palabras de interfaz o instrucción como match, select, each, drag, drop, check, relaciona, selecciona o arrastra.
+- En relacion_columnas y drag_drop, cada objeto de "parejas" debe incluir una "pista" conceptual breve que ayude a reconocer la relación sin repetir literalmente la ficha correcta.
+- Escribe cada valor "pista" exclusivamente en ${languageMode.name}; no copies al contenido los ejemplos estructurales en español.
 - Cada sala debe declarar qué otras salas desbloquea al resolverse. Usa una estructura simple de mapa libre.
 - No dejes respuestas vacías ni feedback vacío; cada sala y cada pregunta debe poder validarse de forma inequívoca.
 
@@ -3050,22 +3891,27 @@ Devuelve SOLO un JSON con esta estructura:
       "release": "SALA 01",
       "titulo": "Sala 01",
       "historia": "Texto inmersivo",
+      "contexto": "Lectura autosuficiente con los datos necesarios para resolver las preguntas",
+      "datos_clave": ["Evidencia 1", "Evidencia 2", "Evidencia 3"],
       "reto": "Descripción de la sala",
       "preguntas": [
         {
           "id": "q1",
           "titulo": "Pregunta 1",
           "reto": "Desafío interno",
-          "tipo_interaccion": "texto | opcion_multiple | relacion_columnas | multimedia",
+          "tipo_interaccion": "texto | opcion_multiple | relacion_columnas | drag_drop | multimedia | verdadero_falso | ordenar_secuencia | completar_espacio",
           "subtipo_respuesta": "palabra | frase_libre | letra | numero | codigo_corto",
           "respuesta_correcta": "una_palabra o vacío para frase_libre",
           "respuestas_aceptadas": ["variantes cerradas; vacío para frase_libre"],
           "opciones": ["Opción A", "Opción B", "Opción C"],
-          "parejas": [{ "izquierda": "Elemento 1", "derecha": "Respuesta 1" }],
+          "parejas": [{ "izquierda": "Elemento 1", "derecha": "Respuesta 1", "pista": "Rasgo conceptual que conecta ambos sin revelar la ficha" }],
+          "elementos": ["Primer paso", "Segundo paso", "Tercer paso"],
+          "texto_con_hueco": "Completa: ___",
           "media": { "tipo": "imagen | audio | video", "url": "URL o data", "alt": "Texto alternativo" },
           "pista": "Usa la condición exacta del enunciado para descartar opciones y hallar la respuesta.",
           "retroalimentacion_correcta": "Mensaje de éxito",
           "retroalimentacion_incorrecta": "Mensaje de error",
+          "requiere_imagen": true,
           "imagen_prompt": "Descripción visual opcional",
           "imagen_alt": "Descripción breve accesible",
           "imagen": ""
@@ -3075,6 +3921,7 @@ Devuelve SOLO un JSON con esta estructura:
       "bloqueada_inicial": false
     }
   ],
+  "clave_final": "CLAVE alfanumérica de 3 a 12 caracteres",
   "conclusion": "Cierre satisfactorio"
 }`.trim();
 }
@@ -3088,6 +3935,7 @@ function buildMenuSectionsPrompt(data) {
     : data.narrativa;
   const estiloImagen = normalizeString(data.estiloImagen, "Ilustración editorial educativa coherente con la narrativa");
   const languageMode = resolvePromptLanguageDirective(data.idioma);
+  const interactionPlan = Array.isArray(data.interactionPlan) ? data.interactionPlan : buildInteractionPlan(data.misiones, data.preguntasPorSala, data.interactionPlanSeed || "menu");
 
   return `
 Eres un experto en gamificación, narrativa educativa y diseño de escape rooms profesionales.
@@ -3117,16 +3965,27 @@ Estructura y comportamiento obligatorios:
 - La experiencia abre en un menú con cards en este orden: Introducción, Instrucciones, actividades y Mensaje final.
 - Redacta "instrucciones" específicas, claras y accionables para explicar inicio, orden, respuestas, pistas, progreso, temporizador y mensaje final.
 - Cada actividad debe incluir exactamente ${data.preguntasPorSala} preguntas que puedan resolverse en cualquier orden.
+- Cada actividad debe incluir "contexto": una lectura autosuficiente de 120 a 250 palabras, y "datos_clave": entre 3 y 5 evidencias breves. Todas sus preguntas y respuestas deben derivarse únicamente de ese expediente.
+- No preguntes conocimientos externos, datos aleatorios ni información ausente de "contexto" o "datos_clave".
+- Escribe "contexto" y "datos_clave" exclusivamente en ${languageMode.name}.
 - Las actividades se desbloquean secuencialmente; cada actividad declara solo la siguiente en "desbloquea".
 - Usa títulos y releases genéricos "Actividad 1" y "ACTIVIDAD 01" cuando no exista un nombre editorial mejor. No llames sala a ninguna actividad.
-- Mezcla texto, opción múltiple, relación de columnas y multimedia. Para texto usa palabra, letra, numero, codigo_corto o frase_libre.
+- Usa el catálogo completo: texto, opción múltiple, relación de columnas, drag & drop, multimedia, verdadero/falso, ordenar secuencia y completar espacio.
+- Respeta EXACTAMENTE este orden de tipos por actividad; no lo reordenes ni sustituyas:
+${formatInteractionPlanForPrompt(interactionPlan)}
+- Para texto usa palabra, letra, numero, codigo_corto o frase_libre.
+- Incluye como máximo una pregunta de tipo drag_drop por actividad. Para drag_drop usa entre 3 y 5 parejas breves: "izquierda" es el destino y "derecha" es la ficha arrastrable.
 - Para palabra, letra, numero y codigo_corto exige una única respuesta objetiva de máximo 32 caracteres y formula el reto como identificar, nombrar o completar una clave.
 - Usa frase_libre únicamente para reflexionar, proponer, justificar, explicar o describir. Cualquier texto no vacío será correcto: deja respuesta_correcta vacía y respuestas_aceptadas como arreglo vacío.
 - Si una solución cerrada necesita dos o más palabras, usa opción múltiple o relación de columnas.
 - En opción múltiple incluye de 3 a 5 opciones plausibles y una sola respuesta que coincida exactamente con una opción.
-- En relación de columnas incluye 3 o 4 pares claros.
+- En relación de columnas incluye 3 o 4 pares claros. Para drag_drop incluye 3 a 5 pares claros y autocontenidos.
+- Para verdadero_falso usa respuesta_correcta booleana. Para ordenar_secuencia usa "elementos" con 3 a 6 textos únicos en el orden correcto. Para completar_espacio usa "texto_con_hueco" con exactamente un marcador ___ y respuesta objetiva.
 - Cada pregunta debe tener respuesta inequívoca, pista específica y feedback correcto e incorrecto no vacíos.
-- Toda imagen debe apoyar el reto sin mostrar la solución; "imagen_prompt" y "imagen_alt" deben describir los detalles funcionales necesarios. Los colores son solo una decisión visual: nunca incluyas códigos hexadecimales, nombres de colores, paletas escritas o anotaciones técnicas dentro de la imagen.
+- Cada pista debe mencionar al menos un término académico, dato, relación o condición que aparezca literalmente en "contexto", "datos_clave", las opciones, las parejas o la secuencia. No uses como pista palabras de interfaz o instrucción como match, select, each, drag, drop, check, relaciona, selecciona o arrastra.
+- En relacion_columnas y drag_drop, cada objeto de "parejas" debe incluir una "pista" conceptual breve que ayude a reconocer la relación sin repetir literalmente la ficha correcta.
+- Escribe cada valor "pista" exclusivamente en ${languageMode.name}; no copies al contenido los ejemplos estructurales en español.
+- Cada pregunta debe incluir "requiere_imagen". Usa true solo cuando la imagen aporte evidencia necesaria para resolver el reto (mapa, diagrama, gráfica, anatomía, geometría, observación o relación espacial), con un máximo de 2 preguntas por sala. Usa false en preguntas textuales, decorativas o repetidas y deja sus campos de imagen vacíos. Toda imagen seleccionada debe apoyar el reto sin mostrar la solución.
 
 Devuelve SOLO un JSON con esta estructura:
 {
@@ -3143,22 +4002,27 @@ Devuelve SOLO un JSON con esta estructura:
       "release": "ACTIVIDAD 01",
       "titulo": "Actividad 1",
       "historia": "Contexto inmersivo de la actividad",
+      "contexto": "Lectura autosuficiente con toda la información necesaria",
+      "datos_clave": ["Evidencia 1", "Evidencia 2", "Evidencia 3"],
       "reto": "Descripción de la actividad",
       "preguntas": [
         {
           "id": "q1",
           "titulo": "Pregunta 1",
           "reto": "Desafío interno",
-          "tipo_interaccion": "texto | opcion_multiple | relacion_columnas | multimedia",
+          "tipo_interaccion": "texto | opcion_multiple | relacion_columnas | drag_drop | multimedia | verdadero_falso | ordenar_secuencia | completar_espacio",
           "subtipo_respuesta": "palabra | frase_libre | letra | numero | codigo_corto",
           "respuesta_correcta": "una_palabra o vacío para frase_libre",
           "respuestas_aceptadas": ["variantes cerradas; vacío para frase_libre"],
           "opciones": ["Opción A", "Opción B", "Opción C"],
-          "parejas": [{ "izquierda": "Elemento 1", "derecha": "Respuesta 1" }],
+          "parejas": [{ "izquierda": "Elemento 1", "derecha": "Respuesta 1", "pista": "Rasgo conceptual que conecta ambos sin revelar la ficha" }],
+          "elementos": ["Primer paso", "Segundo paso", "Tercer paso"],
+          "texto_con_hueco": "Completa: ___",
           "media": { "tipo": "imagen | audio | video", "url": "", "alt": "Texto alternativo" },
           "pista": "Pista concreta sin revelar la respuesta",
           "retroalimentacion_correcta": "Mensaje de éxito",
           "retroalimentacion_incorrecta": "Mensaje de error",
+          "requiere_imagen": true,
           "imagen_prompt": "Descripción visual funcional",
           "imagen_alt": "Descripción breve accesible",
           "imagen": ""
@@ -3168,6 +4032,7 @@ Devuelve SOLO un JSON con esta estructura:
       "bloqueada_inicial": false
     }
   ],
+  "clave_final": "CLAVE alfanumérica de 3 a 12 caracteres",
   "conclusion": "Mensaje final satisfactorio"
 }`.trim();
 }
@@ -3176,6 +4041,27 @@ function buildPrompt(data) {
   return normalizePresentationMode(data?.modoPresentacion) === PRESENTATION_MODE_MENU
     ? buildMenuSectionsPrompt(data)
     : buildRoomsPrompt(data);
+}
+
+function alignGeneratedQuestionsToInteractionPlan(project = {}, plan = []) {
+  const issues = [];
+  if (!Array.isArray(project?.misiones) || !Array.isArray(plan)) return issues;
+  project.misiones.forEach((mission, missionIndex) => {
+    const expected = Array.isArray(plan[missionIndex]) ? plan[missionIndex] : [];
+    const questions = Array.isArray(mission.preguntas) ? mission.preguntas : [];
+    if (!expected.length) return;
+    const remaining = [...questions];
+    const ordered = expected.map((type) => {
+      const index = remaining.findIndex((question) => question?.tipo_interaccion === type);
+      return index >= 0 ? remaining.splice(index, 1)[0] : null;
+    });
+    if (ordered.every(Boolean) && ordered.length === questions.length) {
+      mission.preguntas = ordered;
+      return;
+    }
+    issues.push(`Actividad/Sala ${missionIndex + 1}: la IA no respetó el plan ${expected.join(" → ")}.`);
+  });
+  return issues;
 }
 
 function prepareGeneratedProjectForPresentation(project, requestedMode = PRESENTATION_MODE_ROOMS) {
@@ -3213,9 +4099,9 @@ function buildEscapeRoomResponseSchema(missionCount = 4, questionsPerMission = 1
       id: stringField,
       titulo: stringField,
       reto: stringField,
-      tipo_interaccion: { type: "string", enum: ["texto", "opcion_multiple", "relacion_columnas", "multimedia"] },
+      tipo_interaccion: { type: "string", enum: ["texto", "opcion_multiple", "relacion_columnas", "drag_drop", "multimedia", "verdadero_falso", "ordenar_secuencia", "completar_espacio"] },
       subtipo_respuesta: { type: "string", enum: ["palabra", "frase_libre", "letra", "numero", "codigo_corto"] },
-      respuesta_correcta: stringField,
+      respuesta_correcta: { anyOf: [stringField, { type: "boolean" }] },
       respuestas_aceptadas: stringArray,
       opciones: stringArray,
       parejas: {
@@ -3223,21 +4109,24 @@ function buildEscapeRoomResponseSchema(missionCount = 4, questionsPerMission = 1
         items: {
           type: "object",
           properties: { izquierda: stringField, derecha: stringField, pista: stringField },
-          required: ["izquierda", "derecha"]
+          required: ["izquierda", "derecha", "pista"]
         }
       },
+      elementos: { type: "array", items: stringField, minItems: 0, maxItems: 6 },
+      texto_con_hueco: stringField,
       media: mediaSchema,
       pista: stringField,
       retroalimentacion_correcta: stringField,
       retroalimentacion_incorrecta: stringField,
+      requiere_imagen: { type: "boolean" },
       imagen_prompt: stringField,
       imagen_alt: stringField,
       imagen: stringField
     },
     required: [
       "id", "titulo", "reto", "tipo_interaccion", "subtipo_respuesta", "respuesta_correcta",
-      "respuestas_aceptadas", "opciones", "parejas", "pista", "retroalimentacion_correcta",
-      "retroalimentacion_incorrecta", "imagen_prompt", "imagen_alt", "imagen"
+      "respuestas_aceptadas", "opciones", "parejas", "elementos", "texto_con_hueco", "pista", "retroalimentacion_correcta",
+      "retroalimentacion_incorrecta", "requiere_imagen", "imagen_prompt", "imagen_alt", "imagen"
     ]
   };
   return {
@@ -3250,6 +4139,7 @@ function buildEscapeRoomResponseSchema(missionCount = 4, questionsPerMission = 1
       instrucciones: stringField,
       ambientacion: stringField,
       linea_visual_base: stringField,
+      clave_final: stringField,
       misiones: {
         type: "array",
         minItems: safeMissionCount,
@@ -3261,6 +4151,8 @@ function buildEscapeRoomResponseSchema(missionCount = 4, questionsPerMission = 1
             release: stringField,
             titulo: stringField,
             historia: stringField,
+            contexto: stringField,
+            datos_clave: stringArray,
             reto: stringField,
             preguntas: {
               type: "array",
@@ -3271,14 +4163,14 @@ function buildEscapeRoomResponseSchema(missionCount = 4, questionsPerMission = 1
             desbloquea: stringArray,
             bloqueada_inicial: { type: "boolean" }
           },
-          required: ["id", "release", "titulo", "historia", "reto", "preguntas", "desbloquea", "bloqueada_inicial"]
+          required: ["id", "release", "titulo", "historia", "contexto", "datos_clave", "reto", "preguntas", "desbloquea", "bloqueada_inicial"]
         }
       },
       conclusion: stringField
     },
     required: [
       "modo_presentacion", "titulo", "subtitulo", "introduccion", "instrucciones", "ambientacion",
-      "linea_visual_base", "misiones", "conclusion"
+      "linea_visual_base", "clave_final", "misiones", "conclusion"
     ]
   };
 }
@@ -3307,7 +4199,7 @@ function extractGeneratedJson(rawText = "") {
 async function repairGeneratedEscapeRoomJson(rawText, formData) {
   const malformed = String(rawText || "").trim();
   if (!malformed) throw new Error("La IA no devolvió contenido JSON para reparar.");
-  const repairedResponse = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+  const repairedResponse = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
     method: "POST",
     body: {
       model: formData.modelo || TEXT_MODEL_DEFAULT,
@@ -3343,16 +4235,21 @@ function extractJsonFromGeminiResponse(rawResponse = {}) {
 }
 
 function extractGeminiImageData(imageData = {}) {
-  const parts = imageData?.candidates?.[0]?.content?.parts || [];
-  for (const part of parts) {
-    const inline = part?.inlineData || part?.inline_data;
-    const mime = String(inline?.mimeType || inline?.mime_type || "").trim();
-    const base64 = String(inline?.data || "").trim();
-    if (mime && base64 && /^image\//i.test(mime)) {
-      return `data:${mime};base64,${base64}`;
+  const response = imageData?.response && typeof imageData.response === "object" ? imageData.response : imageData;
+  const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
+  for (const candidate of candidates) {
+    for (const part of (candidate?.content?.parts || [])) {
+      const inline = part?.inlineData || part?.inline_data;
+      const mime = String(inline?.mimeType || inline?.mime_type || "").trim();
+      const base64 = String(inline?.data || "").trim();
+      if (mime && base64 && /^image\//i.test(mime)) {
+        return `data:${mime};base64,${base64}`;
+      }
     }
   }
-  throw new Error("No se recibió una imagen válida.");
+  const finishReason = candidates.map((candidate) => candidate?.finishReason || candidate?.finish_reason).filter(Boolean).join(", ");
+  const blockReason = response?.promptFeedback?.blockReason || response?.prompt_feedback?.block_reason || "";
+  throw new Error(`No se recibió una imagen válida${blockReason ? `: solicitud bloqueada (${blockReason})` : finishReason ? `: ${finishReason}` : ""}.`);
 }
 
 function buildVisualDirection(data = {}) {
@@ -3424,11 +4321,14 @@ function buildQuestionVisualPrompt({ data, mission, question, roomIndex, questio
   ].filter(Boolean).join("\n");
 }
 
-async function generateGeminiImage(prompt, { aspectRatio = "16:9", imageSize = "2K", temperature = 0.58 } = {}) {
-  const imageData = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+async function generateGeminiImage(prompt, { aspectRatio = "16:9", imageSize = "2K", temperature = 0.58, model = IMAGE_MODEL_DEFAULT } = {}) {
+  const imageModel = ALLOWED_IMAGE_MODELS.has(String(model || "").trim())
+    ? String(model).trim()
+    : IMAGE_MODEL_DEFAULT;
+  const requestOptions = {
     method: "POST",
     body: {
-      model: IMAGE_MODEL,
+      model: imageModel,
       payload: {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
@@ -3438,16 +4338,100 @@ async function generateGeminiImage(prompt, { aspectRatio = "16:9", imageSize = "
         }
       }
     }
-  });
-  return extractGeminiImageData(imageData);
+  };
+  // Una respuesta 429/5xx puede llegar después de que Vertex haya empezado a
+  // producir la imagen. Repetir aquí la misma petición puede duplicar consumo;
+  // el proxy ya gestiona su fallback de modelo antes de devolver la respuesta.
+  return extractGeminiImageData(await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), requestOptions));
 }
 
 async function generateCoverImage(project, context) {
   try {
-    return await generateGeminiImage(buildCoverVisualPrompt({ ...project, ...context }), { aspectRatio: "16:9" });
+    updatePreviewGenerationProgress({
+      title: "Creando imagen de portada",
+      detail: "Preparando la identidad visual del escape room"
+    });
+    return await generateGeminiImage(buildCoverVisualPrompt({ ...project, ...context }), {
+      aspectRatio: "16:9",
+      model: context?.modeloImagen
+    });
   } catch (error) {
     console.warn("No se pudo generar la portada:", error);
     return "";
+  }
+}
+
+async function regenerateCoverImageOnly() {
+  if (!state.project || state.isGenerating) {
+    if (!state.project) setStatus("Genera un escape room antes de regenerar la imagen de inicio.", "warning");
+    return;
+  }
+  const formData = getFormData();
+  state.isGenerating = true;
+  renderGeneralContentEditor();
+  syncActionButtons();
+  setStatus("Regenerando la imagen de inicio…", "info");
+  try {
+    const image = await generateCoverImage(state.project, formData);
+    if (!image) throw new Error("El modelo no devolvió una imagen de inicio válida.");
+    state.project.backgroundImage = image;
+    renderOutputsNow();
+    setStatus("Imagen de inicio regenerada.", "success");
+  } catch (error) {
+    console.error("No se pudo regenerar la imagen de inicio:", error);
+    setStatus("No se pudo regenerar la imagen de inicio. Intenta de nuevo.", "bad");
+  } finally {
+    state.isGenerating = false;
+    renderGeneralContentEditor();
+    refreshPanels();
+  }
+}
+
+async function regenerateQuestionImageOnly(missionIndex, questionIndex) {
+  if (!state.project || state.isGenerating) {
+    if (!state.project) setStatus("Genera un escape room antes de regenerar una imagen.", "warning");
+    return;
+  }
+  const roomIndex = Number(missionIndex);
+  const qIndex = Number(questionIndex);
+  const mission = state.project.misiones?.[roomIndex];
+  const question = mission?.preguntas?.[qIndex];
+  if (!mission || !question) {
+    setStatus("Selecciona una pregunta válida para regenerar su imagen.", "warning");
+    return;
+  }
+
+  const formData = getFormData();
+  const terms = getPresentationTerminology();
+  const actionButton = elements.missionEditorList?.querySelector(`[data-question-action="regenerate-question-image"][data-question-mission-index="${roomIndex}"][data-question-index="${qIndex}"]`);
+  state.isGenerating = true;
+  if (actionButton) {
+    actionButton.disabled = true;
+    actionButton.setAttribute("aria-busy", "true");
+    const icon = actionButton.querySelector("i");
+    if (icon) icon.className = "fas fa-spinner fa-spin";
+  }
+  setStatus(`Regenerando imagen de la pregunta ${qIndex + 1}…`, "info");
+  refreshPanels();
+  await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  try {
+    const result = await generateMissionImages(state.project, formData, null, {
+      missionIndexes: [roomIndex],
+      includeMissionImage: false,
+      includeQuestions: true,
+      forceQuestionImages: true,
+      questionScope: { missionIndex: roomIndex, questionIndex: qIndex }
+    });
+    if (!result.generated) throw result.error || new Error("El modelo no devolvió una imagen válida.");
+    renderOutputsNow();
+    setStatus(`Imagen de la pregunta ${qIndex + 1} de ${terms.itemSingular} ${roomIndex + 1} regenerada.`, "success");
+  } catch (error) {
+    console.error("No se pudo regenerar la imagen de la pregunta:", error);
+    setStatus("No se pudo regenerar la imagen de la pregunta. Intenta de nuevo.", "bad");
+  } finally {
+    state.isGenerating = false;
+    renderMissionEditor();
+    refreshPanels();
   }
 }
 
@@ -3472,16 +4456,44 @@ function resolveImageGenerationScope(project, options = {}) {
   };
 }
 
-function questionNeedsImage(question = {}) {
-  const hasMedia = question.media && (question.media.tipo === "imagen" || !question.media.tipo);
-  return question.tipo_interaccion === "multimedia" || question.imagen_prompt || question.imagen || hasMedia;
+const MAX_QUESTION_IMAGES_PER_MISSION = 2;
+const VISUAL_QUESTION_PATTERN = /\b(imagen|image|observa|observe|visual|mapa|map|diagrama|diagram|gr[aá]fic[ao]|graph|chart|geometr[ií]a|geometry|figura|shape|anatom[ií]a|anatomy|ilustraci[oó]n|illustration|fotograf[ií]a|photo|escena|scene|spatial|espacial|ruta|route|ecosistema|ecosystem|experimento|experiment)\b/i;
+
+function getQuestionImageScore(question = {}) {
+  if (question.requiere_imagen === false || question.requires_image === false) return -100;
+  const interaction = normalizeString(question.tipo_interaccion, "").toLowerCase();
+  const visualText = [question.titulo, question.reto, question.imagen_prompt, question.imagen_alt, question.media?.alt, question.media?.texto].map((value) => normalizeString(value, "")).join(" ");
+  let score = question.requiere_imagen === true || question.requires_image === true ? 7 : 0;
+  if (interaction === "multimedia") score += 8;
+  if (VISUAL_QUESTION_PATTERN.test(visualText)) score += 5;
+  if (["drag_drop", "ordenar_secuencia"].includes(interaction)) score += 2;
+  if (interaction === "relacion_columnas") score += 1;
+  if (normalizeString(question.imagen, "") || (question.media && (question.media.tipo === "imagen" || !question.media.tipo) && question.media.url)) score += 6;
+  if (["texto", "verdadero_falso", "completar_espacio"].includes(interaction) && !VISUAL_QUESTION_PATTERN.test(visualText)) score -= 3;
+  return score;
+}
+
+function selectQuestionImageIndexes(mission = {}, maxImages = MAX_QUESTION_IMAGES_PER_MISSION) {
+  return new Set((Array.isArray(mission.preguntas) ? mission.preguntas : [])
+    .map((question, index) => ({ index, score: getQuestionImageScore(question) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, Math.max(0, maxImages))
+    .map((candidate) => candidate.index));
 }
 
 async function generateMissionImages(project, context, onProgress, options = {}) {
   const scope = resolveImageGenerationScope(project, options);
   const terms = getPresentationTerminology(project?.modo_presentacion || context?.modoPresentacion);
+  const selectedQuestionsByMission = new Map(project.misiones.map((mission, missionIndex) => [
+    missionIndex,
+    scope.forceQuestionImages
+      ? new Set((mission.preguntas || []).map((_, questionIndex) => questionIndex))
+      : selectQuestionImageIndexes(mission)
+  ]));
   let generated = 0;
   let failed = 0;
+  let firstError = null;
   let total = 0;
 
   // Calcular total de imágenes a generar de antemano
@@ -3497,7 +4509,7 @@ async function generateMissionImages(project, context, onProgress, options = {})
       if (scope.questionScope && (scope.questionScope.missionIndex !== index || scope.questionScope.questionIndex !== questionIndex)) {
         continue;
       }
-      const needsImage = scope.includeQuestions && (scope.forceQuestionImages || questionNeedsImage(question));
+      const needsImage = scope.includeQuestions && selectedQuestionsByMission.get(index)?.has(questionIndex);
       if (!needsImage) continue;
       total += 1;
     }
@@ -3511,10 +4523,20 @@ async function generateMissionImages(project, context, onProgress, options = {})
     }
     if (scope.includeMissionImage) {
       processed += 1;
-      if (onProgress) onProgress(processed, total);
+      const progress = {
+        type: "mission-image",
+        missionIndex: index,
+        title: `Creando imagen de ${terms.itemSingular} ${index + 1}`,
+        detail: normalizeString(mission.titulo, `${terms.itemSingularTitle} ${index + 1}`)
+      };
+      updatePreviewGenerationProgress({ ...progress, current: processed, total });
+      if (onProgress) onProgress(processed, total, progress);
 
       try {
-        const image = await generateGeminiImage(buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index }), { aspectRatio: "4:3" });
+        const image = await generateGeminiImage(buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index }), {
+          aspectRatio: "4:3",
+          model: context?.modeloImagen
+        });
         mission.imagen = image;
         mission.imagen_alt = mission.imagen_alt || mission.media?.alt || `Imagen de la ${terms.itemSingular} ${index + 1}`;
         mission.media = {
@@ -3528,6 +4550,7 @@ async function generateMissionImages(project, context, onProgress, options = {})
         generated += 1;
       } catch (error) {
         console.warn(`No se pudo generar la imagen de la ${terms.itemSingular} ${index + 1}:`, error);
+        firstError ||= error;
         failed += 1;
       }
     }
@@ -3537,14 +4560,25 @@ async function generateMissionImages(project, context, onProgress, options = {})
       if (scope.questionScope && (scope.questionScope.missionIndex !== index || scope.questionScope.questionIndex !== questionIndex)) {
         continue;
       }
-      const needsImage = scope.includeQuestions && (scope.forceQuestionImages || questionNeedsImage(question));
+      const needsImage = scope.includeQuestions && selectedQuestionsByMission.get(index)?.has(questionIndex);
       if (!needsImage) continue;
 
       processed += 1;
-      if (onProgress) onProgress(processed, total);
+      const progress = {
+        type: "question-image",
+        missionIndex: index,
+        questionIndex,
+        title: `Creando imagen de la pregunta ${questionIndex + 1}`,
+        detail: `${terms.itemSingularTitle} ${index + 1} · ${normalizeString(question.titulo, `Pregunta ${questionIndex + 1}`)}`
+      };
+      updatePreviewGenerationProgress({ ...progress, current: processed, total });
+      if (onProgress) onProgress(processed, total, progress);
 
       try {
-        const image = await generateGeminiImage(buildQuestionVisualPrompt({ data: { ...project, ...context }, mission, question, roomIndex: index, questionIndex }), { aspectRatio: "4:3" });
+        const image = await generateGeminiImage(buildQuestionVisualPrompt({ data: { ...project, ...context }, mission, question, roomIndex: index, questionIndex }), {
+          aspectRatio: "4:3",
+          model: context?.modeloImagen
+        });
         question.imagen = image;
         question.imagen_alt = question.imagen_alt || question.media?.alt || `Imagen de la pregunta ${questionIndex + 1}`;
         question.media = {
@@ -3558,32 +4592,83 @@ async function generateMissionImages(project, context, onProgress, options = {})
         generated += 1;
       } catch (error) {
         console.warn(`No se pudo generar la imagen de la pregunta ${questionIndex + 1} de la ${terms.itemSingular} ${index + 1}:`, error);
+        firstError ||= error;
         failed += 1;
       }
     }
   }
-  return { generated, failed, total };
+  return { generated, failed, total, error: firstError };
 }
 
-function buildRoomRegenerationPrompt({ formData = {}, missionIndex = 0, sourceMission = {}, questionCount = 1 }) {
+function getQuestionComparisonText(question = {}) {
+  return [question.titulo, question.pregunta, question.reto, question.enunciado, question.respuesta_correcta]
+    .map((value) => normalizeString(value, ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getQuestionComparisonTokens(question = {}) {
+  const normalized = getQuestionComparisonText(question)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ");
+  return new Set(normalized.split(/\s+/).filter((token) => token.length > 3));
+}
+
+function questionsAreTooSimilar(firstQuestion, secondQuestion) {
+  const firstTokens = getQuestionComparisonTokens(firstQuestion);
+  const secondTokens = getQuestionComparisonTokens(secondQuestion);
+  if (!firstTokens.size || !secondTokens.size) return false;
+  let sharedTokens = 0;
+  firstTokens.forEach((token) => {
+    if (secondTokens.has(token)) sharedTokens += 1;
+  });
+  return sharedTokens / Math.min(firstTokens.size, secondTokens.size) >= 0.72;
+}
+
+function assertQuestionVariety(candidateQuestions = [], excludedQuestions = []) {
+  candidateQuestions.forEach((question, questionIndex) => {
+    const repeatsExisting = excludedQuestions.some((existingQuestion) => questionsAreTooSimilar(question, existingQuestion));
+    const repeatsGenerated = candidateQuestions.slice(0, questionIndex)
+      .some((previousQuestion) => questionsAreTooSimilar(question, previousQuestion));
+    if (repeatsExisting || repeatsGenerated) {
+      throw new Error(`La pregunta ${questionIndex + 1} se parece demasiado a una pregunta existente. Vuelve a regenerar la sala.`);
+    }
+  });
+}
+
+function buildRoomRegenerationPrompt({ formData = {}, missionIndex = 0, sourceMission = {}, questionCount = 1, excludedQuestions = [] }) {
   const safeIndex = Math.max(0, Number(missionIndex) || 0);
   const visual = buildVisualDirection(formData);
   const languageMode = resolvePromptLanguageDirective(formData.idioma);
   const strictTextPolicy = buildImageTextPolicyLine({ formData, allowOptionalText: false });
   const terms = getPresentationTerminology(formData.modoPresentacion);
+  const roomPlan = Array.isArray(formData.roomInteractionPlan)
+    ? formData.roomInteractionPlan
+    : buildInteractionPlan(1, questionCount, formData.interactionPlanSeed || `${Date.now()}-${missionIndex}`)[0];
   return [
     `Regenera una sola ${terms.itemSingular} del escape room, como objeto JSON estricto.`,
     `Genera exactamente la ${terms.itemSingular} #${safeIndex + 1} y ${questionCount} preguntas internas.`,
+    `Respeta exactamente este orden de tipos: ${roomPlan.join(" → ")}.`,
     `Debe devolver solo JSON con esta forma: {"mission": {...}}.`,
     `Idioma objetivo del contenido: ${languageMode.name}.`,
+    `Todas las pistas deben estar exclusivamente en ${languageMode.name}; no uses español salvo que ese sea el idioma objetivo.`,
     "Mantén el nivel de detalle, coherencia narrativa y dificultad de la experiencia original.",
+    "Todas las preguntas deben ser nuevas: cambia el enfoque, los datos, las pistas y la respuesta respecto de la versión anterior.",
+    excludedQuestions.length
+      ? `No repitas ni parafrasees ninguna de estas preguntas ya usadas en esta u otras salas:\n${excludedQuestions.map((question, index) => `${index + 1}. ${getQuestionComparisonText(question)}`).join("\n")}`
+      : "",
     strictTextPolicy,
     `Tema principal: ${formData.temaPrincipal || formData.tema}.`,
     `Narrativa: ${formData.narrativa || "general"}.`,
     `Estilo visual general: ${visual.line}.`,
-    `La ${terms.itemSingular} debe incluir: id, titulo, release, historia, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, desbloquea y bloqueada_inicial.`,
+    `La ${terms.itemSingular} debe incluir: id, titulo, release, historia, contexto, datos_clave, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, desbloquea y bloqueada_inicial.`,
+    `Genera "contexto" como una lectura autosuficiente de 120 a 250 palabras y "datos_clave" con 3 a 5 evidencias. Todas las preguntas deben resolverse únicamente con ese expediente y estar en ${languageMode.name}.`,
+    `Cada pista debe citar al menos un término académico, dato, relación o condición que aparezca literalmente en el expediente o en la propia pregunta, siempre en ${languageMode.name}. No uses palabras de interfaz como match, select, each, drag, drop o check como si fueran pistas.`,
+    'Para relacion_columnas y drag_drop, cada pareja debe incluir "pista": una relación conceptual breve que oriente sin repetir la ficha correcta.',
     'Regla de respuestas: usa palabra para validación exacta de una sola palabra; usa frase_libre para reflexión o desarrollo, donde cualquier texto no vacío es correcto y no debe existir respuesta modelo.',
-    "Dentro de preguntas usa la estructura esperada por la app con: id, titulo, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, imagen_prompt, imagen_alt e imagen.",
+    "Dentro de preguntas usa la estructura esperada por la app con: id, titulo, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, requiere_imagen, imagen_prompt, imagen_alt e imagen. Marca como máximo 2 preguntas con requiere_imagen=true y solo cuando la evidencia visual sea necesaria; deja vacíos los campos de imagen en las demás.",
     `Si no hay suficientes respuestas u opciones, usa defaults claros y consistentes con preguntas de nivel ${formData.nivel}.`,
     `Si la ${terms.itemSingular} anterior ya existía, conserva su id si aplica: ${sourceMission.id || "m" + (safeIndex + 1)}`
   ].filter(Boolean).join("\n");
@@ -3599,15 +4684,20 @@ function buildQuestionRegenerationPrompt({ formData = {}, mission = {}, missionI
     "Regenera una sola pregunta interna, como objeto JSON estricto.",
     "Devuelve solo JSON con esta forma: {\"question\": {...}}.",
     `No cambies otras preguntas ni la ${terms.itemSingular}.`,
+    `Conserva exactamente el tipo_interaccion actual: ${sourceQuestion.tipo_interaccion || "texto"}.`,
     `La pregunta es la #${safeQuestionIndex + 1} de la ${terms.itemSingular} #${Number(missionIndex) + 1}.`,
     `Idioma objetivo del contenido: ${languageMode.name}.`,
+    `La pista debe estar exclusivamente en ${languageMode.name}; no uses español salvo que ese sea el idioma objetivo.`,
     strictTextPolicy,
     `Tema principal: ${formData.temaPrincipal || formData.tema}.`,
     `Narrativa de la ${terms.itemSingular}: ${mission.reto || mission.historia || ""}.`,
+    `Expediente obligatorio de referencia: ${mission.contexto || mission.historia || ""}. Evidencias: ${(mission.datos_clave || []).join(" | ")}.`,
+    "La respuesta debe estar explícitamente respaldada por el expediente. No introduzcas conocimientos externos ni datos aleatorios.",
     `Estilo visual base: ${visual.line}.`,
-    "La pregunta debe incluir: id, titulo, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, imagen_prompt, imagen_alt, imagen y pista textual.",
+    "La pregunta debe incluir: id, titulo, reto, tipo_interaccion, subtipo_respuesta, respuesta_correcta, respuestas_aceptadas, opciones, parejas, media, pista, retroalimentacion_correcta, retroalimentacion_incorrecta, requiere_imagen, imagen_prompt, imagen_alt, imagen y pista textual. Usa requiere_imagen=true solo si una evidencia visual es necesaria para resolverla.",
     'Regla de respuestas: usa palabra para validación exacta de una sola palabra; usa frase_libre para reflexión o desarrollo, donde cualquier texto no vacío es correcto y no debe existir respuesta modelo.',
-    "Regenera una pista específica y accionable: menciona 1 o 2 detalles concretos del reto (número, personaje, lugar, condición o relación) para guiar al alumnado sin dar la respuesta.",
+    `Regenera una pista específica y accionable en ${languageMode.name}: menciona 1 o 2 términos académicos, datos, relaciones o condiciones que aparezcan literalmente en el expediente o la pregunta, sin dar la respuesta. No uses palabras de interfaz como match, select, each, drag, drop o check como si fueran pistas.`,
+    'Si el tipo es relacion_columnas o drag_drop, cada pareja debe incluir "pista": una relación conceptual breve que oriente sin repetir la ficha correcta.',
     `Mantén coherencia pedagógica para ${formData.nivel} y dificulta de forma similar al entorno actual.`,
     `Si puedes, conserva la intención de: ${sourceQuestion?.reto || "reto existente"} y ${sourceQuestion?.respuesta_correcta || "respuesta correcta"}.`
   ].join("\n");
@@ -3740,20 +4830,30 @@ async function regenerateMissionContent(index) {
   }
 
   const sourceMission = state.project.misiones[missionIndex];
+  const excludedQuestions = state.project.misiones.flatMap((mission) => (
+    Array.isArray(mission?.preguntas) ? mission.preguntas : []
+  ));
   const formData = getFormData();
   const questionCount = Math.max(1, Array.isArray(sourceMission.preguntas) ? sourceMission.preguntas.length : Number(formData.preguntasPorSala || 1));
+  const roomInteractionPlan = buildInteractionPlan(1, questionCount, `${Date.now()}-${missionIndex}-${Math.random()}`)[0];
   const prompt = buildRoomRegenerationPrompt({
-    formData,
+    formData: { ...formData, roomInteractionPlan },
     missionIndex,
     sourceMission,
-    questionCount
+    questionCount,
+    excludedQuestions
   });
 
   state.isGenerating = true;
+  updatePreviewGenerationProgress({
+    title: `Creando contenido de ${terms.itemSingular} ${missionIndex + 1}`,
+    detail: "Generando narrativa, reto y preguntas",
+    reset: true
+  });
   setStatus(`Regenerando ${terms.itemSingular} ${missionIndex + 1}...`, "info");
   renderMissionEditor();
   try {
-    const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+    const response = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
       method: "POST",
       body: {
         model: formData.modelo || TEXT_MODEL_DEFAULT,
@@ -3775,12 +4875,15 @@ async function regenerateMissionContent(index) {
     });
 
     const missionPayload = pickMissionFromGeminiPayload(extractJsonFromGeminiResponse(response));
+    const roomPlanIssues = alignGeneratedQuestionsToInteractionPlan({ misiones: [missionPayload] }, [roomInteractionPlan]);
+    if (roomPlanIssues.length) throw new Error(roomPlanIssues.join(" "));
     const normalized = createMissionDraft(missionIndex, {
       ...missionPayload,
       id: missionPayload.id || sourceMission.id,
       release: sourceMission.release || getDefaultMissionRelease(missionIndex, terms.mode),
       bloqueada_inicial: missionIndex !== 0
     }, questionCount, terms.mode);
+    assertQuestionVariety(normalized.preguntas || [], excludedQuestions);
 
     state.project.misiones[missionIndex] = normalized;
     state.project = withDefaultRoutes(state.project);
@@ -3797,7 +4900,7 @@ async function regenerateMissionContent(index) {
       missionIndexes: [missionIndex],
       includeMissionImage: true,
       includeQuestions: true,
-      forceQuestionImages: true
+      forceQuestionImages: false
     });
 
     renderMissionEditor();
@@ -3839,10 +4942,15 @@ async function regenerateQuestionContent(missionIndex, questionIndex) {
     sourceQuestion: question
   });
   state.isGenerating = true;
+  updatePreviewGenerationProgress({
+    title: `Creando contenido de la pregunta ${qIndex + 1}`,
+    detail: `${terms.itemSingularTitle} ${roomIndex + 1} · Generando reto y respuesta`,
+    reset: true
+  });
   setStatus(`Regenerando pregunta ${qIndex + 1} de la ${terms.itemSingular} ${roomIndex + 1}...`, "info");
 
   try {
-    const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+    const response = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
       method: "POST",
       body: {
         model: formData.modelo || TEXT_MODEL_DEFAULT,
@@ -3864,7 +4972,8 @@ async function regenerateQuestionContent(missionIndex, questionIndex) {
     const questionPayload = pickQuestionFromGeminiPayload(extractJsonFromGeminiResponse(response));
     const normalized = createQuestionDraft(roomIndex, qIndex, {
       ...questionPayload,
-      id: question.id
+      id: question.id,
+      tipo_interaccion: question.tipo_interaccion
     });
     mission.preguntas[qIndex] = normalized;
     state.project = withDefaultRoutes(state.project);
@@ -3896,6 +5005,7 @@ async function regenerateQuestionContent(missionIndex, questionIndex) {
 }
 
 function createQuestionDraft(roomIndex = 0, questionIndex = 0, partial = {}, presentationMode = getPresentationMode()) {
+  const hintLocale = normalizeGameLocale(partial.idioma || state.project?.idioma || elements.idiomaSelect?.value || "es-419");
   const title = partial.titulo || `Pregunta ${String(questionIndex + 1).padStart(2, "0")}`;
   const draftQuestion = {
     id: partial.id || `question-${roomIndex + 1}-${questionIndex + 1}`,
@@ -3911,10 +5021,13 @@ function createQuestionDraft(roomIndex = 0, questionIndex = 0, partial = {}, pre
       { izquierda: "Elemento 2", derecha: "Respuesta 2" },
       { izquierda: "Elemento 3", derecha: "Respuesta 3" }
     ],
+    elementos: partial.elementos || ["Primer paso", "Segundo paso", "Tercer paso"],
+    texto_con_hueco: partial.texto_con_hueco || "Completa la clave: ___",
     media: partial.media || null,
     pista: partial.pista || "",
     retroalimentacion_correcta: partial.retroalimentacion_correcta || "",
     retroalimentacion_incorrecta: partial.retroalimentacion_incorrecta || "",
+    requiere_imagen: partial.requiere_imagen === true || partial.requires_image === true,
     imagen_prompt: partial.imagen_prompt || "",
     imagen_alt: partial.imagen_alt || "",
     imagen: partial.imagen || "",
@@ -3923,11 +5036,11 @@ function createQuestionDraft(roomIndex = 0, questionIndex = 0, partial = {}, pre
   const terms = getPresentationTerminology(presentationMode);
   const normalizedHintQuestion = {
     ...draftQuestion,
-    pista: normalizeQuestionHint(draftQuestion, `${terms.itemSingularTitle} ${roomIndex + 1}`, "")
+    pista: normalizeQuestionHint(draftQuestion, `${terms.itemSingularTitle} ${roomIndex + 1}`, "", hintLocale)
   };
   const question = normalizeQuestion({
     ...normalizedHintQuestion
-  }, roomIndex, questionIndex);
+  }, roomIndex, questionIndex, hintLocale);
 
   question._correctOptionIndex = typeof partial._correctOptionIndex === "number"
     ? partial._correctOptionIndex
@@ -3938,9 +5051,10 @@ function createQuestionDraft(roomIndex = 0, questionIndex = 0, partial = {}, pre
 function createMissionDraft(index = 0, partial = {}, questionCount = 1, presentationMode = getPresentationMode()) {
   const mode = normalizePresentationMode(presentationMode);
   const terms = getPresentationTerminology(mode);
+  const hintLocale = normalizeGameLocale(partial.idioma || state.project?.idioma || elements.idiomaSelect?.value || "es-419");
   const title = normalizeMissionTitle(partial.titulo, getDefaultMissionTitle(index, mode), mode);
   const preguntas = Array.isArray(partial.preguntas) && partial.preguntas.length
-    ? normalizeQuestionList(partial.preguntas, index)
+    ? normalizeQuestionList(partial.preguntas, index, hintLocale)
     : Array.from({ length: Math.max(1, questionCount) }, (_, questionIndex) => createQuestionDraft(index, questionIndex, {}, mode));
 
   const mission = normalizeMission({
@@ -3948,6 +5062,8 @@ function createMissionDraft(index = 0, partial = {}, questionCount = 1, presenta
     titulo: title,
     release: normalizeMissionRelease(partial.release, getDefaultMissionRelease(index, mode), mode),
     historia: partial.historia || `Introduce aquí la escena y el contexto de la ${terms.itemSingular}.`,
+    contexto: partial.contexto || getGameMessages(hintLocale).defaultBriefingContext,
+    datos_clave: partial.datos_clave || [],
     reto: partial.reto || `Define aquí el reto principal de la ${terms.itemSingular}.`,
     tipo_interaccion: partial.tipo_interaccion || "texto",
     subtipo_respuesta: partial.subtipo_respuesta || "palabra",
@@ -3960,13 +5076,13 @@ function createMissionDraft(index = 0, partial = {}, questionCount = 1, presenta
       { izquierda: "Elemento 3", derecha: "Respuesta 3" }
     ],
     media: partial.media || null,
-    pista: partial.pista || "Añade una pista útil, pero no obvia.",
+    pista: partial.pista || getGameMessages(hintLocale).defaultHint,
     retroalimentacion_correcta: partial.retroalimentacion_correcta || "",
     retroalimentacion_incorrecta: partial.retroalimentacion_incorrecta || "",
     desbloquea: partial.desbloquea || [],
     bloqueada_inicial: partial.bloqueada_inicial ?? index !== 0,
     preguntas
-  }, index, mode);
+  }, index, mode, hintLocale);
 
   const repairedMission = repairMissionAnswers({
     ...mission,
@@ -4044,16 +5160,30 @@ function repairQuestionAnswers(question = {}, roomIndex = 0, questionIndex = 0) 
     retroalimentacion_incorrecta: normalizeString(question.retroalimentacion_incorrecta, "Respuesta incorrecta. Intenta de nuevo."),
     pista: ""
   };
-  repaired.pista = normalizeQuestionHint(repaired, missionLabel);
+  const hintLocale = normalizeGameLocale(state.project?.idioma || elements.idiomaSelect?.value || "es-419");
+  repaired.pista = normalizeQuestionHint(repaired, missionLabel, "", hintLocale);
   repaired.subtipo_respuesta = resolveTextSubtypeForAnswer(repaired.subtipo_respuesta, repaired.respuesta_correcta);
   if (["texto", "multimedia"].includes(repaired.tipo_interaccion) && repaired.subtipo_respuesta === "frase_corta") repaired.subtipo_respuesta = "palabra";
 
   if (["texto", "multimedia"].includes(repaired.tipo_interaccion) && repaired.subtipo_respuesta === "palabra") {
     repaired.respuesta_correcta = extractSingleWordAnswer(repaired.respuesta_correcta);
-    repaired.reto = buildSingleWordChallenge(repaired.reto, repaired.titulo || `Pregunta ${questionIndex + 1}`, repaired.respuesta_correcta);
+    repaired.reto = buildSingleWordChallenge(repaired.reto, repaired.titulo || `Pregunta ${questionIndex + 1}`, repaired.respuesta_correcta, hintLocale);
   }
 
-  if (repaired.tipo_interaccion === "opcion_multiple") {
+  if (repaired.tipo_interaccion === "verdadero_falso") {
+    repaired.respuesta_correcta = repaired.respuesta_correcta === true || /^(?:true|verdadero|vrai|verdadeiro|1)$/i.test(String(repaired.respuesta_correcta || ""));
+    repaired.respuestas_aceptadas = [];
+  } else if (repaired.tipo_interaccion === "ordenar_secuencia") {
+    repaired.elementos = normalizeSequenceItems(repaired.elementos || []);
+    repaired.respuesta_correcta = "";
+    repaired.respuestas_aceptadas = [];
+  } else if (repaired.tipo_interaccion === "completar_espacio") {
+    repaired.texto_con_hueco = normalizeString(repaired.texto_con_hueco, "Completa: ___");
+    if (!repaired.texto_con_hueco.includes("___")) repaired.texto_con_hueco = `${repaired.texto_con_hueco} ___`;
+    const accepted = normalizeAcceptedAnswers(repaired.respuestas_aceptadas || repaired.respuesta_correcta || []);
+    repaired.respuestas_aceptadas = accepted;
+    if (!repaired.respuesta_correcta && accepted.length) repaired.respuesta_correcta = accepted[0];
+  } else if (repaired.tipo_interaccion === "opcion_multiple") {
     const optionIndex = typeof repaired._correctOptionIndex === "number" && repaired._correctOptionIndex >= 0
       ? repaired._correctOptionIndex
       : findCorrectOptionIndex(repaired);
@@ -4063,7 +5193,7 @@ function repairQuestionAnswers(question = {}, roomIndex = 0, questionIndex = 0) 
       repaired.respuesta_correcta = correctValue;
       repaired.respuestas_aceptadas = [correctValue];
     }
-  } else if (repaired.tipo_interaccion === "relacion_columnas") {
+  } else if (["relacion_columnas", "drag_drop"].includes(repaired.tipo_interaccion)) {
     repaired.parejas = normalizePairList(repaired.parejas || []);
   } else {
     const acceptedSource = ["texto", "multimedia"].includes(repaired.tipo_interaccion) && repaired.subtipo_respuesta === "palabra"
@@ -4083,6 +5213,7 @@ function repairQuestionAnswers(question = {}, roomIndex = 0, questionIndex = 0) 
 }
 
 function repairMissionAnswers(mission = {}, index = 0) {
+  const hintLocale = normalizeGameLocale(state.project?.idioma || elements.idiomaSelect?.value || "es-419");
   const preguntas = Array.isArray(mission.preguntas) && mission.preguntas.length
     ? mission.preguntas.map((question, questionIndex) => repairQuestionAnswers(question, index, questionIndex))
     : [repairQuestionAnswers(createQuestionDraft(index, 0, mission), index, 0)];
@@ -4090,6 +5221,8 @@ function repairMissionAnswers(mission = {}, index = 0) {
   const repaired = {
     ...mission,
     preguntas,
+    contexto: normalizeString(mission.contexto || mission.historia, getGameMessages(hintLocale).defaultBriefingContext),
+    datos_clave: normalizeTextList(mission.datos_clave || []).slice(0, 8),
     retroalimentacion_correcta: normalizeString(mission.retroalimentacion_correcta, "Correcto."),
     retroalimentacion_incorrecta: normalizeString(mission.retroalimentacion_incorrecta, "Respuesta incorrecta. Intenta de nuevo.")
   };
@@ -4098,10 +5231,26 @@ function repairMissionAnswers(mission = {}, index = 0) {
 
   if (["texto", "multimedia"].includes(repaired.tipo_interaccion) && repaired.subtipo_respuesta === "palabra") {
     repaired.respuesta_correcta = extractSingleWordAnswer(repaired.respuesta_correcta || preguntas[0]?.respuesta_correcta);
-    repaired.reto = buildSingleWordChallenge(repaired.reto, repaired.titulo || getMissionLabel(index, repaired), repaired.respuesta_correcta);
+    repaired.reto = buildSingleWordChallenge(repaired.reto, repaired.titulo || getMissionLabel(index, repaired), repaired.respuesta_correcta, hintLocale);
   }
 
-  if (repaired.tipo_interaccion === "opcion_multiple") {
+  if (repaired.tipo_interaccion === "verdadero_falso") {
+    repaired.respuesta_correcta = repaired.respuesta_correcta === true || /^(?:true|verdadero|vrai|verdadeiro|1)$/i.test(String(repaired.respuesta_correcta || ""));
+    repaired.respuestas_aceptadas = [];
+  } else if (repaired.tipo_interaccion === "ordenar_secuencia") {
+    repaired.elementos = normalizeSequenceItems(repaired.elementos || []);
+    while (repaired.elementos.length < 3) repaired.elementos.push(`${repaired.titulo || "Secuencia"} · paso ${repaired.elementos.length + 1}`);
+    repaired.elementos = [...new Set(repaired.elementos)].slice(0, 6);
+    repaired.respuesta_correcta = "";
+    repaired.respuestas_aceptadas = [];
+  } else if (repaired.tipo_interaccion === "completar_espacio") {
+    repaired.texto_con_hueco = normalizeString(repaired.texto_con_hueco, `${repaired.titulo || "Completa"}: ___`);
+    if ((repaired.texto_con_hueco.match(/___/g) || []).length !== 1) repaired.texto_con_hueco = `${repaired.titulo || "Completa"}: ___`;
+    if (!normalizeAcceptedAnswers(repaired.respuestas_aceptadas || repaired.respuesta_correcta || []).length) {
+      repaired.respuesta_correcta = extractSingleWordAnswer(repaired.titulo || repaired.reto, "clave") || "clave";
+      repaired.respuestas_aceptadas = [repaired.respuesta_correcta];
+    }
+  } else if (repaired.tipo_interaccion === "opcion_multiple") {
     const optionIndex = typeof repaired._correctOptionIndex === "number" && repaired._correctOptionIndex >= 0
       ? repaired._correctOptionIndex
       : findCorrectOptionIndex(repaired);
@@ -4111,7 +5260,7 @@ function repairMissionAnswers(mission = {}, index = 0) {
       repaired.respuesta_correcta = correctValue;
       repaired.respuestas_aceptadas = [correctValue];
     }
-  } else if (repaired.tipo_interaccion === "relacion_columnas") {
+  } else if (["relacion_columnas", "drag_drop"].includes(repaired.tipo_interaccion)) {
     repaired.parejas = normalizePairList(repaired.parejas || []);
   } else {
     const acceptedSource = ["texto", "multimedia"].includes(repaired.tipo_interaccion) && repaired.subtipo_respuesta === "palabra"
@@ -4140,8 +5289,24 @@ function repairMissionAnswers(mission = {}, index = 0) {
 function repairGeneratedQuestion(question = {}, roomIndex = 0, questionIndex = 0) {
   const repaired = repairQuestionAnswers(question, roomIndex, questionIndex);
   const label = repaired.titulo || `Pregunta ${questionIndex + 1}`;
+  const contentLocale = normalizeGameLocale(state.project?.idioma || elements.idiomaSelect?.value || "es-419");
 
-  if (repaired.tipo_interaccion === "opcion_multiple") {
+  if (repaired.tipo_interaccion === "verdadero_falso") {
+    repaired.respuesta_correcta = repaired.respuesta_correcta === true || /^(?:true|verdadero|vrai|verdadeiro|1)$/i.test(String(question.respuesta_correcta || ""));
+    repaired.respuestas_aceptadas = [];
+  } else if (repaired.tipo_interaccion === "ordenar_secuencia") {
+    repaired.elementos = normalizeSequenceItems(question.elementos || repaired.elementos || []);
+    while (repaired.elementos.length < 3) repaired.elementos.push(`${label} · paso ${repaired.elementos.length + 1}`);
+    repaired.respuesta_correcta = "";
+    repaired.respuestas_aceptadas = [];
+  } else if (repaired.tipo_interaccion === "completar_espacio") {
+    repaired.texto_con_hueco = normalizeString(question.texto_con_hueco || repaired.texto_con_hueco, `${label}: ___`);
+    if ((repaired.texto_con_hueco.match(/___/g) || []).length !== 1) repaired.texto_con_hueco = `${label}: ___`;
+    if (!normalizeAcceptedAnswers(repaired.respuestas_aceptadas || repaired.respuesta_correcta || []).length) {
+      repaired.respuesta_correcta = extractSingleWordAnswer(repaired.titulo || repaired.reto, "clave") || "clave";
+      repaired.respuestas_aceptadas = [repaired.respuesta_correcta];
+    }
+  } else if (repaired.tipo_interaccion === "opcion_multiple") {
     const options = [...new Set(normalizeTextList(repaired.opciones || []))];
     const fallbackOptions = ["Opción principal", "Otra alternativa", "Tercera alternativa"];
     while (options.length < 2) {
@@ -4162,7 +5327,7 @@ function repairGeneratedQuestion(question = {}, roomIndex = 0, questionIndex = 0
     repaired._correctOptionIndex = correctIndex;
     repaired.respuesta_correcta = repaired.opciones[correctIndex];
     repaired.respuestas_aceptadas = [repaired.respuesta_correcta];
-  } else if (repaired.tipo_interaccion === "relacion_columnas") {
+  } else if (["relacion_columnas", "drag_drop"].includes(repaired.tipo_interaccion)) {
     const pairs = normalizePairList(repaired.parejas || []);
     while (pairs.length < 2) {
       const pairNumber = pairs.length + 1;
@@ -4187,7 +5352,7 @@ function repairGeneratedQuestion(question = {}, roomIndex = 0, questionIndex = 0
     repaired.respuesta_correcta = fallbackAnswer;
     repaired.respuestas_aceptadas = [fallbackAnswer];
     if (repaired.subtipo_respuesta === "palabra") {
-      repaired.reto = buildSingleWordChallenge(repaired.reto, label, fallbackAnswer);
+      repaired.reto = buildSingleWordChallenge(repaired.reto, label, fallbackAnswer, contentLocale);
     }
   }
 
@@ -4239,7 +5404,17 @@ function validateQuestionSetup(question = {}, roomIndex = 0, questionIndex = 0, 
     question.retroalimentacion_incorrecta = "Respuesta incorrecta. Intenta de nuevo.";
   }
 
-  if (question.tipo_interaccion === "opcion_multiple") {
+  if (question.tipo_interaccion === "verdadero_falso") {
+    if (typeof question.respuesta_correcta !== "boolean") issues.push(`${label}: debe definir Verdadero o Falso.`);
+  } else if (question.tipo_interaccion === "ordenar_secuencia") {
+    const elements = normalizeSequenceItems(question.elementos || []);
+    if (elements.length < 3 || elements.length > 6) issues.push(`${label}: necesita entre 3 y 6 elementos únicos.`);
+    question.elementos = elements;
+  } else if (question.tipo_interaccion === "completar_espacio") {
+    const markers = (String(question.texto_con_hueco || "").match(/___/g) || []).length;
+    if (markers !== 1) issues.push(`${label}: el texto debe contener exactamente un marcador ___.`);
+    if (!accepted.length) issues.push(`${label}: no tiene una respuesta correcta válida.`);
+  } else if (question.tipo_interaccion === "opcion_multiple") {
     if (options.length < 2) issues.push(`${label}: necesita al menos 2 opciones.`);
     const optionIndex = findCorrectOptionIndex(question);
     if (optionIndex < 0) {
@@ -4250,8 +5425,9 @@ function validateQuestionSetup(question = {}, roomIndex = 0, questionIndex = 0, 
       question.respuesta_correcta = correctValue;
       question.respuestas_aceptadas = correctValue ? [correctValue] : [];
     }
-  } else if (question.tipo_interaccion === "relacion_columnas") {
+  } else if (["relacion_columnas", "drag_drop"].includes(question.tipo_interaccion)) {
     if (pairs.length < 2) issues.push(`${label}: necesita al menos 2 parejas para ser válida.`);
+    if (pairs.length > 6) issues.push(`${label}: admite como máximo 6 parejas.`);
     question.parejas = pairs;
   } else if (question.subtipo_respuesta === "frase_libre") {
     question.respuesta_correcta = "";
@@ -4309,8 +5485,9 @@ function validateMissionSetup(mission = {}, index = 0, presentationMode = getPre
       mission.respuesta_correcta = correctValue;
       mission.respuestas_aceptadas = correctValue ? [correctValue] : [];
     }
-  } else if (mission.tipo_interaccion === "relacion_columnas") {
+  } else if (["relacion_columnas", "drag_drop"].includes(mission.tipo_interaccion)) {
     if (pairs.length < 2) issues.push(`${label}: necesita al menos 2 parejas para ser válida.`);
+    if (pairs.length > 6) issues.push(`${label}: admite como máximo 6 parejas.`);
     mission.parejas = pairs;
   } else if (mission.subtipo_respuesta === "frase_libre") {
     mission.respuesta_correcta = "";
@@ -4334,9 +5511,14 @@ function validateMissionSetup(mission = {}, index = 0, presentationMode = getPre
 }
 
 function validateProjectSetup(project = null) {
-  const normalized = withDefaultRoutes(project || state.project || {});
+  const sourceProject = project || state.project || {};
+  const normalized = withDefaultRoutes(sourceProject);
   const issues = [];
   const mode = normalizePresentationMode(normalized.modo_presentacion);
+  const rawFinalKey = normalizeEditableFinalKey(sourceProject.clave_final || "");
+  if (sourceProject.clave_final != null && rawFinalKey.length > 0 && rawFinalKey.length < 3) {
+    issues.push("La clave final debe tener entre 3 y 12 caracteres alfanuméricos.");
+  }
 
   normalized.misiones.forEach((mission, index) => {
     issues.push(...validateMissionSetup(mission, index, mode));
@@ -4475,6 +5657,7 @@ function createProjectFromForm(seedCount = 1) {
   const questionCount = Math.max(1, Number(formData.preguntasPorSala || 1));
   const misiones = Array.from({ length: Math.max(1, seedCount) }, (_, index) => createMissionDraft(index, {}, questionCount, presentationMode));
   return withDefaultRoutes({
+    idioma: formData.idioma || "es-419",
     modo_presentacion: presentationMode,
     nivel: formData.nivel,
     grado: formData.grado,
@@ -4502,6 +5685,7 @@ function materializeProjectForExport() {
   const formData = getFormData();
   const project = withDefaultRoutes({
     ...state.project,
+    idioma: formData.idioma || state.project.idioma || "es-419",
     modo_presentacion: normalizePresentationMode(formData.modoPresentacion || state.project.modo_presentacion),
     nivel: formData.nivel,
     grado: formData.grado,
@@ -4651,6 +5835,10 @@ function getMissionTypeBadge(type) {
     texto: "Texto",
     opcion_multiple: "Opción múltiple",
     relacion_columnas: "Relación",
+    drag_drop: "Drag & Drop",
+    verdadero_falso: "Verdadero / Falso",
+    ordenar_secuencia: "Secuencia",
+    completar_espacio: "Completar",
     multimedia: "Multimedia"
   };
   return labels[type] || type;
@@ -4698,9 +5886,26 @@ function getQuestionTypeLabel(question = {}) {
     texto: "Texto",
     opcion_multiple: "Opción múltiple",
     relacion_columnas: "Relación de columnas",
+    drag_drop: "Drag & Drop · Encaja parejas",
+    verdadero_falso: "Verdadero / Falso",
+    ordenar_secuencia: "Ordenar secuencia",
+    completar_espacio: "Completar espacio",
     multimedia: "Multimedia"
   };
   return labels[question.tipo_interaccion] || question.tipo_interaccion || "Pregunta";
+}
+
+function renderFinalKeyEditorCard() {
+  const editableCode = normalizeEditableFinalKey(state.project?.clave_final || "");
+  const code = editableCode || resolveFinalPasscode(state.project || {}).code;
+  return `<section class="er-routing-panel er-final-key-editor">
+    <div class="er-label">Control final del escape room</div>
+    <label class="er-field">
+      <span>Clave final para desactivar el sistema</span>
+      <input type="text" data-editor-final-key minlength="3" maxlength="12" autocomplete="off" spellcheck="false" value="${escapeHtmlAttr(code)}">
+    </label>
+    <p class="er-inline-note">Este campo está sincronizado con Contenido general. El jugador lo verá solo cuando termine todas las actividades.</p>
+  </section>`;
 }
 
 function getQuestionQuestionText(question = {}, questionIndex = 0) {
@@ -4750,6 +5955,9 @@ function renderQuestionCard(missionIndex, questionIndex, question) {
             <button type="button" class="er-icon-button er-studio-icon-button" data-question-action="replace-question-image" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" data-er-tooltip="Sustituir imagen" aria-label="Sustituir imagen de pregunta">
             <i class="fas fa-image"></i>
           </button>
+          <button type="button" class="er-icon-button er-studio-icon-button" data-question-action="regenerate-question-image" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" data-er-tooltip="Regenerar imagen" aria-label="Regenerar únicamente la imagen de la pregunta">
+            <i class="fas fa-wand-magic-sparkles"></i>
+          </button>
           <button type="button" class="er-icon-button er-studio-icon-button" data-question-action="regenerate-question" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" data-er-tooltip="Regenerar pregunta" aria-label="Regenerar pregunta completa">
             <i class="fas fa-rotate-right"></i>
           </button>
@@ -4774,6 +5982,10 @@ function renderQuestionCard(missionIndex, questionIndex, question) {
               <option value="texto" ${question.tipo_interaccion === "texto" ? "selected" : ""}>Texto</option>
               <option value="opcion_multiple" ${question.tipo_interaccion === "opcion_multiple" ? "selected" : ""}>Opción múltiple</option>
               <option value="relacion_columnas" ${question.tipo_interaccion === "relacion_columnas" ? "selected" : ""}>Relación de columnas</option>
+              <option value="drag_drop" ${question.tipo_interaccion === "drag_drop" ? "selected" : ""}>Drag & Drop · Encaja parejas</option>
+              <option value="verdadero_falso" ${question.tipo_interaccion === "verdadero_falso" ? "selected" : ""}>Verdadero / Falso</option>
+              <option value="ordenar_secuencia" ${question.tipo_interaccion === "ordenar_secuencia" ? "selected" : ""}>Ordenar secuencia</option>
+              <option value="completar_espacio" ${question.tipo_interaccion === "completar_espacio" ? "selected" : ""}>Completar espacio</option>
               <option value="multimedia" ${question.tipo_interaccion === "multimedia" ? "selected" : ""}>Multimedia</option>
             </select>
           </label>
@@ -4840,9 +6052,38 @@ function renderQuestionCard(missionIndex, questionIndex, question) {
               </div>
             ` : ""}
 
-            ${question.tipo_interaccion === "relacion_columnas" ? `
+            ${question.tipo_interaccion === "verdadero_falso" ? `
               <div class="er-type-group">
-                <strong>Parejas</strong>
+                <strong>Respuesta correcta</strong>
+                <select data-question-field="respuesta_booleana" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}">
+                  <option value="true" ${question.respuesta_correcta === true ? "selected" : ""}>Verdadero</option>
+                  <option value="false" ${question.respuesta_correcta === false ? "selected" : ""}>Falso</option>
+                </select>
+              </div>
+            ` : ""}
+
+            ${question.tipo_interaccion === "ordenar_secuencia" ? `
+              <div class="er-type-group">
+                <strong>Secuencia correcta</strong>
+                <p class="er-inline-note">Escribe de 3 a 6 elementos, uno por línea, en el orden correcto.</p>
+                <textarea rows="6" data-question-field="elementos" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}">${escapeHtml((question.elementos || []).join("\n"))}</textarea>
+              </div>
+            ` : ""}
+
+            ${question.tipo_interaccion === "completar_espacio" ? `
+              <div class="er-type-group">
+                <strong>Frase con espacio</strong>
+                <p class="er-inline-note">Incluye exactamente un marcador ___.</p>
+                <textarea rows="3" data-question-field="texto_con_hueco" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}">${escapeHtml(question.texto_con_hueco || "")}</textarea>
+                <label class="er-field"><span>Respuesta correcta</span><input type="text" data-question-field="respuesta_correcta" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" value="${escapeHtmlAttr(question.respuesta_correcta || "")}"></label>
+                <label class="er-field"><span>Respuestas aceptadas</span><textarea rows="3" data-question-field="respuestas_aceptadas" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}">${escapeHtml(answerText)}</textarea></label>
+              </div>
+            ` : ""}
+
+            ${["relacion_columnas", "drag_drop"].includes(question.tipo_interaccion) ? `
+              <div class="er-type-group">
+                <strong>${question.tipo_interaccion === "drag_drop" ? "Destinos y fichas" : "Parejas"}</strong>
+                ${question.tipo_interaccion === "drag_drop" ? '<p class="er-inline-note">Izquierda = destino · Derecha = ficha arrastrable.</p>' : ""}
                 <div class="er-inline-list">${pairRows}</div>
                 <button type="button" class="er-button er-studio-icon-button" data-question-action="add-pair" data-question-mission-index="${missionIndex}" data-question-index="${questionIndex}" data-er-tooltip="Añadir pareja" aria-label="Añadir pareja">
                   <i class="fas fa-plus"></i>
@@ -4896,7 +6137,7 @@ function renderQuestionCard(missionIndex, questionIndex, question) {
                 <span class="er-badge">${escapeHtml(question.subtipo_respuesta)}</span>
               </div>
               <p class="er-inline-note">${escapeHtml(question.reto)}</p>
-              <div class="er-inline-note"><strong>Respuesta:</strong> ${question.subtipo_respuesta === "frase_libre" ? "Cualquier texto no vacío" : escapeHtml(question.respuesta_correcta || "Sin definir")}</div>
+              <div class="er-inline-note"><strong>Respuesta:</strong> ${["relacion_columnas", "drag_drop"].includes(question.tipo_interaccion) ? `${question.parejas.length} parejas configuradas` : (question.tipo_interaccion === "ordenar_secuencia" ? `${question.elementos?.length || 0} pasos configurados` : (question.tipo_interaccion === "verdadero_falso" ? (question.respuesta_correcta ? "Verdadero" : "Falso") : (question.subtipo_respuesta === "frase_libre" ? "Cualquier texto no vacío" : escapeHtml(question.respuesta_correcta || "Sin definir"))))}</div>
             </div>
           </div>
         </section>
@@ -4923,11 +6164,6 @@ function syncMissionWorkspaceHeading(terms = getPresentationTerminology()) {
     elements.studioTitle.textContent = question
       ? getQuestionQuestionText(question, questionIndex)
       : (mission?.titulo || (terms.mode === PRESENTATION_MODE_MENU ? "Editor de actividad y preguntas" : "Editor de sala, rutas y preguntas"));
-  }
-  if (elements.studioHelp) {
-    elements.studioHelp.textContent = question
-      ? `Editando solo esta pregunta de ${mission?.titulo || terms.itemSingular}.`
-      : `Vista completa de la ${terms.itemSingular}: contenido, rutas y todas sus preguntas.`;
   }
 }
 
@@ -5007,6 +6243,16 @@ function selectQuestionById(missionId, questionId, { focusEditor = true } = {}) 
     closeStudioPanel("inspector", { restoreFocus: false });
   }
   if (focusEditor) window.requestAnimationFrame(() => elements.studioTitle?.focus?.());
+}
+
+function closeMissionWorkspace() {
+  const selectedMissionId = state.selectedMissionId;
+  state.selectedMissionId = null;
+  state.selectedQuestionId = null;
+  renderMissionEditor();
+  const returnTarget = Array.from(elements.missionNavigatorList?.querySelectorAll("[data-mission-select]") || [])
+    .find((button) => button.dataset.missionSelect === selectedMissionId);
+  window.requestAnimationFrame(() => returnTarget?.focus?.());
 }
 
 function toggleMissionQuestions(missionId) {
@@ -5184,12 +6430,25 @@ function renderMissionEditor() {
                 <option value="texto" ${mission.tipo_interaccion === "texto" ? "selected" : ""}>Texto</option>
                 <option value="opcion_multiple" ${mission.tipo_interaccion === "opcion_multiple" ? "selected" : ""}>Opción múltiple</option>
                 <option value="relacion_columnas" ${mission.tipo_interaccion === "relacion_columnas" ? "selected" : ""}>Relación de columnas</option>
+                <option value="drag_drop" ${mission.tipo_interaccion === "drag_drop" ? "selected" : ""}>Drag & Drop · Encaja parejas</option>
+                <option value="verdadero_falso" ${mission.tipo_interaccion === "verdadero_falso" ? "selected" : ""}>Verdadero / Falso</option>
+                <option value="ordenar_secuencia" ${mission.tipo_interaccion === "ordenar_secuencia" ? "selected" : ""}>Ordenar secuencia</option>
+                <option value="completar_espacio" ${mission.tipo_interaccion === "completar_espacio" ? "selected" : ""}>Completar espacio</option>
                 <option value="multimedia" ${mission.tipo_interaccion === "multimedia" ? "selected" : ""}>Multimedia</option>
               </select>
             </label>
             <label class="er-field er-field-wide">
               <span>Historia</span>
               <textarea rows="3" data-field="historia" data-index="${index}">${escapeHtml(mission.historia)}</textarea>
+            </label>
+            <label class="er-field er-field-wide">
+              <span>Expediente de contexto</span>
+              <textarea rows="7" data-field="contexto" data-index="${index}" placeholder="Lectura con toda la información necesaria para resolver las preguntas.">${escapeHtml(mission.contexto)}</textarea>
+              <small>Las preguntas deben poder resolverse únicamente con esta lectura.</small>
+            </label>
+            <label class="er-field er-field-wide">
+              <span>Evidencias clave · una por línea</span>
+              <textarea rows="4" data-field="datos_clave" data-index="${index}" placeholder="Dato o relación importante">${escapeHtml((mission.datos_clave || []).join("\n"))}</textarea>
             </label>
             <div class="er-field-row er-field-wide er-field-row--2">
               <label class="er-field">
@@ -5240,6 +6499,7 @@ function renderMissionEditor() {
                 : `<div class="er-empty-inline">Esta ${terms.itemSingular} no tiene preguntas configuradas todavía.</div>`}
             </div>
           </section>
+          ${renderFinalKeyEditorCard()}
         </div>
       </details>
     `;
@@ -5325,6 +6585,25 @@ function updateMissionField(index, fieldPath, value) {
     return;
   }
 
+  if (fieldPath === "respuesta_booleana") {
+    mission.respuesta_correcta = String(value) === "true";
+    mission.respuestas_aceptadas = [];
+    scheduleOutputRefresh();
+    return;
+  }
+
+  if (fieldPath === "elementos") {
+    mission.elementos = normalizeSequenceItems(String(value || "").split(/\r?\n+/));
+    scheduleOutputRefresh();
+    return;
+  }
+
+  if (fieldPath === "datos_clave") {
+    mission.datos_clave = normalizeTextList(String(value || "").split(/\r?\n+/)).slice(0, 8);
+    scheduleOutputRefresh();
+    return;
+  }
+
   if (fieldPath === "bloqueada_inicial") {
     mission.bloqueada_inicial = Boolean(value);
     scheduleOutputRefresh();
@@ -5349,7 +6628,7 @@ function updateMissionField(index, fieldPath, value) {
     if (value === "opcion_multiple" && mission.opciones.length < 3) {
       mission.opciones = ["Opción A", "Opción B", "Opción C"];
     }
-    if (value === "relacion_columnas" && mission.parejas.length < 3) {
+    if (["relacion_columnas", "drag_drop"].includes(value) && mission.parejas.length < 3) {
       mission.parejas = normalizePairList([
         { izquierda: "Elemento 1", derecha: "Respuesta 1" },
         { izquierda: "Elemento 2", derecha: "Respuesta 2" },
@@ -5363,6 +6642,18 @@ function updateMissionField(index, fieldPath, value) {
         mission.respuestas_aceptadas = [];
       }
     }
+    if (value === "verdadero_falso") {
+      question.respuesta_correcta = true;
+      question.respuestas_aceptadas = [];
+    }
+    if (value === "ordenar_secuencia" && (!Array.isArray(question.elementos) || question.elementos.length < 3)) {
+      question.elementos = ["Primer paso", "Segundo paso", "Tercer paso"];
+    }
+    if (value === "completar_espacio") {
+      question.texto_con_hueco = normalizeString(question.texto_con_hueco, "Completa la clave: ___");
+      question.respuesta_correcta = normalizeString(question.respuesta_correcta, "clave");
+      question.respuestas_aceptadas = [question.respuesta_correcta];
+    }
     renderMissionEditor();
     scheduleOutputRefresh();
     return;
@@ -5375,6 +6666,7 @@ function updateMissionField(index, fieldPath, value) {
 function updateQuestionField(missionIndex, questionIndex, fieldPath, value) {
   const question = getQuestionAt(missionIndex, questionIndex);
   if (!question) return;
+  const contentLocale = normalizeGameLocale(state.project?.idioma || elements.idiomaSelect?.value || "es-419");
 
   if (fieldPath === "respuestas_aceptadas") {
     const rawAcceptedAnswers = normalizeTextList(String(value || "").split(/\r?\n+/));
@@ -5402,7 +6694,7 @@ function updateQuestionField(missionIndex, questionIndex, fieldPath, value) {
     question.subtipo_respuesta = resolveTextSubtypeForAnswer(question.subtipo_respuesta, nextCorrect);
     if (["texto", "multimedia"].includes(question.tipo_interaccion) && question.subtipo_respuesta === "frase_corta") question.subtipo_respuesta = "palabra";
     if (["texto", "multimedia"].includes(question.tipo_interaccion) && question.subtipo_respuesta === "palabra") {
-      question.reto = buildSingleWordChallenge(question.reto, question.titulo, nextCorrect);
+      question.reto = buildSingleWordChallenge(question.reto, question.titulo, nextCorrect, contentLocale);
     }
     scheduleOutputRefresh();
     return;
@@ -5426,7 +6718,7 @@ function updateQuestionField(missionIndex, questionIndex, fieldPath, value) {
     if (value === "opcion_multiple" && (!Array.isArray(question.opciones) || question.opciones.length < 3)) {
       question.opciones = ["Opción A", "Opción B", "Opción C"];
     }
-    if (value === "relacion_columnas" && (!Array.isArray(question.parejas) || question.parejas.length < 3)) {
+    if (["relacion_columnas", "drag_drop"].includes(value) && (!Array.isArray(question.parejas) || question.parejas.length < 3)) {
       question.parejas = normalizePairList([
         { izquierda: "Elemento 1", derecha: "Respuesta 1" },
         { izquierda: "Elemento 2", derecha: "Respuesta 2" },
@@ -5448,7 +6740,7 @@ function updateQuestionField(missionIndex, questionIndex, fieldPath, value) {
         question.respuestas_aceptadas = [question.respuesta_correcta, ...(question.respuestas_aceptadas || [])]
           .map((answer) => extractSingleWordAnswer(answer, question.respuesta_correcta))
           .filter(Boolean);
-        question.reto = buildSingleWordChallenge(question.reto, question.titulo, question.respuesta_correcta);
+        question.reto = buildSingleWordChallenge(question.reto, question.titulo, question.respuesta_correcta, contentLocale);
       }
     }
     renderMissionEditor();
@@ -5468,7 +6760,7 @@ function updateQuestionField(missionIndex, questionIndex, fieldPath, value) {
       question.respuestas_aceptadas = [question.respuesta_correcta, ...(question.respuestas_aceptadas || [])]
         .map((answer) => extractSingleWordAnswer(answer, question.respuesta_correcta))
         .filter(Boolean);
-      question.reto = buildSingleWordChallenge(question.reto, question.titulo, question.respuesta_correcta);
+      question.reto = buildSingleWordChallenge(question.reto, question.titulo, question.respuesta_correcta, contentLocale);
     }
     renderMissionEditor();
     scheduleOutputRefresh();
@@ -5543,7 +6835,7 @@ function updatePairValue(index, pairIndex, side, value) {
 
 function addPair(index) {
   const mission = state.project?.misiones[index];
-  if (!mission) return;
+  if (!mission || mission.parejas.length >= 6) return;
   mission.parejas.push({ izquierda: `Elemento ${mission.parejas.length + 1}`, derecha: `Respuesta ${mission.parejas.length + 1}` });
   renderMissionEditor();
   scheduleOutputRefresh();
@@ -5636,6 +6928,7 @@ function addQuestionPair(missionIndex, questionIndex) {
   const question = getQuestionAt(missionIndex, questionIndex);
   if (!question) return;
   if (!Array.isArray(question.parejas)) question.parejas = [];
+  if (question.parejas.length >= 6) return;
   question.parejas.push({ izquierda: `Elemento ${question.parejas.length + 1}`, derecha: `Respuesta ${question.parejas.length + 1}` });
   renderMissionEditor();
   scheduleOutputRefresh();
@@ -5652,6 +6945,16 @@ function removeQuestionPair(missionIndex, questionIndex, pairIndex) {
 function wireMissionEditorEvents() {
   elements.missionEditorList.addEventListener("input", (event) => {
     const target = event.target;
+    if (target.matches('[data-editor-final-key]')) {
+      const code = normalizeEditableFinalKey(target.value);
+      target.value = code;
+      state.project.clave_final = code;
+      elements.generalContentInputs.forEach((field) => {
+        if (field.dataset.projectField === "clave_final" && field.value !== code) field.value = code;
+      });
+      scheduleOutputRefresh();
+      return;
+    }
     const questionField = target.dataset.questionField;
     if (questionField) {
       const missionIndex = Number(target.dataset.questionMissionIndex);
@@ -5743,6 +7046,9 @@ function wireMissionEditorEvents() {
         fileInput.value = "";
         fileInput.click();
       }
+      if (questionAction === "regenerate-question-image") {
+        void regenerateQuestionImageOnly(missionIndex, questionIndex);
+      }
       if (questionAction === "regenerate-question") {
         void regenerateQuestionContent(missionIndex, questionIndex);
       }
@@ -5787,6 +7093,45 @@ function wireMissionEditorEvents() {
 }
 
 function wireSessionEvents() {
+  elements.sessionTrimesterFilters?.forEach((select) => {
+    select?.addEventListener("change", (event) => {
+      setSessionFilters({ sessionTrimesterFilter: event.currentTarget.value, sessionSubjectFilter: state.sessionSubjectFilter, sessionThemeFilter: state.sessionThemeFilter, sessionLevelFilter: state.sessionLevelFilter, sessionGradoFilter: state.sessionGradoFilter });
+      closeSessionMenu();
+    });
+  });
+
+  elements.sessionSubjectFilters?.forEach((select) => {
+    select?.addEventListener("change", (event) => {
+      setSessionFilters({ sessionTrimesterFilter: state.sessionTrimesterFilter, sessionThemeFilter: state.sessionThemeFilter, sessionLevelFilter: state.sessionLevelFilter, sessionGradoFilter: state.sessionGradoFilter, sessionSubjectFilter: String(event.currentTarget.value || "").trim() });
+      closeSessionMenu();
+    });
+  });
+
+  elements.sessionThemeFilters?.forEach((select) => {
+    select?.addEventListener("change", (event) => {
+      setSessionFilters({ sessionTrimesterFilter: state.sessionTrimesterFilter, sessionSubjectFilter: state.sessionSubjectFilter, sessionLevelFilter: state.sessionLevelFilter, sessionGradoFilter: state.sessionGradoFilter, sessionThemeFilter: String(event.currentTarget.value || "").trim() });
+      closeSessionMenu();
+    });
+  });
+
+  elements.sessionLevelFilters?.forEach((select) => {
+    select?.addEventListener("change", (event) => {
+      setSessionFilters({ sessionTrimesterFilter: state.sessionTrimesterFilter, sessionSubjectFilter: state.sessionSubjectFilter, sessionThemeFilter: state.sessionThemeFilter, sessionGradoFilter: state.sessionGradoFilter, sessionLevelFilter: String(event.currentTarget.value || "").trim() });
+      closeSessionMenu();
+    });
+  });
+
+  elements.sessionGradeFilters?.forEach((select) => {
+    select?.addEventListener("change", (event) => {
+      setSessionFilters({ sessionTrimesterFilter: state.sessionTrimesterFilter, sessionSubjectFilter: state.sessionSubjectFilter, sessionThemeFilter: state.sessionThemeFilter, sessionLevelFilter: state.sessionLevelFilter, sessionGradoFilter: String(event.currentTarget.value || "").trim() });
+      closeSessionMenu();
+    });
+  });
+
+  elements.btnResetSessionFilters?.addEventListener("click", () => {
+    resetSessionFilters();
+  });
+
   elements.btnNewSession?.addEventListener("click", () => {
     setImportZipStatus("");
     if (elements.importZipInput) elements.importZipInput.value = "";
@@ -5798,31 +7143,14 @@ function wireSessionEvents() {
     void createBlankSession();
   });
 
-  async function createBlankSession() {
-    try {
-      setRemoteSaveState("saving");
-
-      await createRemoteSession({
-        title: SESSION_TITLE_DEFAULT,
-        project: null,
-        formState: null,
-        activate: true
-      });
-      setStatus("Nueva sesión vacía creada.", "success");
-      setRemoteSaveState("saved");
-    } catch (error) {
-      console.error("No se pudo crear la sesión:", error);
-      setRemoteSaveState("error", "Error al crear");
-      setStatus("No fue posible crear la sesión.", "bad");
-    }
-  }
-
   elements.btnCreateBlankSession?.addEventListener("click", async () => {
     const button = elements.btnCreateBlankSession;
     if (button) button.disabled = true;
     try {
       await createBlankSession();
       getNewSessionModal()?.hide();
+    } catch (_) {
+      // createBlankSession ya comunica el error en la interfaz.
     } finally {
       if (button) button.disabled = false;
     }
@@ -5831,6 +7159,25 @@ function wireSessionEvents() {
   elements.btnImportZipSession?.addEventListener("click", () => {
     setImportZipStatus("Selecciona un ZIP exportado por PigPen.");
     elements.importZipInput?.click();
+  });
+
+  elements.btnCreateSheetsSession?.addEventListener("click", () => {
+    createSessionFromSheetsPending = true;
+    const openSheetsImporter = () => window.PigPenSheetsImport?.open?.();
+    if (elements.newSessionModal?.classList.contains("show")) {
+      elements.newSessionModal.addEventListener("hidden.bs.modal", openSheetsImporter, { once: true });
+      getNewSessionModal()?.hide();
+      return;
+    }
+    openSheetsImporter();
+  });
+
+  elements.sheetsImportModal?.addEventListener("hidden.bs.modal", () => {
+    createSessionFromSheetsPending = false;
+  });
+
+  elements.sessionFiltersModal?.addEventListener("show.bs.modal", () => {
+    syncSessionFiltersModalTheme();
   });
 
   elements.importZipInput?.addEventListener("change", async (event) => {
@@ -5961,6 +7308,17 @@ function isRemoteUrl(value) {
   return /^(https?:)?\/\//i.test(value);
 }
 
+function isFirebaseStorageDownloadUrl(value = "") {
+  try {
+    const parsed = new URL(String(value || "").trim(), window.location.origin);
+    const host = String(parsed.hostname || "").toLowerCase();
+    return host === "firebasestorage.googleapis.com"
+      && /^\/v0\/b\/[^/]+\/o\//i.test(parsed.pathname);
+  } catch (_) {
+    return false;
+  }
+}
+
 function resolveRemoteAssetDownloadUrl(rawUrl = "") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
@@ -5987,14 +7345,28 @@ async function fetchBinaryAsset(url) {
     // Los assets locales del Creator (por ejemplo logo.png) deben descargarse
     // directamente. Enviarlos al proxy remoto los convierte erróneamente en un
     // recurso externo cuando hay una API configurada.
-    const finalUrl = isRemoteUrl(rawUrl)
+    const isRemote = isRemoteUrl(rawUrl);
+    const resolvedUrl = isRemote
       ? resolveRemoteAssetDownloadUrl(rawUrl)
       : new URL(rawUrl, window.location.href).toString();
-    const response = await fetch(finalUrl, { mode: "cors" });
-    if (!response.ok) return null;
-    const buffer = await response.arrayBuffer();
-    const contentType = response.headers.get("content-type") || "application/octet-stream";
-    return new Blob([buffer], { type: contentType });
+    // Las download URLs tokenizadas de Firebase ya permiten CORS para el origen
+    // de la app. El assetApi de Hosting acepta storagePath de Podcaster, no
+    // `url=` de Escape Rooms, y responde 400 si se fuerza esta ruta por el proxy.
+    const candidates = isRemote && isFirebaseStorageDownloadUrl(rawUrl)
+      ? [rawUrl, resolvedUrl]
+      : [resolvedUrl];
+    for (const candidateUrl of [...new Set(candidates.filter(Boolean))]) {
+      try {
+        const response = await fetch(candidateUrl, { mode: "cors" });
+        if (!response.ok) continue;
+        const buffer = await response.arrayBuffer();
+        const contentType = response.headers.get("content-type") || "application/octet-stream";
+        return new Blob([buffer], { type: contentType });
+      } catch (_) {
+        // Intenta el siguiente candidato; el caller reporta el fallo definitivo.
+      }
+    }
+    return null;
   } catch (e) {
     console.warn(`No se pudo descargar el recurso remoto para empaquetarlo: ${url}`, e);
     return null;
@@ -6038,22 +7410,25 @@ function isExportableAssetSource(value = "") {
 }
 
 function countExportableImages(project = {}) {
-  let total = isExportableAssetSource(project.backgroundImage) ? 1 : 0;
+  const sources = new Set();
+  const addImage = (value) => {
+    const source = String(value || "").trim();
+    if (isExportableAssetSource(source)) sources.add(source);
+  };
+  addImage(project.backgroundImage);
   for (const mission of Array.isArray(project.misiones) ? project.misiones : []) {
     const missionImage = String(mission?.imagen || "").trim();
-    if (isExportableAssetSource(missionImage)) total += 1;
+    addImage(missionImage);
     if (mission?.media?.tipo === "imagen"
-      && isExportableAssetSource(mission.media.url)
-      && String(mission.media.url).trim() !== missionImage) total += 1;
+      && String(mission.media.url).trim() !== missionImage) addImage(mission.media.url);
     for (const question of Array.isArray(mission?.preguntas) ? mission.preguntas : []) {
       const questionImage = String(question?.imagen || "").trim();
-      if (isExportableAssetSource(questionImage)) total += 1;
+      addImage(questionImage);
       if (question?.media?.tipo === "imagen"
-        && isExportableAssetSource(question.media.url)
-        && String(question.media.url).trim() !== questionImage) total += 1;
+        && String(question.media.url).trim() !== questionImage) addImage(question.media.url);
     }
   }
-  return total;
+  return sources.size;
 }
 
 async function downloadRemoteAssets(project, remoteFiles, mediaFolder, { onImageProgress } = {}) {
@@ -6064,20 +7439,27 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder, { onImage
     imagesOptimized: 0,
     imagesUnchanged: 0,
     originalBytes: 0,
-    finalBytes: 0
+    finalBytes: 0,
+    failedSources: []
   };
   const totalImages = countExportableImages(project);
   let currentImage = 0;
+  const packagedAssets = new Map();
 
   async function packageAsset(source, basePath, { image = false, fallbackExtension = "bin" } = {}) {
     if (!isExportableAssetSource(source)) return "";
+    const normalizedSource = String(source || "").trim();
+    const cacheKey = `${image ? "image" : "media"}:${normalizedSource}`;
+    if (packagedAssets.has(cacheKey)) return packagedAssets.get(cacheKey);
     if (image) {
       currentImage += 1;
       onImageProgress?.(currentImage, totalImages);
     }
-    const blob = await fetchBinaryAsset(source);
+    const blob = await fetchBinaryAsset(normalizedSource);
     if (!blob) {
       stats.failed += 1;
+      stats.failedSources.push(normalizedSource);
+      packagedAssets.set(cacheKey, "");
       return "";
     }
 
@@ -6090,12 +7472,17 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder, { onImage
       bytes = result.bytes;
       mimeType = result.mimeType;
       extension = result.extension || fallbackExtension;
+      if (result.status === "failed") {
+        stats.failed += 1;
+        stats.failedSources.push(normalizedSource);
+        packagedAssets.set(cacheKey, "");
+        return "";
+      }
       stats.originalBytes += result.originalBytes;
       stats.finalBytes += result.optimizedBytes;
-      if (result.status === "optimized") stats.imagesOptimized += 1;
+      if (result.status === "optimized" || result.status === "sanitized") stats.imagesOptimized += 1;
       else {
         stats.imagesUnchanged += 1;
-        if (result.status === "failed") stats.failed += 1;
       }
     } else {
       bytes = new Uint8Array(await blob.arrayBuffer());
@@ -6106,6 +7493,7 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder, { onImage
     const fileName = `${basePath}.${extension}`;
     remoteFiles[fileName] = bytes;
     stats.downloaded += 1;
+    packagedAssets.set(cacheKey, fileName);
     return fileName;
   }
 
@@ -6220,6 +7608,15 @@ function buildImageOptimizationSummary(stats = {}) {
   return `${stats.imagesOptimized || 0} imágenes optimizadas · ${formatCompactBytes(originalBytes)} → ${formatCompactBytes(finalBytes)} · ${savedPercent}% menos · ${stats.imagesUnchanged || 0} sin cambios`;
 }
 
+function assertExportPackageHasNoEmbeddedImages(files = {}) {
+  const residualPaths = Object.entries(files)
+    .filter(([, content]) => typeof content === "string" && /(?:data:image\/|blob:)/i.test(content))
+    .map(([path]) => path);
+  if (residualPaths.length) {
+    throw new Error(`Quedaron imágenes embebidas sin empaquetar en: ${residualPaths.join(", ")}`);
+  }
+}
+
 function updateZipExportProgress(message = "Preparando los archivos del tema…") {
   if (elements.zipExportStatus) elements.zipExportStatus.textContent = message;
 }
@@ -6298,6 +7695,7 @@ async function buildAndDownloadExportPackage() {
 
   updateZipExportProgress("Organizando los archivos del juego…");
   const pkg = buildEscapeRoomPackage(projectClone);
+  assertExportPackageHasNoEmbeddedImages(pkg.files);
   const zip = new JSZipCtor();
 
   Object.entries(pkg.files).forEach(([path, content]) => {
@@ -6360,13 +7758,28 @@ async function exportPackage() {
 
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (state.isGenerating) {
+    setStatus("Ya hay una generación en curso. Espera a que termine antes de iniciar otra.", "info");
+    return;
+  }
   setStatus("", "info");
 
   const formData = getFormData();
+  const interactionSeed = globalThis.crypto?.getRandomValues
+    ? Array.from(globalThis.crypto.getRandomValues(new Uint32Array(2))).join("-")
+    : `${Date.now()}-${Math.random()}`;
+  formData.interactionPlanSeed = interactionSeed;
+  formData.interactionPlan = buildInteractionPlan(formData.misiones, formData.preguntasPorSala, interactionSeed);
   const terms = getPresentationTerminology(formData.modoPresentacion);
   if (!formData.tema) {
     setStatus("Escribe un tema curricular antes de generar el escape room.", "warning");
     document.getElementById("temaInput")?.focus();
+    return;
+  }
+
+  if (formData.estiloImagenBase === "otro" && !formData.estiloImagenPersonalizado) {
+    setStatus("Describe el tipo de ilustración personalizado antes de generar el escape room.", "warning");
+    elements.estiloImagenCustomInput?.focus();
     return;
   }
 
@@ -6385,14 +7798,21 @@ elements.form.addEventListener("submit", async (event) => {
   elements.btnGenerar.classList.add("is-generating");
   elements.btnGenerar.setAttribute("aria-busy", "true");
   elements.btnGenerar.dataset.erTooltip = "Generando escape room";
+  elements.btnGenerarBottom?.classList.add("is-generating");
+  elements.btnGenerarBottom?.setAttribute("aria-busy", "true");
   setLoading(true);
   state.isGenerating = true;
   state.generationNote = "";
+  updatePreviewGenerationProgress({
+    title: "Creando contenido del escape room",
+    detail: `Generando narrativa, ${formData.misiones} ${terms.itemPlural} y sus preguntas`,
+    reset: true
+  });
   renderGeneralContentEditor();
   refreshPanels();
 
   try {
-    const generated = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+    const generationRequest = {
       method: "POST",
       body: {
         model: formData.modelo || TEXT_MODEL_DEFAULT,
@@ -6418,7 +7838,17 @@ elements.form.addEventListener("submit", async (event) => {
           }
         }
       }
-    });
+    };
+    let generated;
+    try {
+      generated = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), generationRequest);
+    } catch (firstError) {
+      const isUpstreamTimeout = String(firstError?.message || firstError?.code || firstError?.detail?.error || "") === "gemini_upstream_timeout";
+      if (!isUpstreamTimeout) throw firstError;
+      setStatus("Gemini tardó más de lo esperado. Reintentando la generación una vez…", "warning");
+      await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+      generated = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), generationRequest);
+    }
 
     const rawText = (generated?.candidates?.[0]?.content?.parts || [])
       .map((part) => typeof part?.text === "string" ? part.text : "")
@@ -6435,7 +7865,10 @@ elements.form.addEventListener("submit", async (event) => {
       setStatus("La IA devolvió JSON incompleto. Reparando la estructura automáticamente...", "warning");
       generatedProject = await repairGeneratedEscapeRoomJson(rawText, formData);
     }
-    const parsed = prepareGeneratedProjectForPresentation(generatedProject, formData.modoPresentacion);
+    const parsed = prepareGeneratedProjectForPresentation({
+      ...generatedProject,
+      idioma: formData.idioma || "es-419"
+    }, formData.modoPresentacion);
 
     // Limpiar URLs de imágenes ficticias / marcadores de posición generados por la IA
     if (parsed && typeof parsed === "object") {
@@ -6459,9 +7892,11 @@ elements.form.addEventListener("submit", async (event) => {
       }
     }
 
+    const interactionPlanIssues = alignGeneratedQuestionsToInteractionPlan(parsed, formData.interactionPlan);
     const initialValidation = validateProjectSetup(parsed);
     const alignment = repairGeneratedProject(initialValidation.project, formData);
     const alignedValidation = validateProjectSetup(alignment.project);
+    alignedValidation.issues.push(...interactionPlanIssues);
     if (alignedValidation.issues.length) {
       console.error("[PigPenCreator] La respuesta siguió inválida después de repararla:", {
         issues: alignedValidation.issues,
@@ -6480,6 +7915,7 @@ elements.form.addEventListener("submit", async (event) => {
     const academicTheme = buildAcademicPreviewTheme(formData);
     const project = applyAcademicMissionPalettes({
       ...alignedValidation.project,
+      idioma: formData.idioma || "es-419",
       modo_presentacion: terms.mode,
       nivel: formData.nivel,
       grado: formData.grado,
@@ -6557,7 +7993,13 @@ elements.form.addEventListener("submit", async (event) => {
     })();
   } catch (error) {
     console.error(error);
-    setStatus(`No se pudo generar el escape room: ${error.message}`, "bad");
+    const isUpstreamTimeout = String(error?.message || error?.code || error?.detail?.error || "") === "gemini_upstream_timeout";
+    setStatus(
+      isUpstreamTimeout
+        ? "Gemini no terminó la generación dentro del tiempo disponible después de dos intentos. Reduce temporalmente el número de salas o preguntas y vuelve a intentar."
+        : `No se pudo generar el escape room: ${error.message}`,
+      "bad"
+    );
     state.isGenerating = false;
     renderMissionEditor();
     refreshPanels();
@@ -6565,11 +8007,17 @@ elements.form.addEventListener("submit", async (event) => {
     elements.btnGenerar.classList.remove("is-generating");
     elements.btnGenerar.removeAttribute("aria-busy");
     elements.btnGenerar.dataset.erTooltip = "Generar escape room";
+    elements.btnGenerarBottom?.classList.remove("is-generating");
+    elements.btnGenerarBottom?.removeAttribute("aria-busy");
     setLoading(false);
   }
 });
 
 elements.btnAddMission.addEventListener("click", addMission);
+elements.btnRegenerateSelectedMission?.addEventListener("click", () => {
+  const missionIndex = state.project?.misiones?.findIndex((mission) => mission.id === state.selectedMissionId) ?? -1;
+  if (missionIndex >= 0) void regenerateMissionContent(missionIndex);
+});
 elements.btnAddTopic?.addEventListener("click", openNewTopicDialog);
 elements.newTopicForm?.addEventListener("submit", createNewTopicFromDialog);
 elements.topicList?.addEventListener("click", (event) => {
@@ -6582,6 +8030,24 @@ elements.topicList?.addEventListener("click", (event) => {
   if (button) void selectTopic(button.dataset.topicId);
 });
 elements.btnExportar.addEventListener("click", exportPackage);
+elements.btnShareEscapeRoom?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  void toggleShareMenu();
+});
+elements.shareMenu?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const button = event.target.closest("[data-er-share-action]");
+  if (button && !button.disabled) void handleShareMenuAction(button.dataset.erShareAction);
+});
+document.addEventListener("click", (event) => {
+  if (state.shareMenuOpen && !event.target.closest(".er-share-menu-wrap")) closeShareMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.shareMenuOpen) {
+    event.preventDefault();
+    closeShareMenu({ restoreFocus: true });
+  }
+});
 elements.btnCopyAllAnswers?.addEventListener("click", copyAllTopicAnswers);
 elements.btnRepairEscapeRoom?.addEventListener("click", repairEscapeRoomRuntime);
 elements.btnPreviewAutofill?.addEventListener("click", triggerPreviewEditorialAutofill);
@@ -6668,7 +8134,7 @@ function buildObjectiveFinalPrompt({ tema, narrativa, numMisiones, preguntasPorS
 async function generateObjectiveText(prompt, temperature = 0.85, language = "es-419") {
   const model = elements.modeloSelect?.value || TEXT_MODEL_DEFAULT;
   const languageMode = resolvePromptLanguageDirective(language);
-  const response = await authFetchJson(buildVeoApiUrl("/api/gemini/generate"), {
+  const response = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
     method: "POST",
     body: {
       model,
@@ -6702,8 +8168,8 @@ function getObjectiveSuggestionContext() {
     tema,
     modoPresentacion: normalizePresentationMode(elements.modoPresentacionSelect?.value || PRESENTATION_MODE_ROOMS),
     numMisiones: document.getElementById("numMisionesInput")?.value || 4,
-    preguntasPorSala: document.getElementById("preguntasPorSalaInput")?.value || 1,
-    duracion: document.getElementById("duracionInput")?.value || 35,
+    preguntasPorSala: document.getElementById("preguntasPorSalaInput")?.value || 4,
+    duracion: document.getElementById("duracionInput")?.value || 20,
     narrativa: elements.narrativaSelect?.value || ""
   };
 }
@@ -6789,13 +8255,14 @@ elements.btnLimpiar.addEventListener("click", () => {
     clearFormState();
     clearProjectState();
     elements.form.reset();
-    document.getElementById("duracionInput").value = 35;
+    document.getElementById("duracionInput").value = 20;
     document.getElementById("numMisionesInput").value = 4;
-    document.getElementById("preguntasPorSalaInput").value = 1;
+    document.getElementById("preguntasPorSalaInput").value = 4;
     document.getElementById("ritmoSelect").value = "progresivo";
     document.getElementById("dificultadSelect").value = "equilibrada";
     document.getElementById("pistasSelect").value = "moderadas";
     elements.modeloSelect.value = TEXT_MODEL_DEFAULT;
+    if (elements.imagenModeloSelect) elements.imagenModeloSelect.value = IMAGE_MODEL_DEFAULT;
     state.project = null;
     state.selectedMissionId = null;
     state.selectedQuestionId = null;
@@ -6811,6 +8278,7 @@ elements.btnLimpiar.addEventListener("click", () => {
     state.formPersistenceSuspended = false;
     syncAcademicFields();
     syncNarrativaCustomField();
+    syncImageStyleCustomField();
   }
 });
 
@@ -6834,16 +8302,63 @@ if (elements.form) {
 }
 
 elements.modeloSelect?.addEventListener("change", saveFormState);
+elements.imagenModeloSelect?.addEventListener("change", saveFormState);
+elements.modelConfigModal?.addEventListener("show.bs.modal", () => {
+  void loadGeminiModelCatalog();
+});
+
+function normalizeSheetImportToken(value = "") { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, " ").trim().toLowerCase(); }
+function selectSheetImportOption(select, value, customInput = null) {
+  const raw = String(value || "").trim(); if (!select || !raw) return false; const token = normalizeSheetImportToken(raw);
+  const option = Array.from(select.options).find((item) => { const label = normalizeSheetImportToken(item.textContent || ""), optionValue = normalizeSheetImportToken(item.value || ""); return label === token || optionValue === token || label.includes(token) || token.includes(label); });
+  if (option) { select.value = option.value; return true; }
+  if (Array.from(select.options).some((item) => item.value === "otro") && customInput) { select.value = "otro"; customInput.value = raw; return true; }
+  return false;
+}
+function normalizeSheetLevel(value = "") { const token = normalizeSheetImportToken(value); return /primary|primaria/.test(token) ? "Primaria" : /junior high|secondary|secundaria/.test(token) ? "Secundaria" : String(value || "").trim(); }
+function normalizeSheetGrade(value = "") { const token = normalizeSheetImportToken(value), words = { first:1,primero:1,second:2,segundo:2,third:3,tercero:3,fourth:4,cuarto:4,fifth:5,quinto:5,sixth:6,sexto:6 }, number = Number(token.match(/\d+/)?.[0] || words[token] || 0); return ["","Primero","Segundo","Tercero","Cuarto","Quinto","Sexto"][number] || String(value || "").trim(); }
+function normalizeSheetSubject(value = "") { const token = normalizeSheetImportToken(value); return token === "english" ? "Inglés" : token === "spanish" ? "Español" : String(value || "").trim(); }
+async function applyImportedSheetRow(row = {}) {
+  if (createSessionFromSheetsPending) {
+    await createBlankSession({ announce: false });
+    createSessionFromSheetsPending = false;
+  }
+  let count = 0;
+  const applySelect = (select,value) => { if (!String(value || "").trim()) return false; const applied = selectSheetImportOption(select,value); if (applied) count += 1; return applied; };
+  const applyInput = (input,value) => { const clean = String(value || "").trim(); if (!input || !clean) return false; input.value = clean; count += 1; return true; };
+  if (String(row.level || "").trim()) { applySelect(elements.nivelSelect,normalizeSheetLevel(row.level)); syncAcademicFields(); }
+  applySelect(elements.gradoSelect,normalizeSheetGrade(row.grade)); applySelect(elements.trimestreSelect,String(row.trimester || "").replace(/[^0-9]/g,"")); applySelect(elements.materiaSelect,normalizeSheetSubject(row.subject)); applySelect(elements.unidadTemaSelect,String(row.unit || "").match(/\d+/)?.[0] || row.unit);
+  applyInput(document.getElementById("temaInput"),row.curricularTopic); applyInput(document.getElementById("objetivoInput"),row.objective);
+  if (String(row.narrative || "").trim() && selectSheetImportOption(elements.narrativaSelect,row.narrative,elements.narrativaCustomInput)) count += 1; syncNarrativaCustomField();
+  if (String(row.illustrationStyle || "").trim() && selectSheetImportOption(elements.estiloImagenSelect,row.illustrationStyle,elements.estiloImagenCustomInput)) count += 1; syncImageStyleCustomField();
+  applyInput(document.getElementById("misionesInput"),row.roomCount); applyInput(elements.preguntasPorSalaInput,row.questionsPerRoom); applyInput(document.getElementById("duracionInput"),row.durationMinutes);
+  syncAcademicFields(); saveFormState(); scheduleSessionSave(); return count;
+}
+window.PigPenSheetsImport?.init({ getUser: () => state.currentUser, getFormState: serializeFormState, onApply: applyImportedSheetRow, onStatus: setStatus });
 
 elements.nivelSelect?.addEventListener("change", syncAcademicFields);
 elements.narrativaSelect?.addEventListener("change", syncNarrativaCustomField);
+elements.estiloImagenSelect?.addEventListener("change", syncImageStyleCustomField);
 elements.modoPresentacionSelect?.addEventListener("change", handlePresentationModeChange);
+elements.idiomaSelect?.addEventListener("change", () => {
+  if (!state.project) return;
+  state.project = normalizeEscapeRoomProject({
+    ...state.project,
+    idioma: elements.idiomaSelect?.value || "es-419"
+  });
+  renderMissionEditor();
+  renderOutputsNow();
+});
 elements.generalContentInputs.forEach((field) => {
   field.addEventListener("input", (event) => updateGeneralProjectField(event.currentTarget, event.currentTarget.value));
+});
+elements.btnRegenerateCoverImage?.addEventListener("click", () => {
+  void regenerateCoverImageOnly();
 });
 
 mountStudioPanels();
 wireSummaryBarMeasurements();
+restoreSessionsWidth();
 restoreBriefWidth();
 restoreInspectorWidth();
 setInspectorTab("rooms");
@@ -6852,10 +8367,12 @@ wireStudioShell();
 wireMissionNavigatorEvents();
 restoreFormState();
 restoreProjectState();
+restoreSessionFiltersFromStorage();
 restoreTheme();
 restorePreviewTheme({ preferProject: true });
 syncAcademicFields();
 syncNarrativaCustomField();
+syncImageStyleCustomField();
 syncPresentationModeUi({ preferProject: Boolean(state.project) });
 wireMissionEditorEvents();
 wireSessionEvents();

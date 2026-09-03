@@ -374,4 +374,23 @@ assert.deepEqual(
   "themeConfig debe sobrevivir la normalización para que un ZIP se pueda reabrir sin perder su apariencia."
 );
 
+const dragDropProject = normalizeEscapeRoomProject({
+  misiones: [{ preguntas: [{
+    tipo_interaccion: "drag_drop",
+    parejas: [
+      { izquierda: "Destino A", derecha: "Ficha A" },
+      { izquierda: "Destino B", derecha: "Ficha B" }
+    ]
+  }] }]
+});
+assert.equal(dragDropProject.misiones[0].preguntas[0].tipo_interaccion, "drag_drop", "Debe preservar el nuevo tipo drag_drop.");
+assert.deepEqual(
+  dragDropProject.misiones[0].preguntas[0].parejas.map(({ izquierda, derecha }) => ({ izquierda, derecha })),
+  [
+    { izquierda: "Destino A", derecha: "Ficha A" },
+    { izquierda: "Destino B", derecha: "Ficha B" }
+  ],
+  "Drag & drop debe reutilizar el contrato normalizado de parejas."
+);
+
 console.log("escapeRoomCreator model OK.");

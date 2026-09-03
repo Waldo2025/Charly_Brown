@@ -3,7 +3,9 @@ import {
   dataUrlToBlob,
   detectAssetMimeType,
   extensionForMimeType,
-  optimizeRasterImage
+  optimizeRasterImage,
+  stripGifMetadata,
+  stripSvgMetadata
 } from "../public/js/escape-room-image-optimizer.mjs";
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -44,13 +46,12 @@ assert.equal(optimized.width, 1920);
 assert.equal(optimized.height, 960);
 assert.equal(bitmapClosed, true, "ImageBitmap debe liberarse después de codificar.");
 
-const notSmaller = await optimizeRasterImage(new Blob([makeBytes(24)], { type: "image/png" }), {
+const sanitizedEvenWhenLarger = await optimizeRasterImage(new Blob([makeBytes(24)], { type: "image/png" }), {
   decodeImage: async () => ({ width: 32, height: 16, close() {} }),
   encodeImage: async () => new Blob([new Uint8Array(48)], { type: "image/webp" })
 });
-assert.equal(notSmaller.status, "unchanged");
-assert.equal(notSmaller.reason, "not-smaller");
-assert.equal(notSmaller.bytes.byteLength, 24, "Nunca debe sustituirse por una imagen más pesada.");
+assert.equal(sanitizedEvenWhenLarger.status, "optimized");
+assert.equal(sanitizedEvenWhenLarger.bytes.byteLength, 48, "Debe conservar la recodificación limpia aunque pese más.");
 
 const forcedClean = await optimizeRasterImage(new Blob([makeBytes(24)], { type: "image/png" }), {
   targetWidth: 1280,
@@ -67,6 +68,18 @@ assert.equal(forcedClean.width, 1280);
 assert.equal(forcedClean.height, 640);
 assert.equal(forcedClean.optimizedBytes, 48, "La limpieza obligatoria conserva el archivo recodificado aunque pese más.");
 
+let fallbackEncodes = 0;
+const fallback = await optimizeRasterImage(new Blob([makeBytes(24)], { type: "image/png" }), {
+  decodeImage: async () => ({ width: 32, height: 16, close() {} }),
+  encodeImage: async ({ type }) => {
+    fallbackEncodes += 1;
+    return new Blob([new Uint8Array(20)], { type: type === "image/webp" ? "image/png" : type });
+  }
+});
+assert.equal(fallback.mimeType, "image/png");
+assert.equal(fallback.reason, "webp-unavailable-fallback");
+assert.equal(fallbackEncodes, 2, "Debe recodificar al formato de respaldo si WebP no está disponible.");
+
 let gifDecoded = false;
 const gif = await optimizeRasterImage(new Blob([new TextEncoder().encode("GIF89a")], { type: "image/gif" }), {
   decodeImage: async () => { gifDecoded = true; }
@@ -74,6 +87,23 @@ const gif = await optimizeRasterImage(new Blob([new TextEncoder().encode("GIF89a
 assert.equal(gif.status, "unchanged");
 assert.equal(gif.reason, "unsupported-format");
 assert.equal(gifDecoded, false, "GIF no debe perder animación por una recodificación accidental.");
+
+const gifWithComment = new Uint8Array([
+  ...new TextEncoder().encode("GIF89a"),
+  1, 0, 1, 0, 0, 0, 0,
+  0x21, 0xff, 11, ...new TextEncoder().encode("NETSCAPE2.0"), 3, 1, 0, 0, 0,
+  0x21, 0xfe, 4, ...new TextEncoder().encode("note"), 0,
+  0x3b
+]);
+const cleanGif = stripGifMetadata(gifWithComment);
+assert.ok(cleanGif.byteLength < gifWithComment.byteLength);
+assert.doesNotMatch(new TextDecoder().decode(cleanGif), /note/, "Debe retirar comentarios de GIF.");
+assert.match(new TextDecoder().decode(cleanGif), /NETSCAPE2\.0/, "Debe conservar el bloque que controla el loop animado.");
+
+const svgWithMetadata = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><metadata>EXIF-XMP</metadata><!-- note --><rect width="1" height="1"/></svg>');
+const cleanSvg = stripSvgMetadata(svgWithMetadata);
+assert.doesNotMatch(new TextDecoder().decode(cleanSvg), /EXIF-XMP|note/);
+assert.match(new TextDecoder().decode(cleanSvg), /<rect/);
 
 const failed = await optimizeRasterImage(new Blob([makeBytes(32)], { type: "image/png" }), {
   decodeImage: async () => { throw new Error("imagen dañada"); }
