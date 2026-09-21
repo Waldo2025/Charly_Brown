@@ -3,15 +3,17 @@ export const IMAGE_CREATOR_SESSION_TITLE = "Nueva sesión";
 export const MAX_REFERENCE_ATTACHMENTS = 3;
 export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 export const TARGET_INLINE_IMAGE_BYTES = 24 * 1024;
-export const MAX_GEMINI_PAYLOAD_BYTES = 96 * 1024;
-export const MAX_HISTORY_MESSAGES = 30;
+// Gemini accepts inline image requests far above the old 96 KiB ceiling. Keep
+// a conservative browser/proxy budget while preserving enough visual detail
+// for localized edits.
+export const MAX_GEMINI_PAYLOAD_BYTES = 7 * 1024 * 1024;
 export const MAX_RESULTS_PER_TURN = 4;
 export const THUMBNAIL_MAX_DIMENSION = 896;
 
 export const IMAGE_CREATOR_MODELS = Object.freeze([
   "gemini-2.5-flash-image",
   "gemini-3.1-flash-image",
-  "gemini-3-pro-image-preview"
+  "gemini-3-pro-image"
 ]);
 
 export const IMAGE_CREATOR_MODES = Object.freeze([
@@ -45,7 +47,7 @@ export const IMAGE_CREATOR_COUNT_OPTIONS = Object.freeze([1, 2, 3, 4]);
 
 export function modelSupportsImageSize(model = "") {
   const normalized = String(model || "").trim().toLowerCase();
-  return normalized === "gemini-3.1-flash-image" || normalized === "gemini-3-pro-image-preview";
+  return normalized === "gemini-3.1-flash-image" || normalized === "gemini-3-pro-image";
 }
 
 export function createDefaultImageCreatorOptions() {

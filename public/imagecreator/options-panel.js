@@ -21,6 +21,9 @@ export function initializeOptionsPanel(elements, options = {}) {
   fillSelect(elements.modeSelect, IMAGE_CREATOR_MODES, (item) => ({ value: item.value, label: item.label }));
   fillSelect(elements.modelSelect, IMAGE_CREATOR_MODELS, (item) => ({ value: item, label: item }));
   fillSelect(elements.aspectRatioSelect, IMAGE_CREATOR_ASPECT_RATIOS, (item) => ({ value: item, label: item }));
+  if (elements.aspectRatioSelect) {
+    elements.aspectRatioSelect.insertAdjacentHTML("beforeend", '<option value="original" hidden>Conservar proporción original</option>');
+  }
   fillSelect(elements.imageSizeSelect, IMAGE_CREATOR_IMAGE_SIZES, (item) => ({ value: item, label: item }));
   fillSelect(elements.downloadFormatSelect, IMAGE_CREATOR_DOWNLOAD_FORMATS, (item) => ({ value: item, label: item.toUpperCase() }));
   fillSelect(elements.countSelect, IMAGE_CREATOR_COUNT_OPTIONS, (item) => ({ value: String(item), label: `${item}` }));
@@ -31,7 +34,9 @@ export function readOptionsFromPanel(elements) {
   return normalizeImageCreatorOptions({
     mode: elements.modeSelect?.value,
     model: elements.modelSelect?.value,
-    aspectRatio: elements.aspectRatioSelect?.value,
+    aspectRatio: elements.aspectRatioSelect?.value === "original"
+      ? elements.aspectRatioSelect.dataset.selectedRatio
+      : elements.aspectRatioSelect?.value,
     imageSize: elements.imageSizeSelect?.value,
     downloadFormat: elements.downloadFormatSelect?.value,
     count: Number(elements.countSelect?.value || 1)
@@ -51,6 +56,12 @@ export function applyOptionsToPanel(elements, options = {}) {
 
 export function syncOptionsPresentation(elements, options = {}) {
   const normalized = normalizeImageCreatorOptions(options);
+  if (elements.aspectRatioSelect) {
+    const select = elements.aspectRatioSelect;
+    select.dataset.selectedRatio = normalized.aspectRatio;
+    select.disabled = normalized.mode === "edit";
+    select.value = select.disabled ? "original" : normalized.aspectRatio;
+  }
   const imageSizeEnabled = modelSupportsImageSize(normalized.model);
   if (elements.imageSizeSelect) elements.imageSizeSelect.disabled = !imageSizeEnabled;
   if (elements.optionsHint) {

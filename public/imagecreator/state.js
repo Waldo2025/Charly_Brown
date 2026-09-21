@@ -13,7 +13,10 @@ export function createImageCreatorState() {
     composerMeta: "",
     searchTerm: "",
     optionsPanelOpen: false,
+    chatPanelOpen: true,
     pendingVariationSource: null,
+    selectedResultRef: null,
+    pendingRevision: null,
     sessionStatusText: "Cargando sesiones...",
     sessionSaveState: "idle",
     lastKnownMessageCount: 0

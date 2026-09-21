@@ -47,7 +47,7 @@ test("payload builder permite 4K para Gemini 3.1 y Pro", async () => {
     mode: "generate",
     prompt: "Poster editorial para impresión",
     options: {
-      model: "gemini-3-pro-image-preview",
+      model: "gemini-3-pro-image",
       aspectRatio: "3:4",
       imageSize: "4K"
     },
@@ -65,7 +65,7 @@ test("payload builder inserta inlineData para edición y composición", async ()
     mode: "compose",
     prompt: "Combina ambas referencias en una portada editorial",
     options: {
-      model: "gemini-3-pro-image-preview",
+      model: "gemini-3-pro-image",
       aspectRatio: "1:1",
       imageSize: "1K"
     },
@@ -126,4 +126,39 @@ test("payload builder puede estimar bytes serializados del request Gemini", asyn
   const bytes = estimateGeminiPayloadBytes(payload);
   assert.equal(typeof bytes, "number");
   assert.ok(bytes > 0);
+});
+
+test("editar conserva el formato de referencias horizontales, verticales e irregulares", async () => {
+  const { buildGeminiImagePayload } = await toDataModule("public/imagecreator/payloads.js");
+  for (const [width, height] of [[1600, 900], [900, 1600], [1379, 811]]) {
+    const payload = buildGeminiImagePayload({
+      mode: "edit", prompt: "Añade un texto", options: { aspectRatio: "1:1", model: "gemini-3-pro-image", imageSize: "2K" },
+      attachments: [{ width, height, mimeType: "image/png", base64: "REFERENCE" }, { mimeType: "image/png", base64: "REGION_MAP" }]
+    });
+    assert.equal("aspectRatio" in payload.generationConfig.imageConfig, false);
+    assert.equal(payload.generationConfig.imageConfig.imageSize, "2K");
+    assert.match(payload.contents[0].parts[0].text, /Conserva la proporción, el encuadre y la geometría de la primera referencia/);
+  }
+});
+
+test("generación, composición y variación respetan la proporción seleccionada", async () => {
+  const { buildGeminiImagePayload } = await toDataModule("public/imagecreator/payloads.js");
+  for (const mode of ["generate", "compose", "variation"]) {
+    const payload = buildGeminiImagePayload({ mode, prompt: "Una imagen", options: { aspectRatio: "9:16" },
+      attachments: mode === "generate" ? [] : [{ base64: "ONE" }, { base64: "TWO" }] });
+    assert.equal(payload.generationConfig.imageConfig.aspectRatio, "9:16");
+  }
+});
+
+
+test("adjuntar referencias en Texto a imagen genera una imagen nueva respetando la proporción", async () => {
+  const { buildGeminiImagePayload, resolveImageCreatorMode } = await toDataModule("public/imagecreator/payloads.js");
+  const attachments = [{ mimeType: "image/png", base64: "SOURCE", width: 1600, height: 900 }];
+  assert.equal(resolveImageCreatorMode("generate", attachments), "generate");
+  assert.equal(resolveImageCreatorMode("generate", []), "generate");
+  for (const mode of ["edit", "compose", "variation"]) assert.equal(resolveImageCreatorMode(mode, attachments), mode);
+  const payload = buildGeminiImagePayload({ mode: "generate", prompt: "Un nuevo concepto inspirado en la referencia", options: { aspectRatio: "1:1" }, attachments });
+  assert.equal(payload.generationConfig.imageConfig.aspectRatio, "1:1");
+  assert.match(payload.contents[0].parts[0].text, /Genera una imagen original/);
+  assert.equal(payload.contents[0].parts.some((part) => part?.inlineData?.data === "SOURCE"), true);
 });

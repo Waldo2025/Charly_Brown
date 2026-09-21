@@ -1,9 +1,19 @@
 const MODE_PROMPTS = Object.freeze({
   generate: "Genera una imagen original a partir del prompt del usuario. Devuelve una respuesta visual útil y coherente.",
-  edit: "Edita la imagen o imágenes de referencia del usuario respetando el objetivo indicado en el prompt. Prioriza cambios claros y consistentes.",
+  edit: "Edita la imagen o imágenes de referencia del usuario respetando el objetivo indicado en el prompt. Conserva la proporción, el encuadre y la geometría de la primera referencia. No estires, comprimas ni recortes el fondo ni los elementos originales; modifica únicamente lo solicitado.",
   compose: "Combina las referencias del usuario en una sola imagen integrada. Conserva elementos clave de cada referencia y evita texto innecesario.",
   variation: "Produce una variación clara de la referencia principal del usuario. Mantén identidad visual y cambia composición, detalles o atmósfera según el prompt."
 });
+
+// Keep the requested mode intact. Having references attached in 'generate' mode
+// allows the user to generate an original image with visual reference guidance,
+// without turning the request into an edit.
+export function resolveImageCreatorMode(mode = "generate", attachments = []) {
+  const requestedMode = String(mode || "generate").trim() || "generate";
+  return ["generate", "edit", "compose", "variation"].includes(requestedMode)
+    ? requestedMode
+    : "generate";
+}
 
 export function estimateGeminiPayloadBytes(payload = {}) {
   try {
@@ -15,7 +25,7 @@ export function estimateGeminiPayloadBytes(payload = {}) {
 
 function supportsImageSize(model = "") {
   const normalized = String(model || "").trim().toLowerCase();
-  return normalized === "gemini-3.1-flash-image" || normalized === "gemini-3-pro-image-preview";
+  return normalized === "gemini-3.1-flash-image" || normalized === "gemini-3-pro-image";
 }
 
 function normalizeAttachmentRecord(attachment = {}) {
@@ -40,8 +50,8 @@ export function buildGeminiImagePayload({ mode = "generate", prompt = "", option
   const cleanPrompt = String(prompt || "").trim();
   if (!cleanPrompt) throw new Error("El prompt no puede estar vacío.");
 
-  const normalizedMode = String(mode || "generate").trim() || "generate";
   const normalizedAttachments = Array.isArray(attachments) ? attachments.map(normalizeAttachmentRecord).filter((item) => item.base64) : [];
+  const normalizedMode = resolveImageCreatorMode(mode, normalizedAttachments);
   assertModeRequirements(normalizedMode, normalizedAttachments);
 
   const parts = [
@@ -61,9 +71,10 @@ export function buildGeminiImagePayload({ mode = "generate", prompt = "", option
     });
   });
 
-  const imageConfig = {
-    aspectRatio: String(options?.aspectRatio || "1:1").trim() || "1:1"
-  };
+  const imageConfig = {};
+  if (normalizedMode !== "edit") {
+    imageConfig.aspectRatio = String(options?.aspectRatio || "1:1").trim() || "1:1";
+  }
   if (supportsImageSize(options?.model)) {
     imageConfig.imageSize = String(options?.imageSize || "1K").trim() || "1K";
   }

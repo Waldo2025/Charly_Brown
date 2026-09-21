@@ -1,6 +1,6 @@
 import { getStorage, ref, uploadString, listAll, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
-import { buildVeoApiUrl, getAuthHeaders } from './api-client.js';
+import { buildGeminiApiUrl, authFetchJson } from './api-client.js';
 import { getDefaultFirebaseApp } from './firebase-default-app.js';
 
 const app = getDefaultFirebaseApp();
@@ -29,17 +29,14 @@ async function generarMapaMentalGemini(textoLectura) {
       """${textoLectura}"""
       `;
 
-  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
-  const response = await fetch(buildVeoApiUrl("/api/gemini/generate"), {
+  const data = await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "gemini-2.5-flash",
       payload: { contents: [{ parts: [{ text: prompt }] }] }
     })
   });
-
-  const data = await response.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
   try {
@@ -50,12 +47,48 @@ async function generarMapaMentalGemini(textoLectura) {
   }
 }
 
+function extractGeminiImageData(imageData = {}) {
+  const response = imageData?.response && typeof imageData.response === "object" ? imageData.response : imageData;
+  const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
+  for (const candidate of candidates) {
+    for (const part of (candidate?.content?.parts || [])) {
+      const inline = part?.inlineData || part?.inline_data;
+      const mime = String(inline?.mimeType || inline?.mime_type || "").trim();
+      const base64 = String(inline?.data || "").trim();
+      if (mime && base64 && /^image\//i.test(mime)) {
+        return `data:${mime};base64,${base64}`;
+      }
+    }
+  }
+  const finishReason = candidates.map((candidate) => candidate?.finishReason || candidate?.finish_reason).filter(Boolean).join(", ");
+  const blockReason = response?.promptFeedback?.blockReason || response?.prompt_feedback?.block_reason || "";
+  throw new Error(`No se recibió una imagen válida${blockReason ? `: solicitud bloqueada (${blockReason})` : finishReason ? `: ${finishReason}` : ""}.`);
+}
+
+async function generateGeminiImage(prompt, { aspectRatio = "1:1", imageSize = "1K", temperature = 0.58, model = "gemini-3.1-flash-image" } = {}) {
+  const requestOptions = {
+    method: "POST",
+    body: {
+      model,
+      payload: {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ["IMAGE"],
+          imageConfig: { aspectRatio, imageSize },
+          temperature
+        }
+      }
+    }
+  };
+  return extractGeminiImageData(await authFetchJson(buildGeminiApiUrl("/api/gemini/generate"), requestOptions));
+}
+
 boton?.addEventListener("click", async () => {
   const description = promptInput?.value?.trim() || "";
   const modelo = modeloSelect?.value || "";
 
   if (!description) {
-    alert("Por favor, escribe o pega una lectura.");
+    alert("Por favor, escribe un prompt o pega una lectura.");
     return;
   }
 
@@ -93,12 +126,37 @@ boton?.addEventListener("click", async () => {
       return;
     }
 
-    imagen.textContent = "La generación directa de imágenes fue retirada. Usa esta vista solo para mapas visuales.";
-  } catch (_) {
-    alert("Hubo un error. Revisa la consola.");
+    // Generación de imagen con Gemini 3.1 Flash Image
+    const dataUrl = await generateGeminiImage(description, {
+      model: modelo || "gemini-3.1-flash-image",
+      aspectRatio: "1:1",
+      imageSize: "1K"
+    });
+
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.style.maxWidth = "100%";
+    img.style.borderRadius = "12px";
+    img.style.boxShadow = "0 4px 10px rgba(0,0,0,0.15)";
+    imagen.appendChild(img);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "💾 Guardar en biblioteca (Storage)";
+    saveBtn.style.marginTop = "0.75rem";
+    saveBtn.onclick = async () => {
+      const nombre = prompt("Nombre del archivo para guardar en Storage (ej. sol, casa, árbol):", description.slice(0, 20).trim());
+      if (nombre) {
+        await guardarEnFirebase(nombre, dataUrl);
+        alert(`✅ Imagen "${nombre}" guardada en Firebase Storage.`);
+      }
+    };
+    imagen.appendChild(saveBtn);
+  } catch (err) {
+    console.error("Error generando con Gemini:", err);
+    alert(`Hubo un error al generar la imagen: ${err.message || "Revisa la consola"}`);
   } finally {
     boton.disabled = false;
-    boton.textContent = "Generar mapa visual";
+    boton.textContent = "Generar";
   }
 });
 

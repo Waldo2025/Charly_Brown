@@ -3,6 +3,20 @@
 <head>
   <script src="js/cache-version-loader.js"></script>
   <meta charset="UTF-8">
+  <script>
+    (() => {
+      const storageKey = "ic-workspace-theme-v1";
+      const allowedThemes = new Set(["dark", "light", "mid"]);
+      let theme = "dark";
+      try {
+        const savedTheme = localStorage.getItem(storageKey);
+        if (allowedThemes.has(savedTheme)) theme = savedTheme;
+      } catch (_) {
+        // El tema oscuro queda como fallback si el almacenamiento está bloqueado.
+      }
+      document.documentElement.dataset.icTheme = theme;
+    })();
+  </script>
   <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Image Creator</title>
@@ -11,7 +25,7 @@
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="imagecreator/imageCreator.css">
+  <link rel="stylesheet" href="imagecreator/imageCreator.css?v=2026-09-08.24">
 </head>
 <body data-page="imageCreator.html">
   <header class="main-header">
@@ -27,137 +41,268 @@
   </div>
 
   <main id="imageCreatorApp" class="ic-page-shell">
-    <aside class="ic-session-rail">
+    <header class="ic-app-header">
+      <div>
+        <p class="ic-eyebrow">Workspace generativo</p>
+        <h1>Image Creator</h1>
+      </div>
+      <div class="ic-app-header__actions">
+        <button type="button" id="icMobileSessionsBtn" class="ic-mobile-sessions-btn" aria-controls="icSessionRail" aria-expanded="false">
+          <i class="fas fa-clock-rotate-left" aria-hidden="true"></i>
+          <span>Sesiones</span>
+        </button>
+        <button type="button" id="icToggleOptionsBtn" class="ic-header-icon-btn" aria-expanded="false" aria-controls="icOptionsModal" aria-label="Mostrar ajustes" title="Ajustes">
+          <i class="fas fa-sliders" aria-hidden="true"></i>
+        </button>
+        <button type="button" id="icThemeToggleBtn" class="ic-theme-toggle" aria-label="Tema actual: Oscuro. Cambiar tema">
+          <i class="fas fa-moon" aria-hidden="true"></i>
+          <span>Oscuro</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="ic-panels-grid">
+    <aside id="icSessionRail" class="ic-session-rail" aria-label="Sesiones de Image Creator">
       <div class="ic-session-rail__header">
-        <div>
-          <p class="ic-eyebrow">Gemini Image Chat</p>
-          <h1>Image Creator</h1>
+        <h1>Sesiones</h1>
+      </div>
+
+      <div class="ic-session-controls">
+        <div class="ic-session-rail__search">
+          <i class="fas fa-search"></i>
+          <input id="icSessionSearchInput" type="search" placeholder="Buscar sesiones">
         </div>
         <button type="button" id="icNewSessionBtn" class="ic-ghost-btn">
           <i class="fas fa-pen-to-square"></i>
-          <span>Nuevo chat</span>
+          <span>Nueva</span>
         </button>
-      </div>
-
-      <div class="ic-session-rail__search">
-        <i class="fas fa-search"></i>
-        <input id="icSessionSearchInput" type="search" placeholder="Buscar sesiones">
       </div>
 
       <div id="icSessionStatus" class="ic-session-status" aria-live="polite">Cargando sesiones...</div>
       <div id="icSessionList" class="ic-session-list" aria-live="polite"></div>
     </aside>
 
-    <section class="ic-chat-shell">
+    <button type="button" id="icMobileBackdrop" class="ic-mobile-backdrop hidden" aria-label="Cerrar panel de sesiones"></button>
+
+    <div class="ic-resizer" data-resizer="sessions" role="separator" aria-label="Redimensionar panel de sesiones" aria-orientation="vertical" tabindex="0"></div>
+
+    <section class="ic-canvas-shell">
       <div class="ic-chat-toolbar">
         <div class="ic-chat-toolbar__main">
           <div>
             <p class="ic-toolbar-label">Sesión activa</p>
             <h2 id="icActiveSessionTitle">Nueva sesión</h2>
           </div>
-          <div id="icUserBadge" class="ic-user-badge">Sin sesión</div>
         </div>
 
-        <div class="ic-chat-toolbar__actions">
-          <button type="button" id="icToggleOptionsBtn" class="ic-toolbar-btn" aria-expanded="true" aria-controls="icOptionsPanel">
-            <i class="fas fa-sliders"></i>
-            <span>Opciones</span>
-          </button>
-          <button type="button" id="icArchiveSessionBtn" class="ic-toolbar-btn">
-            <i class="fas fa-box-archive"></i>
-            <span>Archivar</span>
-          </button>
-          <button type="button" id="icDeleteSessionBtn" class="ic-toolbar-btn is-danger">
-            <i class="fas fa-trash"></i>
-            <span>Eliminar</span>
-          </button>
+        <span class="ic-toolbar-context"><i class="fas fa-sparkles"></i> Lienzo generativo</span>
+      </div>
+
+      <section id="icChatFeed" class="ic-chat-feed" aria-live="polite"></section>
+    </section>
+
+    <div id="icToolsResizer" class="ic-resizer" data-resizer="tools" role="separator" aria-label="Redimensionar panel de herramientas" aria-orientation="vertical" tabindex="0"></div>
+
+    <aside id="icToolsPanel" class="ic-tools-panel">
+      <div class="ic-tools-panel__header">
+        <div>
+          <p class="ic-toolbar-label">Asistente</p>
+          <h2>Chat creativo</h2>
         </div>
       </div>
 
-      <div class="ic-workspace">
-        <section id="icChatFeed" class="ic-chat-feed" aria-live="polite"></section>
+      <div class="ic-chat-panel">
+        <div class="ic-chat-panel__label"><i class="fas fa-message"></i><span>Chat</span></div>
+        <div class="ic-composer-shell">
+          <div id="icComposerError" class="ic-inline-alert hidden" aria-live="polite"></div>
+          <div id="icComposerMeta" class="ic-composer-meta hidden"></div>
+          <div id="icAttachmentTray" class="ic-attachment-tray hidden"></div>
 
-        <aside id="icOptionsPanel" class="ic-options-panel hidden">
-          <div class="ic-options-panel__header">
-            <div>
-              <h3>Ajustes</h3>
-              <p>Controla modelo, formato y orientación.</p>
+          <div class="ic-composer">
+            <label class="ic-composer__field" for="icPromptInput">
+              <span class="ic-sr-only">Instrucción creativa</span>
+              <textarea id="icPromptInput" rows="5" placeholder="Describe la imagen o indica cómo editar/componer referencias..."></textarea>
+            </label>
+
+            <div class="ic-composer__footer">
+              <div class="ic-composer__actions">
+                <button type="button" id="icAttachBtn" class="ic-composer-action" aria-label="Adjuntar referencias">
+                  <i class="fas fa-paperclip"></i>
+                  <span>Adjuntar</span>
+                </button>
+                <input id="icAttachmentInput" type="file" accept="image/*" multiple hidden>
+              </div>
+
+              <div class="ic-composer__submit">
+                <button type="button" id="icSendBtn" class="ic-send-btn">
+                  <i class="fas fa-wand-magic-sparkles"></i>
+                  <span>Generar</span>
+                </button>
+              </div>
             </div>
-            <button type="button" id="icCloseOptionsBtn" class="ic-panel-close-btn" aria-label="Cerrar ajustes">
-              <i class="fas fa-xmark"></i>
-            </button>
           </div>
-
-          <div class="ic-options-grid">
-            <label class="ic-field">
-              <span>Modo</span>
-              <select id="icModeSelect"></select>
-            </label>
-
-            <label class="ic-field">
-              <span>Modelo</span>
-              <select id="icModelSelect"></select>
-            </label>
-
-            <label class="ic-field">
-              <span>Aspect ratio</span>
-              <select id="icAspectRatioSelect"></select>
-            </label>
-
-            <label class="ic-field">
-              <span>Image size</span>
-              <select id="icImageSizeSelect"></select>
-            </label>
-
-            <label class="ic-field">
-              <span>Formato descarga</span>
-              <select id="icDownloadFormatSelect"></select>
-            </label>
-
-            <label class="ic-field">
-              <span>Cantidad</span>
-              <select id="icCountSelect"></select>
-            </label>
-          </div>
-
-          <div class="ic-options-note">
-            <strong>Notas:</strong>
-            <span id="icOptionsHint">Gemini 2.5 ignora `imageSize`; Gemini 3.1 y Pro sí lo usan.</span>
-          </div>
-        </aside>
+        </div>
       </div>
+    </aside>
+    </div>
 
-      <div class="ic-composer-shell">
-        <div id="icComposerError" class="ic-inline-alert hidden" aria-live="polite"></div>
-        <div id="icComposerMeta" class="ic-composer-meta hidden"></div>
-        <div id="icAttachmentTray" class="ic-attachment-tray hidden"></div>
+    <button type="button" id="icToggleChatBtn" class="ic-chat-fab" aria-controls="icToolsPanel" aria-expanded="true" aria-label="Ocultar Chat creativo" title="Arrastra para mover · Ocultar Chat creativo">
+      <i class="fas fa-comments" aria-hidden="true"></i>
+      <span class="ic-sr-only">Mostrar u ocultar Chat creativo</span>
+    </button>
 
-        <div class="ic-composer">
-          <div class="ic-composer__actions">
-            <button type="button" id="icAttachBtn" class="ic-icon-btn" aria-label="Adjuntar referencias">
-              <i class="fas fa-paperclip"></i>
-            </button>
-            <input id="icAttachmentInput" type="file" accept="image/*" multiple hidden>
+    <div id="icOptionsModal" class="ic-options-modal hidden" aria-hidden="true">
+      <section id="icOptionsPanel" class="ic-options-panel" role="dialog" aria-modal="true" aria-labelledby="icOptionsTitle">
+        <div class="ic-options-panel__header">
+          <div>
+            <p class="ic-toolbar-label">Configuración de imagen</p>
+            <h2 id="icOptionsTitle">Ajustes</h2>
+            <p>Controla modelo, formato y orientación.</p>
           </div>
+          <button type="button" id="icCloseOptionsBtn" class="ic-panel-close-btn" aria-label="Cerrar ajustes">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
 
-          <label class="ic-composer__field" for="icPromptInput">
-            <textarea id="icPromptInput" rows="1" placeholder="Describe la imagen o indica cómo editar/componer referencias..."></textarea>
+        <div class="ic-options-grid">
+          <label class="ic-field"><span>Modo</span><select id="icModeSelect"></select></label>
+          <label class="ic-field"><span>Modelo</span><select id="icModelSelect"></select></label>
+          <label class="ic-field"><span>Aspect ratio</span><select id="icAspectRatioSelect"></select></label>
+          <label class="ic-field"><span>Image size</span><select id="icImageSizeSelect"></select></label>
+          <label class="ic-field"><span>Formato descarga</span><select id="icDownloadFormatSelect"></select></label>
+          <label class="ic-field"><span>Cantidad</span><select id="icCountSelect"></select></label>
+        </div>
+
+        <div class="ic-options-note">
+          <strong>Notas:</strong>
+          <span id="icOptionsHint">Gemini 2.5 ignora `imageSize`; Gemini 3.1 y Pro sí lo usan.</span>
+        </div>
+      </section>
+    </div>
+
+    <div id="icImageViewer" class="ic-image-viewer hidden" aria-hidden="true">
+      <section class="ic-image-viewer__gallery" role="dialog" aria-modal="true" aria-label="Imagen generada en vista de galería">
+        <div class="ic-image-viewer__stage">
+          <img id="icImageViewerImage" class="ic-image-viewer__single" src="" alt="Imagen generada ampliada">
+          <section id="icImageViewerComparison" class="ic-image-viewer__comparison hidden" aria-label="Comparación de edición">
+            <header class="ic-image-viewer__comparison-header">
+              <strong id="icImageViewerCompareLabel">Comparación: original vs propuesta</strong>
+            </header>
+            <div class="ic-image-viewer__comparison-grid">
+              <figure class="ic-image-viewer__comparison-cell">
+                <img id="icImageViewerOriginalImage" src="" alt="Imagen original">
+                <figcaption id="icImageViewerMeta">Original</figcaption>
+              </figure>
+              <figure class="ic-image-viewer__comparison-cell">
+                <img id="icImageViewerProposedImage" src="" alt="Imagen propuesta">
+                <figcaption id="icImageViewerMetaRight">Propuesta</figcaption>
+              </figure>
+            </div>
+          </section>
+          <aside id="icImageViewerReviewBar" class="ic-image-viewer__review-bar hidden" aria-live="polite">
+            <p>Revisión de edición: elige cómo continuar.</p>
+            <div class="ic-image-viewer__review-actions">
+              <button type="button" id="icImageViewerAcceptRevisionBtn" class="ic-gallery-action ic-gallery-action--primary">
+                <i class="fas fa-check"></i><span>Aceptar propuesta</span>
+              </button>
+              <button type="button" id="icImageViewerContinueRevisionBtn" class="ic-gallery-action ic-gallery-action--soft">
+                <i class="fas fa-redo"></i><span>Seguir editando desde propuesta</span>
+              </button>
+              <button type="button" id="icImageViewerRejectRevisionBtn" class="ic-gallery-action ic-gallery-action--danger">
+                <i class="fas fa-xmark"></i><span>Rechazar</span>
+              </button>
+            </div>
+          </aside>
+          <button type="button" class="ic-gallery-close" data-image-viewer-close aria-label="Cerrar galería"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+          <div class="ic-gallery-actions">
+            <button type="button" id="icImageViewerAnnotateBtn" class="ic-gallery-action" aria-label="Señalar una zona de la imagen" title="Señalar"><i class="fas fa-highlighter" aria-hidden="true"></i></button>
+            <button type="button" id="icImageViewerMenuTrigger" class="ic-gallery-action" aria-label="Abrir herramientas de la imagen" aria-haspopup="menu" aria-expanded="false" aria-controls="icImageViewerMenu"><i class="fas fa-ellipsis-vertical" aria-hidden="true"></i></button>
+          </div>
+          <div id="icImageViewerMenu" class="ic-result-menu ic-image-viewer__menu hidden" role="menu" aria-label="Herramientas de imagen">
+            <button type="button" role="menuitem" class="ic-result-menu__rich" data-viewer-result-action="download-web"><i class="fas fa-globe"></i><span><strong>Preparar para web</strong><small>WebP · máximo 1920 px</small></span></button>
+            <button type="button" role="menuitem" class="ic-result-menu__rich" data-viewer-result-action="download-original"><i class="fas fa-download"></i><span><strong>Descarga original</strong><small>Resolución completa · sin metadatos</small></span></button>
+            <button type="button" role="menuitem" data-viewer-result-action="variation"><i class="fas fa-shuffle"></i><span>Variar</span></button>
+            <button type="button" role="menuitem" data-viewer-result-action="edit-text"><i class="fas fa-font"></i><span>Editar texto</span></button>
+            <button type="button" role="menuitem" data-viewer-result-action="regenerate"><i class="fas fa-rotate-right"></i><span>Regenerar</span></button>
+            <button type="button" role="menuitem" data-viewer-result-action="info"><i class="fas fa-circle-info"></i><span>Ver información</span></button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="icRegionEditor" class="ic-region-editor hidden" aria-hidden="true">
+      <section class="ic-region-dialog" role="dialog" aria-modal="true" aria-label="Señalar una zona de la imagen">
+        <div class="ic-region-stage">
+          <canvas id="icRegionCanvas" tabindex="0" aria-label="Lienzo para marcar la zona de la imagen"></canvas>
+          <div class="ic-region-toolbar" aria-label="Herramientas de marcado">
+            <div class="ic-region-tool-group">
+              <button type="button" class="ic-region-tool" data-region-tool="pencil" aria-pressed="false" aria-label="Usar lápiz" title="Lápiz">
+                <i class="fas fa-pencil" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="ic-region-tool is-active" data-region-tool="marker" aria-pressed="true" aria-label="Usar plumón" title="Plumón">
+                <i class="fas fa-highlighter" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="ic-region-tool-group">
+              <button type="button" id="icRegionUndoBtn" class="ic-region-tool" aria-label="Deshacer último trazo" title="Deshacer">
+                <i class="fas fa-rotate-left" aria-hidden="true"></i>
+              </button>
+              <button type="button" id="icRegionClearBtn" class="ic-region-tool" aria-label="Limpiar todos los trazos" title="Limpiar">
+                <i class="fas fa-eraser" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div id="icRegionStatus" class="ic-region-status" role="status">Marca la zona que deseas cambiar.</div>
+        </div>
+
+        <div id="icRegionPromptPanel" class="ic-region-prompt-panel hidden">
+          <label class="ic-region-instruction" for="icRegionInstruction">
+            <span>¿Qué debe cambiar en la zona marcada?</span>
+            <textarea id="icRegionInstruction" rows="2" placeholder="Ejemplo: convierte esta montaña en un faro, sin modificar el resto de la imagen."></textarea>
           </label>
 
-          <div class="ic-composer__submit">
-            <button type="button" id="icSendBtn" class="ic-send-btn">
-              <i class="fas fa-wand-magic-sparkles"></i>
-              <span>Generar</span>
-            </button>
+          <div id="icRegionTextFields" class="ic-region-text-fields hidden">
+            <div class="ic-region-text-mode" role="radiogroup" aria-label="Método para editar texto">
+              <label><input type="radio" name="icTextRenderMode" value="integrated" checked><span><strong>Integrado</strong><small>Gemini conserva perspectiva y textura</small></span></label>
+              <label><input type="radio" name="icTextRenderMode" value="exact"><span><strong>Texto exacto</strong><small>Fondo con Gemini y letras precisas</small></span></label>
+            </div>
+            <div class="ic-region-text-grid">
+              <label><span>Texto actual</span><input id="icRegionCurrentText" type="text" placeholder="Texto que aparece ahora (opcional)"></label>
+              <label><span>Texto nuevo exacto</span><input id="icRegionNewText" type="text" placeholder="Escribe la frase final exactamente"></label>
+              <label><span>Tipografía</span><select id="icRegionFontStyle"><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="display">Display gruesa</option><option value="handwritten">Manuscrita</option></select></label>
+              <label><span>Color</span><input id="icRegionTextColor" type="color" value="#ffffff"></label>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+
+        <footer class="ic-region-dialog__footer">
+          <button type="button" class="ic-ghost-btn" data-region-close>Cancelar</button>
+          <button type="button" id="icRegionApplyBtn" class="ic-send-btn">
+            <i class="fas fa-wand-magic-sparkles"></i><span>Aplicar cambio</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div id="icImageInfoModal" class="ic-image-info-modal hidden" aria-hidden="true">
+      <section class="ic-image-info-dialog" role="dialog" aria-modal="true" aria-labelledby="icImageInfoTitle">
+        <header>
+          <div><p class="ic-toolbar-label">Archivo generado</p><h2 id="icImageInfoTitle">Información de la imagen</h2></div>
+          <button type="button" class="ic-icon-btn" data-image-info-close aria-label="Cerrar información"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+        </header>
+        <dl>
+          <div><dt>Modelo</dt><dd id="icImageInfoModel">—</dd></div>
+          <div><dt>Formato</dt><dd id="icImageInfoFormat">—</dd></div>
+          <div><dt>Dimensiones</dt><dd id="icImageInfoDimensions">—</dd></div>
+          <div><dt>Creada</dt><dd id="icImageInfoCreated">—</dd></div>
+        </dl>
+      </section>
+    </div>
   </main>
 
   <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.858"></script>
   <script type="module" src="js/sidebar.js?v=2026-1.0.10.833"></script>
-  <script type="module" src="imagecreator/app.js"></script>
+    <script type="module" src="imagecreator/app.js?v=2026-09-14.2"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="js/update-banner-loader.js" defer></script>
 </body>

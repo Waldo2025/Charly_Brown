@@ -11,10 +11,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { auth, db } from "../js/firebase-instance.js";
-import {
-  IMAGE_CREATOR_SESSION_COLLECTION,
-  MAX_HISTORY_MESSAGES
-} from "./constants.js";
+import { IMAGE_CREATOR_SESSION_COLLECTION } from "./constants.js";
 import { createEmptySession, deriveSessionTitleFromPrompt, findSessionById } from "./state.js";
 
 const MAX_FIRESTORE_SESSION_BYTES = 900 * 1024;
@@ -60,94 +57,138 @@ function normalizeSessionDoc(docSnap) {
   };
 }
 
-function compactMessages(messages = []) {
-  const list = Array.isArray(messages) ? messages : [];
-  return list.slice(-MAX_HISTORY_MESSAGES);
+function compactMessageResult(result = {}) {
+  return {
+    id: String(result?.id || "").trim(),
+    mimeType: String(result?.mimeType || "image/png").trim() || "image/png",
+    model: String(result?.model || "").trim(),
+    aspectRatio: String(result?.aspectRatio || "").trim(),
+    imageSize: String(result?.imageSize || "1K").trim() || "1K",
+    sourceMessageId: String(result?.sourceMessageId || "").trim(),
+    createdAt: result?.createdAt || null,
+    fileName: String(result?.fileName || "").trim(),
+    width: Number(result?.width || 0) || 0,
+    height: Number(result?.height || 0) || 0,
+    sizeBytes: Number(result?.sizeBytes || 0) || 0,
+    dataUrl: "",
+    downloadUrl: String(result?.downloadUrl || "").trim(),
+    storagePath: String(result?.storagePath || "").trim()
+  };
 }
 
-async function compactImageCreatorMessagesForFirestore(messages = []) {
-  const list = compactMessages(messages);
+function compactMessageAttachment(attachment = {}) {
+  return {
+    id: String(attachment?.id || "").trim(),
+    name: String(attachment?.name || "referencia").trim() || "referencia",
+    mimeType: String(attachment?.mimeType || "image/jpeg").trim() || "image/jpeg",
+    dataUrl: "",
+    width: Number(attachment?.width || 0) || 0,
+    height: Number(attachment?.height || 0) || 0,
+    sizeBytes: Math.min(Number(attachment?.sizeBytes || 0) || 0, 120000),
+    source: String(attachment?.source || "upload").trim() || "upload",
+    hiddenInChat: attachment?.hiddenInChat === true
+  };
+}
+
+function compactImageCreatorMessagesForFirestore(messages = []) {
   const compacted = [];
-  for (const message of list) {
-    const nextMessage = message && typeof message === "object" ? { ...message } : {};
-    if (Array.isArray(nextMessage.attachments)) {
-      nextMessage.attachments = nextMessage.attachments.map((attachment) => ({
-        id: String(attachment?.id || "").trim(),
-        name: String(attachment?.name || "referencia").trim() || "referencia",
-        mimeType: String(attachment?.mimeType || "image/jpeg").trim() || "image/jpeg",
-        dataUrl: String(
-          attachment?.inlineBase64
-            ? `data:${String(attachment?.mimeType || "image/jpeg").trim() || "image/jpeg"};base64,${String(attachment.inlineBase64).trim()}`
-            : attachment?.dataUrl || attachment?.originalDataUrl || ""
-        ).trim(),
-        width: Number(attachment?.width || 0) || 0,
-        height: Number(attachment?.height || 0) || 0,
-        base64: "",
-        inlineBase64: "",
-        sizeBytes: Math.min(Number(attachment?.sizeBytes || 0) || 0, 120000),
-        source: String(attachment?.source || "upload").trim() || "upload"
-      }));
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const sanitized = message && typeof message === "object" ? { ...message } : {};
+    if (Array.isArray(sanitized.attachments)) {
+      sanitized.attachments = sanitized.attachments.map(compactMessageAttachment);
     }
-    if (Array.isArray(nextMessage.results)) {
-      nextMessage.results = nextMessage.results.map((result) => ({
-        id: String(result?.id || "").trim(),
-        mimeType: String(result?.mimeType || "image/png").trim() || "image/png",
-        model: String(result?.model || "").trim(),
-        aspectRatio: String(result?.aspectRatio || "1:1").trim() || "1:1",
-        imageSize: String(result?.imageSize || "1K").trim() || "1K",
-        sourceMessageId: String(result?.sourceMessageId || "").trim(),
-        createdAt: result?.createdAt || null,
-        fileName: String(result?.fileName || "").trim(),
-        width: Number(result?.width || 0) || 0,
-        height: Number(result?.height || 0) || 0,
-        sizeBytes: Number(result?.sizeBytes || 0) || 0,
-        dataUrl: "",
-        downloadUrl: String(result?.downloadUrl || "").trim(),
-        storagePath: String(result?.storagePath || "").trim()
-      }));
+    if (Array.isArray(sanitized.results)) {
+      sanitized.results = sanitized.results.map(compactMessageResult);
     }
-    compacted.push(nextMessage);
+    compacted.push(sanitized);
   }
 
-  while (
-    compacted.length > 1 &&
-    estimateSerializedBytes({ session: { messages: compacted } }) > MAX_FIRESTORE_SESSION_BYTES
-  ) {
-    compacted.shift();
-  }
+  const payloadBytes = () => estimateSerializedBytes({ session: { messages: compacted } });
 
-  while (estimateSerializedBytes({ session: { messages: compacted } }) > MAX_FIRESTORE_SESSION_BYTES) {
+  const compactResultData = (result) => ({
+    ...compactMessageResult(result),
+    fileName: "",
+    width: Number(result?.width || 0) || 0,
+    height: Number(result?.height || 0) || 0,
+    sizeBytes: 0,
+    downloadUrl: "",
+    storagePath: ""
+  });
+
+  const compactAttachmentData = (attachment) => ({
+    ...compactMessageAttachment(attachment),
+    sizeBytes: 0,
+    base64: "",
+    inlineBase64: ""
+  });
+
+  const compactMessageData = (message) => {
+    if (message && typeof message === "object") {
+      message.options = {
+        mode: String(message?.options?.mode || "generate").trim() || "generate",
+        model: String(message?.options?.model || "").trim(),
+        count: Number(message?.options?.count || 1) || 1
+      };
+      message.requestPrompt = "";
+      message.error = "";
+      message.note = "";
+    }
+  };
+
+  while (payloadBytes() > MAX_FIRESTORE_SESSION_BYTES) {
     let reduced = false;
+
     for (const message of compacted) {
       if (Array.isArray(message.results) && message.results.length > 1) {
         message.results = message.results.slice(0, 1);
         reduced = true;
       }
+    }
+    if (reduced) continue;
+
+    for (const message of compacted) {
       if (Array.isArray(message.attachments) && message.attachments.length > 1) {
         message.attachments = message.attachments.slice(0, 1);
         reduced = true;
       }
-      if (reduced) break;
     }
-    if (!reduced) {
-      for (const message of compacted) {
-        if (Array.isArray(message.results)) {
-          message.results = message.results.map((result) => ({
-            ...result,
-            dataUrl: "",
-            sizeBytes: 0
-          }));
-        }
-        if (Array.isArray(message.attachments)) {
-          message.attachments = message.attachments.map((attachment) => ({
-            ...attachment,
-            dataUrl: "",
-            sizeBytes: 0
-          }));
-        }
+    if (reduced) continue;
+
+    for (const message of compacted) {
+      if (Array.isArray(message.results)) {
+        message.results = message.results.map(compactResultData);
+        reduced = true;
       }
-      break;
+      if (Array.isArray(message.attachments)) {
+        message.attachments = message.attachments.map(compactAttachmentData);
+        reduced = true;
+      }
     }
+    if (reduced) continue;
+
+    for (const message of compacted) {
+      compactMessageData(message);
+      reduced = true;
+    }
+    if (reduced) continue;
+
+    for (const message of compacted) {
+      if (typeof message.prompt === "string" && message.prompt.length > 1200) {
+        message.prompt = `${message.prompt.slice(0, 1200)}…`;
+        reduced = true;
+      }
+    }
+    if (reduced) continue;
+
+    for (const message of compacted) {
+      if (typeof message.prompt === "string") {
+        message.prompt = message.prompt.slice(0, 300);
+        reduced = true;
+      }
+    }
+    if (reduced) continue;
+
+    break;
   }
 
   return compacted;

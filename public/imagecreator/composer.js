@@ -1,9 +1,5 @@
-import { autosizeTextarea } from "./dom.js";
-
 export function bindComposer(elements, handlers = {}) {
   if (elements.promptInput) {
-    autosizeTextarea(elements.promptInput);
-    elements.promptInput.addEventListener("input", () => autosizeTextarea(elements.promptInput));
     elements.promptInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -26,7 +22,7 @@ export function setComposerDisabled(elements, disabled = false) {
 export function clearComposer(elements) {
   if (elements.promptInput) {
     elements.promptInput.value = "";
-    autosizeTextarea(elements.promptInput);
+    elements.promptInput.style.removeProperty("height");
   }
   if (elements.attachmentInput) elements.attachmentInput.value = "";
 }

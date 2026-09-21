@@ -13,9 +13,20 @@ function readWorkspaceFile(relativePath) {
 
 test("image creator expone la nueva página y su bootstrap modular", () => {
   const html = readWorkspaceFile("public/imageCreator.html");
-  assert.match(html, /<script type="module" src="imagecreator\/app\.js"><\/script>/, "La página debe cargar imagecreator/app.js como módulo principal.");
+  assert.match(html, /<script type="module" src="imagecreator\/app\.js(?:\?v=[^"]+)?"><\/script>/, "La página debe cargar imagecreator/app.js como módulo principal.");
   assert.match(html, /imagecreator\/imageCreator\.css/, "La página debe cargar el stylesheet propio de imagecreator.");
   assert.match(html, /id="imageCreatorApp"/, "La página debe exponer el shell principal de la aplicación.");
+});
+
+test("el panel de sesiones mantiene una jerarquía compacta", () => {
+  const html = readWorkspaceFile("public/imageCreator.html");
+  const css = readWorkspaceFile("public/imagecreator/imageCreator.css");
+  const sessionPanel = html.match(/<aside id="icSessionRail"[\s\S]*?<\/aside>/)?.[0] || "";
+  assert.match(sessionPanel, /ic-session-rail__header[\s\S]*<h1>Sesiones<\/h1>/);
+  assert.doesNotMatch(sessionPanel, /Gemini Image Chat/);
+  assert.match(sessionPanel, /ic-session-controls[\s\S]*ic-session-rail__search[\s\S]*id="icNewSessionBtn"/);
+  assert.match(css, /\.ic-session-controls\s*\{[^}]*grid-template-columns:minmax\(0,1fr\) auto;/);
+  assert.doesNotMatch(css, /\.ic-session-card\.is-active\s*\{[^}]*box-shadow:inset 2px 0/);
 });
 
 test("chrome layout integra image creator en el sidebar principal", () => {

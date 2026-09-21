@@ -1,7 +1,7 @@
 import { authFetchJson, buildVeoApiUrl } from "../js/api-client.js";
-import { prepareAttachmentsForGemini } from "./attachments.js";
-import { buildGeminiImagePayload, estimateGeminiPayloadBytes } from "./payloads.js";
-import { MAX_GEMINI_PAYLOAD_BYTES, MAX_RESULTS_PER_TURN } from "./constants.js";
+import { prepareAttachmentsForGemini } from "./attachments.js?v=2026-09-07.9";
+import { buildGeminiImagePayload, estimateGeminiPayloadBytes } from "./payloads.js?v=2026-09-14.1";
+import { MAX_GEMINI_PAYLOAD_BYTES, MAX_RESULTS_PER_TURN } from "./constants.js?v=2026-09-07.1";
 
 const GEMINI_IMAGE_QUOTA_COOLDOWN_MS = 60_000;
 let geminiImageQuotaBlockedUntil = 0;
@@ -48,9 +48,25 @@ function makeId(prefix = "msg") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function extractGeminiImageResults(imageData = {}, { sourceMessageId = "", options = {} } = {}) {
+function measureResultImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      if (!width || !height) return reject(new Error("La imagen generada no tiene dimensiones válidas."));
+      const gcd = (a, b) => b ? gcd(b, a % b) : a;
+      const divisor = gcd(width, height);
+      resolve({ width, height, aspectRatio: `${width / divisor}:${height / divisor}` });
+    };
+    image.onerror = () => reject(new Error("No fue posible leer la imagen generada."));
+    image.src = dataUrl;
+  });
+}
+
+async function extractGeminiImageResults(imageData = {}, { sourceMessageId = "", options = {} } = {}) {
   const parts = Array.isArray(imageData?.candidates?.[0]?.content?.parts) ? imageData.candidates[0].content.parts : [];
-  return parts
+  const results = parts
     .map((part, index) => {
       const inline = part?.inlineData || part?.inline_data;
       const mimeType = String(inline?.mimeType || inline?.mime_type || "").trim();
@@ -61,7 +77,6 @@ function extractGeminiImageResults(imageData = {}, { sourceMessageId = "", optio
         mimeType,
         dataUrl: `data:${mimeType};base64,${base64}`,
         model: String(options?.model || "").trim(),
-        aspectRatio: String(options?.aspectRatio || "1:1").trim() || "1:1",
         imageSize: String(options?.imageSize || "1K").trim() || "1K",
         sourceMessageId,
         createdAt: new Date().toISOString(),
@@ -69,6 +84,10 @@ function extractGeminiImageResults(imageData = {}, { sourceMessageId = "", optio
       };
     })
     .filter(Boolean);
+  return Promise.all(results.map(async (result) => ({
+    ...result,
+    ...await measureResultImage(result.dataUrl)
+  })));
 }
 
 export async function generateImagesViaGemini({ mode, prompt, options, attachments }) {
@@ -95,7 +114,7 @@ export async function generateImagesViaGemini({ mode, prompt, options, attachmen
           payload
         }
       });
-      const extracted = extractGeminiImageResults(response, {
+      const extracted = await extractGeminiImageResults(response, {
         sourceMessageId: "",
         options
       });

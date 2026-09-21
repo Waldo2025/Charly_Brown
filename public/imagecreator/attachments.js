@@ -4,7 +4,7 @@ import {
   MAX_REFERENCE_ATTACHMENTS,
   TARGET_INLINE_IMAGE_BYTES,
   THUMBNAIL_MAX_DIMENSION
-} from "./constants.js";
+} from "./constants.js?v=2026-09-07.1";
 
 function makeId(prefix = "att") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -138,7 +138,7 @@ export async function fileToAttachment(file, deps = {}) {
   return attachmentToInlineInput({
     id: makeId(),
     name: String(file.name || "referencia").trim() || "referencia",
-    mimeType: sourceSplit.mimeType,
+    mimeType: compact.mimeType,
     base64: sourceSplit.base64,
     inlineBase64: base64,
     dataUrl: sourceDataUrl,
@@ -218,18 +218,24 @@ export async function prepareAttachmentsForGemini(attachments = [], {
   return prepared;
 }
 
-export async function resultImageToAttachment(result = {}) {
+export async function resultImageToAttachment(result = {}, {
+  maxDimension = THUMBNAIL_MAX_DIMENSION,
+  targetBytes = TARGET_INLINE_IMAGE_BYTES
+} = {}) {
   const dataUrl = String(result?.dataUrl || "").trim();
   if (!dataUrl) throw new Error("result_data_url_missing");
   const sourceSplit = splitDataUrl(dataUrl);
   const compact = await downscaleImageDataUrl(dataUrl, {
-    mimeType: String(result?.mimeType || "image/jpeg").trim() || "image/jpeg"
+    mimeType: String(result?.mimeType || "image/jpeg").trim() || "image/jpeg",
+    maxDimension,
+    targetBytes
   });
   const { base64 } = splitDataUrl(compact.dataUrl);
   return attachmentToInlineInput({
     id: makeId("var"),
     name: String(result?.fileName || "variacion").trim() || "variacion",
-    mimeType: sourceSplit.mimeType,
+    mimeType: compact.mimeType,
+    originalMimeType: sourceSplit.mimeType,
     base64: sourceSplit.base64,
     inlineBase64: base64,
     dataUrl,
@@ -238,6 +244,34 @@ export async function resultImageToAttachment(result = {}) {
     height: Number(result?.height || 0) || compact.height,
     sizeBytes: estimateBase64Bytes(sourceSplit.base64),
     source: "generated"
+  });
+}
+
+export async function dataUrlToAttachment(dataUrl = "", {
+  name = "referencia",
+  source = "generated"
+} = {}) {
+  const cleanDataUrl = String(dataUrl || "").trim();
+  if (!cleanDataUrl) throw new Error("data_url_missing");
+  const sourceSplit = splitDataUrl(cleanDataUrl);
+  const compact = await downscaleImageDataUrl(cleanDataUrl, {
+    mimeType: sourceSplit.mimeType
+  });
+  const { base64 } = splitDataUrl(compact.dataUrl);
+  const sourceDimensions = await decodeImageDimensions(cleanDataUrl);
+  return attachmentToInlineInput({
+    id: makeId("region"),
+    name: String(name || "referencia").trim() || "referencia",
+    mimeType: compact.mimeType,
+    originalMimeType: sourceSplit.mimeType,
+    base64: sourceSplit.base64,
+    inlineBase64: base64,
+    dataUrl: cleanDataUrl,
+    originalDataUrl: cleanDataUrl,
+    width: sourceDimensions.width || compact.width,
+    height: sourceDimensions.height || compact.height,
+    sizeBytes: estimateBase64Bytes(sourceSplit.base64),
+    source: String(source || "generated").trim() || "generated"
   });
 }
 

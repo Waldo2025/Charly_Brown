@@ -24,10 +24,14 @@ test("icOptionsPanel se comporta como panel flotante y toggleable", () => {
   const html = readWorkspaceFile("public/imageCreator.html");
   const css = readWorkspaceFile("public/imagecreator/imageCreator.css");
   const app = readWorkspaceFile("public/imagecreator/app.js");
+  assert.match(html, /id="icOptionsModal"[^>]*aria-hidden="true"/, "La página debe incluir el overlay del modal.");
   assert.match(html, /id="icOptionsPanel"/, "La página debe incluir icOptionsPanel.");
+  assert.match(html, /id="icOptionsPanel"[^>]*role="dialog"[^>]*aria-modal="true"/, "Ajustes debe ser un diálogo modal accesible.");
   assert.match(html, /id="icCloseOptionsBtn"/, "El panel flotante debe tener botón de cierre.");
-  assert.match(css, /\.ic-options-panel\s*\{[\s\S]*position:\s*absolute;/, "El panel debe estar posicionado como flotante.");
+  assert.match(css, /\.ic-options-modal\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*160;/, "El overlay debe cubrir el workspace.");
   assert.match(app, /elements\.closeOptionsBtn/, "app.js debe registrar el botón de cierre del panel.");
+  assert.match(app, /event\.target === elements\.optionsModal/, "El modal debe cerrar al pulsar el fondo.");
+  assert.match(app, /dom\.js\?v=2026-09-07\.15/, "La dependencia DOM debe invalidar caché al incorporar el modal.");
 });
 
 test("api de imagecreator no degrada el resultado inmediatamente después de recibirlo", () => {

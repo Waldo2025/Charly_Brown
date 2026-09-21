@@ -20,12 +20,13 @@
 
   <input type="text" id="prompt" placeholder="Describe tu imagen o pega la lectura aquí" />
   <select id="modelo" style="width: 100%; margin-top: 1rem; padding: 1rem; border-radius: 8px; font-size: 1rem;">
-    <optgroup label="Herramientas disponibles">
-      <option value="gemini-mindmap">Mapa visual</option>
+    <optgroup label="Generación con IA Gemini">
+      <option value="gemini-3.1-flash-image" selected>Generar Imagen (Gemini 3.1 Flash Image)</option>
+      <option value="gemini-mindmap">Mapa visual de conceptos (Lectura)</option>
     </optgroup>
   </select>
 
-  <button id="generarImagen">Generar mapa visual</button>
+  <button id="generarImagen">Generar con Gemini</button>
   <div id="imagenGenerada" style="display: flex; flex-wrap: wrap;"></div>
 
 
