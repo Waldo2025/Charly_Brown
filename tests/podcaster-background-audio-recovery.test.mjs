@@ -120,6 +120,7 @@ test("background source changes reuse one MediaElementSource node", async () => 
   };
   controller.resolveAudioSource = async (clip) => String(clip?.sourceUrl || "");
   controller.getBlobUrlSync = (source) => source;
+  controller.getBlobUrl = async source => source;
 
   await controller.syncBackgroundMusic(1000, 1, false);
   assert.equal(createMediaElementSourceCalls, 1);
@@ -130,7 +131,7 @@ test("background source changes reuse one MediaElementSource node", async () => 
 
   assert.equal(createMediaElementSourceCalls, 1);
   assert.equal(controller.backgroundSource, originalSourceNode);
-  assert.equal(controller.backgroundSourceKey, activeSource);
+  assert.equal(controller.backgroundSourceKey, controller.resolveAudioSourceKey({ sourceUrl: activeSource }));
 });
 
 test("stop and replay preserve the MediaElementSource association", async () => {
@@ -206,17 +207,18 @@ test("background recovery stops after four failed attempts for one source", () =
   assert.equal(controller.backgroundRecoveryAttempts, 4);
 });
 
-test("visual scene replacement never evicts row audio unless explicitly requested", () => {
+test("visual scene replacement never evicts row audio unless explicitly requested", async () => {
   const controller = new PodcasterPlaybackController();
+  controller.prepareSessionMedia = async () => true;
   let audioInvalidations = 0;
   controller.invalidateRowAudioCache = () => {
     audioInvalidations += 1;
   };
 
-  controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} });
+  await controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} });
   assert.equal(audioInvalidations, 0);
 
-  controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} }, { includeAudio: true });
+  await controller.invalidateRowMediaCache("row-1", { dialogueVideoMap: {} }, { includeAudio: true });
   assert.equal(audioInvalidations, 1);
 });
 

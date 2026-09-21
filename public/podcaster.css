@@ -2110,6 +2110,125 @@ body.is-resizing-podcaster-sidepanel * {
   gap: 14px;
 }
 
+.timeline-clip-duration-panel.admin-user-videos-panel {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 42px));
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.admin-user-videos-panel .timeline-clip-duration-head > div {
+  min-width: 0;
+}
+
+.admin-user-videos-subtitle {
+  margin: 4px 0 0;
+  color: var(--pod-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.admin-user-videos-user-field {
+  margin: 0;
+}
+
+.admin-user-videos-status {
+  min-height: 20px;
+  color: var(--pod-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-user-videos-status.is-error {
+  color: var(--creator-amber);
+}
+
+.admin-user-videos-list {
+  display: grid;
+  gap: 8px;
+  min-height: 110px;
+  max-height: min(420px, 52vh);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.admin-user-video-item {
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--pod-border) 78%, transparent 22%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pod-surface-2) 88%, transparent 12%);
+}
+
+.admin-user-video-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.admin-user-video-title {
+  overflow: hidden;
+  color: var(--pod-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-video-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: var(--pod-muted);
+  font-size: 11px;
+}
+
+.admin-user-video-archived {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--creator-amber) 36%, var(--pod-border) 64%);
+  border-radius: 999px;
+  color: var(--creator-amber);
+  background: color-mix(in srgb, var(--creator-amber) 10%, var(--pod-surface) 90%);
+}
+
+.admin-user-video-open-btn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--pod-accent) 28%, var(--pod-border) 72%);
+  border-radius: 8px;
+  color: var(--pod-accent);
+  background: color-mix(in srgb, var(--pod-accent-soft) 74%, transparent 26%);
+}
+
+.admin-user-video-open-btn:hover,
+.admin-user-video-open-btn:focus-visible {
+  border-color: color-mix(in srgb, var(--pod-accent) 54%, var(--pod-border) 46%);
+  background: color-mix(in srgb, var(--pod-accent-soft) 92%, var(--pod-surface) 8%);
+}
+
+@media (max-width: 560px) {
+  .timeline-clip-duration-panel.admin-user-videos-panel {
+    width: calc(100vw - 20px);
+  }
+
+  .admin-user-video-item {
+    gap: 8px;
+  }
+}
+
 .dialogue-video-directive-panel {
   width: min(620px, calc(100vw - 24px));
   border: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
@@ -4325,7 +4444,7 @@ body.is-snoopy-editor-light-theme .montage-export-tab.is-active i {
   gap: 10px;
   min-height: 0;
   position: relative;
-  transition: grid-template-columns 0.22s ease;
+  transition: none;
   overflow-y: auto;
   scrollbar-width: none;
   height: 100%;
@@ -9358,7 +9477,7 @@ body.is-snoopy-editor-light-theme {
 
 body.is-snoopy-editor-light-theme .snoopy-editor-child-modal .floating-panel-card,
 body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal .pme-modal-container,
-body.is-snoopy-editor-light-theme #podcastPortraitViewer .podcast-portrait-viewer-card {
+body.is-snoopy-editor-light-theme #podcastPortraitViewer:not(.has-reference-editor) .podcast-portrait-viewer-card {
   color: var(--snoopy-text);
   border-color: var(--snoopy-border) !important;
   background: var(--snoopy-surface) !important;
@@ -9419,7 +9538,7 @@ body.is-snoopy-editor-light-theme .snoopy-editor-child-modal .floating-panel-hea
 }
 
 body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal .pme-modal-header,
-body.is-snoopy-editor-light-theme #podcastPortraitViewer .podcast-portrait-viewer-head {
+body.is-snoopy-editor-light-theme #podcastPortraitViewer:not(.has-reference-editor) .podcast-portrait-viewer-head {
   color: var(--snoopy-text);
   border-color: var(--snoopy-border);
   background: var(--snoopy-surface-subtle);
@@ -10455,6 +10574,10 @@ body.podcast-timeline-resizing-lane .podcast-video-track-row.is-educational-scen
   z-index: 2147483647;
 }
 
+#regenerateGeminiAudioConfigModal.floating-panel-modal {
+  z-index: 2147483647;
+}
+
 .podcast-audio-timeline-chip {
   position: absolute;
   top: 10px;
@@ -10893,22 +11016,26 @@ body.podcast-timeline-resizing-lane .podcast-video-track-row.is-educational-scen
 }
 
 /* Colores de Propuestas en Timeline */
-.podcast-video-clip-body.has-pending-proposals {
+.podcast-video-clip-body.has-pending-proposals,
+.podcast-video-timeline-clip.has-pending-proposals .podcast-video-clip-body {
   background: color-mix(in srgb, #f59e0b 22%, transparent 78%) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #f59e0b 35%, transparent 65%);
 }
 
-.podcast-video-clip-body.has-all-proposals-realized {
+.podcast-video-clip-body.has-all-proposals-realized,
+.podcast-video-timeline-clip.has-all-proposals-realized .podcast-video-clip-body {
   background: color-mix(in srgb, #22c55e 25%, transparent 75%) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #22c55e 40%, transparent 60%);
 }
 
-.podcast-video-timeline-clip.is-active .podcast-video-clip-body.has-pending-proposals {
+.podcast-video-timeline-clip.is-active .podcast-video-clip-body.has-pending-proposals,
+.podcast-video-timeline-clip.is-active.has-pending-proposals .podcast-video-clip-body {
   background: color-mix(in srgb, #f59e0b 40%, var(--pod-accent) 20%) !important;
   box-shadow: inset 0 0 0 2px #f59e0b;
 }
 
-.podcast-video-timeline-clip.is-active .podcast-video-clip-body.has-all-proposals-realized {
+.podcast-video-timeline-clip.is-active .podcast-video-clip-body.has-all-proposals-realized,
+.podcast-video-timeline-clip.is-active.has-all-proposals-realized .podcast-video-clip-body {
   background: color-mix(in srgb, #22c55e 45%, var(--pod-accent) 20%) !important;
   box-shadow: inset 0 0 0 2px #22c55e;
 }
@@ -11726,7 +11853,7 @@ body.podcast-timeline-resizing-lane .podcast-video-track-row.is-educational-scen
   min-inline-size: var(--pod-studio-inspector-min);
   max-inline-size: var(--pod-studio-inspector-max);
   resize: none;
-  transition: opacity 0.18s ease, transform 0.22s ease, padding 0.18s ease, border-width 0.18s ease;
+  transition: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
@@ -13174,6 +13301,9 @@ body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal {
 .global-config-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-top: 4px;
 }
 
@@ -13944,6 +14074,41 @@ body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal {
   gap: 8px;
 }
 
+.gemini-audio-regenerate-config-panel {
+  width: min(680px, calc(100vw - 24px));
+  max-height: min(720px, calc(100vh - 24px));
+}
+
+.gemini-audio-regenerate-config-panel .timeline-clip-duration-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.gemini-audio-regenerate-config-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding: 4px 2px;
+}
+
+.gemini-audio-regenerate-config-body > div {
+  display: grid;
+  gap: 8px;
+}
+
+.gemini-audio-regenerate-config-label {
+  color: var(--studio-modal-muted, var(--pod-muted));
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.global-speaker-row.gemini-audio-config-speaker-row {
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr);
+  align-items: center;
+}
+
 .global-speaker-row {
   border: 1px solid var(--studio-modal-border, var(--pod-border));
   border-radius: 12px;
@@ -14032,6 +14197,22 @@ body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal {
 
 .global-apply-btn:hover {
   filter: brightness(0.96);
+}
+
+@media (max-width: 560px) {
+  .global-speaker-row.gemini-audio-config-speaker-row {
+    grid-template-columns: 1fr;
+  }
+
+  .gemini-audio-regenerate-config-panel .timeline-clip-duration-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .gemini-audio-regenerate-config-panel .timeline-clip-duration-actions button {
+    width: 100%;
+    margin: 0;
+  }
 }
 
 .sidepanel-panel {
@@ -15008,6 +15189,14 @@ body.is-snoopy-editor-light-theme #podcastSceneVideoSelectorModal {
   color: var(--pod-muted);
   font-size: 12px;
   text-align: center;
+}
+
+.session-menu-readonly-note {
+  display: block;
+  padding: 8px 10px;
+  color: var(--pod-muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .session-card {
@@ -16753,7 +16942,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button.row-icon-btn, summary.row-icon-btn),
 .snoopy-editor-child-modal :where(button.row-icon-btn),
 #podcastSceneVideoSelectorModal :where(button.row-icon-btn),
-#podcastPortraitViewer :where(button.row-icon-btn) {
+#podcastPortraitViewer:not(.has-reference-editor) :where(button.row-icon-btn) {
   width: 32px;
   min-width: 32px;
   height: 32px;
@@ -16775,7 +16964,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button.row-icon-btn, summary.row-icon-btn):hover:not(:disabled),
 .snoopy-editor-child-modal button.row-icon-btn:hover:not(:disabled),
 #podcastSceneVideoSelectorModal button.row-icon-btn:hover:not(:disabled),
-#podcastPortraitViewer button.row-icon-btn:hover:not(:disabled) {
+#podcastPortraitViewer:not(.has-reference-editor) button.row-icon-btn:hover:not(:disabled) {
   color: var(--studio-button-text-strong);
   border-color: var(--studio-button-border-hover);
   background: var(--studio-button-bg-hover);
@@ -16786,7 +16975,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button.row-icon-btn, summary.row-icon-btn):focus-visible,
 .snoopy-editor-child-modal button:focus-visible,
 #podcastSceneVideoSelectorModal button:focus-visible,
-#podcastPortraitViewer button:focus-visible {
+#podcastPortraitViewer:not(.has-reference-editor) button:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px var(--studio-focus-ring);
 }
@@ -16801,7 +16990,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button.row-icon-btn, summary.row-icon-btn):disabled,
 .snoopy-editor-child-modal button:disabled,
 #podcastSceneVideoSelectorModal button:disabled,
-#podcastPortraitViewer button:disabled {
+#podcastPortraitViewer:not(.has-reference-editor) button:disabled {
   cursor: not-allowed;
   opacity: 0.46;
   transform: none;
@@ -16965,7 +17154,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button, summary.row-icon-btn),
 .snoopy-editor-child-modal :where(button),
 #podcastSceneVideoSelectorModal :where(button),
-#podcastPortraitViewer :where(button) {
+#podcastPortraitViewer:not(.has-reference-editor) :where(button) {
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -16975,7 +17164,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button, summary.row-icon-btn):hover:not(:disabled),
 .snoopy-editor-child-modal button:hover:not(:disabled),
 #podcastSceneVideoSelectorModal button:hover:not(:disabled),
-#podcastPortraitViewer button:hover:not(:disabled) {
+#podcastPortraitViewer:not(.has-reference-editor) button:hover:not(:disabled) {
   color: var(--studio-button-active-text) !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -16986,7 +17175,7 @@ body.is-snoopy-editor-light-theme {
 #podcastVideoShell :where(button, summary.row-icon-btn):focus-visible,
 .snoopy-editor-child-modal button:focus-visible,
 #podcastSceneVideoSelectorModal button:focus-visible,
-#podcastPortraitViewer button:focus-visible {
+#podcastPortraitViewer:not(.has-reference-editor) button:focus-visible {
   outline: 2px solid var(--studio-focus-ring) !important;
   outline-offset: 2px;
   box-shadow: none !important;
@@ -17080,6 +17269,19 @@ body.is-snoopy-editor-light-theme {
   color: var(--studio-button-active-text) !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+#podcastVideoShell .podcast-preview-left-toolbar .podcast-preview-fullscreen-toolbar-btn {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  margin: 0;
+  color: var(--snoopy-text-muted);
+  backdrop-filter: none;
+}
+
+#podcastVideoShell .podcast-preview-left-toolbar .podcast-preview-fullscreen-toolbar-btn[aria-pressed="true"] {
+  color: var(--studio-button-active-text) !important;
 }
 
 #podcastVideoShell .podcast-video-preview-shell.is-compact-toolbar .podcast-preview-left-toolbar {
@@ -17200,7 +17402,7 @@ body.is-snoopy-editor-light-theme {
 body:not(.is-snoopy-editor-light-theme):not(.is-snoopy-editor-mid-theme) :where(
   .snoopy-editor-child-modal .floating-panel-card,
   #podcastSceneVideoSelectorModal .pme-modal-container,
-  #podcastPortraitViewer .podcast-portrait-viewer-card,
+  #podcastPortraitViewer:not(.has-reference-editor) .podcast-portrait-viewer-card,
   .podcast-modal-container,
   .disfluency-modal-card
 ) {
@@ -17213,7 +17415,7 @@ body:not(.is-snoopy-editor-light-theme):not(.is-snoopy-editor-mid-theme) :where(
 body:not(.is-snoopy-editor-light-theme):not(.is-snoopy-editor-mid-theme) :where(
   .snoopy-editor-child-modal .floating-panel-head,
   #podcastSceneVideoSelectorModal .pme-modal-header,
-  #podcastPortraitViewer .podcast-portrait-viewer-head,
+  #podcastPortraitViewer:not(.has-reference-editor) .podcast-portrait-viewer-head,
   .podcast-modal-header,
   .podcast-modal-footer,
   .music-config-head,
@@ -18141,7 +18343,7 @@ body.is-snoopy-editor-light-theme {
   .pme-modal-overlay > .pme-modal-container,
   .disfluency-modal > .disfluency-modal-card,
   .podcast-modal-container,
-  #podcastPortraitViewer > .podcast-portrait-viewer-card
+  #podcastPortraitViewer:not(.has-reference-editor) > .podcast-portrait-viewer-card
 ) {
   color: var(--studio-modal-text) !important;
   border: 1px solid var(--studio-modal-border) !important;
@@ -23256,6 +23458,10 @@ body:not(.is-snoopy-editor-light-theme):not(.is-snoopy-editor-mid-theme) .sessio
 
 .sessions-rail-actions {
   gap: 4px;
+}
+
+#openAdminUserVideosBtn[hidden] {
+  display: none !important;
 }
 
 .sessions-rail .sessions-rail-actions .panel-icon-btn {

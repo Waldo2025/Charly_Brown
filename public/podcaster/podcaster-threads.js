@@ -53,11 +53,17 @@
         return false;
     }
 
+    const mediaFields = ["dialogueVideoMap", "dialogueAudioMap", "dialogueVideoDeletedAtMap", "dialogueAudioDeletedAtMap", "podcastVideoConfig", "visualEffectsMap", "rowReferenceImageMap", "rowReferenceImageListMap", "rowReferenceVideoMap", "rowReferenceModeByRowId"];
+    function mediaSnapshot(session) {
+        return Object.fromEntries(mediaFields.map(key => [key, cloneValue(session[key] || {}, {})]));
+    }
+
     function buildThreadFromSession(session, seed = null) {
         const source = seed && typeof seed === "object" ? seed : {};
         return {
             id: String(source.id || "").trim() || createThreadId(session),
             name: String(source.name || "").trim() || 'Versión 1',
+            ...mediaSnapshot(session),
             chat: cloneValue(session.chat || [], []),
             script: session.script ? cloneValue(session.script, null) : null,
             prompt: session.prompt || '',
@@ -106,12 +112,19 @@
             activeThread.script = session.script ? cloneValue(session.script, null) : null;
             activeThread.prompt = session.prompt || '';
             activeThread.videoConfig = session.videoConfig ? cloneValue(session.videoConfig, null) : null;
+            Object.assign(activeThread, mediaSnapshot(session));
             activeThread.updatedAt = Date.now();
         }
     }
 
     function restoreThreadToSession(session, targetThread) {
         if (!session || !targetThread) return false;
+        const rowIds = new Set((targetThread.script?.rows || []).map(row => String(row.id)));
+        for (const key of mediaFields) {
+            if (Object.hasOwn(targetThread, key)) session[key] = cloneValue(targetThread[key], {});
+            else if (key !== "podcastVideoConfig") session[key] = Object.fromEntries(Object.entries(session[key] || {}).filter(([id]) => rowIds.has(id)));
+            else session[key] = {};
+        }
         session.activeThreadId = targetThread.id;
         session.chat = cloneValue(targetThread.chat || [], []);
         session.script = targetThread.script ? cloneValue(targetThread.script, null) : null;

@@ -1,3 +1,4 @@
+const mediaState = require("./podcaster-media-state.js");
 const crypto = require("node:crypto");
 const { GoogleAuth } = require("google-auth-library");
 const {
@@ -18,6 +19,61 @@ const TASK_INVOKER = `charly-tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com
 const VEO_DISPATCH_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/dispatchVeoTask`;
 const NON_RETRYABLE_VERTEX_CODES = new Set([3, 5, 7, 9, 12, 16]);
 const VERTEX_VIDEO_OPERATION_DEADLINE_MS = 26 * 60 * 1000;
+const GEMINI_TTS_VOICES = new Set([
+  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+  "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia",
+  "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix",
+  "Sadachbia", "Sadaltager", "Sulafat"
+]);
+const GEMINI_TTS_LANGUAGE_CODES = new Set([
+  "ar", "fil", "bn", "fi", "nl", "gl", "en", "ka", "fr", "el", "de", "gu", "hi", "ht", "id", "he",
+  "it", "hu", "ja", "is", "ko", "jv", "mr", "kn", "pl", "kok", "pt", "lo", "ro", "la", "ru", "lv",
+  "es", "lt", "ta", "lb", "te", "mk", "th", "mai", "tr", "mg", "uk", "ms", "vi", "ml", "af", "mn",
+  "sq", "ne", "am", "nb", "hy", "nn", "az", "or", "eu", "ps", "be", "fa", "bg", "pa", "my", "sr",
+  "ca", "sd", "ceb", "si", "cmn", "sk", "hr", "sl", "cs", "sw", "da", "sv", "et", "ur"
+]);
+
+function resolveTtsSpeechLocale(value = "") {
+  const requested = String(value || "").trim() || "es-MX";
+  if (requested === "es" || requested === "es-MX") {
+    return {
+      speechLocale: "es-MX",
+      languageCode: "es",
+      instruction: "Speak only in natural Mexican Spanish. Do not use Peninsular Spanish pronunciation and do not switch languages."
+    };
+  }
+  if (requested === "es-ES") {
+    return {
+      speechLocale: "es-ES",
+      languageCode: "es",
+      instruction: "Speak only in natural Peninsular Spanish. Do not use Latin American pronunciation and do not switch languages."
+    };
+  }
+  if (requested === "es-419" || requested === "es-US") {
+    return {
+      speechLocale: "es-419",
+      languageCode: "es",
+      instruction: "Speak only in neutral Latin American Spanish. Avoid strongly regional vocabulary and do not switch languages."
+    };
+  }
+  const languageCode = requested.toLowerCase().split("-")[0];
+  if (!GEMINI_TTS_LANGUAGE_CODES.has(languageCode)) {
+    throw Object.assign(new Error("unsupported_speech_locale"), { status: 400, code: "unsupported_speech_locale" });
+  }
+  return {
+    speechLocale: languageCode,
+    languageCode,
+    instruction: `Speak only in the language identified by BCP-47 code ${languageCode}. Do not switch languages.`
+  };
+}
+
+function normalizeTtsVoiceName(value = "") {
+  const voiceName = String(value || "").trim();
+  if (!GEMINI_TTS_VOICES.has(voiceName)) {
+    throw Object.assign(new Error("unsupported_tts_voice"), { status: 400, code: "unsupported_tts_voice" });
+  }
+  return voiceName;
+}
 
 function normalizeVertexModelName(model = "") {
   return String(model || "")
@@ -227,6 +283,12 @@ function extractImage(response) {
 async function createAiJob(req, type) {
   const authContext = await resolveAuthContext(req);
   const input = compactInput(req.body || {});
+  if (type === "dialogue_audio") {
+    const speech = resolveTtsSpeechLocale(input?.speechLocale || input?.languageCode || "es-MX");
+    input.voiceName = normalizeTtsVoiceName(input?.voiceName || "Aoede");
+    input.speechLocale = speech.speechLocale;
+    input.languageCode = speech.languageCode;
+  }
   const sessionId = cleanId(input?.sessionId || "");
   const { db, admin } = getAdminServices();
   const sessionRef = db.collection("podcaster_sessions").doc(sessionId);
@@ -247,6 +309,15 @@ async function createAiJob(req, type) {
   if (!sessionSnapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
   if (!sessionAccess(sessionSnapshot.data(), authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
   const jobId = crypto.randomUUID();
+  if (["dialogue_video", "dialogue_audio"].includes(type)) {
+    const origin = { ...sessionSnapshot.data()?.session, id: sessionId };
+    const kind = type === "dialogue_audio" ? "audio" : "video";
+    input.selectionContext = {
+      ...(input.selectionContext || mediaState.captureMediaSelection(origin, input.rowId, kind, jobId)),
+      sessionId, rowId: String(input.rowId || ""), kind,
+      requestId: String(input.selectionContext?.requestId || jobId)
+    };
+  }
   const now = new Date();
   const isVideo = type === "dialogue_video";
   const requestedModel = String(input.model || "");
@@ -482,30 +553,32 @@ async function processVideoJob(job, ref) {
     referenceMode: references.mode,
     updatedAt: new Date().toISOString()
   };
-  const generatedRowId = String(input.rowId || "").trim();
-  const sessionRef = db.collection("podcaster_sessions").doc(String(job.sessionId || ""));
-  if (generatedRowId) await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(sessionRef);
-    if (!snapshot.exists) return;
-    const sessionData = snapshot.data()?.session && typeof snapshot.data().session === "object" ? snapshot.data().session : {};
-    const currentClip = sessionData?.dialogueVideoMap?.[generatedRowId];
-    const currentSourceType = String(currentClip?.sourceType || currentClip?.replacementSource || "").trim().toLowerCase();
-    const currentIsManual = currentClip?.manuallyReplaced === true || currentSourceType === "manual-replacement" || currentSourceType === "manual";
-    if (currentIsManual) return;
-    const currentUpdatedAt = currentClip?.updatedAt?.toDate?.().getTime?.()
-      ?? Date.parse(String(currentClip?.updatedAt || ""));
-    const generatedUpdatedAt = Date.parse(dialogueVideo.updatedAt);
-    if (Number.isFinite(currentUpdatedAt) && currentUpdatedAt >= generatedUpdatedAt) return;
-    transaction.set(sessionRef, {
-      session: {
-        dialogueVideoMap: { [generatedRowId]: dialogueVideo },
-        updatedAt: dialogueVideo.updatedAt
-      },
-      sessionUpdatedAt: dialogueVideo.updatedAt,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-  });
-  await ref.set({ status: "ready", stage: "ready", progress: 1, hint: "Video listo.", result: { dialogueVideo }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  const application = await commitGeneratedSceneMedia(job, dialogueVideo, ref);
+  if (application.reason === "cancelled") return;
+  await ref.set({ status: "ready", stage: "ready", progress: 1, hint: application.status === "applied" ? "Escena reemplazada." : "Video creado. Disponible para aplicar en la biblioteca.", result: { dialogueVideo: application.clip || dialogueVideo, application: { status: application.status, reason: application.reason || "" } }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+}
+
+async function commitGeneratedSceneMedia(job, clip, jobRef) {
+  const { db, admin } = getAdminServices();
+  const context = job.input?.selectionContext;
+  // Old queued jobs without a captured revision must never overwrite a newer selection.
+  if (!context) return { status: "superseded", reason: "missing-selection-context", clip };
+  const sessionRef = db.collection("podcaster_sessions").doc(job.sessionId);
+  try {
+    return await db.runTransaction(async transaction => {
+      const [snapshot, jobSnapshot] = await Promise.all([transaction.get(sessionRef), transaction.get(jobRef)]);
+      if (jobSnapshot.data()?.status === "cancelled") return { status: "superseded", reason: "cancelled", clip };
+      if (!snapshot.exists) return { status: "superseded", reason: "session-removed", clip };
+      const outcome = mediaState.selectSceneMedia({ ...snapshot.data().session, id: job.sessionId }, context.rowId, clip, context);
+      if (outcome.status === "applied" && !outcome.unchanged) transaction.update(sessionRef, {
+        session: outcome.session, sessionUpdatedAt: outcome.session.updatedAt, updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return { status: outcome.status, reason: outcome.reason || "", clip: outcome.status === "applied" ? outcome.clip : clip };
+    });
+  } catch (error) {
+    // The file already exists. Persist a retriable application result, without charging for generation again.
+    return { status: "error", reason: String(error.message || error), clip };
+  }
 }
 
 function extractAudioParts(response) {
@@ -576,10 +649,11 @@ async function processAudioJob(job, ref) {
   const { bucket, admin } = getAdminServices();
   const input = job.input || {};
   const isMusic = job.type === "music";
-  const voiceName = String(input.voiceName || "Aoede").trim() || "Aoede";
+  const voiceName = isMusic ? "" : normalizeTtsVoiceName(input.voiceName || "Aoede");
+  const speech = isMusic ? null : resolveTtsSpeechLocale(input.speechLocale || input.languageCode || "es-MX");
   const prompt = isMusic
     ? `Create a polished, loop-friendly instrumental podcast music clip. No speech or lyrics. Direction: ${String(input.prompt || input.preset || "warm ambient editorial underscore").slice(0, 3000)}`
-    : `Read the following podcast dialogue naturally and clearly as ${String(input.speakerName || input.speakerLabel || "the speaker")}. Preserve the exact wording and do not add commentary. Dialogue: ${String(input.text || input.targetSpeechLine || "").slice(0, 8000)}`;
+    : `${speech.instruction} Read the following podcast dialogue naturally and clearly as ${String(input.speakerName || input.speakerLabel || "the speaker")}. Preserve the exact wording and do not add commentary. Dialogue: ${String(input.text || input.targetSpeechLine || "").slice(0, 8000)}`;
   if (!isMusic && !String(input.text || input.targetSpeechLine || "").trim()) throw Object.assign(new Error("dialogue_text_required"), { status: 400 });
   let audioParts;
   if (isMusic) {
@@ -592,7 +666,7 @@ async function processAudioJob(job, ref) {
       config: {
         responseModalities: ["AUDIO"],
         speechConfig: {
-          languageCode: String(input.languageCode || "es-MX"),
+          languageCode: speech.languageCode,
           voiceConfig: { prebuiltVoiceConfig: { voiceName } }
         }
       }
@@ -613,13 +687,11 @@ async function processAudioJob(job, ref) {
   const downloadToken = crypto.randomUUID();
   await bucket.file(storagePath).save(output, { resumable: false, metadata: { contentType: mimeType, metadata: { jobId: job.jobId, ownerId: job.ownerId, type: job.type, firebaseStorageDownloadTokens: downloadToken } } });
   if (String((await ref.get()).data()?.status || "") === "cancelled") throw Object.assign(new Error("ai_job_cancelled"), { code: "ai_job_cancelled" });
-  const previousStoragePath = String(input.previousStoragePath || "").trim();
-  if (previousStoragePath && previousStoragePath !== storagePath && previousStoragePath.startsWith(`podcaster/sessions/${job.sessionId}/`)) {
-    await bucket.file(previousStoragePath).delete({ ignoreNotFound: true }).catch(() => {});
-  }
   const media = {
     mimeType,
     size: output.length,
+    durationSec: pcm ? raw.length / (sampleRate * 2) : 0,
+    sourceType: "generated",
     storagePath,
     downloadUrl: tokenDownloadUrl(bucket.name, storagePath, downloadToken),
     updatedAt: new Date().toISOString(),
@@ -627,7 +699,13 @@ async function processAudioJob(job, ref) {
   };
   const result = isMusic
     ? { track: { ...media, name: "AI Music", durationSec: 0, prompt: String(input.prompt || "") } }
-    : { dialogueAudio: { ...media, rowId: String(input.rowId || ""), speaker: String(input.speakerLabel || input.speaker || ""), voiceName, promptVersion: "podcaster_vertex_tts_v1", targetSpeechLine: String(input.targetSpeechLine || input.text || ""), playbackRate: 1, wordTimings: [] } };
+    : { dialogueAudio: { ...media, rowId: String(input.rowId || ""), speaker: String(input.speakerLabel || input.speaker || ""), voiceName, speechLocale: speech.speechLocale, languageCode: speech.languageCode, promptVersion: "podcaster_vertex_tts_v2", targetSpeechLine: String(input.targetSpeechLine || input.text || ""), playbackRate: 1, wordTimings: [] } };
+  if (!isMusic) {
+    const application = await commitGeneratedSceneMedia(job, result.dialogueAudio, ref);
+    result.dialogueAudio = application.clip || result.dialogueAudio;
+    if (application.reason === "cancelled") return;
+    result.application = { status: application.status, reason: application.reason || "" };
+  }
   await ref.set({ status: "ready", stage: "ready", progress: 1, hint: isMusic ? "Música lista." : "Audio listo.", result, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
 }
 
@@ -761,6 +839,8 @@ module.exports = {
   extractVertexVideoOutcome,
   createVertexVideoEmptyError,
   normalizeVertexVideoError,
+  resolveTtsSpeechLocale,
+  normalizeTtsVoiceName,
   isRetryableAiJobError,
   normalizeOwnedReferencePath,
   buildCanonicalDialogueVideoStoragePath,

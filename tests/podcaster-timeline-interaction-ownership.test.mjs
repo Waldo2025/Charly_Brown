@@ -89,6 +89,15 @@ test("timeline interaction owns Gemini audio chip click and drag behavior", () =
   assert.doesNotMatch(podcasterSource, /const montageAudioChip = event\.target\.closest\("\.podcast-montage-audio-chip\[data-row-id\]"\);/);
 });
 
+test("timeline chip selection keeps scene state and inspector sync in the selection flow", () => {
+  const markerMatch = podcasterSource.match(/function markPodcastTimelineSceneChipsActive\(rowId\) \{[\s\S]*?\n\}/);
+  assert.ok(markerMatch, "expected local chip marker helper");
+  assert.doesNotMatch(markerMatch[0], /podcastVideoState\.activeRowId\s*=/);
+  const geminiClickMatch = interactionSource.match(/const geminiChip = event\.target\?\.closest\?\.\("\[data-action='timeline-select-gemini-audio'\]\[data-row-id\]"\);[\s\S]*?return true;\n    \}/);
+  assert.ok(geminiClickMatch, "expected Gemini chip click branch");
+  assert.match(geminiClickMatch[0], /selectTimelineSceneRow\(rowId, \{ syncStage: false \}\);[\s\S]*renderPodcastVideoTimeline\(getActiveSession\(\)\);/);
+});
+
 test("timeline clip mousedown preserves the transition anchor while Shift is pressed", () => {
   assert.match(
     interactionSource,

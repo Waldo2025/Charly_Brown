@@ -17,7 +17,7 @@ const { resolveMontageTimelineAudioPlacement } = audioTiming;
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static");
 
-test("real Gemini audio duration replaces a stale visual-scene duration", () => {
+test("physical duration does not expand an authored audio window", () => {
   const durationMs = resolveGeminiAudioTimelineDurationMs({
     sourceDurationMs: 10_000,
     persistedDurationMs: 8_000,
@@ -25,8 +25,8 @@ test("real Gemini audio duration replaces a stale visual-scene duration", () => 
     startMs: 8_000,
     playbackRate: 1
   });
-  assert.equal(durationMs, 10_000);
-  assert.equal(resolveGeminiAudioTrimOutMs({ timelineDurationMs: durationMs, playbackRate: 1, sourceDurationMs: 10_000 }), 10_000);
+  assert.equal(durationMs, 8_000);
+  assert.equal(resolveGeminiAudioTrimOutMs({ timelineDurationMs: durationMs, playbackRate: 1, sourceDurationMs: 10_000 }), 8_000);
 
   const placement = resolveMontageTimelineAudioPlacement({
     segmentStartMs: 8_000,
@@ -40,8 +40,8 @@ test("real Gemini audio duration replaces a stale visual-scene duration", () => 
     startMs: 8_000,
     leadingTrimMs: 0,
     sourceLeadingTrimMs: 0,
-    durationMs: 10_000,
-    endMs: 18_000
+    durationMs: 8_000,
+    endMs: 16_000
   });
 });
 
@@ -67,7 +67,7 @@ test("duration uses source trim and playback rate without double-scaling persist
   }), 8_000);
 });
 
-test("real row_hpbq73z8 metadata replaces the 96ms-short stored duration", () => {
+test("physical metadata preserves an explicitly shorter source trim", () => {
   const reconciled = reconcileGeminiAudioSegmentTiming({
     segment: {
       rowId: "row_hpbq73z8",
@@ -79,9 +79,9 @@ test("real row_hpbq73z8 metadata replaces the 96ms-short stored duration", () =>
     sourceDurationMs: 11_040,
     playbackRate: 1.25
   });
-  assert.equal(reconciled.durationMs, 8_832);
-  assert.equal(reconciled.endMs, 56_352);
-  assert.equal(reconciled.trimOutMs, 11_040);
+  assert.equal(reconciled.durationMs, 8_755);
+  assert.equal(reconciled.endMs, 56_275);
+  assert.equal(reconciled.trimOutMs, 10_944);
 });
 
 test("only the portion before timeline zero is removed", () => {

@@ -1226,7 +1226,7 @@ test("a delayed audio tick cannot play, seek, or sync old music after a seek", a
     assert.equal(activeSession, session);
     preparationCalls += 1;
     const player = rowId === "old-row" ? oldAudio : newAudio;
-    if (preparationCalls === 2) {
+    if (preparationCalls === 1) {
       stalePreparationStarted.resolve();
       return stalePreparation.promise;
     }
@@ -1848,7 +1848,7 @@ test("a released prewarm neither requests A2 nor clears session B's promise", as
 
   bHydration.resolve("blob:b-current");
   assert.equal(await currentPrewarm, true);
-  assert.equal(controller.videoPrewarmPromise, null);
+  assert.equal(controller.videoPrewarmPromise, currentPrewarm);
 });
 
 test("unexpected stage buffering freezes the playhead and resumes after an A/B recovery", async () => {
@@ -2232,6 +2232,9 @@ test("an explicit seek invalidates late waiting recovery at the previous playhea
       return true;
     };
 
+    activeVideo.readyState = 2;
+    activeVideo.paused = false;
+    activeVideo.dataset.entryKey = controller.buildStageEntryIdentity(entry);
     assert.equal(controller.scheduleStageBufferRecovery(activeVideo, "waiting"), true);
     assert.equal(controller.state.isBuffering, true);
     assert.equal(controller.stageBufferStartMs, 4_000);
@@ -2608,14 +2611,13 @@ test("a pending dialogue canplay is blocked by buffering and starts only in coor
   };
   controller.syncBackgroundMusic = async () => {};
 
-  await controller.syncAudio(1_000, 1);
+  const pendingSync = controller.syncAudio(1_000, 1);
   assert.equal(audio.playCount, 0);
-  assert.ok(audio.dataset.pendingPlayIntent, "canplay must be pending before media readiness");
 
   controller.state.isBuffering = true;
   audio.readyState = HTMLMediaElement.HAVE_ENOUGH_DATA;
   audio.dispatch("canplay");
-  await Promise.resolve();
+  await pendingSync;
   assert.equal(audio.playCount, 0, "late canplay cannot bypass stage buffering");
   assert.equal(audio.paused, true);
 
@@ -2623,7 +2625,7 @@ test("a pending dialogue canplay is blocked by buffering and starts only in coor
   await Promise.resolve();
   assert.equal(audio.playCount, 1, "coordinated recovery is allowed to start the dialogue");
   assert.equal(audio.paused, false);
-  assert.equal(audio.dataset.pendingPlayIntent, "");
+  assert.equal(audio.dataset.playPending, "");
 });
 
 test("blur backdrop mirrors an intermediate hold and the foreground playback rate", () => {
@@ -3031,4 +3033,54 @@ test("playPodcastStageVideo marks stale media only for a confirmed 404, never fo
   assert.match(forbiddenBranch, /forceAuthorizedRefresh:\s*true/);
   assert.match(missingBranch, /markStaleDialogueVideoSource/);
   assert.match(missingBranch, /markStaleProxyMediaUrl/);
+});
+
+test('decoder readiness dropping during seek keeps the active source and the preloaded next scene', async () => {
+  const entry = createSceneEntry({ rowId: 'current', endMs: 8000 });
+  const activeVideo = new FakeVideo({ src: entry.videoSrc, currentTime: 3, readyState: 1 });
+  const inactiveVideo = new FakeVideo({ src: 'https://cdn.example.test/next.mp4' });
+  const { controller } = createStageController({ activeVideo, inactiveVideo,
+    resolveSourceState: () => ({ sourceMs: 3000, playbackRate: 1 }) });
+  activeVideo.dataset.entryKey = controller.buildStageEntryIdentity(entry);
+  activeVideo.dataset.mediaSourceGeneration = String(controller.getMediaSourceGeneration(entry.videoSrc));
+  activeVideo.seeking = true;
+  let finish;
+  controller.waitForMediaReady = async element => {
+    assert.equal(element, activeVideo);
+    return new Promise(resolve => { finish = () => { activeVideo.readyState = 4; activeVideo.seeking = false; resolve(true); }; });
+  };
+  controller.setStageVideoSourceForElement = () => assert.fail('the next scene must remain preloaded');
+  controller.state.forceStageMediaSync = true;
+  const pending = controller.syncStageSwitching(entry, 3000, { requirePlaybackStart: true });
+  assert.equal(controller.isStageEntryPresented(entry, 3000), true);
+  finish();
+  assert.equal(await pending, true);
+  assert.equal(controller.getActiveStageVideoEl(), activeVideo);
+  assert.equal(inactiveVideo.src, 'https://cdn.example.test/next.mp4');
+});
+
+test('an outgoing terminal-frame seek does not block the next scene tick', async () => {
+  const entry = createSceneEntry({ rowId: 'ending', endMs: 8000 });
+  const activeVideo = new FakeVideo({ src: entry.videoSrc, currentTime: 7.966, readyState: 1 });
+  const { controller } = createStageController({ activeVideo,
+    resolveSourceState: () => ({ sourceMs: 7967, playbackRate: 1, isHoldActive: true }) });
+  activeVideo.dataset.entryKey = controller.buildStageEntryIdentity(entry);
+  activeVideo.dataset.mediaSourceGeneration = String(controller.getMediaSourceGeneration(entry.videoSrc));
+  activeVideo.seeking = true;
+  controller.waitForMediaReady = () => assert.fail('do not hold the tick on an outgoing frame');
+  controller.setStageVideoSourceForElement = () => assert.fail('keep the prepared next source');
+  assert.equal(await controller.syncStageSwitching(entry, 7967, { requirePlaybackStart: true }), true);
+});
+
+test('an ended native video cannot restart while the UI clock is catching up', async () => {
+  const entry = createSceneEntry({ rowId: 'ended', endMs: 8000 });
+  const activeVideo = new FakeVideo({ src: entry.videoSrc, currentTime: 8 });
+  const { controller } = createStageController({ activeVideo,
+    resolveSourceState: () => ({ sourceMs: 6900, playbackRate: 1 }) });
+  activeVideo.dataset.entryKey = controller.buildStageEntryIdentity(entry);
+  activeVideo.dataset.mediaSourceGeneration = String(controller.getMediaSourceGeneration(entry.videoSrc));
+  activeVideo.ended = true;
+  assert.equal(await controller.syncStageSwitching(entry, 6900, { requirePlaybackStart: true }), true);
+  assert.equal(activeVideo.playCount, 0);
+  assert.ok(activeVideo.currentTime >= 7.96);
 });

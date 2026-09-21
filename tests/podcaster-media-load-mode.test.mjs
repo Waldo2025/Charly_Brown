@@ -125,8 +125,8 @@ test("PodcasterPlaybackController.getBlobUrlSync returns correct streaming proxy
   const proxyUrl = controller.getBlobUrlSync(fbUrl);
 
   // Direct Firebase URLs are wrapped in same-origin proxy in streaming mode
-  assert.match(proxyUrl, /^\/api\/assets\/proxy-media\?url=/);
-  assert.equal(proxyUrl, `/api/assets/proxy-media?url=${encodeURIComponent(fbUrl)}`);
+  assert.match(proxyUrl, /^\/api\/assets\/proxy-media\?storagePath=/);
+  assert.equal(proxyUrl, `/api/assets/proxy-media?storagePath=video.mp4`);
 
   // Subsequent calls return the cached proxy URL
   assert.equal(controller.getBlobUrlSync(fbUrl), proxyUrl);
@@ -142,7 +142,7 @@ test("PodcasterPlaybackController prefers the remote proxy-media base when avail
   const fbUrl = "https://firebasestorage.googleapis.com/v0/b/bucket/o/video.mp4?alt=media";
   assert.equal(
     controller.getBlobUrlSync(fbUrl),
-    `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(fbUrl)}`
+    `https://example.test/api/assets/proxy-media?storagePath=video.mp4`
   );
 });
 
@@ -162,7 +162,7 @@ test("PodcasterPlaybackController.getBlobUrl resolves gs:// and proxies correctl
   const resolvedUrl = await controller.getBlobUrl(gsUrl);
 
   // It should resolve gs:// -> Firebase https URL -> wrapped proxy URL
-  assert.equal(resolvedUrl, `/api/assets/proxy-media?url=${encodeURIComponent("https://firebasestorage.googleapis.com/v0/b/bucket/o/video.mp4?alt=media")}`);
+  assert.equal(resolvedUrl, `/api/assets/proxy-media?storagePath=video.mp4`);
 
   // It should cache the resolved URL so synchronous calls now work
   assert.equal(controller.getBlobUrlSync(gsUrl), resolvedUrl);
@@ -181,7 +181,15 @@ test("persistent video hydration does not reuse an in-flight streaming resolver"
   });
 
   controller.deps = {
-    resolveFirebaseStorageUrl: async () => storageUrlReady
+    resolveFirebaseStorageUrl: async () => storageUrlReady,
+    resolveAuthorizedAssetMetadata: async (proxyUrl) => {
+      assert.match(proxyUrl, /\/api\/assets\/proxy-media\?storagePath=podcaster%2Fsessions%2Fs1%2Fvideos%2Freplaced\.mp4/);
+      return {
+        url: directUrl,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        storagePath: "podcaster/sessions/s1/videos/replaced.mp4"
+      };
+    }
   };
   globalThis.fetch = async (url) => {
     assert.equal(url, directUrl);
@@ -228,8 +236,8 @@ test("PodcasterPlaybackController prewarms dialogue URLs successfully", () => {
   const url1 = "https://firebasestorage.googleapis.com/v0/b/bucket/o/audio-row-1.mp3?alt=media";
   const url2 = "https://firebasestorage.googleapis.com/v0/b/bucket/o/audio-row-2.mp3?alt=media";
   
-  assert.equal(controller.getBlobUrlSync(url1), `/api/assets/proxy-media?url=${encodeURIComponent(url1)}`);
-  assert.equal(controller.getBlobUrlSync(url2), `/api/assets/proxy-media?url=${encodeURIComponent(url2)}`);
+  assert.equal(controller.getBlobUrlSync(url1), `/api/assets/proxy-media?storagePath=audio-row-1.mp3`);
+  assert.equal(controller.getBlobUrlSync(url2), `/api/assets/proxy-media?storagePath=audio-row-2.mp3`);
 });
 
 test("PodcasterPlaybackController falls back to Firebase Storage when local audio cache key is empty", async () => {
@@ -252,7 +260,7 @@ test("PodcasterPlaybackController falls back to Firebase Storage when local audi
     }
   };
 
-  const source = await controller.resolveAudioSource({
+  const source = await controller.resolveDialoguePlaybackAudioSource({
     localMediaCacheKey: "row-1-local-missing",
     localDataUrl: "podcaster-local-media:row-1-local-missing",
     downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media",
@@ -267,7 +275,7 @@ test("PodcasterPlaybackController falls back to Firebase Storage when local audi
       downloadUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/row-1.wav?alt=media",
       storagePath: "podcaster/sessions/s1/audio/row-1.wav"
     }),
-    remoteUrl
+    `audio:${remoteUrl}`
   );
 });
 
@@ -277,6 +285,7 @@ test("PodcasterPlaybackController treats proxy-media 404 as a failed hydration, 
   const originalFetch = globalThis.fetch;
   const sourceUrl = "http://127.0.0.1:5010/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Fvideos%2Fmissing.mp4";
   let staleMarked = false;
+  controller.resolveAuthorizedAssetSource = async () => ({ url: "https://signed.example.test/missing.mp4", expiresAt: Date.now() + 600000 });
 
   globalThis.fetch = async () => ({
     ok: false,
@@ -298,8 +307,8 @@ test("PodcasterPlaybackController treats proxy-media 404 as a failed hydration, 
 
   try {
     const resolved = await controller.getBlobUrl(sourceUrl, { persistent: true });
-    assert.equal(resolved, "");
-    assert.equal(controller.getBlobUrlSync(sourceUrl), "");
+    assert.ok(!resolved, "a missing resource must never become a playable source");
+    assert.ok(!controller.getBlobUrlSync(sourceUrl));
     assert.equal(staleMarked, true);
   } finally {
     globalThis.fetch = originalFetch;
@@ -333,7 +342,8 @@ test("PodcasterPlaybackController preloads upcoming dialogue player without dele
   const controller = new PodcasterPlaybackController();
   controller.state.config = { mediaLoadMode: "streaming" };
 
-  const resolvedUrls = {};
+  controller.resolveDialoguePlaybackAudioSource = async clip => `blob:${clip.storagePath}`;
+  controller.syncBackgroundMusic = async () => {};
   controller.deps = {
     resolveDialogueAudioForRow: (session, rowId) => ({
       downloadUrl: `https://firebasestorage.googleapis.com/v0/b/bucket/o/${rowId}.mp3`,
@@ -369,6 +379,7 @@ test("PodcasterPlaybackController preloads upcoming dialogue player without dele
 
   // Tick at currentMs = 0 (row-1 is active, row-2 is upcoming because startMs=4000, difference is 4000ms < 5000ms)
   await controller.syncAudio(0, 1.0);
+  await Promise.all([...controller.dialoguePreparationPromises.values()]);
 
   // Both row-1 and row-2 players should be instantiated
   assert.ok(controller.dialoguePlayers["row-1"], "active row player should exist");

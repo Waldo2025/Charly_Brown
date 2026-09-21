@@ -1,0 +1,20 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Prueba local de referencias Snoopy</title>
+<link rel="stylesheet" href="/podcaster.css"><link rel="stylesheet" href="/podcaster/podcaster-reference-editor.css">
+<style>body{background:#151c28;color:#e6edf7;font-family:Arial;padding:20px}body>button{margin:8px;padding:12px}.podcast-portrait-viewer-card{padding:18px;background:#202733}.qa-report{white-space:pre-wrap}</style>
+<button id="open">Abrir referencias de prueba</button><label><input id="fail" type="checkbox">Simular fallo de guardado</label><button id="change">Cambiar selección</button><pre id="report" class="qa-report"></pre>
+<div id="viewer" class="podcast-portrait-viewer" hidden><button id="backdrop" class="podcast-portrait-viewer-backdrop" aria-label="Cerrar visor"></button><section class="podcast-portrait-viewer-card" role="dialog" aria-modal="true" aria-label="Visor de retrato"><header class="podcast-portrait-viewer-head"><div class="podcast-portrait-viewer-copy"><strong id="podcastPortraitViewerTitle"></strong><span id="podcastPortraitViewerMeta"></span></div><button id="close">Cerrar</button></header><div class="podcast-portrait-viewer-stage"><img alt="Referencia"></div></section></div>
+<script type="module">
+import {createReferenceEditor} from '/podcaster/podcaster-reference-editor.js';
+import {selectEditedReference} from '/podcaster/podcaster-reference-edit-state.js';
+const $=id=>document.getElementById(id);
+const canvas=document.createElement('canvas');canvas.width=960;canvas.height=540;const c=canvas.getContext('2d');c.fillStyle='#4c698c';c.fillRect(0,0,960,540);c.fillStyle='#f6d791';c.fillRect(280,120,400,290);c.fillStyle='#222';c.font='48px Arial';c.fillText('Referencia de prueba',220,470);
+const original=canvas.toDataURL();c.fillStyle='#a8d8ac';c.fillRect(280,120,400,290);const edited=canvas.toDataURL();
+const image=(name,dataUrl)=>({name,storagePath:`test/${name}.png`,downloadUrl:dataUrl,dataUrl,mimeType:'image/png'});
+let session=JSON.parse(localStorage.getItem('snoopy-reference-qa-session')||'null')||{id:'qa',activeThreadId:'v1',script:{rows:[{id:'row'}]},threads:[{id:'v1',script:{rows:[{id:'row'}]}}],rowReferenceImageMap:{row:image('original',original)},rowReferenceImageListMap:{row:[image('original',original),image('second',original)]},rowReferenceModeByRowId:{row:'image'}};
+let calls=0,writes=0;const report=()=>$('report').textContent=JSON.stringify({generationCalls:calls,writes,names:session.rowReferenceImageListMap.row.map(r=>r.name),history:session.rowReferenceImageListMap.row.map(r=>r.referenceEditHistory?.length||0)},null,2);report();
+const editor=createReferenceEditor($('viewer'),{uid:()=> 'qa-only',getSession:()=>session,preview:r=>r.dataUrl||r.downloadUrl,fetchImage:record=>fetch(record.downloadUrl),generate:async request=>{calls++;report();await new Promise(resolve=>setTimeout(resolve,1200));return [{dataUrl:edited,mimeType:'image/png',width:960,height:540}];},apply:async draft=>{if($('fail').checked)throw Error('Fallo de guardado simulado');const result=selectEditedReference(session,draft.context,image(draft.result.name||'edited',draft.result.dataUrl),draft.original);if(result.status==='applied'){session=result.session;localStorage.setItem('snoopy-reference-qa-session',JSON.stringify(session));writes++;report();}return result;}});
+$('open').onclick=()=>{$('viewer').hidden=false;editor.open({sessionId:'qa',threadId:'v1',rowId:'row',index:0,sceneNumber:1});};
+const close=()=>{editor.close();$('viewer').hidden=true;};$('close').onclick=close;$('backdrop').onclick=close;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+$('change').onclick=()=>{session.rowReferenceImageListMap.row[0]=image('later-selection',original);report();};
+</script></html>

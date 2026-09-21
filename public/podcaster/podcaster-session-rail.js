@@ -45,6 +45,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
     firestoreDb,
     serverTimestamp,
     shareSessionWithUser,
+    canEditArchivedSession,
     onSessionsRendered
   } = deps;
 
@@ -282,6 +283,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
     const isActive = session.id === activeId;
     const showSessionVersions = isActive && isSessionExpanded(session.id);
     const sessionThreadList = isActive ? renderSessionThreadList(session) : "";
+    const canEdit = session?.archived !== true || canEditArchivedSession?.(session) === true;
     return `
       <article class="session-card${isActive ? " is-active" : ""}${showSessionVersions ? " is-expanded" : ""}" data-action="open-session" data-session-id="${escapeHtml(session.id)}" tabindex="0" role="button" aria-pressed="${isActive ? "true" : "false"}" aria-expanded="${showSessionVersions ? "true" : "false"}">
         <div class="session-card-header${sessionStatus.hasPendingProposal ? " has-pending-proposal" : sessionStatus.hasOnlyReviewedProposals ? " has-reviewed-proposals" : ""}">
@@ -300,11 +302,13 @@ export function createPodcasterSessionRailApi(deps = {}) {
               <i class="fas fa-ellipsis-vertical" aria-hidden="true"></i>
             </button>
             <div class="session-menu" hidden>
-              <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
-              <button type="button" data-action="rename-session" data-session-id="${escapeHtml(session.id)}">Editar nombre</button>
-              <button type="button" data-action="assign-session-data" data-session-id="${escapeHtml(session.id)}">Asignar datos</button>
-              <button type="button" data-action="toggle-session-publication" data-session-id="${escapeHtml(session.id)}">${session.publicar === true ? "Desactivar publicación" : "Publicar sesión"}</button>
-              <button type="button" data-action="share-session" data-session-id="${escapeHtml(session.id)}">Compartir sesión</button>
+              ${canEdit ? `
+                <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
+                <button type="button" data-action="rename-session" data-session-id="${escapeHtml(session.id)}">Editar nombre</button>
+                <button type="button" data-action="assign-session-data" data-session-id="${escapeHtml(session.id)}">Asignar datos</button>
+                <button type="button" data-action="toggle-session-publication" data-session-id="${escapeHtml(session.id)}">${session.publicar === true ? "Desactivar publicación" : "Publicar sesión"}</button>
+                <button type="button" data-action="share-session" data-session-id="${escapeHtml(session.id)}">Compartir sesión</button>
+              ` : `<span class="session-menu-readonly-note">Desarchiva para editar</span>`}
               <button type="button" data-action="${session.archived === true ? "restore-session" : "archive-session"}" data-session-id="${escapeHtml(session.id)}">${session.archived === true ? "Desarchivar" : "Archivar"}</button>
               <button type="button" data-action="delete-session" data-session-id="${escapeHtml(session.id)}">Eliminar</button>
             </div>

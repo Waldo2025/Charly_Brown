@@ -19,6 +19,23 @@ test("studio sidepanel shell keeps the edge-tab contract", () => {
   assert.match(podcasterSource, /els\.podcasterLayout\?\.classList\.toggle\("has-sidepanel", !!isOpen\);/);
 });
 
+test("editor keeps only the existing resizable inspector", () => {
+  assert.match(htmlSource, /id="podcastStudioInspectorResizeHandle"/);
+  assert.doesNotMatch(htmlSource, /id="openSidepanelFromEditorBtn"/);
+  assert.doesNotMatch(podcasterSource, /openSidepanelFromEditorBtn/);
+  assert.doesNotMatch(podcasterSource, /function setSidepanelEditorContext\(/);
+});
+
+test("resizable inspector opens without layout-heavy transitions or synchronous persistence", () => {
+  assert.match(cssSource, /\.podcast-studio-layout\s*\{[\s\S]*?transition:\s*none;/m);
+  assert.doesNotMatch(
+    cssSource,
+    /\.podcast-studio-inspector\s*\{[^}]*transition:[^;]*(?:padding|border-width)[^;]*;/m
+  );
+  assert.match(cssSource, /\.podcast-studio-inspector\s*\{[\s\S]*?transition:\s*none;/m);
+  assert.match(podcasterSource, /podcastStudioInspectorPersistTimer = window\.setTimeout\(\(\) => \{[\s\S]*?upsertPodcastStudioUiState\(/m);
+});
+
 test("session rail module owns rail filters, archive toggle, and card actions", () => {
   assert.match(sessionRailSource, /function bindEvents\(\) \{/);
   assert.match(sessionRailSource, /els\.sessionsRailFilter\.addEventListener\("click"/);
@@ -38,12 +55,23 @@ test("session rail module owns rail filters, archive toggle, and card actions", 
 test("preview fullscreen uses the shared controller on visual containers", () => {
   assert.match(fullscreenSource, /function mountControls\(\) \{/);
   assert.match(fullscreenSource, /function restoreControls\(\) \{/);
+  assert.match(fullscreenSource, /function mountButton\(\) \{/);
+  assert.match(fullscreenSource, /function restoreButton\(\) \{/);
   assert.match(fullscreenSource, /controlsEl\.classList\.add\("is-attached-to-stage-fullscreen"\);/);
   assert.match(fullscreenSource, /document\.addEventListener\("fullscreenchange", onFullscreenChange\);/);
   assert.match(fullscreenSource, /targetEl\.classList\.add\(fallbackClass\);/);
   assert.match(podcasterSource, /createPodcasterStageFullscreenController\(\{[\s\S]*?targetEl: podcastPreviewStageEl,[\s\S]*?buttonEl: els\.podcastPreviewFullscreenBtn[\s\S]*?\}\);/);
   assert.match(podcasterSource, /const montageExportPreviewStageEl = document\.getElementById\("montageExportPreviewContainer"\);/);
   assert.match(podcasterSource, /createPodcasterStageFullscreenController\(\{[\s\S]*?targetEl: montageExportPreviewStageEl,[\s\S]*?buttonEl: els\.montageExportFullscreenBtn[\s\S]*?\}\);/);
+});
+
+test("preview fullscreen trigger lives in the left toolbar", () => {
+  assert.match(
+    htmlSource,
+    /<div class="podcast-preview-left-toolbar"[\s\S]*?id="podcastPreviewFullscreenBtn"[\s\S]*?<\/div>\s*<div class="podcast-video-preview">/m
+  );
+  assert.match(htmlSource, /id="podcastPreviewFullscreenBtn"[\s\S]*?podcast-preview-fullscreen-toolbar-btn/);
+  assert.match(cssSource, /\.podcast-preview-left-toolbar \.podcast-preview-fullscreen-toolbar-btn\s*\{[\s\S]*?position:\s*relative;[\s\S]*?inset:\s*auto;/m);
 });
 
 test("fullscreen transport stays above stage overlays and remains clickable after reparenting", () => {

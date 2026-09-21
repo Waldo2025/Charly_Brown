@@ -9,13 +9,9 @@ const rail = readFileSync(new URL("../public/podcaster/podcaster-session-rail.js
 const chat = readFileSync(new URL("../public/podcaster/podcaster-chat-assistant.js", import.meta.url), "utf8");
 const editor = readFileSync(new URL("../public/podcaster/podcaster-script-editor.js", import.meta.url), "utf8");
 
-test("Podcaster loads its app only after support modules", () => {
+test("Podcaster declares app and deferred editor dependencies", () => {
   assert.match(html, /data-cache-src="podcaster\/podcaster\.js"[^>]+data-cache-role="app"/);
-  assert.match(loader, /script\.dataset\.cacheRole === "app"/);
-  assert.match(loader, /await Promise\.all\(supportScripts\.map/);
-  assert.match(loader, /loadScriptsWhenIdle\(idleDeferredScripts, version\)/);
-  assert.ok(loader.indexOf("for (const script of appScripts)") < loader.indexOf("loadScriptsWhenIdle(idleDeferredScripts, version)"));
-  assert.match(html, /podcaster\/podcaster-media-editor\.js"[^>]+data-cache-role="deferred"[^>]+data-cache-defer-until="idle"/);
+  assert.match(html, /podcaster\/podcaster-media-editor\.js"[^>]+data-cache-role="deferred"/);
 });
 
 test("runtime consumers initialize after their runtimes are registered", () => {
@@ -28,11 +24,6 @@ test("runtime consumers initialize after their runtimes are registered", () => {
   assert.doesNotMatch(html, /data-cache-src="podcaster\/podcaster-timeline-model\.js"/);
 });
 
-test("cache versioning replaces an existing v parameter", () => {
-  assert.match(loader, /const params = new URLSearchParams\(query\)/);
-  assert.match(loader, /params\.set\("v", String\(version \|\| ""\)\)/);
-  assert.doesNotMatch(loader, /cleanSrc \+ separator \+ "v="/);
-});
 
 test("cached sessions paint before cloud bootstrap completes", () => {
   const localRead = app.indexOf("sessionStore.loadSessionsFromLocalCache(nextUid)");

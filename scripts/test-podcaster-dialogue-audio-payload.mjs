@@ -6,6 +6,7 @@ const videoGeneratorSource = readFileSync(new URL("../public/podcaster/podcaster
 const requiredSnippets = [
   "speakerLabel: String(row?.speaker || \"\").trim()",
   "speakerName: window.resolveSpeakerDisplayName(row?.speaker, session)",
+  "speechLocale: speechConfig.speechLocale",
   "targetSpeechLine: text",
   "ttsDirection: row?.ttsDirectionConfig || {}"
 ];
@@ -16,8 +17,8 @@ if (missing.length) {
   throw new Error(`Payload de dialogue-audio incompleto: ${missing.join(", ")}`);
 }
 
-if (!source.includes('window.resolveConfiguredSpeakerVoiceForGeneration(row, session)')) {
-  throw new Error("La generación de audio Gemini debe resolver la voz configurada usando la fila completa.");
+if (!source.includes('window.resolveSpeechGenerationConfig(row, session)')) {
+  throw new Error("La generación de audio Gemini debe resolver voz e idioma usando la fila y la sesión completas.");
 }
 
 if (!source.includes('window.flushScriptEditorVoiceDraftsToSession?.();')) {

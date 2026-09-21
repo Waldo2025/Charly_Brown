@@ -1,4 +1,4 @@
-const { getAdminServices, resolveAuthContext, asyncRoute } = require("./common.js");
+const { getAdminServices, resolveAuthContext, asyncRoute, hasAdminRoleWithProfile } = require("./common.js");
 
 const SIGNED_URL_TTL_MS = 10 * 60 * 1000;
 
@@ -35,7 +35,7 @@ async function assertAssetAccess({ req, storagePath, db }) {
   if (!snapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
   const session = snapshot.data() || {};
   const sharedWithIds = Array.isArray(session.sharedWithIds) ? session.sharedWithIds.map(String) : [];
-  if (String(session.ownerId || "") !== authContext.uid && !sharedWithIds.includes(authContext.uid)) {
+  if (String(session.ownerId || "") !== authContext.uid && !sharedWithIds.includes(authContext.uid) && !await hasAdminRoleWithProfile(authContext, db)) {
     throw Object.assign(new Error("asset_forbidden"), { status: 403 });
   }
   return authContext;

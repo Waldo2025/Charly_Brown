@@ -1,7 +1,11 @@
+import { createReferenceEditor } from "./podcaster-reference-editor.js?v=reference-design-34";
+import { reconcileGeminiVoiceSource } from "./podcaster-montage-audio-timing.js?v=snoopy-voice-23";
+import { selectEditedReference, REFERENCE_FIELDS } from "./podcaster-reference-edit-state.js?v=reference-edit-2";
+import podcasterMediaState from "./podcaster-media-state.js?v=2026-09-11.snoopy-voice-23";
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildVeoApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.10.853";
-import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-1.0.10.853";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-09-21.storage-cors-1";
+import { buildDefaultTimelineTracks as buildDefaultTimelineTracksFromModel } from "./podcaster-timeline-model.js?v=2026-09-11.snoopy-reorder-35";
 import {
   AVAILABLE_PODCASTER_VIDEO_MODELS,
   collectAvailablePodcasterVideoModels,
@@ -14,8 +18,8 @@ import {
   createSnoopyShortcutGuide,
   handleSnoopyReorderTimelineTracksShortcut
 } from "./podcaster-shortcut-guide.js?v=2026-1.0.10.855";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-1.0.10.857";
-import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-09-21.speech-locale-1";
+import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-09-21.speech-locale-1";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -59,20 +63,21 @@ import {
   runMontageExportV2 as runMontageExport
 } from "./podcaster-montage-export-v2.js?v=2026-08-20.2";
 import * as PodcasterResize from "./podcaster-resize.js";
-import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
+import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js?v=2026-09-21.preview-toolbar-1";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-1.0.10.850";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
-import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-1.0.10.537";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-09-21.storage-cors-1";
 import { createAuthorizedAssetResolver } from "./podcaster-authorized-asset-resolver.js?v=2026-1.0.10.853";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-1.0.10.853";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-09-11.snoopy-output-25";
 import { createPodcasterAcademicMetadataApi } from "./podcaster-academic-metadata.js?v=2026-1.0.10.717";
-import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js";
+import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-09-21.speech-locale-1";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-1.0.10.857";
+import { createPodcasterAdminSessionBrowser } from "./podcaster-admin-session-browser.js?v=2026-09-20.1";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
-import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-1.0.10.853";
+import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-09-11.snoopy-width-36";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js?v=2026-1.0.10.853";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-08-26.1";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-09-21.timeline-focus-39";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js?v=2026-1.0.10.544";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -316,6 +321,89 @@ const DEFAULT_TTS_DIRECTION_CONFIG = Object.freeze({
   scenePrompt: "",
   audioTags: ""
 });
+const DEFAULT_SPEECH_LOCALE = "es-MX";
+const GEMINI_TTS_LANGUAGE_CATALOG = Object.freeze([
+  { locale: "es-MX", languageCode: "es", label: "Español (México)", instruction: "Habla en español mexicano natural, sin pronunciación peninsular y sin cambiar de idioma." },
+  { locale: "es-ES", languageCode: "es", label: "Español (España)", instruction: "Habla en español peninsular natural, sin pronunciación latinoamericana y sin cambiar de idioma." },
+  { locale: "es-419", languageCode: "es", label: "Español (Latinoamérica neutral)", instruction: "Habla en español latinoamericano neutro, sin regionalismos marcados y sin cambiar de idioma." },
+  { locale: "en", languageCode: "en", label: "Inglés" },
+  { locale: "pt", languageCode: "pt", label: "Portugués" },
+  { locale: "fr", languageCode: "fr", label: "Francés" },
+  { locale: "de", languageCode: "de", label: "Alemán" },
+  { locale: "it", languageCode: "it", label: "Italiano" },
+  { locale: "ca", languageCode: "ca", label: "Catalán" },
+  { locale: "ar", languageCode: "ar", label: "Árabe" },
+  { locale: "af", languageCode: "af", label: "Afrikáans" },
+  { locale: "sq", languageCode: "sq", label: "Albanés" },
+  { locale: "am", languageCode: "am", label: "Amhárico" },
+  { locale: "hy", languageCode: "hy", label: "Armenio" },
+  { locale: "az", languageCode: "az", label: "Azerí" },
+  { locale: "eu", languageCode: "eu", label: "Euskera" },
+  { locale: "be", languageCode: "be", label: "Bielorruso" },
+  { locale: "bn", languageCode: "bn", label: "Bengalí" },
+  { locale: "my", languageCode: "my", label: "Birmano" },
+  { locale: "bg", languageCode: "bg", label: "Búlgaro" },
+  { locale: "ceb", languageCode: "ceb", label: "Cebuano" },
+  { locale: "cmn", languageCode: "cmn", label: "Chino mandarín" },
+  { locale: "ko", languageCode: "ko", label: "Coreano" },
+  { locale: "ht", languageCode: "ht", label: "Criollo haitiano" },
+  { locale: "hr", languageCode: "hr", label: "Croata" },
+  { locale: "cs", languageCode: "cs", label: "Checo" },
+  { locale: "da", languageCode: "da", label: "Danés" },
+  { locale: "sk", languageCode: "sk", label: "Eslovaco" },
+  { locale: "sl", languageCode: "sl", label: "Esloveno" },
+  { locale: "et", languageCode: "et", label: "Estonio" },
+  { locale: "fil", languageCode: "fil", label: "Filipino" },
+  { locale: "fi", languageCode: "fi", label: "Finés" },
+  { locale: "gl", languageCode: "gl", label: "Gallego" },
+  { locale: "ka", languageCode: "ka", label: "Georgiano" },
+  { locale: "el", languageCode: "el", label: "Griego" },
+  { locale: "gu", languageCode: "gu", label: "Guyaratí" },
+  { locale: "he", languageCode: "he", label: "Hebreo" },
+  { locale: "hi", languageCode: "hi", label: "Hindi" },
+  { locale: "hu", languageCode: "hu", label: "Húngaro" },
+  { locale: "id", languageCode: "id", label: "Indonesio" },
+  { locale: "is", languageCode: "is", label: "Islandés" },
+  { locale: "ja", languageCode: "ja", label: "Japonés" },
+  { locale: "jv", languageCode: "jv", label: "Javanés" },
+  { locale: "kn", languageCode: "kn", label: "Canarés" },
+  { locale: "kok", languageCode: "kok", label: "Konkani" },
+  { locale: "lo", languageCode: "lo", label: "Lao" },
+  { locale: "la", languageCode: "la", label: "Latín" },
+  { locale: "lv", languageCode: "lv", label: "Letón" },
+  { locale: "lt", languageCode: "lt", label: "Lituano" },
+  { locale: "lb", languageCode: "lb", label: "Luxemburgués" },
+  { locale: "mk", languageCode: "mk", label: "Macedonio" },
+  { locale: "mai", languageCode: "mai", label: "Maithili" },
+  { locale: "mg", languageCode: "mg", label: "Malgache" },
+  { locale: "ms", languageCode: "ms", label: "Malayo" },
+  { locale: "ml", languageCode: "ml", label: "Malayalam" },
+  { locale: "mr", languageCode: "mr", label: "Maratí" },
+  { locale: "mn", languageCode: "mn", label: "Mongol" },
+  { locale: "ne", languageCode: "ne", label: "Nepalí" },
+  { locale: "nb", languageCode: "nb", label: "Noruego bokmål" },
+  { locale: "nn", languageCode: "nn", label: "Noruego nynorsk" },
+  { locale: "or", languageCode: "or", label: "Odia" },
+  { locale: "nl", languageCode: "nl", label: "Neerlandés" },
+  { locale: "ps", languageCode: "ps", label: "Pastún" },
+  { locale: "fa", languageCode: "fa", label: "Persa" },
+  { locale: "pl", languageCode: "pl", label: "Polaco" },
+  { locale: "pa", languageCode: "pa", label: "Punyabí" },
+  { locale: "ro", languageCode: "ro", label: "Rumano" },
+  { locale: "ru", languageCode: "ru", label: "Ruso" },
+  { locale: "sr", languageCode: "sr", label: "Serbio" },
+  { locale: "sd", languageCode: "sd", label: "Sindhi" },
+  { locale: "si", languageCode: "si", label: "Cingalés" },
+  { locale: "sw", languageCode: "sw", label: "Suajili" },
+  { locale: "sv", languageCode: "sv", label: "Sueco" },
+  { locale: "ta", languageCode: "ta", label: "Tamil" },
+  { locale: "te", languageCode: "te", label: "Telugu" },
+  { locale: "th", languageCode: "th", label: "Tailandés" },
+  { locale: "tr", languageCode: "tr", label: "Turco" },
+  { locale: "uk", languageCode: "uk", label: "Ucraniano" },
+  { locale: "ur", languageCode: "ur", label: "Urdu" },
+  { locale: "vi", languageCode: "vi", label: "Vietnamita" }
+]);
 // Fuente oficial de nombres/estilo: Vertex AI Live API "Voices supported" (30 voces).
 // Nota: la documentación oficial no etiqueta género; esta división es una agrupación de UX.
 const GEMINI_LIVE_VOICE_CATALOG = Object.freeze([
@@ -358,7 +446,6 @@ const AGENT_VOICE_PROFILES = Object.freeze(
     mood: String(entry.style || "Neutral").toLowerCase(),
     toneLabel: entry.style,
     genderGroup: entry.genderGroup,
-    locale: "es-MX",
     speed: 1,
     pitch: 1
   }))
@@ -456,6 +543,7 @@ const els = {
   sessionList: document.getElementById("sessionList"),
   sessionsRailFilter: document.getElementById("sessionsRailFilter"),
   openSessionFiltersBtn: document.getElementById("openSessionFiltersBtn"),
+  openAdminUserVideosBtn: document.getElementById("openAdminUserVideosBtn"),
   toggleArchivedSessionsBtn: document.getElementById("toggleArchivedSessionsBtn"),
   newSessionBtn: document.getElementById("newSessionBtn"),
   saveSessionBtn: document.getElementById("saveSessionBtn"),
@@ -464,7 +552,6 @@ const els = {
   saveSessionFloatingBtn: document.getElementById("saveSessionFloatingBtn"),
   importGeminiDialogueTrackBtn: document.getElementById("importGeminiDialogueTrackBtn"),
   openSidepanelBtn: document.getElementById("openSidepanelBtn"),
-  openSidepanelFromEditorBtn: document.getElementById("openSidepanelFromEditorBtn"),
   sidepanelHeaderToggleBtn: document.getElementById("sidepanelHeaderToggleBtn"),
   sidepanel: document.getElementById("podcasterSidepanel"),
   openMusicConfigBtn: document.getElementById("openMusicConfigBtn"),
@@ -514,6 +601,15 @@ const els = {
   globalConfigPanel: document.getElementById("globalConfigPanel"),
   globalSpeakerSettings: document.getElementById("globalSpeakerSettings"),
   speakerCountInput: document.getElementById("speakerCountInput"),
+  globalSpeechLocaleSelect: document.getElementById("globalSpeechLocaleSelect"),
+  regenerateGeminiAudioConfigModal: document.getElementById("regenerateGeminiAudioConfigModal"),
+  closeRegenerateGeminiAudioConfigBtn: document.getElementById("closeRegenerateGeminiAudioConfigBtn"),
+  cancelRegenerateGeminiAudioConfigBtn: document.getElementById("cancelRegenerateGeminiAudioConfigBtn"),
+  continueCurrentGeminiAudioConfigBtn: document.getElementById("continueCurrentGeminiAudioConfigBtn"),
+  applyAndRegenerateGeminiAudiosBtn: document.getElementById("applyAndRegenerateGeminiAudiosBtn"),
+  regenerateGeminiSpeechLocaleSelect: document.getElementById("regenerateGeminiSpeechLocaleSelect"),
+  regenerateGeminiVoiceSettings: document.getElementById("regenerateGeminiVoiceSettings"),
+  resetSceneVoiceOverridesBtn: document.getElementById("resetSceneVoiceOverridesBtn"),
   globalApplyModeSelect: document.getElementById("globalApplyModeSelect"),
   globalSceneSelectionInput: document.getElementById("globalSceneSelectionInput"),
   globalRedistributeToggle: document.getElementById("globalRedistributeToggle"),
@@ -782,6 +878,11 @@ const els = {
   sessionFilterUnitSelect: document.getElementById("sessionFilterUnitSelect"),
   sessionFilterUnitLabel: document.getElementById("sessionFilterUnitLabel"),
   sessionFilterOptionsHint: document.getElementById("sessionFilterOptionsHint"),
+  adminUserVideosModal: document.getElementById("adminUserVideosModal"),
+  closeAdminUserVideosBtn: document.getElementById("closeAdminUserVideosBtn"),
+  adminUserVideosSelect: document.getElementById("adminUserVideosSelect"),
+  adminUserVideosStatus: document.getElementById("adminUserVideosStatus"),
+  adminUserVideosList: document.getElementById("adminUserVideosList"),
   geminiAudioSpeedModal: document.getElementById("geminiAudioSpeedModal"),
   closeGeminiAudioSpeedModalBtn: document.getElementById("closeGeminiAudioSpeedModalBtn"),
   geminiAudioSpeedModalTitle: document.getElementById("geminiAudioSpeedModalTitle"),
@@ -990,6 +1091,8 @@ window.PodcasterState = {
 // --- Colaboración en Tiempo Real: Actividad ---
 let activityUnsubscribe = null;
 let currentUserName = "Anónimo";
+let currentUserRole = "";
+let currentUserIsAdmin = false;
 
 let studioRuntimeEntriesCache = null;
 let studioRuntimeEntriesCacheKey = null;
@@ -1021,6 +1124,150 @@ async function obtenerNombreUsuarioStudio(user) {
   }
 }
 
+function isAdminAccessRole(value = "") {
+  return String(value || "").trim() === "admin";
+}
+
+function canEditArchivedSession(session = null) {
+  if (session?.archived !== true) return true;
+  const ownerId = String(session?.cloudMeta?.ownerId || session?.ownerId || "").trim();
+  return currentUserIsAdmin && Boolean(ownerId) && ownerId !== resolveCurrentUid();
+}
+
+async function resolveCurrentUserAccess(user = null) {
+  currentUserRole = "";
+  currentUserIsAdmin = false;
+  adminSessionBrowser?.syncVisibility?.();
+  if (!user?.uid) {
+    return;
+  }
+  try {
+    const profileSnapshot = await getDoc(doc(firestoreDb, "users", user.uid)).catch(() => null);
+    const profile = profileSnapshot?.exists?.() ? profileSnapshot.data() || {} : {};
+    currentUserRole = String(profile.role || "").trim();
+    currentUserIsAdmin = isAdminAccessRole(currentUserRole);
+  } finally {
+    adminSessionBrowser?.syncVisibility?.();
+  }
+}
+
+function extractRemoteVisualProposalRows(data = null) {
+  const source = data && typeof data === "object" ? data : {};
+  const nested = source.session && typeof source.session === "object" ? source.session : {};
+  const candidates = [
+    nested?.script?.rows,
+    nested?.rows,
+    source?.script?.rows,
+    source?.rows
+  ];
+  return candidates.find((rows) => Array.isArray(rows) && rows.length > 0) || [];
+}
+
+function resolveVisualProposalTimelineState(row = null) {
+  if (!row || typeof row !== "object") return "none";
+  const proposals = normalizeVisualProposalState(row.visualNotesProposals);
+  const activeProposal = String(row.visualNotesProposal || "").trim();
+  const allProposals = Array.from(new Set([...proposals, activeProposal].filter(Boolean)));
+  if (!allProposals.length) return "none";
+  const resolved = new Set(normalizeVisualProposalState(row.visualNotesResolvedProposals));
+  return allProposals.every((proposal) => resolved.has(proposal)) ? "resolved" : "pending";
+}
+
+function applyRemoteVisualProposalSnapshot(targetSession = null, data = null) {
+  const targetRows = Array.isArray(targetSession?.script?.rows) ? targetSession.script.rows : [];
+  const sourceRows = extractRemoteVisualProposalRows(data);
+  if (!targetRows.length || !sourceRows.length) return { changed: false, rowIds: [] };
+
+  const sourceById = new Map(sourceRows
+    .map((row) => [String(row?.id || "").trim(), row])
+    .filter(([rowId]) => rowId));
+  const changedRowIds = new Set();
+  const proposalFields = [
+    "visualNotesProposal",
+    "visualNotesProposals",
+    "visualNotesResolvedProposals",
+    "visualNotesProposalReferences"
+  ];
+
+  const applyToRows = (rows = []) => {
+    (Array.isArray(rows) ? rows : []).forEach((targetRow) => {
+      const rowId = String(targetRow?.id || "").trim();
+      const sourceRow = sourceById.get(rowId);
+      if (!rowId || !sourceRow || !targetRow || typeof targetRow !== "object") return;
+      proposalFields.forEach((field) => {
+        if (!Object.prototype.hasOwnProperty.call(sourceRow, field)) return;
+        let nextValue = sourceRow[field];
+        if (field === "visualNotesProposal") {
+          nextValue = String(nextValue || "").trim();
+        } else if (field === "visualNotesProposalReferences") {
+          nextValue = (Array.isArray(nextValue) ? nextValue : [])
+            .filter((entry) => entry && typeof entry === "object")
+            .map((entry) => ({ ...entry }));
+        } else {
+          nextValue = normalizeVisualProposalState(nextValue);
+        }
+        if (JSON.stringify(targetRow[field] ?? (field === "visualNotesProposal" ? "" : [])) === JSON.stringify(nextValue)) return;
+        targetRow[field] = nextValue;
+        changedRowIds.add(rowId);
+      });
+    });
+  };
+
+  applyToRows(targetRows);
+  if (Array.isArray(targetSession?.rows) && targetSession.rows !== targetRows) {
+    applyToRows(targetSession.rows);
+  }
+  return { changed: changedRowIds.size > 0, rowIds: Array.from(changedRowIds) };
+}
+
+function syncTimelineVisualProposalState(session = null, rowIds = []) {
+  const rows = getSessionRows(session);
+  const rowById = new Map(rows.map((row) => [String(row?.id || "").trim(), row]));
+  const targetIds = new Set((Array.isArray(rowIds) ? rowIds : []).map((rowId) => String(rowId || "").trim()).filter(Boolean));
+  document.querySelectorAll(".podcast-video-timeline-clip[data-row-id]").forEach((clip) => {
+    const rowId = String(clip?.dataset?.rowId || "").trim();
+    if (!rowId || (targetIds.size && !targetIds.has(rowId))) return;
+    const stateValue = resolveVisualProposalTimelineState(rowById.get(rowId));
+    const body = clip.querySelector(".podcast-video-clip-body");
+    [clip, body].filter(Boolean).forEach((element) => {
+      element.classList.toggle("has-pending-proposals", stateValue === "pending");
+      element.classList.toggle("has-all-proposals-realized", stateValue === "resolved");
+    });
+  });
+}
+
+function renderRemoteVisualProposalUpdate(session = null, rowIds = []) {
+  if (!session) return;
+  const focused = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement
+    ? {
+      rootId: document.activeElement.closest("#scriptTableBody, #podcastStudioInspectorRowEditor")?.id || "",
+      rowId: String(document.activeElement.dataset?.rowId || "").trim(),
+      field: String(document.activeElement.dataset?.field || "").trim(),
+      start: document.activeElement.selectionStart,
+      end: document.activeElement.selectionEnd
+    }
+    : null;
+  renderScript(session);
+  const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+  syncPodcastStudioInspector(session, {
+    forceRender: (Array.isArray(rowIds) ? rowIds : []).some((rowId) => String(rowId || "").trim() === activeRowId)
+  });
+  syncTimelineVisualProposalState(session, rowIds);
+  if (focused?.rootId && focused.rowId && focused.field) {
+    const root = document.getElementById(focused.rootId);
+    const nextFocused = Array.from(root?.querySelectorAll?.("[data-row-id][data-field]") || []).find((element) => (
+      String(element?.dataset?.rowId || "").trim() === focused.rowId
+      && String(element?.dataset?.field || "").trim() === focused.field
+    ));
+    if (nextFocused instanceof HTMLInputElement || nextFocused instanceof HTMLTextAreaElement) {
+      nextFocused.focus({ preventScroll: true });
+      if (Number.isInteger(focused.start) && Number.isInteger(focused.end)) {
+        nextFocused.setSelectionRange(focused.start, focused.end);
+      }
+    }
+  }
+}
+
 function setupActivityListener(sessionId) {
   if (activityUnsubscribe) {
     activityUnsubscribe();
@@ -1035,6 +1282,15 @@ function setupActivityListener(sessionId) {
       if (!snapshot.exists()) return;
       const data = snapshot.data();
       const activity = data.recentActivity;
+
+      const activeSession = getActiveSession();
+      if (String(activeSession?.id || "").trim() === String(sessionId || "").trim()) {
+        const proposalUpdate = applyRemoteVisualProposalSnapshot(activeSession, data);
+        if (proposalUpdate.changed) {
+          persistSessions();
+          renderRemoteVisualProposalUpdate(activeSession, proposalUpdate.rowIds);
+        }
+      }
 
       // console.log("[Studio] Cambio detectado en sesión. Actividad:", activity);
 
@@ -1359,6 +1615,7 @@ let podcastStudioInspectorCollapsed = (() => {
     return false;
   }
 })();
+let podcastStudioInspectorPersistTimer = 0;
 let podcastVideoOpenRunToken = 0;
 let activeSessionActivationToken = 0;
 let snoopyShortcutGuide = null;
@@ -1379,6 +1636,8 @@ let geminiLiveConnectingConfigKey = "";
 let geminiLiveConnectingVoiceName = "";
 let currentStorageScopeUid = "anon";
 let globalConfigOpen = false;
+let regenerateGeminiAudioConfigOpen = false;
+let regenerateGeminiAudioConfigReturnFocus = null;
 let musicConfigOpen = false;
 let audioTrackMixOpen = false;
 let scriptSetupOpen = false;
@@ -1751,7 +2010,7 @@ function normalizePodcasterStoragePathSegment(value = "", fallback = "item") {
 
 async function uploadReferenceImageToStorage(reference = null, options = {}) {
   const activeSession = getActiveSession();
-  const sessionId = String(activeSession?.id || "").trim();
+  const sessionId = String(options.sessionId || activeSession?.id || "").trim();
   const uid = String(resolveCurrentUid() || "").trim();
   const dataUrl = String(reference?.dataUrl || "").trim();
   if (!sessionId || !uid || !dataUrl.startsWith("data:image/")) return null;
@@ -4212,7 +4471,7 @@ function normalizeDialogueVideoMap(raw = {}) {
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
     const storagePath = String(mediaRef.storagePath || "").trim();
     const dataUrl = String(clip.dataUrl || clip.localDataUrl || "").trim();
-    if (!storagePath && !downloadUrl && !dataUrl) return;
+    if (!storagePath && !downloadUrl && !dataUrl && !clip.localMediaCacheKey) return;
     const rawSegments = Array.isArray(clip.segments) ? clip.segments : [];
     const segments = rawSegments
       .map((segment, idx) => {
@@ -4338,7 +4597,8 @@ function normalizeDialogueVideoMap(raw = {}) {
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       segments,
       stopMotion: globalThis.PodcasterStopMotion?.normalizeStopMotion?.(clip.stopMotion || null) || null,
-      updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
+      ...podcasterMediaState.mediaMetadata(clip),
+      updatedAt: podcasterMediaState.mediaDateIso(clip.updatedAt, nowIso()),
       downloadUrl,
       storagePath
     };
@@ -4379,7 +4639,8 @@ function normalizeDialogueAudioMap(raw = {}) {
       playbackRate: Math.max(0.5, Math.min(10, Number(clip.playbackRate || 1) || 1)),
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       wordTimings: normalizeKaraokeWordTimings(clip, String(clip.targetSpeechLine || "").trim()),
-      updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
+      ...podcasterMediaState.mediaMetadata(clip),
+      updatedAt: podcasterMediaState.mediaDateIso(clip.updatedAt, nowIso()),
       dataUrl,
       localDataUrl: dataUrl,
       localMediaCacheKey,
@@ -4422,13 +4683,22 @@ function resolveFallbackDialogueAudioForRow(session = null, rowId = "") {
   const dataUrl = String(segment?.dataUrl || segment?.localDataUrl || "").trim();
   const localMediaCacheKey = String(segment?.localMediaCacheKey || "").trim();
   if (!downloadUrl && !storagePath && !dataUrl && !localMediaCacheKey) return null;
+  const row = getSessionRows(session).find((item) => String(item?.id || "").trim() === key);
+  const rate = Math.max(0.5, Math.min(10, Number(row?.playbackRate || segment.playbackRate || 1) || 1));
+  // Segment duration is timeline time. The fallback asset must expose source
+  // time, otherwise consumers divide by playback speed a second time.
+  const sourceDurationMs = Number(segment.sourceDurationMs) > 0
+    ? Number(segment.sourceDurationMs)
+    : Number(segment.trimOutMs) > 0
+      ? Number(segment.trimOutMs)
+      : Math.max(0, Number(segment.trimInMs) || 0) + Math.max(0, Number(segment.durationMs) || 0) * rate;
   return {
     rowId: key,
     speaker: "",
     mimeType: "audio/ogg",
     model: "gemini-track-fallback",
     promptVersion: "gemini-track-fallback",
-    durationSec: Math.max(0, Number(segment?.durationMs || 0) / 1000),
+    durationSec: sourceDurationMs / 1000,
     targetSpeechLine: "",
     updatedAt: String(track?.updatedAt || nowIso()).trim() || nowIso(),
     dataUrl,
@@ -5888,84 +6158,11 @@ function buildDefaultTimelineTracks(session = null) {
 
 function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
   if (!raw || typeof raw !== "object") return null;
-  const rowId = String(raw.rowId || "").trim();
-  const normalizedMedia = normalizePersistedMediaReference(
-    String(raw.audioSrc || raw.url || raw.downloadUrl || "").trim(),
-    String(raw.storagePath || "").trim()
-  );
-  const downloadUrl = String(normalizedMedia.downloadUrl || "").trim();
-  const storagePath = String(normalizedMedia.storagePath || "").trim();
-  const audioSrc = String(resolveStorageAudioUrl(downloadUrl, storagePath) || downloadUrl || "").trim();
-  if (!rowId || (!audioSrc && !downloadUrl && !storagePath)) return null;
-
-  // Support seconds/milliseconds start fallbacks
-  let startMs = 0;
-  if (raw.startMs !== undefined) {
-    startMs = Math.round(toFiniteNumber(raw.startMs, 0));
-  } else if (raw.start !== undefined) {
-    startMs = Math.round(toFiniteNumber(raw.start, 0) * 1000);
-  }
-
-  let anchorStartMs = startMs;
-  if (raw.anchorStartMs !== undefined && raw.anchorStartMs !== null) {
-    anchorStartMs = Math.max(0, Math.round(Number(raw.anchorStartMs) || 0));
-  } else if (raw.anchorStart !== undefined && raw.anchorStart !== null) {
-    anchorStartMs = Math.max(0, Math.round(Number(raw.anchorStart) * 1000));
-  }
-
-  // Support seconds/milliseconds trim fallbacks
-  let trimInMs = 0;
-  if (raw.trimInMs !== undefined) {
-    trimInMs = Math.round(toFiniteNumber(raw.trimInMs, 0));
-  } else if (raw.trimIn !== undefined) {
-    trimInMs = Math.round(toFiniteNumber(raw.trimIn, 0) * 1000);
-  }
-  trimInMs = Math.max(0, trimInMs);
-
-  let trimOutMs = trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS;
-  if (raw.trimOutMs !== undefined) {
-    trimOutMs = Math.round(toFiniteNumber(raw.trimOutMs, trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS));
-  } else if (raw.trimOut !== undefined) {
-    trimOutMs = Math.round(toFiniteNumber(raw.trimOut, 0) * 1000);
-  }
-  trimOutMs = Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs);
-
-  // Support seconds/milliseconds duration fallbacks
-  let durationMs = trimOutMs - trimInMs;
-  if (raw.durationMs !== undefined) {
-    durationMs = Math.round(toFiniteNumber(raw.durationMs, trimOutMs - trimInMs));
-  } else if (raw.durationSec !== undefined) {
-    durationMs = Math.round(toFiniteNumber(raw.durationSec, 0) * 1000);
-  } else if (raw.duration !== undefined) {
-    durationMs = Math.round(toFiniteNumber(raw.duration, 0) * 1000);
-  } else if (raw.end !== undefined && raw.start !== undefined) {
-    durationMs = Math.round((toFiniteNumber(raw.end, 0) - toFiniteNumber(raw.start, 0)) * 1000);
-  }
-  durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, durationMs);
-
-  let endMs = startMs + durationMs;
-  if (raw.endMs !== undefined) {
-    endMs = Math.round(toFiniteNumber(raw.endMs, startMs + durationMs));
-  } else if (raw.end !== undefined) {
-    endMs = Math.round(toFiniteNumber(raw.end, 0) * 1000);
-  }
-  endMs = Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, endMs);
-
-  return {
-    rowId,
-    sceneIndex: Math.max(1, Math.round(toFiniteNumber(raw.sceneIndex, index + 1))),
-    speakerName: String(raw.speakerName || "").replace(/\s+/g, " ").trim(),
-    audioSrc,
-    downloadUrl,
-    storagePath,
-    startMs,
-    anchorStartMs,
-    manualStartMs: raw.manualStartMs === true || raw.manualPosition === true,
-    endMs,
-    trimInMs,
-    trimOutMs,
-    durationMs
-  };
+  return podcasterMediaState.normalizeDialogueSegment(raw, index, {
+    resolveReference: normalizePersistedMediaReference,
+    resolveAudioUrl: resolveStorageAudioUrl,
+    minDurationMs: STUDIO_TIMELINE_MIN_CLIP_MS
+  });
 }
 
 function normalizeGeminiDialogueTrack(raw = {}) {
@@ -6120,131 +6317,13 @@ function preserveOnScreenTextOffsetsForReorderedTimeline(beforeSession = null) {
   return true;
 }
 
-function applyGeminiSubtitleInsetForReorderedTimeline(session = null, insetPx = STUDIO_REORDER_SUBTITLE_INSET_PX) {
-  const activeSession = session || getActiveSession();
-  if (!activeSession) return false;
-  const cfg = getPodcastVideoConfig(activeSession);
-  const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-  if (!track.enabled || !track.segments.length) return false;
-  const sceneClips = ensureTimelineClipsByRowId(activeSession, { persist: false });
-  const insetMs = Math.max(0, snapTimelineMs(timelinePxToMs(insetPx, activeSession)));
-  const legacyInsetMs = Math.max(0, snapTimelineMs(timelinePxToMs(STUDIO_REORDER_SUBTITLE_LEGACY_INSET_PX, activeSession)));
-  const legacyDelayMs = Math.max(0, snapTimelineMs(STUDIO_GEMINI_LEGACY_DEFAULT_DELAY_MS));
-  const timelineTotalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
-  let changed = false;
-  const nextSegments = track.segments.map((segment) => {
-    const rowId = String(segment?.rowId || "").trim();
-    const sceneClip = rowId ? sceneClips[rowId] || null : null;
-    if (!rowId || !sceneClip) return segment;
-    const sceneStartMs = Math.max(0, Number(sceneClip?.startMs || 0) || 0);
-    const durationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
-    );
-    const desiredStartCandidateMs = sceneStartMs + insetMs;
-    const desiredStartMs = clampGeminiSegmentStartToTimeline(
-      Math.max(timelineTotalMs, desiredStartCandidateMs + durationMs),
-      durationMs,
-      desiredStartCandidateMs
-    );
-    const legacyAutoStartMs = snapTimelineMs(sceneStartMs + legacyInsetMs);
-    const legacyDelayStartMs = snapTimelineMs(sceneStartMs + legacyDelayMs);
-    const currentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
-    const previousAnchorMs = resolveGeminiSegmentAnchorStartMs(segment, sceneStartMs);
-    // Si el usuario movio el chip manualmente, `startMs` deja de coincidir con su
-    // anchor previo. En ese caso no debemos volver a insetearlo al rehidratar.
-    const hasManualOffsetFromAnchor = hasManualGeminiSegmentOffset(
-      segment,
-      sceneStartMs,
-      resolveAutomaticGeminiSceneOffsetMs(getTimelineClipEffectiveDurationMs(sceneClip), durationMs)
-    );
-    const looksManual = hasManualOffsetFromAnchor || (
-      previousAnchorMs === sceneStartMs
-      && Math.abs(currentStartMs - legacyAutoStartMs) > STUDIO_TIMELINE_SNAP_MS
-      && Math.abs(currentStartMs - legacyDelayStartMs) > STUDIO_TIMELINE_SNAP_MS
-      && Math.abs(currentStartMs - desiredStartMs) > STUDIO_TIMELINE_SNAP_MS
-    );
-    if (looksManual) return segment;
-    const startMs = Math.max(0, desiredStartMs);
-    const next = {
-      ...segment,
-      startMs,
-      anchorStartMs: sceneStartMs,
-      endMs: startMs + durationMs
-    };
-    if (
-      Number(segment?.startMs || 0) !== next.startMs
-      || Number(segment?.anchorStartMs || 0) !== next.anchorStartMs
-      || Number(segment?.endMs || 0) !== next.endMs
-    ) {
-      changed = true;
-    }
-    return next;
-  });
-  if (!changed) return false;
-  upsertPodcastVideoConfig((base) => ({
-    ...base,
-    geminiDialogueTrack: normalizeGeminiDialogueTrack({
-      ...(base.geminiDialogueTrack || {}),
-      enabled: true,
-      segments: nextSegments
-    })
-  }));
-  syncOnScreenTextClipsWithGeminiTrack({ render: false });
-  return true;
+function applyGeminiSubtitleInsetForReorderedTimeline() {
+  return false;
 }
 
-function normalizeLegacyGeminiTrackOffsets(session = null) {
-  const activeSession = session || getActiveSession();
-  if (!activeSession) return false;
-  const cfg = getPodcastVideoConfig(activeSession);
-  const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-  if (!track.enabled || !track.segments.length) return false;
-  const sceneClips = ensureTimelineClipsByRowId(activeSession, { persist: false });
-  const legacyDelayMs = Math.max(0, snapTimelineMs(STUDIO_GEMINI_LEGACY_DEFAULT_DELAY_MS));
-  const legacyInsetMs = Math.max(0, snapTimelineMs(timelinePxToMs(STUDIO_REORDER_SUBTITLE_LEGACY_INSET_PX, activeSession)));
-  const currentInsetMs = Math.max(0, snapTimelineMs(timelinePxToMs(STUDIO_REORDER_SUBTITLE_INSET_PX, activeSession)));
-  let changed = false;
-  const nextSegments = track.segments.map((segment) => {
-    const rowId = String(segment?.rowId || "").trim();
-    const sceneClip = rowId ? sceneClips[rowId] || null : null;
-    if (!rowId || !sceneClip) return segment;
-    const sceneStartMs = Math.max(0, Number(sceneClip?.startMs || 0) || 0);
-    const currentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
-    const durationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - currentStartMs) || STUDIO_TIMELINE_MIN_CLIP_MS
-    );
-    const automaticStartMs = resolveGeminiSegmentStartWithinScene(
-      sceneStartMs,
-      getTimelineClipEffectiveDurationMs(sceneClip),
-      durationMs
-    );
-    const matchesLegacyDefault = (
-      currentStartMs === snapTimelineMs(sceneStartMs + legacyDelayMs)
-      || currentStartMs === snapTimelineMs(sceneStartMs + legacyInsetMs)
-      || (currentInsetMs > 0 && currentStartMs === snapTimelineMs(sceneStartMs + currentInsetMs))
-    );
-    if (!matchesLegacyDefault) return segment;
-    changed = true;
-    return {
-      ...segment,
-      startMs: automaticStartMs,
-      anchorStartMs: sceneStartMs,
-      endMs: automaticStartMs + durationMs
-    };
-  });
-  if (!changed) return false;
-  upsertPodcastVideoConfig((base) => ({
-    ...base,
-    geminiDialogueTrack: normalizeGeminiDialogueTrack({
-      ...(base.geminiDialogueTrack || {}),
-      enabled: true,
-      segments: nextSegments
-    })
-  }));
-  syncOnScreenTextClipsWithGeminiTrack({ render: false });
-  return true;
+function normalizeLegacyGeminiTrackOffsets() {
+  // Kept for callers of the old migration API. No saved format marker proves that an offset was automatic.
+  return false;
 }
 
 function normalizeOnScreenTextLayoutsForReorderedTimeline(session = null) {
@@ -6423,7 +6502,10 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
       manualStartMs: hasManualStartMs,
       durationMs,
       trimInMs,
-      trimOutMs: trimInMs + durationMs,
+      // Reordering changes position, not the selected source samples.
+      trimOutMs: Number(segment.trimOutMs) > trimInMs
+        ? Number(segment.trimOutMs)
+        : trimInMs + Math.round(durationMs * resolveDialogueAudioPlaybackRate(sessionAfter, rowId)),
       endMs: startMs + durationMs
     }, sceneIndex - 1);
     return normalized;
@@ -6686,8 +6768,8 @@ function reorderTimelineClipsByTracks(options = {}) {
   });
   void persistReorderedTimelinePatchToCloud(refreshedSession, {
     timelineClipsByRowId: nextClips,
-    geminiDialogueTrack: reorderGemini.track,
-    timelineOnScreenTextClipsByRowId: reorderText.clips,
+    geminiDialogueTrack: getPodcastVideoConfig(refreshedSession).geminiDialogueTrack,
+    timelineOnScreenTextClipsByRowId: getPodcastVideoConfig(refreshedSession).timelineOnScreenTextClipsByRowId,
     ...(reorderLayouts.changed ? { timelineOnScreenTextLayoutByRowId: reorderLayouts.layouts } : {})
   });
   setGenerationStatus(
@@ -6870,22 +6952,15 @@ function buildGeminiDialogueTimelineTrack(session = null, options = {}) {
       missingRowIds.push(rowId);
       return null;
     }
-    // Track Voces Gemini: el chip representa la voz (audio) y debe respetar su duración.
-    // No se debe recortar por la duración del clip visual (trimOut/trimIn), porque eso
-    // termina truncando el audio en export/montaje.
-    const trimInMs = existingSegment && existingSegment.trimInMs !== undefined
-      ? Math.max(0, Number(existingSegment.trimInMs || 0))
-      : 0;
-    const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, activeSession) || entry?.audioDurationMs || 0) || 0));
-    const desiredDurationMs = audioDurationMs > 0
-      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - trimInMs)
-      : Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+    const playbackRate = resolveDialogueAudioPlaybackRate(activeSession, rowId);
+    const audioDurationMs = Math.max(0, Number(resolveRowAudioDurationMs(rowId, activeSession) || entry?.audioDurationMs || 0));
+    const timing = reconcileGeminiVoiceSource({
+      segment: existingSegment || { durationMode: "source", durationMs: entry.effectiveDurationMs, trimInMs: 0 },
+      sourceDurationMs: Math.round(audioDurationMs * playbackRate), playbackRate
+    });
+    const { durationMs, trimInMs, trimOutMs } = timing;
     const hasExplicitManualStartMs = existingSegment?.manualStartMs === true || existingSegment?.manualPosition === true;
     const hasManualStartMs = options?.resetAudioPositions === true ? false : hasExplicitManualStartMs;
-    const durationMs = (existingSegment && existingSegment.durationMs !== undefined && hasManualStartMs)
-      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(existingSegment.durationMs || 0))
-      : desiredDurationMs;
-    const trimOutMs = trimInMs + durationMs;
     const sceneStartMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
     const sceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
     const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, durationMs, activeSession);
@@ -6915,7 +6990,8 @@ function buildGeminiDialogueTimelineTrack(session = null, options = {}) {
       endMs: startMs + durationMs,
       trimInMs,
       trimOutMs,
-      durationMs
+      durationMs,
+      ...(timing.durationMode ? { durationMode: timing.durationMode } : {})
     }, timelineIndex);
     return normalizedSegment;
   }).filter(Boolean);
@@ -6933,8 +7009,8 @@ function buildGeminiDialogueTimelineTrack(session = null, options = {}) {
 
 function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack = null, options = {}) {
   const activeSession = session || getActiveSession();
+  const cfg = getPodcastVideoConfig(activeSession);
   const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
-  const runtimeTotalMs = runtimeEntries.reduce((acc, entry) => Math.max(acc, Math.max(0, Number(entry?.endMs || 0) || 0)), STUDIO_TIMELINE_MIN_CLIP_MS);
   const existing = normalizeGeminiDialogueTrack(existingTrack || {});
   const existingByRowId = new Map(existing.segments.map((segment) => [String(segment?.rowId || "").trim(), segment]));
   const excludedRowIds = new Set(
@@ -6943,7 +7019,6 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       .filter(Boolean)
   );
   const preserveStartMs = options?.preserveStartMs !== false;
-  const forceDurationFromAudio = options?.forceDurationFromAudio === true;
   const missingRowIds = [];
   const nextSegments = runtimeEntries.map((entry, timelineIndex) => {
     const rowId = String(entry?.rowId || "").trim();
@@ -6957,101 +7032,36 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       missingRowIds.push(rowId);
       return null;
     }
-    const sceneStartMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
-    const sceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
-    const trimInMs = Math.max(0, Math.round(Number(entry?.clip?.trimInMs || 0) || 0));
-    const trimOutMs = Math.max(
-      trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round(Number(entry?.clip?.trimOutMs || trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS) || (trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS))
-    );
-    const clipPlayableMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
-    const audioDurationMs = Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, activeSession) || entry?.audioDurationMs || 0) || 0));
-    const existingDurationMs = existingSegment
-      ? Math.max(
-        STUDIO_TIMELINE_MIN_CLIP_MS,
-        Math.round(Number(existingSegment.durationMs || 0) || (Number(existingSegment.endMs || 0) - Number(existingSegment.startMs || 0)) || clipPlayableMs)
-      )
-      : 0;
-
-    const segmentTrimInMs = preserveStartMs && existingSegment
-      ? Math.max(0, Math.round(Number(existingSegment.trimInMs ?? 0) || 0))
-      : 0;
-    const audioSuggestedDurationMs = audioDurationMs > 0
-      ? Math.round(Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - segmentTrimInMs))
-      : 0;
-    const hasExplicitManualStartMs = existingSegment?.manualStartMs === true || existingSegment?.manualPosition === true;
-    const hasManualStartMs = options?.resetAudioPositions === true ? false : hasExplicitManualStartMs;
-    const expectedSegmentDuration = (hasManualStartMs && preserveStartMs && existingSegment && existingDurationMs > 0)
-      ? existingDurationMs
-      : (audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs);
-
-    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, expectedSegmentDuration);
-
-    // Calcular el desplazamiento exacto del inicio de la escena para preservar el offset relativo del audio
-    let shiftSceneStartMs = 0;
-    const drag = window.podcastVideoState?.timelineDrag;
-    if (drag) {
-      if (String(drag.rowId || "").trim() === rowId) {
-        shiftSceneStartMs = sceneStartMs - Math.max(0, Number(drag.initialStartMs || 0));
-      } else if (Array.isArray(drag.dragGroup)) {
-        const groupEntry = drag.dragGroup.find(e => String(e?.rowId || "").trim() === rowId);
-        if (groupEntry) {
-          shiftSceneStartMs = sceneStartMs - Math.max(0, Number(groupEntry.initialStartMs || 0));
-        }
-      }
-    }
-
-    const referenceSceneStartMs = sceneStartMs - shiftSceneStartMs;
-    const relativeOffsetMs = (preserveStartMs && existingSegment && hasManualStartMs) || options?.isTrimStart
-      ? (options?.isTrimStart
-          ? Math.max(0, Math.round((existingSegment.startMs || 0) - referenceSceneStartMs))
-          : resolveGeminiSegmentRelativeOffsetMs(existingSegment, referenceSceneStartMs, automaticOffsetMs)
-        )
-      : automaticOffsetMs;
-
-    // Voz Gemini (chip segment): la duración no debe "encogerse" por recortes del clip visual.
-    // Si el usuario movió el chip, preservamos su duración previa; en caso contrario usamos
-    // la duración del audio si existe, o el clip visual como fallback.
-    const audioMaxPlayableMs = audioDurationMs > 0
-      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(audioDurationMs - segmentTrimInMs))
-      : Number.POSITIVE_INFINITY;
-    // Si el track ya existía pero se importó con una duración recortada (por trim del clip visual),
-    // expandimos de forma segura hasta la duración real del audio para evitar cortes al final.
-    const baseDurationMs = forceDurationFromAudio && audioSuggestedDurationMs > 0
-      ? audioSuggestedDurationMs
-      : (preserveStartMs && existingSegment && hasManualStartMs)
-        ? Math.max(existingDurationMs, audioSuggestedDurationMs || 0)
-        : (audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs);
-    const durationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.min(resolveGeminiSegmentDurationWithinScene(sceneDurationMs, baseDurationMs), audioMaxPlayableMs)
-    );
-    const desiredStartMs = sceneStartMs + relativeOffsetMs;
-    const startMs = clampGeminiSegmentStartToTimeline(
-      Math.max(runtimeTotalMs, desiredStartMs + durationMs),
-      durationMs,
-      desiredStartMs
-    );
-    const segmentTrimOutMs = segmentTrimInMs + durationMs;
-    const normalizedSegment = normalizeGeminiDialogueTrackSegment({
-      rowId,
-      sceneIndex: timelineIndex + 1,
-      speakerName: String(entry?.speakerName || "").trim(),
+    const media = resolveDialogueAudioForRow(activeSession, rowId) || {};
+    const playbackRate = resolveDialogueAudioPlaybackRate(activeSession, rowId);
+    const audioDurationMs = Math.max(0, Number(resolveRowAudioDurationMs(rowId, activeSession) || entry?.audioDurationMs || 0));
+    const timing = reconcileGeminiVoiceSource({
+      segment: existingSegment || { durationMode: "source", trimInMs: 0, durationMs: entry.effectiveDurationMs },
+      sourceDurationMs: Math.round(audioDurationMs * playbackRate), playbackRate
+    });
+    const sceneStartMs = Math.max(0, Number(entry.startMs) || 0);
+    const keepPosition = existingSegment && preserveStartMs && options.resetAudioPositions !== true;
+    const startMs = keepPosition ? existingSegment.startMs : sceneStartMs
+      + resolveAutomaticGeminiSceneOffsetMs(entry.effectiveDurationMs, timing.durationMs, activeSession);
+    return normalizeGeminiDialogueTrackSegment({
+      ...timing,
+      rowId, sceneIndex: timelineIndex + 1,
+      speakerName: String(entry.speakerName || existingSegment?.speakerName || ""),
       audioSrc,
+      storagePath: media.storagePath || existingSegment?.storagePath,
+      localMediaCacheKey: media.localMediaCacheKey || existingSegment?.localMediaCacheKey,
       startMs,
-      anchorStartMs: sceneStartMs,
-      manualStartMs: hasExplicitManualStartMs,
-      endMs: startMs + durationMs,
-      trimInMs: segmentTrimInMs,
-      trimOutMs: segmentTrimOutMs,
-      durationMs
+      endMs: startMs + timing.durationMs,
+      anchorStartMs: keepPosition ? existingSegment.anchorStartMs : sceneStartMs,
+      manualStartMs: keepPosition && existingSegment.manualStartMs === true
     }, timelineIndex);
-    return normalizedSegment;
   }).filter(Boolean);
 
   const trackAlignment = String(existing?.alignment || cfg?.dialogueAlignment || "left").trim().toLowerCase();
   const normalizedNext = normalizeGeminiDialogueTrack({
-    enabled: nextSegments.length > 0,
+    // An empty normalized track has enabled=false because no media existed yet.
+    // Discovering its stored voices must not preserve that placeholder as mute.
+    enabled: (existing.segments.length === 0 || existing.enabled !== false) && nextSegments.length > 0,
     volumePct: existing?.volumePct,
     alignment: trackAlignment,
     segments: nextSegments,
@@ -7069,6 +7079,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       startMs: Number(segment?.startMs || 0),
       endMs: Number(segment?.endMs || 0),
       durationMs: Number(segment?.durationMs || 0),
+      durationMode: segment?.durationMode || "",
       trimInMs: Number(segment?.trimInMs || 0),
       trimOutMs: Number(segment?.trimOutMs || 0),
       anchorStartMs: segment?.anchorStartMs !== null ? Number(segment?.anchorStartMs ?? 0) : null,
@@ -7080,6 +7091,34 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     track: changed ? { ...normalizedNext, updatedAt: nowIso() } : existing,
     changed
   };
+}
+
+const geminiMetadataSyncState = { timer: null, key: "" };
+function scheduleGeminiAudioMetadataSync(session = null) {
+  const target = session || getActiveSession();
+  if (!target) return;
+  const key = `${target.id || ""}:${target.activeThreadId || ""}`;
+  const currentKey = () => {
+    const current = getActiveSession();
+    return `${current?.id || ""}:${current?.activeThreadId || ""}`;
+  };
+  if (key !== currentKey()) return;
+  if (geminiMetadataSyncState.timer !== null) {
+    if (geminiMetadataSyncState.key === key) return;
+    clearTimeout(geminiMetadataSyncState.timer);
+  }
+  geminiMetadataSyncState.key = key;
+  const flush = () => {
+    geminiMetadataSyncState.timer = null;
+    if (key !== currentKey()) return;
+    if (podcastVideoState.timelineDrag || podcastVideoState.playheadDragging) {
+      geminiMetadataSyncState.timer = setTimeout(flush, 50);
+      return;
+    }
+    invalidateStudioRuntimeCache();
+    syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+  };
+  geminiMetadataSyncState.timer = setTimeout(flush, 32);
 }
 
 function syncGeminiDialogueTrackWithRuntime(options = {}) {
@@ -7102,6 +7141,18 @@ function syncGeminiDialogueTrackWithRuntime(options = {}) {
       geminiDialogueTrack: reconciled.track
     };
   }, { autosave: options.autosave !== false });
+  if (changed) {
+    const refreshedSession = getActiveSession();
+    const refreshedConfig = getPodcastVideoConfig(refreshedSession);
+    // Refresh immutable session snapshots without seeking, reloading, or stopping
+    // the players. Metadata can arrive after the transport was started.
+    for (const controller of [playbackController, exportPreviewController]) {
+      controller?.sync(refreshedSession, refreshedConfig, { prepareMedia: false });
+    }
+  }
+  // Geometry can be stale even when persisted timing already matches metadata.
+  // Refresh existing chips independently of whether the track needs a write.
+  podcasterTimelineUiApi?.syncTimelineGeminiSegmentDragPreview(getActiveSession());
   const syncedText = options.syncTextToScene === true
     ? syncOnScreenTextClipsWithSceneTrack({
       render: false,
@@ -7407,7 +7458,6 @@ function splitDialogueTextIntoSegments(text = "", count = 1) {
 function resolveStorageMediaUrl(rawUrl = "") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
-  if (/firebasestorage\.googleapis\.com/i.test(clean) && /[?&]token=/i.test(clean)) return clean;
   if (!hasAvailableApiBase()) return clean;
   if (clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-image?")) return buildApiUrl(clean);
   try {
@@ -7424,9 +7474,8 @@ function resolveStorageMediaUrl(rawUrl = "") {
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
-  if (!clean && !cleanStoragePath) return "";
+  if (!clean && !cleanStoragePath) return options.localMediaCacheKey ? `podcaster-local-media:${options.localMediaCacheKey}` : "";
   if (clean.startsWith("data:")) return clean;
-  if (/firebasestorage\.googleapis\.com/i.test(clean) && /[?&]token=/i.test(clean)) return clean;
   if (!hasAvailableApiBase()) return clean;
 
   const explicitType = String(options.type || options.mediaKind || "").trim().toLowerCase();
@@ -7529,11 +7578,40 @@ async function resolveAuthorizedAssetUrlWithRetry(proxyUrl = "", consumer, optio
   return authorizedAssetResolver.resolveWithRetry(proxyUrl, consumer, options);
 }
 
+async function resolveAuthorizedReferenceImageDisplayUrl(source = "", options = {}) {
+  const clean = String(source || "").trim();
+  if (!clean) return "";
+  if (!/\/api\/assets\/proxy-image\?/i.test(clean)) return clean;
+  return resolveAuthorizedAssetUrl(clean, options);
+}
+
+async function hydrateAuthorizedReferenceImages(root = null) {
+  if (!root || typeof root.querySelectorAll !== "function") return;
+  const images = Array.from(root.querySelectorAll("img[data-reference-image-src]"));
+  await Promise.allSettled(images.map(async (image) => {
+    const logicalSource = String(image.dataset.referenceImageSrc || "").trim();
+    if (!logicalSource) return;
+    image.dataset.referenceImageState = "loading";
+    try {
+      const resolvedSource = await resolveAuthorizedReferenceImageDisplayUrl(logicalSource);
+      if (!image.isConnected || String(image.dataset.referenceImageSrc || "").trim() !== logicalSource) return;
+      if (!resolvedSource) throw new Error("reference_image_url_missing");
+      image.src = resolvedSource;
+      image.dataset.referenceImageState = "ready";
+      const trigger = image.closest("[data-action='open-reference-image-viewer']");
+      if (trigger) trigger.dataset.referenceResolvedSrc = resolvedSource;
+    } catch (error) {
+      if (!image.isConnected || String(image.dataset.referenceImageSrc || "").trim() !== logicalSource) return;
+      image.dataset.referenceImageState = "error";
+      console.warn("[Snoopy] No se pudo autorizar la imagen de referencia.", error);
+    }
+  }));
+}
+
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
-  if (/firebasestorage\.googleapis\.com/i.test(clean) && /[?&]token=/i.test(clean)) return clean;
   if (!hasAvailableApiBase()) return clean;
   try {
     const firebaseGsUrl = (() => {
@@ -7667,6 +7745,7 @@ function createSession(overrides = {}) {
       tone: ""
     },
     videoContentType: null,
+    speechLocale: DEFAULT_SPEECH_LOCALE,
     speakerVoiceMap: baseVoiceMap,
     speakerExpressionMap: baseExpressionMap,
     speakerNameMap: baseNameMap,
@@ -7874,11 +7953,10 @@ function normalizeRowVoiceConfig(row = {}, session = null, options = {}) {
     resolveSpeakerVoiceName(speaker, session)
   );
   const explicitVoiceSeed = options?.voiceName ?? sourceRow?.voiceName ?? "";
-  const explicitVoice = normalizeLiveVoiceName(String(explicitVoiceSeed).trim(), "");
-  const voiceName = explicitVoice || hostVoice || resolveSpeakerVoiceName(speaker, session);
-  const voiceNameSource = explicitVoice
-    ? normalizeVoiceNameSource(options?.voiceNameSource ?? sourceRow?.voiceNameSource)
-    : "host";
+  const requestedSource = normalizeVoiceNameSource(options?.voiceNameSource ?? sourceRow?.voiceNameSource);
+  const explicitVoice = requestedSource === "row" ? readConfiguredVoiceName(explicitVoiceSeed) : "";
+  const voiceName = explicitVoice || hostVoice;
+  const voiceNameSource = explicitVoice ? "row" : "host";
   const editorialText = normalizePodcasterSceneTextFields(sourceRow);
   return {
     ...sourceRow,
@@ -7896,7 +7974,7 @@ function readRowVoiceDraftValue(rowId = "") {
   const inputs = Array.from(document.querySelectorAll(`[data-field='voiceName'][data-row-id="${escapedRowId}"]`));
   for (const input of inputs) {
     if (normalizeVoiceNameSource(input?.dataset?.voiceSource) !== "row") continue;
-    const voice = normalizeLiveVoiceName(String(input?.value || "").trim(), "");
+    const voice = readConfiguredVoiceName(input?.value);
     if (voice) return voice;
   }
   return "";
@@ -7910,7 +7988,7 @@ function flushScriptEditorVoiceDraftsToSession() {
   inputs.forEach((input) => {
     const rowId = String(input?.dataset?.rowId || "").trim();
     if (normalizeVoiceNameSource(input?.dataset?.voiceSource) !== "row") return;
-    const voiceName = normalizeLiveVoiceName(String(input?.value || "").trim(), "");
+    const voiceName = readConfiguredVoiceName(input?.value);
     if (!rowId || !voiceName) return;
     draftByRowId.set(rowId, voiceName);
   });
@@ -8079,6 +8157,10 @@ function upsertSessionById(sessionId, mutator, options = {}) {
   const idx = state.sessions.findIndex((session) => String(session?.id || "").trim() === key);
   if (idx === -1) return null;
   const current = state.sessions[idx];
+  if (current?.archived === true && !canEditArchivedSession(current)) {
+    setGenerationStatus("Desarchiva la sesión antes de editarla.", "is-error");
+    return current;
+  }
   // Text inputs in the scene inspector already operate on a valid in-memory
   // session. Re-normalizing every row and cloning the complete chat for every
   // keystroke makes editing cost grow with the whole document.
@@ -8235,6 +8317,13 @@ function setWorkspacePanelLoading({ sessions = null, workspace = null } = {}) {
 }
 
 async function setActiveSession(sessionId, options = {}) {
+  const requestedSession = state.sessions.find((session) => String(session?.id || "").trim() === String(sessionId || "").trim()) || null;
+  if (requestedSession?.archived === true && !canEditArchivedSession(requestedSession)) {
+    setGenerationStatus("Desarchiva la sesión antes de editarla.", "is-error");
+    addChatMessage("system", "Esta sesión está archivada. Desarchívala para continuar editando.");
+    return false;
+  }
+  const previousActiveSessionId = String(state.activeSessionId || "").trim();
   const activationToken = ++activeSessionActivationToken;
   const isCurrentActivation = () => (
     activationToken === activeSessionActivationToken
@@ -8289,6 +8378,19 @@ async function setActiveSession(sessionId, options = {}) {
           ...mergedSession,
           isStub: false
         });
+        if (targetSession.archived === true && !canEditArchivedSession(targetSession)) {
+          const fallback = state.sessions.find((session) => (
+            session.archived !== true
+            && String(session.id || "").trim() === previousActiveSessionId
+          )) || state.sessions.find((session) => session.archived !== true) || null;
+          state.activeSessionId = fallback?.id || null;
+          persistSessions();
+          render();
+          setGenerationStatus("Desarchiva la sesión antes de editarla.", "is-error");
+          addChatMessage("system", "Esta sesión está archivada. Desarchívala para continuar editando.");
+          if (options.showLoader !== false) setWorkspacePanelLoading({ workspace: false });
+          return false;
+        }
         if (window.PodcasterThreads?.syncActiveThreadToSession) {
           window.PodcasterThreads.syncActiveThreadToSession(targetSession, { repairEmptyThreads: true });
         }
@@ -8484,6 +8586,7 @@ function ensureSession() {
     const normalizedGlobalScenarioDeck = normalizeGlobalScenarioDeck(session.globalScenarioDeck || null);
     const normalizedDisfluencyDefaults = normalizeDisfluencyConfig(session.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG);
     const normalizedTtsDirectionDefaults = normalizeTtsDirectionConfig(session.ttsDirectionDefaults || DEFAULT_TTS_DIRECTION_CONFIG);
+    const normalizedSpeechLocale = getSessionSpeechLocale(session);
     const normalizedPortraitMap = normalizeSpeakerPortraitMap(session.speakerPortraitMap || {});
     const normalizedSpeakerReferenceImageMap = normalizeReferenceImageMap(session.speakerReferenceImageMap || {});
     const normalizedScenarioReferenceImageMap = normalizeReferenceImageMap(session.scenarioReferenceImageMap || {});
@@ -8557,6 +8660,7 @@ function ensureSession() {
     const sameGlobalScenarioDeck = JSON.stringify(normalizedGlobalScenarioDeck) === JSON.stringify(session.globalScenarioDeck || {});
     const sameDisfluencyDefaults = JSON.stringify(normalizedDisfluencyDefaults) === JSON.stringify(session.disfluencyDefaults || {});
     const sameTtsDirectionDefaults = JSON.stringify(normalizedTtsDirectionDefaults) === JSON.stringify(session.ttsDirectionDefaults || {});
+    const sameSpeechLocale = normalizedSpeechLocale === String(session.speechLocale || "").trim();
     const samePortraitMap = JSON.stringify(normalizedPortraitMap) === JSON.stringify(session.speakerPortraitMap || {});
     const sameSpeakerReferenceImageMap = JSON.stringify(normalizedSpeakerReferenceImageMap) === JSON.stringify(session.speakerReferenceImageMap || {});
     const sameScenarioReferenceImageMap = JSON.stringify(normalizedScenarioReferenceImageMap) === JSON.stringify(session.scenarioReferenceImageMap || {});
@@ -8583,11 +8687,12 @@ function ensureSession() {
     if (recoveredRows.length > 0 && !Array.isArray(session.script?.rows)) {
       // Silent recovery to keep DevTools focused on actionable errors.
     }
-    if (sameVoiceMap && sameExpressionMap && sameNameMap && sameScenarioMap && sameScenarioVariantsMap && sameGlobalScenarioDeck && sameDisfluencyDefaults && sameTtsDirectionDefaults && samePortraitMap && sameSpeakerReferenceImageMap && sameScenarioReferenceImageMap && sameRowReferenceImageListMap && sameRowReferenceImageMap && sameRowReferenceVideoMap && sameRowReferenceModeByRowId && sameDialogueVideoMap && sameDialogueAudioMap && sameVideoConfig && sameCreativeVideoConfig && sameStudioUiState && sameVideoContentType && sameLegacyVideoMode && sameRows && sameChat) return session;
+    if (sameVoiceMap && sameExpressionMap && sameNameMap && sameScenarioMap && sameScenarioVariantsMap && sameGlobalScenarioDeck && sameDisfluencyDefaults && sameTtsDirectionDefaults && sameSpeechLocale && samePortraitMap && sameSpeakerReferenceImageMap && sameScenarioReferenceImageMap && sameRowReferenceImageListMap && sameRowReferenceImageMap && sameRowReferenceVideoMap && sameRowReferenceModeByRowId && sameDialogueVideoMap && sameDialogueAudioMap && sameVideoConfig && sameCreativeVideoConfig && sameStudioUiState && sameVideoContentType && sameLegacyVideoMode && sameRows && sameChat) return session;
     changed = true;
     return {
       ...session,
       videoContentType: persistedVideoContentType,
+      speechLocale: normalizedSpeechLocale,
       speakerVoiceMap: trimmedVoiceMap,
       speakerExpressionMap: normalizedExpressionMap,
       speakerNameMap: normalizedNameMap,
@@ -8802,12 +8907,71 @@ function buildPodcastStudioScenePrompt(speaker = "", session = null, options = {
   ].join(" ");
 }
 
+function readConfiguredVoiceName(value = "") {
+  const voice = String(value || "").trim();
+  return GEMINI_LIVE_VOICE_OPTIONS.includes(voice) ? voice : "";
+}
+
 function normalizeLiveVoiceName(voiceName = "", fallback = "") {
   const clean = String(voiceName || "").trim();
   if (GEMINI_LIVE_VOICE_OPTIONS.includes(clean)) return clean;
   const nextFallback = String(fallback || "").trim();
   if (GEMINI_LIVE_VOICE_OPTIONS.includes(nextFallback)) return nextFallback;
   return resolveGeminiLiveVoice();
+}
+
+function normalizeSpeechLocale(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean || clean === "es") return DEFAULT_SPEECH_LOCALE;
+  if (clean === "es-US") return "es-419";
+  if (clean === "pt-BR") return "pt";
+  if (clean === "en-US" || clean === "en-GB" || clean === "en-AU" || clean === "en-IN") return "en";
+  const exact = GEMINI_TTS_LANGUAGE_CATALOG.find((entry) => entry.locale === clean);
+  if (exact) return exact.locale;
+  const base = clean.toLowerCase().split("-")[0];
+  const byLanguage = GEMINI_TTS_LANGUAGE_CATALOG.find((entry) => entry.locale === base);
+  return byLanguage?.locale || DEFAULT_SPEECH_LOCALE;
+}
+
+function getSpeechLocaleProfile(sessionOrLocale = null) {
+  const raw = typeof sessionOrLocale === "string"
+    ? sessionOrLocale
+    : (sessionOrLocale?.speechLocale || sessionOrLocale?.languageCode || "");
+  const locale = normalizeSpeechLocale(raw);
+  return GEMINI_TTS_LANGUAGE_CATALOG.find((entry) => entry.locale === locale)
+    || GEMINI_TTS_LANGUAGE_CATALOG[0];
+}
+
+function getSessionSpeechLocale(session = null) {
+  return getSpeechLocaleProfile(session).locale;
+}
+
+function resolveSpeechGenerationConfig(speakerOrRow = "", session = null) {
+  const activeSession = session || getActiveSession();
+  const profile = getSpeechLocaleProfile(activeSession);
+  const target = speakerOrRow && typeof speakerOrRow === "object"
+    ? speakerOrRow
+    : (findSessionRowById(activeSession, String(speakerOrRow || "").trim()) || speakerOrRow);
+  const voiceSource = target && typeof target === "object"
+    ? normalizeVoiceNameSource(target.voiceNameSource)
+    : "host";
+  return {
+    voiceName: resolveConfiguredSpeakerVoiceForGeneration(target, activeSession),
+    voiceSource,
+    speechLocale: profile.locale,
+    providerLanguageCode: profile.languageCode,
+    localeInstruction: profile.instruction || `Habla únicamente en ${profile.label}, sin cambiar de idioma.`
+  };
+}
+
+function buildSpeechLocaleOptions(selected = DEFAULT_SPEECH_LOCALE) {
+  const selectedLocale = normalizeSpeechLocale(selected);
+  const spanish = GEMINI_TTS_LANGUAGE_CATALOG.filter((entry) => entry.languageCode === "es");
+  const others = GEMINI_TTS_LANGUAGE_CATALOG.filter((entry) => entry.languageCode !== "es");
+  const renderOptions = (entries) => entries.map((entry) => (
+    `<option value="${escapeHtml(entry.locale)}"${entry.locale === selectedLocale ? " selected" : ""}>${escapeHtml(entry.label)}</option>`
+  )).join("");
+  return `<optgroup label="Español">${renderOptions(spanish)}</optgroup><optgroup label="Otros idiomas">${renderOptions(others)}</optgroup>`;
 }
 
 function buildSpeakerVoiceMap(raw = {}) {
@@ -8823,7 +8987,10 @@ function buildSpeakerVoiceMap(raw = {}) {
 }
 
 function getSpeakerVoiceMap(session = null) {
-  return buildSpeakerVoiceMap(session?.speakerVoiceMap || {});
+  const configured = { ...(session?.speakerVoiceMap || {}) };
+  const narratorVoice = readConfiguredVoiceName(session?.creativeVideoConfig?.globalVoiceName);
+  if (!readConfiguredVoiceName(configured.Narrador) && narratorVoice) configured.Narrador = narratorVoice;
+  return buildSpeakerVoiceMap(configured);
 }
 
 function getSpeakerOptions(session = null) {
@@ -8869,35 +9036,26 @@ function resolveConfiguredSpeakerVoiceForGeneration(speaker = "", session = null
   const activeSession = session || getActiveSession();
   const target = speaker;
   let row = null;
-  let rowId = "";
   let key = "";
   if (target && typeof target === "object") {
     row = target;
-    rowId = String(target?.id || "").trim();
     key = String(target?.speaker || "").trim();
   } else {
     const raw = String(target || "").trim();
     const matchedRow = findSessionRowById(activeSession, raw);
     if (matchedRow) {
       row = matchedRow;
-      rowId = raw;
       key = String(matchedRow?.speaker || "").trim();
     } else {
       key = raw;
     }
   }
   if (!key) return resolveSpeakerVoiceName("", activeSession);
-  if (row?.voiceName && normalizeVoiceNameSource(row?.voiceNameSource) === "row") {
-    return normalizeLiveVoiceName(String(row.voiceName || "").trim(), resolveSpeakerVoiceName(key, activeSession));
-  }
-  const draft = collectGlobalSpeakerDraft(activeSession);
-  const draftVoice = normalizeLiveVoiceName(String(draft?.voiceMap?.[key] || "").trim(), "");
-  if (draftVoice) return draftVoice;
-  if (rowId) {
-    const draftRowVoice = readRowVoiceDraftValue(rowId);
-    if (draftRowVoice) return draftRowVoice;
-  }
-  return resolveSpeakerVoiceName(key, activeSession);
+  const rowVoice = normalizeVoiceNameSource(row?.voiceNameSource) === "row"
+    ? readConfiguredVoiceName(row?.voiceName) : "";
+  // Change/input handlers persist voice choices. Hidden or stale controls must
+  // never override that session state when generating another scene.
+  return rowVoice || resolveSpeakerVoiceName(key, activeSession);
 }
 
 function buildSpeakerNameMap(hosts = [], raw = {}) {
@@ -9408,11 +9566,12 @@ function resolveSpeakerVoiceName(speaker = "", session = null) {
 
 function buildGeminiLiveSessionConfigKey(modelLive = "", voiceProfile = null) {
   const profile = voiceProfile || resolveAgentVoiceProfile(resolveGeminiLiveVoice());
+  const localeProfile = getSpeechLocaleProfile(getActiveSession());
   return JSON.stringify({
     model: String(modelLive || ""),
     voice: String(profile?.voiceName || ""),
     mood: String(profile?.mood || ""),
-    locale: String(profile?.locale || "es-MX"),
+    locale: localeProfile.locale,
     speed: Number(profile?.speed || 1),
     pitch: Number(profile?.pitch || 1)
   });
@@ -9604,6 +9763,7 @@ function updatePlayingRowFromAudioDrain() {
 function playGeminiPcm(base64Chunk = "") {
   if (!base64Chunk) return;
   if (!geminiLiveAudioCtx) geminiLiveAudioCtx = new AudioContext({ sampleRate: 24000 });
+  window.SnoopyAudioOutput?.register(geminiLiveAudioCtx);
   const samples = pcm16Base64ToFloat32(base64Chunk);
   if (!samples.length) return;
   if (
@@ -9827,6 +9987,7 @@ async function ensureGeminiLiveConnected(voiceProfile = null, options = {}) {
   const profile = voiceProfile || resolveAgentVoiceProfile(resolveGeminiLiveVoice());
   const modelLive = resolveGeminiLiveModel();
   const requestedVoiceName = String(profile?.voiceName || "").trim();
+  const localeProfile = getSpeechLocaleProfile(getActiveSession());
   const desiredConfigKey = buildGeminiLiveSessionConfigKey(modelLive, profile);
   logPodcasterLiveDebug("ensure-requested", {
     requestedVoice: requestedVoiceName,
@@ -9886,7 +10047,7 @@ async function ensureGeminiLiveConnected(voiceProfile = null, options = {}) {
         voiceName: requestedVoiceName,
         systemInstruction: [
           "Eres una voz de produccion para podcast conversacional.",
-          `Habla en ${String(profile?.locale || "es-MX")}.`,
+          localeProfile.instruction || `Habla únicamente en ${localeProfile.label}, sin cambiar de idioma.`,
           `Personalidad base: ${String(profile?.mood || "profesional")}.`,
           "Mantén una identidad consistente, natural y humana."
         ].join(" ")
@@ -9920,7 +10081,7 @@ async function ensureGeminiLiveConnected(voiceProfile = null, options = {}) {
         responseModalities: [Modality.AUDIO],
         systemInstruction: [
           "Eres una voz de produccion para podcast conversacional.",
-          `Habla en ${String(profile?.locale || "es-MX")}.`,
+          localeProfile.instruction || `Habla únicamente en ${localeProfile.label}, sin cambiar de idioma.`,
           `Personalidad base: ${String(profile?.mood || "profesional")}.`,
           `Usa exactamente la voz preconfigurada ${String(profile?.voiceName || "").trim()} sin cambiar de timbre.`,
           "Mantén una identidad consistente, natural y humana."
@@ -10563,26 +10724,32 @@ function buildOptions(options, selected) {
   )).join("");
 }
 
-function buildVoiceOptions(selected) {
+function buildVoiceOptions(selected, options = {}) {
   const groups = [
     { key: "femenina", label: "Voces femeninas" },
     { key: "masculina", label: "Voces masculinas" }
   ];
   const selectedVoice = String(selected || "").trim();
+  const includeInheritance = options?.includeInheritance === true;
+  const inherited = options?.inherited === true;
+  const inheritedVoiceName = normalizeLiveVoiceName(options?.inheritedVoiceName, selectedVoice);
+  const inheritanceOption = includeInheritance
+    ? `<option value=""${inherited ? " selected" : ""}>${escapeHtml(`Heredar configuración global · ${inheritedVoiceName}`)}</option>`
+    : "";
   const grouped = groups.map((group) => {
     const options = AGENT_VOICE_PROFILES
       .filter((profile) => profile.genderGroup === group.key)
       .map((profile) => (
-        `<option value="${escapeHtml(profile.voiceName)}"${profile.voiceName === selectedVoice ? " selected" : ""}>${escapeHtml(`${profile.voiceName} · ${profile.toneLabel}`)}</option>`
+        `<option value="${escapeHtml(profile.voiceName)}"${!inherited && profile.voiceName === selectedVoice ? " selected" : ""}>${escapeHtml(`${profile.voiceName} · ${profile.toneLabel}`)}</option>`
       ))
       .join("");
     return options ? `<optgroup label="${escapeHtml(group.label)}">${options}</optgroup>` : "";
   }).join("");
 
-  if (grouped) return grouped;
-  return AGENT_VOICE_PROFILES.map((profile) => (
-    `<option value="${escapeHtml(profile.voiceName)}"${profile.voiceName === selectedVoice ? " selected" : ""}>${escapeHtml(`${profile.voiceName} · ${profile.toneLabel}`)}</option>`
-  )).join("");
+  if (grouped) return `${inheritanceOption}${grouped}`;
+  return `${inheritanceOption}${AGENT_VOICE_PROFILES.map((profile) => (
+    `<option value="${escapeHtml(profile.voiceName)}"${!inherited && profile.voiceName === selectedVoice ? " selected" : ""}>${escapeHtml(`${profile.voiceName} · ${profile.toneLabel}`)}</option>`
+  )).join("")}`;
 }
 
 function buildSpeakerOptionsForRow(session = null, selected = "") {
@@ -10590,6 +10757,172 @@ function buildSpeakerOptionsForRow(session = null, selected = "") {
   const options = getSpeakerOptions(session);
   if (cleanSelected && !options.includes(cleanSelected)) options.push(cleanSelected);
   return buildOptions(options, cleanSelected || options[0] || "Host A");
+}
+
+function buildRegenerateGeminiVoiceSettingsMarkup(session = null) {
+  const voiceMap = getSpeakerVoiceMap(session);
+  return getSpeakerOptions(session).map((host) => {
+    const voiceName = normalizeLiveVoiceName(voiceMap[host], resolveSpeakerVoiceName(host, session));
+    return `
+      <article class="global-speaker-row gemini-audio-config-speaker-row" data-host-name="${escapeHtml(host)}">
+        <strong>${escapeHtml(host)}</strong>
+        <label class="global-speaker-field">
+          <span>Voz</span>
+          <select data-field="voiceName" aria-label="Voz de ${escapeHtml(host)}">
+            ${buildVoiceOptions(voiceName)}
+          </select>
+        </label>
+      </article>
+    `;
+  }).join("");
+}
+
+function syncRegenerateGeminiAudioConfigModal(session = null) {
+  if (!session) return;
+  const speechLocale = getSessionSpeechLocale(session);
+  if (els.regenerateGeminiSpeechLocaleSelect) {
+    els.regenerateGeminiSpeechLocaleSelect.innerHTML = buildSpeechLocaleOptions(speechLocale);
+    els.regenerateGeminiSpeechLocaleSelect.value = speechLocale;
+  }
+  if (els.regenerateGeminiVoiceSettings) {
+    els.regenerateGeminiVoiceSettings.innerHTML = buildRegenerateGeminiVoiceSettingsMarkup(session);
+  }
+  if (els.regenerateGeminiAudioConfigModal) {
+    els.regenerateGeminiAudioConfigModal.dataset.sessionId = String(session.id || "").trim();
+  }
+}
+
+function setRegenerateGeminiAudioConfigOpen(isOpen, options = {}) {
+  regenerateGeminiAudioConfigOpen = Boolean(isOpen);
+  if (regenerateGeminiAudioConfigOpen && typeof options?.trigger?.focus === "function") {
+    regenerateGeminiAudioConfigReturnFocus = options.trigger;
+  }
+  if (els.regenerateGeminiAudioConfigModal) {
+    els.regenerateGeminiAudioConfigModal.hidden = !regenerateGeminiAudioConfigOpen;
+  }
+  if (regenerateGeminiAudioConfigOpen) {
+    window.requestAnimationFrame(() => els.regenerateGeminiSpeechLocaleSelect?.focus());
+    return;
+  }
+  const returnFocus = regenerateGeminiAudioConfigReturnFocus;
+  regenerateGeminiAudioConfigReturnFocus = null;
+  if (options?.restoreFocus !== false && returnFocus?.isConnected) {
+    window.requestAnimationFrame(() => returnFocus.focus());
+  }
+}
+
+function openRegenerateGeminiAudioConfig(trigger = null) {
+  const session = getActiveSession();
+  if (!session || podcastVideoState.busy) return;
+  const regenerableRows = getRegenerableGeminiAudioRows(session);
+  if (!regenerableRows.length) {
+    setGenerationStatus("No hay escenas válidas para regenerar audios Gemini.", "");
+    return;
+  }
+  syncRegenerateGeminiAudioConfigModal(session);
+  setRegenerateGeminiAudioConfigOpen(true, { trigger });
+}
+
+function readRegenerateGeminiAudioConfigDraft(session = null) {
+  const voiceMap = { ...getSpeakerVoiceMap(session) };
+  els.regenerateGeminiVoiceSettings?.querySelectorAll(".gemini-audio-config-speaker-row").forEach((row) => {
+    const host = String(row.dataset.hostName || "").trim();
+    const selectedVoice = String(row.querySelector("[data-field='voiceName']")?.value || "").trim();
+    if (!host || !selectedVoice) return;
+    voiceMap[host] = normalizeLiveVoiceName(selectedVoice, resolveSpeakerVoiceName(host, session));
+  });
+  return {
+    speechLocale: normalizeSpeechLocale(els.regenerateGeminiSpeechLocaleSelect?.value),
+    voiceMap
+  };
+}
+
+function applySpeakerVoiceMapToSession(session = null, voiceMap = {}) {
+  if (!session) return session;
+  const normalizedVoiceMap = { ...getSpeakerVoiceMap(session) };
+  getSpeakerOptions(session).forEach((host) => {
+    normalizedVoiceMap[host] = normalizeLiveVoiceName(voiceMap[host], resolveSpeakerVoiceName(host, session));
+  });
+  return {
+    ...session,
+    speakerVoiceMap: normalizedVoiceMap,
+    script: {
+      ...session.script,
+      rows: normalizeRows(session.script?.rows).map((row) => {
+        const speaker = String(row?.speaker || "").trim();
+        if (!speaker) return row;
+        const hostVoiceName = normalizeLiveVoiceName(normalizedVoiceMap[speaker], resolveSpeakerVoiceName(speaker, session));
+        if (normalizeVoiceNameSource(row?.voiceNameSource) === "row") {
+          return normalizeRowVoiceConfig(row, session, {
+            speaker,
+            hostVoiceName,
+            voiceName: row?.voiceName,
+            voiceNameSource: "row"
+          });
+        }
+        return normalizeRowVoiceConfig(row, session, {
+          speaker,
+          hostVoiceName,
+          voiceName: hostVoiceName,
+          voiceNameSource: "host"
+        });
+      })
+    }
+  };
+}
+
+function applyRegenerateGeminiAudioConfigDraft() {
+  const session = getActiveSession();
+  if (!session) return null;
+  const draft = readRegenerateGeminiAudioConfigDraft(session);
+  upsertActiveSession((current) => applySpeakerVoiceMapToSession({
+    ...current,
+    speechLocale: draft.speechLocale
+  }, draft.voiceMap), { render: false });
+  scheduleSessionLocalPersist("regenerate-gemini-audio-config");
+  stopGeminiLiveSession().catch(() => {});
+  const refreshed = getActiveSession();
+  syncGlobalConfigPanel(refreshed);
+  return refreshed;
+}
+
+async function runRegenerateAllGeminiAudios() {
+  const session = getActiveSession();
+  if (!session || podcastVideoState.busy) return;
+  const regenerableRows = getRegenerableGeminiAudioRows(session);
+  if (!regenerableRows.length) {
+    setGenerationStatus("No hay escenas válidas para regenerar audios Gemini.", "");
+    return;
+  }
+  window.beginGeminiAudioGenerationAnimation?.(regenerableRows.length);
+  podcastVideoState.busy = true;
+  const allRegenBtns = document.querySelectorAll("#regenerateAllGeminiAudiosBtn, .regenerate-all-gemini-audios-trigger, [data-action='regenerate-all-gemini-audios']");
+  allRegenBtns.forEach((button) => window.setButtonLoadingState(button, true, {
+    loadingTitle: "Generando Voz en off..."
+  }));
+  updatePodcastPlayerUi();
+  try {
+    const currentSessionId = String(session?.id || getActiveSession()?.id || "").trim();
+    if (currentSessionId && typeof saveSessionToCloud === "function") {
+      try {
+        await saveSessionToCloud(currentSessionId, { render: false, silent: true });
+      } catch (_) { }
+    }
+    const result = await regenerateAllGeminiDialogueAudios(getActiveSession() || session);
+    window.completeGeminiAudioGenerationAnimation?.(result);
+    const refreshed = getActiveSession();
+    syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+    syncPodcastStudioInspector(refreshed);
+    renderPodcastVideoShell(refreshed);
+  } catch (error) {
+    window.failGeminiAudioGenerationAnimation?.();
+    setGenerationStatus("Error", "");
+    addChatMessage("system", `No se pudieron regenerar todos los audios Gemini (${String(error?.message || "error desconocido")}).`);
+  } finally {
+    allRegenBtns.forEach((button) => window.setButtonLoadingState(button, false));
+    podcastVideoState.busy = false;
+    updatePodcastPlayerUi();
+  }
 }
 
 function setGlobalConfigOpen(isOpen) {
@@ -11456,7 +11789,7 @@ function collectGlobalSpeakerDraft(session = null) {
   const expressionMap = { ...baseExpressionMap };
   const nameMap = { ...baseNameMap };
   const scenarioMap = { ...baseScenarioMap };
-  const containers = [els.globalSpeakerSettings, els.podcastStudioInspectorRowEditor].filter(Boolean);
+  const containers = [els.globalSpeakerSettings].filter(Boolean);
   if (!containers.length) return { voiceMap, expressionMap, nameMap, scenarioMap };
   containers.forEach((container) => container.querySelectorAll(".global-speaker-row").forEach((row) => {
     const host = String(row.dataset.hostName || "").trim();
@@ -11530,6 +11863,11 @@ function syncGlobalConfigPanel(session = null) {
   const hosts = getSpeakerOptions(session);
   if (els.speakerCountInput) {
     els.speakerCountInput.value = String(hosts.length);
+  }
+  if (els.globalSpeechLocaleSelect) {
+    const speechLocale = getSessionSpeechLocale(session);
+    els.globalSpeechLocaleSelect.innerHTML = buildSpeechLocaleOptions(speechLocale);
+    els.globalSpeechLocaleSelect.value = speechLocale;
   }
   if (els.globalApplyModeSelect && !els.globalApplyModeSelect.value) {
     els.globalApplyModeSelect.value = "all";
@@ -11624,6 +11962,39 @@ function persistGlobalTtsDirectionDraft() {
     ...current,
     ttsDirectionDefaults: readGlobalTtsDirectionControls()
   }), { render: false });
+}
+
+function persistGlobalSpeechLocale() {
+  const session = getActiveSession();
+  if (!session || !els.globalSpeechLocaleSelect) return;
+  const speechLocale = normalizeSpeechLocale(els.globalSpeechLocaleSelect.value);
+  upsertActiveSession((current) => ({
+    ...current,
+    speechLocale
+  }), { render: false });
+  scheduleSessionLocalPersist("global-speech-locale");
+}
+
+function resetSceneVoiceOverrides() {
+  const session = getActiveSession();
+  if (!session) return;
+  upsertActiveSession((current) => ({
+    ...current,
+    script: {
+      ...current.script,
+      rows: normalizeRows(current.script?.rows).map((row) => {
+        const speaker = String(row?.speaker || "").trim() || "Host A";
+        const voiceName = resolveSpeakerVoiceName(speaker, current);
+        return normalizeRowVoiceConfig({
+          ...row,
+          voiceName,
+          voiceNameSource: "host"
+        }, current, { speaker, hostVoiceName: voiceName, voiceNameSource: "host" });
+      })
+    }
+  }));
+  scheduleSessionLocalPersist("reset-scene-voice-overrides");
+  setGenerationStatus("Las escenas volverán a usar la voz global de su locutor.", "is-live");
 }
 
 function readGlobalVideoConfigControls() {
@@ -12103,7 +12474,7 @@ function syncGeminiTrackVolumeModal(session = null) {
   const activeSession = session || getActiveSession();
   const cfg = getPodcastVideoConfig(activeSession);
   const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-  const volumePct = Math.max(0, Math.min(100, Math.round(Number(track?.volumePct ?? 100) || 100)));
+  const volumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(track?.volumePct, 100))));
   const alignment = ["left", "left-center", "center", "center-right", "right"].includes(String(track?.alignment || cfg?.dialogueAlignment || "").trim().toLowerCase())
     ? String(track?.alignment || cfg?.dialogueAlignment).trim().toLowerCase()
     : "left";
@@ -12118,6 +12489,7 @@ function syncGeminiTrackVolumeModal(session = null) {
     : 1;
   geminiTrackVolumeModalState.volumePct = volumePct;
   geminiTrackVolumeModalState.playbackRate = playbackRate;
+  geminiTrackVolumeModalState.initialPlaybackRate = playbackRate;
   geminiTrackVolumeModalState.alignment = alignment;
   if (els.geminiTrackVolumeModalTitle) {
     els.geminiTrackVolumeModalTitle.textContent = "Volumen general Gemini";
@@ -12340,12 +12712,15 @@ function setGeminiDialogueTrackVolumePct(nextVolumePct = 100) {
   let changed = false;
   upsertPodcastVideoConfig((cfg) => {
     const currentTrack = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-    if (Math.round(Number(currentTrack?.volumePct ?? 100)) === normalizedPct) return cfg;
+    const enableStoredVoice = normalizedPct > 0 && currentTrack.segments.length > 0;
+    if (Math.round(Number(currentTrack?.volumePct ?? 100)) === normalizedPct
+      && (!enableStoredVoice || currentTrack.enabled === true)) return cfg;
     changed = true;
     return {
       ...cfg,
       geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
         ...currentTrack,
+        enabled: enableStoredVoice || currentTrack.enabled,
         volumePct: normalizedPct,
         updatedAt: nowIso()
       })
@@ -12413,14 +12788,18 @@ async function applyGeminiTrackSpeedToAllScenes(nextPlaybackRate = 1) {
 async function applyGeminiTrackVolumeModal(options = {}) {
   const nextVolumePct = Math.round(Math.max(0, Math.min(100, Number(geminiTrackVolumeModalState.volumePct || 0) || 0)));
   const volumeChanged = setGeminiDialogueTrackVolumePct(nextVolumePct);
-  const speedChanged = await applyGeminiTrackSpeedToAllScenes(geminiTrackVolumeModalState.playbackRate);
+  const speedChanged = geminiTrackVolumeModalState.playbackRate !== geminiTrackVolumeModalState.initialPlaybackRate
+    ? await applyGeminiTrackSpeedToAllScenes(geminiTrackVolumeModalState.playbackRate)
+    : false;
 
   const nextAlignment = ["left", "left-center", "center", "center-right", "right"].includes(String(geminiTrackVolumeModalState.alignment || "").trim().toLowerCase())
     ? String(geminiTrackVolumeModalState.alignment).trim().toLowerCase()
     : "left";
   const activeSession = getActiveSession();
-  let alignmentChanged = true;
-  upsertPodcastVideoConfig((base) => ({
+  const currentConfig = getPodcastVideoConfig(activeSession);
+  const alignmentChanged = nextAlignment !== (currentConfig.geminiDialogueTrack?.alignment || currentConfig.dialogueAlignment || "left");
+  if (alignmentChanged) {
+    upsertPodcastVideoConfig((base) => ({
     ...base,
     dialogueAlignment: nextAlignment,
     geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
@@ -12428,8 +12807,9 @@ async function applyGeminiTrackVolumeModal(options = {}) {
       alignment: nextAlignment
     })
   }), { autosaveReason: "gemini-track-alignment" });
-  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: false, resetAudioPositions: true });
-  renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: false, resetAudioPositions: true });
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+  }
 
   if (options.close !== false) {
     setGeminiTrackVolumeModalOpen(false);
@@ -13011,6 +13391,7 @@ function setPodcastNowPlaying(text = "") {
 function setPodcastVideoStatus(text = "") {
   if (els.podcastVideoStatus) {
     els.podcastVideoStatus.textContent = text;
+    renderPendingSceneMedia();
   }
 }
 
@@ -13815,10 +14196,113 @@ function resolvePortraitForSpeaker(session = null, speaker = "") {
   return portraitMap[key] || findReusablePortraitForSpeaker(session, key) || null;
 }
 
+let referenceImageEditor = null;
+let referenceViewerEpoch = 0;
+
+async function applyEditedSceneReference(draft) {
+  const { context } = draft;
+  const localSession = () => state.sessions.find(item => String(item.id) === context.sessionId);
+  const uid = resolveCurrentUid();
+  if (!uid) throw new Error("Inicia sesión para guardar la referencia.");
+  if (context.ownerUid !== uid) throw new Error("Vuelve a la cuenta donde comenzaste esta edición para guardar la referencia.");
+  const placeholder = { storagePath: "pending", downloadUrl: "pending" };
+  const check = selectEditedReference(localSession(), context, placeholder);
+  if (check.status !== "applied") return check;
+  if (!draft.resource) {
+    const uploaded = await uploadReferenceImageToStorage(draft.result, { sessionId: context.sessionId, scope: "reference-edits", id: context.requestId });
+    if (!uploaded?.storagePath) throw new Error("No se pudo guardar la imagen. Reintenta aplicar el resultado.");
+    draft.resource = { ...uploaded, name: "Referencia editada", createdAt: nowIso(), updatedAt: nowIso(), width: draft.result.width || 0, height: draft.result.height || 0 };
+  }
+  if (!draft.original.storagePath || !draft.original.downloadUrl) {
+    const uploaded = await uploadReferenceImageToStorage({ ...draft.original, dataUrl: draft.source }, { sessionId: context.sessionId, scope: "reference-originals", id: context.requestId });
+    if (!uploaded?.storagePath) throw new Error("No se pudo conservar la imagen original. Reintenta aplicar el resultado.");
+    draft.original = { ...draft.original, ...uploaded };
+  }
+  const sessionRef = doc(firestoreDb, "podcaster_sessions", context.sessionId);
+  let committed;
+  await runTransaction(firestoreDb, async transaction => {
+    const snapshot = await transaction.get(sessionRef);
+    if (!snapshot.exists()) throw new Error("Guarda la sesión antes de aplicar la referencia. El resultado permanece disponible.");
+    const data = snapshot.data() || {};
+    if (String(data.ownerId || "") !== uid && !(data.sharedWithIds || []).includes(uid) && !currentUserIsAdmin) throw new Error("No tienes acceso para guardar esta sesión.");
+    const localCheck = selectEditedReference(localSession(), context, draft.resource, draft.original);
+    if (localCheck.status !== "applied") { committed = localCheck; return; }
+    committed = selectEditedReference({ ...data.session, id: context.sessionId }, context, draft.resource, draft.original);
+    if (committed.status !== "applied" || committed.unchanged) return;
+    const patch = { "session.updatedAt": committed.session.updatedAt, sessionUpdatedAt: committed.session.updatedAt, updatedAt: serverTimestamp() };
+    if (committed.session.activeThreadId !== data.session?.activeThreadId) patch["session.activeThreadId"] = committed.session.activeThreadId;
+    if (String(committed.session.activeThreadId || "") === context.threadId) {
+      for (const key of REFERENCE_FIELDS) patch[`session.${key}`] = committed.session[key];
+    }
+    if (context.threadId) patch["session.threads"] = committed.session.threads;
+    transaction.update(sessionRef, patch);
+  });
+  if (committed.status !== "applied") return committed;
+  let applied;
+  const updated = upsertSessionById(context.sessionId, current => {
+    applied = selectEditedReference(current, context, draft.resource, draft.original);
+    return applied.status === "applied" ? applied.session : current;
+  }, { render: false, persist: false, lightweight: true, invalidateRuntimeCache: false, touchUpdatedAt: false });
+  if (applied.status !== "applied") return applied;
+  await flushSessionLocalPersistNow(context.sessionId, "reference-image-edited");
+  if (getActiveSession()?.id === context.sessionId && String(getActiveSession()?.activeThreadId || "") === context.threadId) {
+    // Reference edits only update the inspector; playback sources and cursor remain intact.
+    syncPodcastStudioInspector(updated, { forceRender: true });
+  }
+  return applied;
+}
+
+async function openSceneReferenceImageEditor(trigger) {
+  const session = getActiveSession();
+  const rowId = String(trigger.dataset.referenceRowId || "");
+  const index = Number(trigger.dataset.referenceIndex || 0);
+  const reference = getRowReferenceImageList(session, rowId)[index];
+  if (!reference) return;
+  const target = { sessionId: String(session.id), threadId: String(session.activeThreadId || ""), rowId, index, sceneNumber: resolveSceneNumberByRowId(rowId, session) };
+  const logicalPreviewSource = resolveReferenceImagePreviewUrl(reference);
+  let previewSource = String(trigger?.dataset?.referenceResolvedSrc || "").trim();
+  if (!previewSource) {
+    try {
+      previewSource = await resolveAuthorizedReferenceImageDisplayUrl(logicalPreviewSource);
+    } catch (error) {
+      setGenerationStatus("No se pudo cargar la imagen de referencia.", "");
+      console.error("[Snoopy] Reference image authorization:", error);
+      return;
+    }
+  }
+  if (!previewSource) return;
+  openPodcastPortraitViewer({ src: previewSource, title: "Imagen de referencia", meta: `Escena ${target.sceneNumber}`, referenceGallery: true });
+  const token = referenceViewerEpoch;
+  try {
+    if (!referenceImageEditor) referenceImageEditor = createReferenceEditor(els.podcastPortraitViewer, {
+        uid: resolveCurrentUid,
+        getSession: id => state.sessions.find(item => String(item.id) === String(id)),
+        preview: async record => resolveAuthorizedReferenceImageDisplayUrl(resolveReferenceImagePreviewUrl(record)),
+        fetchImage: async record => {
+          const url = resolveStaleAwareProxyMediaUrl(record.downloadUrl || "", record.storagePath || "", "image");
+          let response;
+          try { response = await fetch(url, { signal: AbortSignal.timeout(30000), ...(url.includes("/api/") ? { headers: await getAuthHeaders() } : {}) }); } catch (error) { if (!record.storagePath) throw error; }
+          if (response?.ok || !record.storagePath) return response;
+          const fallback = resolveStaleAwareProxyMediaUrl("", record.storagePath, "image");
+          return fetch(fallback, { headers: await getAuthHeaders(), signal: AbortSignal.timeout(30000) });
+        },
+        apply: applyEditedSceneReference
+      });
+    const editor = referenceImageEditor;
+    if (token === referenceViewerEpoch && !els.podcastPortraitViewer.hidden) await editor.open(target);
+  } catch (error) {
+    if (token === referenceViewerEpoch) setGenerationStatus("No se pudo cargar la edición de imagen. Cierra el visor e inténtalo de nuevo.", "");
+    console.error("[Snoopy] Reference editor:", error);
+  }
+}
+
 function closePodcastPortraitViewer() {
+  referenceViewerEpoch += 1;
+  referenceImageEditor?.close();
   if (els.podcastPortraitViewer) {
     els.podcastPortraitViewer.hidden = true;
-    els.podcastPortraitViewer.classList.remove("is-reference-minimal");
+    els.podcastPortraitViewer.classList.remove("is-reference-minimal", "has-reference-editor");
+    delete els.podcastPortraitViewer.dataset.referenceMode;
   }
   if (els.podcastPortraitViewerImage) {
     els.podcastPortraitViewerImage.removeAttribute("src");
@@ -13829,11 +14313,17 @@ function closePodcastPortraitViewer() {
   podcastPortraitViewerLastFocus = null;
 }
 
-function openPodcastPortraitViewer({ src = "", title = "", meta = "", minimal = false } = {}) {
+function openPodcastPortraitViewer({ src = "", title = "", meta = "", minimal = false, referenceGallery = false } = {}) {
   const cleanSrc = String(src || "").trim();
   if (!cleanSrc || !els.podcastPortraitViewer || !els.podcastPortraitViewerImage) return;
+  referenceViewerEpoch += 1;
+  referenceImageEditor?.close();
   podcastPortraitViewerLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   els.podcastPortraitViewer.classList.toggle("is-reference-minimal", Boolean(minimal));
+  // Select the presentation before showing the image, even on a cold module load.
+  els.podcastPortraitViewer.classList.toggle("has-reference-editor", referenceGallery);
+  if (referenceGallery) els.podcastPortraitViewer.dataset.referenceMode = "gallery";
+  else delete els.podcastPortraitViewer.dataset.referenceMode;
   els.podcastPortraitViewerImage.src = cleanSrc;
   els.podcastPortraitViewerImage.alt = String(title || "Retrato ampliado").trim() || "Retrato ampliado";
   if (els.podcastPortraitViewerTitle) {
@@ -13843,7 +14333,11 @@ function openPodcastPortraitViewer({ src = "", title = "", meta = "", minimal = 
     els.podcastPortraitViewerMeta.textContent = String(meta || "").trim() || "Locutor";
   }
   els.podcastPortraitViewer.hidden = false;
-  els.podcastPortraitViewerCloseBtn?.focus?.();
+  if (referenceGallery) {
+    const card = els.podcastPortraitViewer.querySelector(".podcast-portrait-viewer-card");
+    card?.setAttribute("tabindex", "-1");
+    card?.focus();
+  } else els.podcastPortraitViewerCloseBtn?.focus?.();
 }
 
 function logPodcastRenderDebug(event = "", payload = {}) {
@@ -14696,11 +15190,13 @@ function syncPodcastStudioInspector(session = null, options = {}) {
 
     if (!forceRender && isEditing && activeRowId === currentDomRowId && els.podcastStudioInspectorRowEditor.innerHTML.trim()) {
       // console.log("[Studio] syncPodcastStudioInspector: Saltando re-render por edición activa en la misma fila.");
+      void hydrateAuthorizedReferenceImages(els.podcastStudioInspectorRowEditor);
       return;
     }
     els.podcastStudioInspectorRowEditor.innerHTML = activeRow
       ? buildInspectorScriptRowMarkup(activeSession, activeRow, rows.findIndex((row) => row?.id === activeRow.id))
       : `<div class="podcast-studio-row-editor-empty">${escapeHtml(panelCopy.emptyRowEditor)}</div>`;
+    void hydrateAuthorizedReferenceImages(els.podcastStudioInspectorRowEditor);
   }
   if (els.podcastStudioMasterVolume) {
     els.podcastStudioMasterVolume.value = String(Math.round(cfg.masterVolume));
@@ -14804,6 +15300,9 @@ const sessionStore = createPodcasterSessionStore({
   getStorageScopeUid: () => currentStorageScopeUid,
   getActiveSession,
   resolveCurrentUid,
+  getCurrentUserIsAdmin: () => currentUserIsAdmin,
+  preferDirectFirestoreReads: () => ["127.0.0.1", "localhost"].includes(String(window.location.hostname || "").toLowerCase()),
+  canEditArchivedSession,
   mergeSessionsById,
   mergeSessionRowsWithFallback,
   normalizePodcastVideoConfig,
@@ -14888,6 +15387,7 @@ playbackController.init(els, {
   invalidateAuthorizedAssetUrl,
   resolveAuthorizedAssetUrlWithRetry,
   clearAuthorizedAssetUrls: () => authorizedAssetResolver.clear(),
+  preferAuthenticatedMediaProxy: ["127.0.0.1", "localhost"].includes(String(window.location.hostname || "").toLowerCase()),
   renderPodcastVideoTimeline,
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -15011,6 +15511,7 @@ exportPreviewController.init(exportPreviewEls, {
   invalidateAuthorizedAssetUrl,
   resolveAuthorizedAssetUrlWithRetry,
   clearAuthorizedAssetUrls: () => authorizedAssetResolver.clear(),
+  preferAuthenticatedMediaProxy: ["127.0.0.1", "localhost"].includes(String(window.location.hostname || "").toLowerCase()),
   renderPodcastVideoTimeline: () => { },
   resolveTimelineClipMix,
   getAuthHeaders,
@@ -15668,7 +16169,6 @@ document.addEventListener("keydown", (event) => {
 function markPodcastTimelineSceneChipsActive(rowId) {
   const normalizedRowId = String(rowId || "").trim();
   if (!normalizedRowId || !els.podcastVideoTimeline) return;
-  podcastVideoState.activeRowId = normalizedRowId;
   els.podcastVideoTimeline
     .querySelectorAll(
       ".podcast-onscreen-text-timeline-clip, .podcast-video-timeline-clip, .podcast-montage-audio-chip"
@@ -16595,9 +17095,9 @@ async function openPodcastVideoModalWithLoader() {
     if (el) el.checked = session?.publicar === true;
   });
 
-  if (typeof window.preloadAllDialogueAudios === "function") {
-    window.preloadAllDialogueAudios(openedSession, { suppressTimelineRender: true });
-  }
+  // Reuse the bounded, shared session queue. Do not create a second set of
+  // audio players and metadata probes while the editor is opening.
+  void prewarmSessionMediaWithOverlay(finalSession);
 
   setPodcastVideoStatus(getPanelModeCopy(getActiveSession()).videoMode ? "Video creativo activado" : "Video activado");
   els.podcastVideoShell?.classList.add("is-editor-entrance-preparing");
@@ -17656,7 +18156,6 @@ function setSidepanelOpen(isOpen) {
   els.sidepanel.classList.toggle("is-open", !!isOpen);
   els.podcasterLayout?.classList.toggle("has-sidepanel", !!isOpen);
   syncSidepanelToggleButton(els.openSidepanelBtn, isOpen);
-  syncSidepanelToggleButton(els.openSidepanelFromEditorBtn, isOpen);
   if (els.sidepanelHeaderToggleBtn) {
     els.sidepanelHeaderToggleBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
   }
@@ -17674,11 +18173,6 @@ function syncPodcasterChatComposerLayout() {
     els.openSidepanelBtn.hidden = false;
     els.openSidepanelBtn.style.visibility = "visible";
     els.openSidepanelBtn.style.opacity = "1";
-  }
-  if (els.openSidepanelFromEditorBtn) {
-    els.openSidepanelFromEditorBtn.hidden = false;
-    els.openSidepanelFromEditorBtn.style.visibility = "visible";
-    els.openSidepanelFromEditorBtn.style.opacity = "1";
   }
 }
 
@@ -17749,7 +18243,15 @@ function setPodcastStudioInspectorCollapsed(isCollapsed) {
   } catch (_) {
     // noop
   }
-  upsertPodcastStudioUiState({ inspectorCollapsed: podcastStudioInspectorCollapsed }, { autosaveReason: "ui-state" });
+  window.clearTimeout(podcastStudioInspectorPersistTimer);
+  const collapsedStateToPersist = podcastStudioInspectorCollapsed;
+  podcastStudioInspectorPersistTimer = window.setTimeout(() => {
+    podcastStudioInspectorPersistTimer = 0;
+    upsertPodcastStudioUiState(
+      { inspectorCollapsed: collapsedStateToPersist },
+      { autosaveReason: "ui-state" }
+    );
+  }, 0);
 }
 
 function setPodcastVideoLibraryCollapsed(collapsed, { persist = true } = {}) {
@@ -18116,6 +18618,7 @@ const podcasterSessionRailApi = createPodcasterSessionRailApi({
   firestoreDb,
   serverTimestamp,
   shareSessionWithUser,
+  canEditArchivedSession,
   onSessionsRendered: animatePodcasterSessionCardsOnce
 });
 const {
@@ -18138,6 +18641,19 @@ const {
   isSessionExpanded,
   getFilterValue: getSessionRailFilterValue
 } = podcasterSessionRailApi;
+
+const adminSessionBrowser = createPodcasterAdminSessionBrowser({
+  els,
+  state,
+  sessionStore,
+  escapeHtml,
+  isCurrentUserAdmin: () => currentUserIsAdmin,
+  resolveCurrentUid,
+  setActiveSession,
+  persistSessions,
+  setGenerationStatus,
+  addChatMessage
+});
 
 function resolveCreativeRowMeta(session = null, rowId = "") {
   const activeSession = session || getActiveSession();
@@ -19337,15 +19853,6 @@ function attachEvents() {
       setSidepanelOpen(nextState);
     });
   }
-  if (els.openSidepanelFromEditorBtn) {
-    els.openSidepanelFromEditorBtn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      suppressComposerToggleTemporarily();
-      const nextState = !els.sidepanel?.classList.contains("is-open");
-      setSidepanelOpen(nextState);
-    });
-  }
   if (els.sidepanelHeaderToggleBtn) {
     els.sidepanelHeaderToggleBtn.addEventListener("click", (event) => {
       event.preventDefault();
@@ -19911,6 +20418,17 @@ function attachEvents() {
         });
       }
     });
+  if (els.globalSpeechLocaleSelect) {
+    els.globalSpeechLocaleSelect.addEventListener("change", () => {
+      persistGlobalSpeechLocale();
+      stopGeminiLiveSession().catch(() => {});
+    });
+  }
+  if (els.resetSceneVoiceOverridesBtn) {
+    els.resetSceneVoiceOverridesBtn.addEventListener("click", () => {
+      resetSceneVoiceOverrides();
+    });
+  }
   [els.globalCheapVideoMode, els.globalMediaLoadMode]
     .filter(Boolean)
     .forEach((input) => {
@@ -21001,45 +21519,33 @@ function attachEvents() {
     });
   }
   document.querySelectorAll("#regenerateAllGeminiAudiosBtn, .regenerate-all-gemini-audios-trigger, [data-action='regenerate-all-gemini-audios']").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const session = getActiveSession();
-      if (!session || podcastVideoState.busy) return;
-      const regenerableRows = getRegenerableGeminiAudioRows(session);
-      if (!regenerableRows.length) {
-        setGenerationStatus("No hay escenas válidas para regenerar audios Gemini.", "");
-        return;
-      }
-      window.beginGeminiAudioGenerationAnimation?.(regenerableRows.length);
-      podcastVideoState.busy = true;
-      const allRegenBtns = document.querySelectorAll("#regenerateAllGeminiAudiosBtn, .regenerate-all-gemini-audios-trigger, [data-action='regenerate-all-gemini-audios']");
-      allRegenBtns.forEach((b) => window.setButtonLoadingState(b, true, {
-        loadingTitle: "Generando Voz en off..."
-      }));
-      updatePodcastPlayerUi();
-      try {
-        const currentSessionId = String(session?.id || getActiveSession()?.id || "").trim();
-        if (currentSessionId && typeof saveSessionToCloud === "function") {
-          try {
-            await saveSessionToCloud(currentSessionId, { render: false, silent: true });
-          } catch (_) { }
-        }
-        const result = await regenerateAllGeminiDialogueAudios(session);
-        window.completeGeminiAudioGenerationAnimation?.(result);
-        const refreshed = getActiveSession();
-        syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
-        syncPodcastStudioInspector(refreshed);
-        renderPodcastVideoShell(refreshed);
-      } catch (error) {
-        window.failGeminiAudioGenerationAnimation?.();
-        setGenerationStatus("Error", "");
-        addChatMessage("system", `No se pudieron regenerar todos los audios Gemini (${String(error?.message || "error desconocido")}).`);
-      } finally {
-        allRegenBtns.forEach((b) => window.setButtonLoadingState(b, false));
-        podcastVideoState.busy = false;
-        updatePodcastPlayerUi();
-      }
+    btn.addEventListener("click", () => {
+      openRegenerateGeminiAudioConfig(btn);
     });
   });
+  if (els.closeRegenerateGeminiAudioConfigBtn) {
+    els.closeRegenerateGeminiAudioConfigBtn.addEventListener("click", () => {
+      setRegenerateGeminiAudioConfigOpen(false);
+    });
+  }
+  if (els.cancelRegenerateGeminiAudioConfigBtn) {
+    els.cancelRegenerateGeminiAudioConfigBtn.addEventListener("click", () => {
+      setRegenerateGeminiAudioConfigOpen(false);
+    });
+  }
+  if (els.continueCurrentGeminiAudioConfigBtn) {
+    els.continueCurrentGeminiAudioConfigBtn.addEventListener("click", async () => {
+      setRegenerateGeminiAudioConfigOpen(false, { restoreFocus: false });
+      await runRegenerateAllGeminiAudios();
+    });
+  }
+  if (els.applyAndRegenerateGeminiAudiosBtn) {
+    els.applyAndRegenerateGeminiAudiosBtn.addEventListener("click", async () => {
+      applyRegenerateGeminiAudioConfigDraft();
+      setRegenerateGeminiAudioConfigOpen(false, { restoreFocus: false });
+      await runRegenerateAllGeminiAudios();
+    });
+  }
   if (els.deleteDialogueAudioBtn) {
     els.deleteDialogueAudioBtn.addEventListener("click", () => {
       const rowId = resolveTargetVideoRowId(getActiveSession());
@@ -22349,6 +22855,7 @@ function attachEvents() {
   });
   els.promptInput.addEventListener("paste", handlePromptInputPaste);
   bindSessionRailEvents();
+  adminSessionBrowser.bindEvents();
   window.addEventListener("resize", syncPodcasterChatComposerLayout);
   if (typeof ResizeObserver === "function" && els.composerShell) {
     const composerResizeObserver = new ResizeObserver(() => {
@@ -22609,6 +23116,10 @@ function attachEvents() {
       setGlobalConfigOpen(false);
       return;
     }
+    if (floatingClose?.dataset?.action === "close-regenerate-gemini-audio-config-modal") {
+      setRegenerateGeminiAudioConfigOpen(false);
+      return;
+    }
     if (floatingClose?.dataset?.action === "close-script-setup-modal") {
       setScriptSetupOpen(false);
       pendingScriptPrompt = "";
@@ -22662,6 +23173,10 @@ function attachEvents() {
       }
       if (els.geminiCreativityModal && !els.geminiCreativityModal.hidden) {
         setGeminiCreativityModalOpen("");
+        return;
+      }
+      if (regenerateGeminiAudioConfigOpen) {
+        setRegenerateGeminiAudioConfigOpen(false);
         return;
       }
       if (rowDisfluencyConfigOpenId) setRowDisfluencyModalOpen("");
@@ -22740,8 +23255,23 @@ function attachEvents() {
       }
       const openReferenceImageBtn = event.target.closest("[data-action='open-reference-image-viewer'][data-reference-src]");
       if (openReferenceImageBtn) {
+        if (openReferenceImageBtn.dataset.referenceRowId) {
+          void openSceneReferenceImageEditor(openReferenceImageBtn);
+          return;
+        }
+        const logicalSource = String(openReferenceImageBtn.dataset.referenceSrc || "").trim();
+        let resolvedSource = String(openReferenceImageBtn.dataset.referenceResolvedSrc || "").trim();
+        if (!resolvedSource) {
+          try {
+            resolvedSource = await resolveAuthorizedReferenceImageDisplayUrl(logicalSource);
+          } catch (error) {
+            setGenerationStatus("No se pudo cargar la imagen de referencia.", "");
+            console.error("[Snoopy] Reference image authorization:", error);
+            return;
+          }
+        }
         openPodcastPortraitViewer({
-          src: String(openReferenceImageBtn.dataset.referenceSrc || "").trim(),
+          src: resolvedSource,
           title: String(openReferenceImageBtn.dataset.referenceTitle || "Referencia visual").trim(),
           meta: String(openReferenceImageBtn.dataset.referenceMeta || "Imagen de referencia").trim(),
           minimal: true
@@ -22976,9 +23506,13 @@ function init() {
 
     const nextUid = String(user?.uid || "").trim();
     if (!nextUid) {
+      currentUserRole = "";
+      currentUserIsAdmin = false;
+      adminSessionBrowser.syncVisibility();
       redirectToIndex();
       return;
     }
+    await resolveCurrentUserAccess(user);
     if (currentStorageScopeUid && currentStorageScopeUid !== nextUid) {
       authorizedAssetResolver.clear();
     }
@@ -23434,55 +23968,150 @@ function resolveSceneMediaUpdatedAtMs(value = null) {
   return Date.parse(String(value || ""));
 }
 
-async function persistLatestDialogueVideoForRow(rowId = "", clip = null, sessionId = "") {
-  const key = String(rowId || "").trim();
-  const cleanSessionId = String(sessionId || getActiveSession()?.id || "").trim();
+function captureSceneMediaSelection(session, rowId, kind = "video") {
+  window.PodcasterThreads?.syncActiveThreadToSession?.(session);
+  return podcasterMediaState.captureMediaSelection(session, rowId, kind, crypto.randomUUID());
+}
+
+async function commitSceneMediaSelection(context, clip) {
+  const { sessionId, rowId, kind = "video" } = context;
+  const localSession = state.sessions.find(item => String(item.id) === sessionId);
+  const localCheck = podcasterMediaState.selectSceneMedia(localSession, rowId, clip, context);
+  if (localCheck.status !== "applied") return { ...localCheck, phase: "local" };
   const uid = resolveCurrentUid();
-  if (!uid || !key || !cleanSessionId || !clip || typeof clip !== "object") return clip;
-  const sessionRef = doc(firestoreDb, "podcaster_sessions", cleanSessionId);
-  let committedClip = clip;
-  try {
-    await runTransaction(firestoreDb, async (transaction) => {
-      const snapshot = await transaction.get(sessionRef);
-      if (!snapshot.exists()) return;
-      const data = snapshot.data() || {};
-      if (String(data.ownerId || "").trim() !== uid) return;
-      const currentClip = data?.session?.dialogueVideoMap?.[key];
-      const currentSourceType = String(currentClip?.sourceType || currentClip?.replacementSource || "").trim().toLowerCase();
-      const currentIsManual = currentClip?.manuallyReplaced === true || currentSourceType === "manual-replacement" || currentSourceType === "manual";
-      if (currentIsManual) {
-        committedClip = currentClip;
-        return;
-      }
-      const currentMs = resolveSceneMediaUpdatedAtMs(currentClip?.updatedAt);
-      const incomingMs = resolveSceneMediaUpdatedAtMs(clip.updatedAt);
-      if (currentClip && Number.isFinite(currentMs) && (!Number.isFinite(incomingMs) || currentMs >= incomingMs)) {
-        committedClip = currentClip;
-        return;
-      }
-      const updatedAt = Number.isFinite(incomingMs) ? new Date(incomingMs).toISOString() : nowIso();
-      committedClip = { ...clip, updatedAt };
-      transaction.set(sessionRef, {
-        session: {
-          dialogueVideoMap: { [key]: committedClip },
-          updatedAt
-        },
-        sessionUpdatedAt: updatedAt,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    });
-  } catch (error) {
-    logPodcastRenderDebug?.("dialogue-video-row-cloud-persist-failed", {
-      sessionId: cleanSessionId,
-      rowId: key,
-      error: String(error?.message || error?.code || "unknown")
-    });
+  if (!uid) throw new Error("Inicia sesión para guardar el reemplazo.");
+  // Hydrate the new immutable resource while existing consumers keep their source.
+  const source = kind === "audio"
+    ? resolveStorageAudioUrl(clip.downloadUrl || clip.dataUrl || "", clip.storagePath || "")
+    : resolveStorageVideoUrl(clip.downloadUrl || clip.dataUrl || "", clip.storagePath || "", clip);
+  const hydratedSource = source && await playbackController.getBlobUrl(source, { persistent: true });
+  if (!hydratedSource) throw new Error("El archivo creado no está disponible todavía. Reintenta aplicarlo.");
+  const sessionRef = doc(firestoreDb, "podcaster_sessions", sessionId);
+  let committed;
+  await runTransaction(firestoreDb, async transaction => {
+    const snapshot = await transaction.get(sessionRef);
+    if (!snapshot.exists()) throw new Error("Guarda la sesión antes de aplicar el recurso creado.");
+    const data = snapshot.data() || {};
+    if (String(data.ownerId || "") !== uid && !(data.sharedWithIds || []).includes(uid) && !currentUserIsAdmin) throw new Error("No tienes acceso para guardar esta sesión.");
+    committed = podcasterMediaState.selectSceneMedia({ ...data.session, id: sessionId }, rowId, clip, context);
+    if (committed.status === "applied" && !committed.unchanged) {
+      transaction.update(sessionRef, { session: committed.session, sessionUpdatedAt: committed.session.updatedAt, updatedAt: serverTimestamp() });
+    }
+  });
+  if (committed.status !== "applied") return { ...committed, phase: "cloud" };
+  const updated = upsertSessionById(sessionId, current => {
+    const selection = podcasterMediaState.selectSceneMedia(current, rowId, committed.clip, context);
+    return selection.status === "applied" ? selection.session : current;
+  }, { render: false, persist: false });
+  window.PodcasterThreads?.syncActiveThreadToSession?.(updated);
+  window.scheduleSessionLocalPersist?.("scene-media-applied");
+  if (getActiveSession()?.id === sessionId && String(getActiveSession()?.activeThreadId || "") === String(context.threadId || "")) {
+    const config = getPodcastVideoConfig(updated);
+    for (const controller of [playbackController, exportPreviewController]) controller?.sync(updated, config);
+    if (kind !== "audio") {
+      if (!await playbackController.invalidateRowMediaCache(rowId, updated, { nextClip: committed.clip, preserveSources: true })) throw new Error("El recurso se guardó, pero no se pudo preparar. Reintenta aplicarlo.");
+      await exportPreviewController?.invalidateRowMediaCache?.(rowId, updated, { nextClip: committed.clip, preserveSources: true });
+      // Use the live cursor, which may have moved during generation and hydration.
+      const atMs = playbackController.state.currentMs;
+      if (playbackController.state.isPlaying) await playbackController.seek(atMs);
+      else if (String(podcastVideoState.activeRowId) === rowId) await syncPodcastVideoStageMedia(updated, rowId, { force: true });
+    }
+    renderPodcastVideoTimeline(updated, { lightweight: true, reason: "scene-media-applied" });
   }
-  return committedClip;
+  return { ...committed, session: updated || committed.session };
+}
+
+function pendingSceneMediaKey() { return `snoopy-pending-media:${resolveCurrentUid() || "anonymous"}`; }
+function readPendingSceneMedia() {
+  try { return JSON.parse(localStorage.getItem(pendingSceneMediaKey()) || "[]"); } catch (_) { return []; }
+}
+function storePendingSceneMedia(items) {
+  try { localStorage.setItem(pendingSceneMediaKey(), JSON.stringify(items.slice(-30))); } catch (_) { }
+}
+function renderPendingSceneMedia() {
+  document.getElementById("snoopyRetrySceneMedia")?.remove();
+  const session = getActiveSession();
+  const pending = readPendingSceneMedia().filter(item => item.context.sessionId === session?.id && item.context.threadId === String(session?.activeThreadId || ""));
+  if (!pending.length || !els.podcastVideoStatus?.parentElement) return;
+  const button = document.createElement("button");
+  button.id = "snoopyRetrySceneMedia";
+  button.type = "button";
+  button.className = "btn btn-sm btn-outline-warning";
+  button.textContent = `Reintentar aplicar medios creados (${pending.length})`;
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      for (const item of pending) {
+        const outcome = await applySceneMediaSelection(item.context, item.clip);
+        if (outcome.status !== "applied") setPodcastVideoStatus("La selección cambió. El recurso creado sigue en Reemplazar escena.");
+      }
+    } catch (error) { setPodcastVideoStatus(error.message); }
+    finally { renderPendingSceneMedia(); }
+  };
+  els.podcastVideoStatus.parentElement.appendChild(button);
+}
+async function applySceneMediaSelection(context, clip) {
+  const previous = readPendingSceneMedia().filter(item => item.context.requestId !== context.requestId);
+  storePendingSceneMedia([...previous, { context, clip }]);
+  try {
+    const outcome = await commitSceneMediaSelection(context, clip);
+    if (/[?&]playbackDebug=1(?:&|$)/.test(window.location.href)) {
+      let output = document.getElementById("snoopyApplicationTrace");
+      if (!output) { output = document.createElement("script"); output.type = "application/json"; output.id = "snoopyApplicationTrace"; document.body.append(output); }
+      output.textContent = JSON.stringify({ status: outcome.status, reason: outcome.reason, phase: outcome.phase, context: {sessionId: context.sessionId, threadId: context.threadId, rowId: context.rowId}, localThread: state.sessions.find(s=>s.id===context.sessionId)?.activeThreadId });
+    }
+    storePendingSceneMedia(readPendingSceneMedia().filter(item => item.context.requestId !== context.requestId));
+    return outcome;
+  } finally { renderPendingSceneMedia(); }
+}
+
+// Compatibility adapter: errors propagate; an unchanged previous clip is never reported as a new success.
+async function persistLatestDialogueVideoForRow(rowId = "", clip = null, sessionId = "", context = null) {
+  const origin = state.sessions.find(item => String(item.id) === String(sessionId));
+  const result = await applySceneMediaSelection(context || captureSceneMediaSelection(origin, rowId), clip);
+  if (result.status !== "applied") throw new Error("La escena cambió mientras se generaba. El video sigue disponible en Reemplazar escena.");
+  return result.clip;
+}
+window.PodcasterSceneMedia = { capture: captureSceneMediaSelection, apply: applySceneMediaSelection };
+
+// Read-only diagnostics for comparing normalized local selections with persisted ones.
+if (/[?&]playbackDebug=1(?:&|$)/.test(window.location.href)) {
+  let diagnosticCount = 0;
+  const diagnosticTimer = setInterval(async () => {
+    const local = getActiveSession();
+    if (!local?.script?.rows?.length || !resolveCurrentUid()) return;
+    if (++diagnosticCount >= 12) clearInterval(diagnosticTimer);
+    try {
+      const snapshot = await getDoc(doc(firestoreDb, "podcaster_sessions", local.id));
+      const cloud = { ...snapshot.data()?.session, id: local.id };
+      const output = document.getElementById("snoopySelectionTrace") || document.createElement("script");
+      output.type = "application/json"; output.id = "snoopySelectionTrace";
+      output.textContent = JSON.stringify({ localThread: local.activeThreadId, cloudThread: cloud.activeThreadId,
+        voice: [local, cloud].map(session => ({ enabled: session.podcastVideoConfig?.geminiDialogueTrack?.enabled,
+          updatedAt: session.podcastVideoConfig?.geminiDialogueTrack?.updatedAt,
+          starts: session.podcastVideoConfig?.geminiDialogueTrack?.segments?.map(segment => segment.startMs),
+          timings: session.podcastVideoConfig?.geminiDialogueTrack?.segments?.map(segment => ({ rowId: segment.rowId, startMs: segment.startMs, durationMs: segment.durationMs, trimInMs: segment.trimInMs, trimOutMs: segment.trimOutMs, durationMode: segment.durationMode, rate: resolveDialogueAudioPlaybackRate(session, segment.rowId) })) })),
+        cloudThreads: (cloud.threads || []).map(thread => thread.id),
+        rows: local.script.rows.map(row => {
+          const context = podcasterMediaState.captureMediaSelection(local, row.id);
+          const old = local.dialogueVideoMap?.[row.id];
+          const stored = podcasterMediaState.mediaTarget(cloud, context.threadId)?.dialogueVideoMap?.[row.id];
+          const result = old ? podcasterMediaState.selectSceneMedia(cloud, row.id, old, context) : {};
+          return { rowId: row.id, reason: result.reason, samePath: old?.storagePath === stored?.storagePath,
+            sameRevision: context.baseRevision === podcasterMediaState.mediaRevision(stored),
+            localFile: String(old?.storagePath || old?.downloadUrl || "").split("?")[0].split("/").pop(),
+            cloudFile: String(stored?.storagePath || stored?.downloadUrl || "").split("?")[0].split("/").pop(),
+            localOperation: old?.selectionOperationId, cloudOperation: stored?.selectionOperationId,
+            localDate: old?.updatedAt, cloudDate: stored?.updatedAt, localRevision: old?.selectionRevision, cloudRevision: stored?.selectionRevision };
+        }) });
+      document.body.append(output);
+    } catch (error) { console.warn("[snoopy] Selection diagnostic unavailable", error.code || error.name); }
+  }, 5000);
 }
 
 // Explicit runtime API for modularized generation logic.
 const podcasterGenerationRuntimeApi = {
+  scheduleGeminiAudioMetadataSync,
   getActiveSession,
   resolveSceneNumberByRowId,
   getPanelModeCopy,
@@ -23517,6 +24146,9 @@ const podcasterGenerationRuntimeApi = {
   resolveCurrentUid,
   sessionStore,
   persistLatestDialogueVideoForRow,
+  captureSceneMediaSelection,
+  applySceneMediaSelection,
+  saveSessionToCloud,
   invalidateStudioRuntimeCache,
   render,
   upsertPodcastVideoConfig,
@@ -23531,6 +24163,9 @@ const podcasterGenerationRuntimeApi = {
   resolveVisualNotesForGeneration,
   getSessionRows,
   resolveConfiguredSpeakerVoiceForGeneration,
+  resolveSpeechGenerationConfig,
+  getSessionSpeechLocale,
+  normalizeSpeechLocale,
   resolveStorageVideoUrl,
   sleep,
   refreshRuntimeFeatureCapabilities,
@@ -23785,81 +24420,6 @@ Object.assign(window, {
   exportPreviewController,
   setSidepanelOpen,
 });
-
-// Regression test patterns for test-podcaster-modular-runtime-and-spinner-regressions.mjs
-// row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}
-// data-action="timeline-generate-scene-video"
-// fa-spinner spinner-icon
-// videoSrc ? "fa-sync-alt" : "fa-film"
-// regenBtn.classList.toggle("is-loading", isGenerating || isBulkRegenAll);
-// regenBtn.disabled = isGenerating || isBulkRegenAll;
-// icon.className = "fas fa-spinner spinner-icon";
-
-// Regression patterns for test-podcaster-onscreen-text-vertical-resize.mjs:
-// startHeightPct: 0,
-// fitToContent: false
-
-// Regression patterns for test-podcaster-overlap-playback-export.mjs:
-// timelineClipVisualLayoutMode
-// visualLayoutMode: normalizeTimelineClipVisualLayoutMode(raw?.visualLayoutMode)
-// visualLayoutMode: normalizeTimelineClipVisualLayoutMode(entry?.clip?.visualLayoutMode)
-
-// Regression patterns for test-podcaster-public-library-audio-track-guard.mjs:
-// if (isPublicLibrarySceneRow(row, sceneClip) && !explicitStoredAudio) return "";
-
-// Regression patterns for test-podcaster-rehydrate-preserves-manual-gemini-offset.mjs:
-// function hasManualGeminiSegmentOffset(segment = null, fallbackAnchorMs = 0, toleranceMs = STUDIO_TIMELINE_SNAP_MS)
-// const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, automaticStartMs);
-
-async function __compatibility_only__() {
-  const updatePayload = {
-    "session.podcastVideoConfig.timelineClipsByRowId": patch.timelineClipsByRowId,
-    "session.podcastVideoConfig.geminiDialogueTrack": patch.geminiDialogueTrack,
-    "session.podcastVideoConfig.timelineOnScreenTextClipsByRowId": patch.timelineOnScreenTextClipsByRowId
-  };
-  await updateDoc(sessionRef, updatePayload);
-
-  upsertPodcastVideoConfig((cfg) => {
-    return {
-      [isText ? "timelineOnScreenTextClipsByRowId" : "timelineClipsByRowId"]: nextClips
-    };
-  }, { autosave: false, persist: false, recordHistory: false });
-
-  if (drag.mode === "trim-end") {
-    const session = getActiveSession();
-    const sourceDurationMs = Math.max(minTrimLen, Number(drag.sourceDurationMs || current.sourceDurationMs || 0));
-    syncStudioTimelinePreview(getActiveSession(), { currentMs, autoplay: isPreviewPlaying });
-  }
-}
-
-// Regression patterns for test-podcaster-row-voice-source-of-truth.mjs:
-// function resolveConfiguredSpeakerVoiceForGeneration(speaker = "", session = null) {
-//   if (row?.voiceName) {
-//     readRowVoiceDraftValue(rowId)
-//     collectGlobalSpeakerDraft(activeSession)
-//   }
-// }
-
-// Regression patterns for test-podcaster-saves-only-main-session-doc.mjs:
-// await setDoc(sessionRef, {
-//   session: sanitized
-// });
-
-// Handler for timeline-generate-scene-video action with specific prompt profile.
-// This function is called from the timeline click handler in podcaster-video-generator.js
-// but must declare its contract here for static analysis.
-function buildTimelineSceneVideoGenerationRequest(row = null, options = {}) {
-  return {
-    promptProfile: "podcaster_video_v2",
-    sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").trim(),
-    visualNotes: String(resolveVisualNotesForGeneration(row) || row?.visual || "").trim()
-  };
-}
-
-// Contract: generateDialogueVideoForRow must propagate promptProfile to the request.
-// promptProfile: options.promptProfile || ""
-// The textarea with data-field="visualNotes" must use resolveVisualNotesEditorValue(
-// to populate its value from the editor state.
 
 function createSessionSaveAnimation() {
   const root = document.createElement("div");

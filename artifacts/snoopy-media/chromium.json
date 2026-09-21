@@ -1,0 +1,11 @@
+{
+  "loader": true,
+  "media": {
+    "ready": true,
+    "frameWaitMs": 33.400000005960464,
+    "pausedBefore": true,
+    "sourceOffsetAtStart": 0,
+    "playingAfterStart": true,
+    "pausedAtTrim": true
+  }
+}

@@ -205,6 +205,36 @@ function mergeRemovedDirectiveMetadata(...groups) {
   return Array.from(counts, ([field, count]) => ({ field, count })).slice(0, 24);
 }
 
+function detectInSceneTextLanguage(text = "", hintLanguage = "") {
+  const hint = String(hintLanguage || "").toLowerCase().trim();
+  if (hint.startsWith("es")) return "es";
+  if (hint.startsWith("en")) return "en";
+  const cleanText = clean(text);
+  if (!cleanText) return "es";
+  if (/[áéíóúüñ¿¡ÁÉÍÓÚÜÑ]/u.test(cleanText)) return "es";
+  if (/\b(?:el|la|los|las|un|una|unos|unas|con|sin|sobre|desde|hacia|hasta|entre|mientras|seg[uú]n|para|por|pero|aunque|como|c[oó]mo|cuando|cu[aá]ndo|donde|d[oó]nde|quien|qui[eé]n|que|qu[eé]|cual|cu[aá]l|cuanto|cu[aá]nto|tanto|tanta|tantos|tantas|este|esta|estos|estas|esto|ese|esa|esos|esas|eso|aquel|aquella|aquellos|aquellas|mi|mis|tu|tus|su|sus|nuestro|nuestra|nuestros|nuestras|del|al|m[aá]s|menos|muy|mucho|mucha|muchos|muchas|poco|poca|pocos|pocas|todo|toda|todos|todas|otro|otra|otros|otras|cada|ambos|ambas|organizar|informaci[oó]n|educaci[oó]n|aprender|estudio|escuela|clase|vida|mundo|tiempo|a[nñ]o|a[nñ]os|d[ií]a|d[ií]as|hoy|ayer|siempre|nunca|bien|mal|nuevo|nueva|nuevos|nuevas|bueno|buena|buenos|buenas|gran|grande|grandes|mejor|mejores|peor|peores)\b/iu.test(cleanText)) {
+    return "es";
+  }
+  if (/\b(?:the|this|that|these|those|with|without|about|from|into|through|between|while|because|which|where|when|what|how|who|whom|whose|some|any|each|every|both|all|more|less|very|much|many|few|little|other|another|and|or|not|in|on|at|to|for|of|by)\b/iu.test(cleanText)) {
+    return "en";
+  }
+  return "es";
+}
+
+function buildInSceneTextDirective(inSceneText = "", options = {}) {
+  const cleanText = clean(inSceneText);
+  if (!cleanText) return "";
+  const exactInSceneText = inSceneText.replace(/"/g, '\\"');
+  const lang = detectInSceneTextLanguage(cleanText, options?.languageCode || options?.language);
+  const words = cleanText.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+  const languageDirective = lang === "es"
+    ? "Language: Spanish. Preserve authentic Spanish orthography, accent marks, and inverted punctuation."
+    : "Language: English.";
+
+  return `Visible text: render exactly one natural, readable sign or surface that says "${exactInSceneText}". ${languageDirective} Word count: exactly ${wordCount} words; render each word cleanly and strictly once without repeating, duplicating, stuttering, or introducing misspelled variants. Spell it exactly as quoted. No other visible text.`;
+}
+
 function buildDialogueVideoPromptBundle(options = {}) {
   const isReel = options?.isReel === true || clean(options?.contentMode).toLowerCase() === "reel";
   const aspectRatio = normalizeAspectRatio(options?.aspectRatio, isReel);
@@ -254,9 +284,8 @@ function buildDialogueVideoPromptBundle(options = {}) {
     sanitized.regenerationQualityPrompt ? `Quality refinement: ${ensureSentence(sanitized.regenerationQualityPrompt)}` : ""
   ].filter(Boolean).join(" ");
   const compactRegenerationInstruction = limitPromptText(regenerationInstruction, 800);
-  const exactInSceneText = inSceneText.replace(/"/g, '\\"');
   const textInstruction = textPolicy === "in_scene"
-    ? `Visible text: render exactly one natural, readable sign or surface that says "${exactInSceneText}". Spell it exactly as quoted. No other visible text.`
+    ? buildInSceneTextDirective(inSceneText, options)
     : "Visible text: none. No titles, subtitles, captions, labels, lettering, logos, watermarks, interface elements, or text-like glyphs.";
   const audioInstruction = excludeScriptFromVideoPrompt
     ? "Audio: natural ambience only. No speech, narration, or lip-synced dialogue. The subject remains silent with a closed, relaxed mouth and does not perform speech."
@@ -322,5 +351,7 @@ module.exports = {
   removeEditorialCopyInstructions,
   buildUniquePromptSpec,
   mergeRemovedDirectiveMetadata,
+  detectInSceneTextLanguage,
+  buildInSceneTextDirective,
   buildDialogueVideoPromptBundle
 };

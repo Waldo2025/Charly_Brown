@@ -90,8 +90,10 @@ test("el estado activo, vacío filtrado y diseño responsive quedan definidos", 
   assert.match(css, /@media \(max-width: 560px\)[\s\S]*\.sessions-filter-fields[\s\S]*grid-template-columns: 1fr/);
 });
 
-test("actualiza los cache-busters del módulo y los estilos", () => {
-  assert.match(html, /podcaster\.css\?v=2026-1\.0\.10\.857/);
-  assert.match(app, /podcaster-session-rail\.js\?v=2026-1\.0\.10\.857/);
-  assert.match(app, /podcaster-session-store\.js\?v=2026-1\.0\.10\.857/);
+test("los módulos de medios comparten la revisión del loader", () => {
+  const loader = readFileSync(new URL("../public/js/cache-version-loader.js", import.meta.url), "utf8");
+  const version = loader.match(/const fallbackVersion = "([^\"]+)"/)[1];
+  for (const name of ["podcaster-playback-controller", "podcaster-timeline-model", "podcaster-timeline-ui", "podcaster-session-store", "podcaster-media-state"]) {
+    assert.ok(app.includes(`${name}.js?v=${version}`), `${name} must use the current media revision`);
+  }
 });

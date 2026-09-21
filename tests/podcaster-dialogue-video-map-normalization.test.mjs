@@ -1,3 +1,4 @@
+import podcasterMediaState from "../public/podcaster/podcaster-media-state.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -36,6 +37,7 @@ function extractFunction(name) {
 }
 
 const context = {
+  podcasterMediaState,
   console,
   normalizeMediaReferenceFromRecord(record = {}, mediaKeys = [], storageKeys = []) {
     const downloadUrl = mediaKeys.map((key) => String(record?.[key] || "").trim()).find(Boolean) || "";

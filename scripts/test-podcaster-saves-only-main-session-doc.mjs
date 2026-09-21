@@ -1,34 +1,19 @@
-import assert from "node:assert/strict";
-import fs from "node:fs";
-
-const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
-  "utf8"
-);
-const legacyCollection = ["podcaster", "sessions", "payloads"].join("_");
-
-assert.doesNotMatch(
-  source,
-  new RegExp(legacyCollection),
-  "Podcaster no debe depender de la coleccion legacy duplicada."
-);
-
-assert.match(
-  source,
-  /await setDoc\(sessionRef, \{/,
-  "El guardado directo debe persistir en podcaster_sessions."
-);
-
-assert.match(
-  source,
-  /session: sanitized/,
-  "El documento principal debe guardar la sesion completa como fuente unica de verdad."
-);
-
-assert.doesNotMatch(
-  source,
-  /const legacyRef = doc\(firestoreDb,[\s\S]*await setDoc\(legacyRef,/,
-  "El guardado directo ya no debe escribir un documento legacy separado."
-);
-
-console.log("Podcaster saves only main session doc OK.");
+import assert from 'node:assert/strict';
+import { saveSessionDirectToCloud } from '../public/podcaster/podcaster-session-store.js';
+const writes = [];
+const deps = {
+  resolveCurrentUid: () => 'owner', firestoreDb: {},
+  doc: (_db, collection, id) => ({ collection, id }),
+  serverTimestamp: () => 'server-time',
+  runTransaction: async (_db, body) => body({
+    get: async () => ({ exists: () => true, data: () => ({ ownerId: 'owner', session: { id: 'session', script: { rows: [] } } }) }),
+    update: (ref, data) => writes.push({ ref, data }),
+    set: () => assert.fail('an existing session must be updated atomically')
+  })
+};
+const result = await saveSessionDirectToCloud({ id: 'session', title: 'Interview', script: { rows: [{ id: 'row' }] } }, deps);
+assert.equal(result.ok, true);
+assert.equal(writes.length, 1);
+assert.deepEqual(writes[0].ref, { collection: 'podcaster_sessions', id: 'session' });
+assert.equal(writes[0].data.session.script.rows[0].id, 'row');
+console.log('Single document transaction verified.');

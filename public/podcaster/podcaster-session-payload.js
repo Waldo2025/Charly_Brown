@@ -138,11 +138,32 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
 
   return {
     id: String(source.id || "").trim() || makeId?.("session"),
+    activeThreadId: String(source.activeThreadId || ""),
+    threads: (Array.isArray(source.threads) ? source.threads : []).map(thread => {
+      const current = String(thread.id) === String(source.activeThreadId) ? source : thread;
+      const versionMedia = Object.fromEntries(["dialogueVideoMap", "dialogueAudioMap", "dialogueVideoDeletedAtMap", "dialogueAudioDeletedAtMap", "podcastVideoConfig", "visualEffectsMap", "rowReferenceImageMap", "rowReferenceImageListMap", "rowReferenceVideoMap", "rowReferenceModeByRowId"].map(key => {
+        const legacyRowIds = new Set((current.script?.rows || []).map(row => String(row.id)));
+        const legacyReferences = key.startsWith("rowReference") && current[key] == null
+          ? Object.fromEntries(Object.entries(source[key] || {}).filter(([rowId]) => legacyRowIds.has(rowId))) : {};
+        return [key, current[key] ?? legacyReferences];
+      }));
+      const normalized = buildCloudSessionPayload({ ...source, ...current, ...versionMedia, threads: [], activeThreadId: "" }, {}, current.chat || [], deps);
+      return { id: String(thread.id), name: String(thread.name || "Versión"),
+        createdAt: thread.createdAt || null, updatedAt: thread.updatedAt || null,
+        script: normalized.script, chat: normalized.chat, prompt: normalized.prompt,
+        videoConfig: current.videoConfig || null,
+        dialogueVideoMap: normalized.dialogueVideoMap, dialogueAudioMap: normalized.dialogueAudioMap,
+        dialogueVideoDeletedAtMap: normalized.dialogueVideoDeletedAtMap,
+        dialogueAudioDeletedAtMap: normalized.dialogueAudioDeletedAtMap,
+        podcastVideoConfig: normalized.podcastVideoConfig, visualEffectsMap: normalized.visualEffectsMap,
+        rowReferenceImageMap: normalized.rowReferenceImageMap, rowReferenceImageListMap: normalized.rowReferenceImageListMap, rowReferenceVideoMap: normalized.rowReferenceVideoMap, rowReferenceModeByRowId: normalized.rowReferenceModeByRowId };
+    }),
     title: String(source.title || "Sesión sin título").trim().slice(0, 160),
     prompt: String(source.prompt || "").slice(0, 4000),
     promptHtml: String(source.promptHtml || "").slice(0, 120000),
     archived: source.archived === true,
     publicar: source.publicar === true,
+    speechLocale: String(source.speechLocale || source.languageCode || "es-MX").trim().slice(0, 24) || "es-MX",
     nivel: String(source.nivel || source?.academicMetadata?.nivel || "").trim().slice(0, 60),
     grado: String(source.grado || source?.academicMetadata?.grado || "").trim().slice(0, 60),
     trimestre: String(source.trimestre || source?.academicMetadata?.trimestre || "").trim().slice(0, 20),
@@ -374,6 +395,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
       ? source.dialogueVideoDeletedAtMap
       : {},
     dialogueAudioMap: getDialogueAudioMap?.(source) || {},
+    dialogueAudioDeletedAtMap: source.dialogueAudioDeletedAtMap || {},
     podcastVideoConfig: normalizePodcastVideoConfig?.(source?.podcastVideoConfig || {}) || {},
     creativeVideoConfig: normalizeCreativeVideoConfig?.(source?.creativeVideoConfig || {}) || {},
     visualEffectsMap: source?.visualEffectsMap || {},

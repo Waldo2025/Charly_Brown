@@ -57,7 +57,7 @@ test("stale proxy-media keys do not fall back to unsigned Firebase Storage urls"
   );
 });
 
-test("stale proxy-media can still fall back to signed Firebase Storage urls", () => {
+test("stale proxy-media never falls back to legacy tokenized Firebase Storage urls", () => {
   const storagePath = "podcaster/sessions/session_cmmy944e/owners/uid/videos/row_pbuhgnrj-narrador/clip.mp4";
   const signedFallbackUrl = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/podcaster%2Fsessions%2Fsession_cmmy944e%2Fowners%2Fuid%2Fvideos%2Frow_pbuhgnrj-narrador%2Fclip.mp4?alt=media&token=abc123";
   const api = createPodcasterMediaRuntimeApi({
@@ -72,6 +72,18 @@ test("stale proxy-media can still fall back to signed Firebase Storage urls", ()
 
   assert.equal(
     api.resolveStaleAwareProxyMediaUrl(signedFallbackUrl, storagePath, "media"),
-    signedFallbackUrl
+    ""
+  );
+});
+
+test("tokenized Firebase Storage videos use the authorized storagePath resolver", () => {
+  const tokenizedUrl = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/podcaster%2Fsessions%2Fsession_if4k1pmr%2Fowners%2Fuid%2Fvideos%2Frow%2Fclip.mp4?alt=media&token=legacy-token";
+  const api = createPodcasterMediaRuntimeApi({
+    buildApiUrlPreferRemote: (path) => `https://charly-brown.web.app${path}`
+  });
+
+  assert.equal(
+    api.resolveStaleAwareProxyMediaUrl(tokenizedUrl, "", "media"),
+    "https://charly-brown.web.app/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fsession_if4k1pmr%2Fowners%2Fuid%2Fvideos%2Frow%2Fclip.mp4"
   );
 });

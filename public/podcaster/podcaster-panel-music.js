@@ -980,6 +980,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     if (!playableSource) return { durationSec: 0, method: "missing" };
     return new Promise((resolve) => {
       const audio = new Audio();
+      window.SnoopyAudioOutput?.register(audio);
       let finished = false;
       let timeoutId = 0;
       const clear = () => {
@@ -1747,6 +1748,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     }
 
     const audio = new Audio(src);
+
+    window.SnoopyAudioOutput?.register(audio);
     audio.crossOrigin = "anonymous";
     audio.volume = Math.max(0, Math.min(1, normalizePercent(panelMusicState.volume, 22) / 100));
     audio.onended = () => {
@@ -1790,6 +1793,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       : "";
     if (musicSrc) {
       const audio = new Audio(musicSrc);
+      window.SnoopyAudioOutput?.register(audio);
       audio.crossOrigin = "anonymous";
       audio.loop = true;
       audio.volume = Math.max(0, Math.min(1, normalizePercent(panelMusicState.volume, 22) / 100));
@@ -1800,6 +1804,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       return;
     }
     if (!panelMusicAudioCtx) panelMusicAudioCtx = new AudioContext();
+    window.SnoopyAudioOutput?.register(panelMusicAudioCtx);
     if (panelMusicAudioCtx.state === "suspended") await panelMusicAudioCtx.resume().catch(() => { });
     const ctx = panelMusicAudioCtx;
     const master = ctx.createGain();

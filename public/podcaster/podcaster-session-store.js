@@ -1,3 +1,4 @@
+import podcasterMediaState from "./podcaster-media-state.js";
 function createLocalStorageSessionAdapter(deps = {}) {
   const storage = deps.storage || globalThis.localStorage;
   return {
@@ -110,6 +111,20 @@ function normalizeApiSessionListItem(session = null) {
   };
 }
 
+function isVideoSessionListItem(session = null) {
+  const generationMode = String(session?.podcastStudioUiState?.composerGenerationMode || "").trim().toLowerCase();
+  const contentType = String(session?.script?.videoContentType || session?.videoContentType || "").trim().toLowerCase();
+  return generationMode === "video" || contentType === "creative";
+}
+
+function normalizeAdminUser(docSnap = null) {
+  const data = typeof docSnap?.data === "function" ? docSnap.data() || {} : (docSnap || {});
+  const uid = String(data.uid || data.userId || docSnap?.id || "").trim();
+  const displayName = String(data.displayName || data.name || `${data.firstName || ""} ${data.lastName || ""}`).replace(/\s+/g, " ").trim();
+  const email = String(data.email || "").trim();
+  return uid ? { uid, displayName: displayName || email || "Usuario", email } : null;
+}
+
 function hasLocalSessionContent(session = null) {
   const source = session && typeof session === "object" ? session : {};
   const rows = Array.isArray(source?.script?.rows) ? source.script.rows : [];
@@ -164,6 +179,13 @@ function mergeGeminiDialogueTrackForLoad(base = null, incoming = null) {
   const nextIncoming = isPlainRecord(incoming) ? incoming : {};
   const baseSegments = Array.isArray(currentBase.segments) ? currentBase.segments : [];
   const incomingSegments = Array.isArray(nextIncoming.segments) ? nextIncoming.segments : [];
+  // A normalized session stub has enabled:false and no segments or revision.
+  // Borrowing the saved segments while retaining those default flags silently
+  // disabled Gemini on reload. An authored empty/excluded track has a revision
+  // or exclusions and still takes precedence.
+  const incomingIsPlaceholder = !incomingSegments.length && baseSegments.length > 0
+    && !nextIncoming.updatedAt && !(nextIncoming.excludedRowIds || []).length;
+  if (incomingIsPlaceholder) return { ...currentBase };
   return {
     ...currentBase,
     ...nextIncoming,
@@ -352,6 +374,7 @@ function sanitizeSessionForFingerprint(session = null, deps = {}) {
     prompt: String(source.prompt || "").trim(),
     archived: source.archived === true,
     publicar: source.publicar === true,
+    speechLocale: String(source.speechLocale || source.languageCode || "es-MX").trim() || "es-MX",
     script: source.script || {},
     speakerVoiceMap: source.speakerVoiceMap || {},
     speakerExpressionMap: source.speakerExpressionMap || {},
@@ -654,10 +677,91 @@ async function loadSessionsFromCloud(uid = "", deps = {}) {
   return directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
 }
 
+async function listAdminUsers(deps = {}) {
+  const uid = String(deps.resolveCurrentUid?.() || "").trim();
+  if (!uid || deps.getCurrentUserIsAdmin?.() !== true) throw new Error("Acceso exclusivo para administradores.");
+  if (deps.preferDirectFirestoreReads?.() !== true && deps.hasAvailableApiBase?.()) {
+    try {
+      const response = await deps.authFetchJson("/api/podcaster/users/list", { method: "GET", preferRemote: false });
+      return (Array.isArray(response?.users) ? response.users : [])
+        .map(normalizeAdminUser)
+        .filter((user) => user && user.uid !== uid);
+    } catch (_) {
+      // The Firestore fallback uses the same admin-only UI gate and security rules.
+    }
+  }
+  const snapshot = await deps.getDocs(deps.query(
+    deps.collection(deps.firestoreDb, "users"),
+    deps.limit(250)
+  ));
+  return (snapshot?.docs || [])
+    .map(normalizeAdminUser)
+    .filter((user) => user && user.uid !== uid)
+    .sort((a, b) => String(a.displayName || a.email).localeCompare(String(b.displayName || b.email), "es"));
+}
+
+async function loadAdminVideoSessionsDirect(owner = "", deps = {}) {
+  const snapshot = await deps.getDocs(deps.query(
+    deps.collection(deps.firestoreDb, "podcaster_sessions"),
+    deps.where("ownerId", "==", owner),
+    deps.limit(100)
+  ));
+  return (snapshot?.docs || [])
+    .map((docSnap) => {
+      const data = docSnap.data() || {};
+      const nested = data.session && typeof data.session === "object" ? data.session : {};
+      return normalizeApiSessionListItem({
+        id: docSnap.id,
+        title: data.title || nested.title || "Sin título",
+        updatedAt: data.sessionUpdatedAt || nested.updatedAt || data.updatedAt?.toDate?.().toISOString() || "",
+        archived: data.archived === true,
+        podcastStudioUiState: nested.podcastStudioUiState || null,
+        videoContentType: nested?.script?.videoContentType || nested.videoContentType || null,
+        script: { rows: [], videoContentType: nested?.script?.videoContentType || nested.videoContentType || null },
+        cloudMeta: { ownerId: owner, savedAt: data.updatedAt?.toDate?.().toISOString() || null },
+        isStub: true
+      });
+    })
+    .filter(isVideoSessionListItem)
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+}
+
+function isAdminSessionResponseScopedToOwner(response = null, sessions = [], owner = "") {
+  const responseOwner = String(response?.scope?.ownerId || response?.ownerId || "").trim();
+  if (responseOwner && responseOwner !== owner) return false;
+  if (!sessions.length) return responseOwner === owner;
+  return sessions.every((session) => String(session?.cloudMeta?.ownerId || "").trim() === owner);
+}
+
+async function listAdminVideoSessions(ownerId = "", deps = {}) {
+  const uid = String(deps.resolveCurrentUid?.() || "").trim();
+  const owner = String(ownerId || "").trim();
+  if (!uid || !owner || owner === uid || deps.getCurrentUserIsAdmin?.() !== true) {
+    throw new Error("Selecciona otro usuario con una cuenta administradora.");
+  }
+  if (deps.preferDirectFirestoreReads?.() !== true && deps.hasAvailableApiBase?.()) {
+    try {
+      const params = new URLSearchParams({ ownerId: owner, type: "video", archived: "all" });
+      const response = await deps.authFetchJson(`/api/podcaster/sessions/list?${params.toString()}`, {
+        method: "GET",
+        preferRemote: false
+      });
+      const apiSessions = (Array.isArray(response?.sessions) ? response.sessions : [])
+        .map(normalizeApiSessionListItem);
+      if (isAdminSessionResponseScopedToOwner(response, apiSessions, owner)) {
+        return apiSessions.filter(isVideoSessionListItem);
+      }
+    } catch (_) {
+      // Fall through to the signed-in Firestore reader when the API is unavailable.
+    }
+  }
+  return loadAdminVideoSessionsDirect(owner, deps);
+}
+
 async function loadSingleSessionFromCloud(sessionId = "", uid = "", deps = {}) {
   const key = String(sessionId || "").trim();
   if (!uid || !key) return null;
-  if (deps.hasAvailableApiBase?.()) {
+  if (deps.preferDirectFirestoreReads?.() !== true && deps.hasAvailableApiBase?.()) {
     try {
       const response = await deps.authFetchJson(`/api/podcaster/sessions/get?sessionId=${encodeURIComponent(key)}`, {
         method: "GET",
@@ -713,36 +817,7 @@ function isManualSceneReplacement(entry = null) {
 }
 
 export function mergeMediaMapByEntryUpdatedAt(currentMap = {}, incomingMap = {}) {
-  const current = currentMap && typeof currentMap === "object" ? currentMap : {};
-  const incoming = incomingMap && typeof incomingMap === "object" ? incomingMap : {};
-  const next = {};
-  const keys = new Set([...Object.keys(current), ...Object.keys(incoming)]);
-  keys.forEach((key) => {
-    const currentEntry = current[key];
-    const incomingEntry = incoming[key];
-    if (!currentEntry || typeof currentEntry !== "object") {
-      if (incomingEntry !== undefined) next[key] = incomingEntry;
-      return;
-    }
-    if (!incomingEntry || typeof incomingEntry !== "object") {
-      next[key] = currentEntry;
-      return;
-    }
-    const currentIsManual = isManualSceneReplacement(currentEntry);
-    const incomingIsManual = isManualSceneReplacement(incomingEntry);
-    if (currentIsManual !== incomingIsManual) {
-      next[key] = currentIsManual ? currentEntry : incomingEntry;
-      return;
-    }
-    const currentUpdatedAt = resolveUpdatedAtMs(currentEntry.updatedAt);
-    const incomingUpdatedAt = resolveUpdatedAtMs(incomingEntry.updatedAt);
-    if (Number.isFinite(currentUpdatedAt) && (!Number.isFinite(incomingUpdatedAt) || currentUpdatedAt >= incomingUpdatedAt)) {
-      next[key] = currentEntry;
-      return;
-    }
-    next[key] = incomingEntry;
-  });
-  return next;
+  return podcasterMediaState.mergeMediaMapByEntryUpdatedAt(currentMap, incomingMap);
 }
 
 export function reconcileDialogueVideoState(currentSession = {}, incomingSession = {}) {
@@ -954,24 +1029,31 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
   let committedSession = sanitized;
   const writeSession = (existing = null) => {
-    if (existing && String(existing.ownerId || "").trim() !== uid) {
-      throw new Error("No puedes sobrescribir una sesión de otro usuario.");
+    const ownerId = existing ? String(existing.ownerId || "").trim() : uid;
+    const sharedWithIds = Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds.map(String) : [];
+    const isAdmin = deps.getCurrentUserIsAdmin?.() === true;
+    const isOwnerOrShared = ownerId === uid || sharedWithIds.includes(uid);
+    const canEditArchivedAsAdmin = isAdmin && ownerId && ownerId !== uid;
+    if (existing && !isOwnerOrShared && !isAdmin) {
+      throw new Error("No tienes permiso para editar esta sesión.");
+    }
+    if (existing?.archived === true && !canEditArchivedAsAdmin) {
+      throw new Error("Desarchiva la sesión antes de editarla.");
     }
     const currentSession = existing?.session && typeof existing.session === "object" ? existing.session : {};
-    const reconciledVideoState = reconcileDialogueVideoState(currentSession, sanitized);
-    committedSession = {
-      ...sanitized,
-      ...reconciledVideoState
-    };
+    committedSession = podcasterMediaState.reconcileSessionMedia(currentSession, sanitized);
+    if (existing) committedSession.archived = existing.archived === true;
     return {
-      ownerId: uid,
+      ownerId,
       title: committedSession.title,
-      archived: committedSession.archived === true,
+      archived: existing ? existing.archived === true : committedSession.archived === true,
       publicar: committedSession.publicar === true,
       sessionUpdatedAt,
       session: committedSession,
       sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
       sharedWith: Array.isArray(existing?.sharedWith) ? existing.sharedWith : [],
+      lastEditedByUid: uid,
+      lastEditedAt: deps.serverTimestamp(),
       createdAt: existing?.createdAt || deps.serverTimestamp(),
       updatedAt: deps.serverTimestamp()
     };
@@ -980,7 +1062,8 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
     await deps.runTransaction(deps.firestoreDb, async (transaction) => {
       const existingSnap = await transaction.get(sessionRef);
       const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
-      transaction.set(sessionRef, writeSession(existing), { merge: true });
+      if (existing && typeof transaction.update === "function") transaction.update(sessionRef, writeSession(existing));
+      else transaction.set(sessionRef, writeSession(existing), { merge: true });
     });
   } else {
     const existingSnap = await deps.getDoc(sessionRef);
@@ -990,7 +1073,7 @@ async function saveSessionDirectToCloud(payload = null, deps = {}) {
   return {
     ok: true,
     sessionId: sanitized.id,
-    ownerId: uid,
+    ownerId: String((await deps.getDoc(sessionRef)).data()?.ownerId || uid).trim(),
     savedAt: typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString(),
     session: committedSession
   };
@@ -1018,6 +1101,9 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     : getActiveSession();
   if (!initialTarget) throw new Error("No hay sesión activa para guardar.");
   if (initialTarget.isStub) return null;
+  if (initialTarget.archived === true && deps.canEditArchivedSession?.(initialTarget) !== true) {
+    throw new Error("Desarchiva la sesión antes de editarla.");
+  }
   if (
     deps.hasAvailableApiBase?.()
     && deps.panelMusicState?.sourceType === "track"
@@ -1194,6 +1280,12 @@ function createPodcasterSessionStore(deps = {}) {
     loadSingleSessionFromCloud(sessionId = "", uid = deps.resolveCurrentUid?.()) {
       return loadSingleSessionFromCloud(sessionId, uid, deps);
     },
+    listAdminUsers() {
+      return listAdminUsers(deps);
+    },
+    listAdminVideoSessions(ownerId = "") {
+      return listAdminVideoSessions(ownerId, deps);
+    },
     mergeCloudVsLocalSessions(cloudSessions = [], localSessions = []) {
       return mergeCloudVsLocalSessions(cloudSessions, localSessions, deps);
     },
@@ -1226,6 +1318,8 @@ export {
   persistSessionsToLocalCache,
   loadSessionsFromCloud,
   loadSingleSessionFromCloud,
+  listAdminUsers,
+  listAdminVideoSessions,
   mergeCloudVsLocalSessions,
   computeSessionFingerprint,
   loadSessionSyncMeta,

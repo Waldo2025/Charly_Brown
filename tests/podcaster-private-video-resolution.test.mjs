@@ -58,6 +58,38 @@ test("persistent private scene videos resolve to a signed URL before fetching", 
   }
 });
 
+test("local persistent hydration fetches the authenticated proxy instead of a Storage signed URL", async () => {
+  const controller = new PodcasterPlaybackController();
+  const privateProxy = "https://charly-brown.web.app/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fs1%2Fvideo.mp4";
+  let fetchedUrl = "";
+  let fetchedHeaders = null;
+
+  controller.state.config = { mediaLoadMode: "blob" };
+  controller.deps = {
+    preferAuthenticatedMediaProxy: true,
+    resolveAuthorizedAssetUrl: async () => {
+      throw new Error("Local hydration must not request a signed Storage URL.");
+    },
+    getAuthHeaders: async () => ({ Authorization: "Bearer local-test" })
+  };
+
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    fetchedUrl = String(url);
+    fetchedHeaders = options.headers;
+    return new Response(new Blob(["video-bytes"], { type: "video/mp4" }), { status: 200 });
+  };
+
+  try {
+    const result = await controller.getBlobUrl(privateProxy, { persistent: true });
+    assert.match(result, /^blob:/);
+    assert.equal(fetchedUrl, privateProxy);
+    assert.equal(fetchedHeaders.Authorization, "Bearer local-test");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("stage video assignment forbids falling back to a raw private proxy", () => {
   const source = readFileSync(
     new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url),

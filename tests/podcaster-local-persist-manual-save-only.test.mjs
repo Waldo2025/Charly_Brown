@@ -50,6 +50,7 @@ function extractFunction(name) {
 test("manual-save-only mode still persists session state locally", () => {
   const calls = [];
   const context = {
+    window: {},
     console,
     cloudAutosaveTimeout: 0,
     PODCAST_SESSION_MANUAL_SAVE_ONLY: true,

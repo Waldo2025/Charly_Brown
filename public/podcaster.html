@@ -3,18 +3,19 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="js/cache-version-loader.js?v=2026-1.0.10.856"></script>
+  <script src="js/cache-version-loader.js?v=2026-09-21.reference-auth-38" data-cache-refresh-on-open></script>
   <script data-cache-src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Snoopy Creator</title>
+  <title>Snoopy Editor</title>
   <link rel="icon" type="image/png" href="SnoopyPodcastCreator.png">
   <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <link rel="stylesheet" href="local-fonts.css">
-  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.10.833">
-  <link rel="stylesheet" href="header.css">
+  <link rel="stylesheet" data-cache-href="sidebar.css">
+  <link rel="stylesheet" data-cache-href="header.css">
   <link rel="stylesheet" data-cache-href="podcaster.css?v=2026-1.0.10.857">
   <link rel="stylesheet" data-cache-href="podcaster/podcaster-sidepanel-studio.css">
+  <link rel="stylesheet" data-cache-href="podcaster/podcaster-reference-editor.css">
   <link rel="stylesheet" data-cache-href="podcaster/podcaster-overlay-card-studio.css">
   <!-- FilePond -->
   <link href="https://unpkg.com/filepond/dist/filepond.min.css" rel="stylesheet" media="print" onload="this.media='all'">
@@ -718,6 +719,11 @@
           <div class="sessions-rail-header">
             <strong class="sessions-rail-header-title">Sesiones</strong>
             <div class="sessions-rail-actions">
+              <button id="openAdminUserVideosBtn" class="panel-icon-btn" type="button"
+                title="Videos de otros usuarios" aria-label="Ver y editar videos de otros usuarios"
+                aria-hidden="true" tabindex="-1" disabled hidden>
+                <i class="fas fa-users-viewfinder" aria-hidden="true"></i>
+              </button>
               <button id="openSessionFiltersBtn" class="panel-icon-btn sessions-advanced-filter-btn" type="button"
                 title="Filtrar sesiones" aria-pressed="false" aria-label="Abrir filtros de sesiones">
                 <i class="fas fa-filter" aria-hidden="true"></i>
@@ -1268,6 +1274,33 @@
       </form>
     </section>
   </div>
+  <div id="adminUserVideosModal" class="floating-panel-modal admin-user-videos-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-admin-user-videos-modal"
+      aria-label="Cerrar videos de otros usuarios"></button>
+    <section class="timeline-clip-duration-panel floating-panel-card admin-user-videos-panel" role="dialog"
+      aria-modal="true" aria-labelledby="adminUserVideosModalTitle">
+      <header class="timeline-clip-duration-head">
+        <div>
+          <h3 id="adminUserVideosModalTitle">Videos de otros usuarios</h3>
+          <p class="admin-user-videos-subtitle">Selecciona un usuario para abrir una sesión en el editor.</p>
+        </div>
+        <button id="closeAdminUserVideosBtn" class="row-icon-btn" type="button" title="Cerrar"
+          aria-label="Cerrar videos de otros usuarios">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <label class="row-field admin-user-videos-user-field">
+        <span>Usuario</span>
+        <select id="adminUserVideosSelect" aria-label="Elegir usuario">
+          <option value="">Selecciona un usuario</option>
+        </select>
+      </label>
+      <div id="adminUserVideosStatus" class="admin-user-videos-status" role="status" aria-live="polite">
+        Selecciona un usuario para consultar sus videos.
+      </div>
+      <div id="adminUserVideosList" class="admin-user-videos-list" role="list"></div>
+    </section>
+  </div>
   <div id="geminiAudioSpeedModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-gemini-audio-speed-modal"
       aria-label="Cerrar ajuste de velocidad Gemini"></button>
@@ -1606,8 +1639,8 @@
           <i class="fas fa-times"></i>
         </button>
         <h3 class="podcast-brand-title">
-          <span>Editor Snoopy</span>
-          <img src="SnoopyPodcastCreator.png" alt="Editor Snoopy" class="podcast-brand-title-icon"
+          <span>Snoopy Editor</span>
+          <img src="SnoopyPodcastCreator.png" alt="Snoopy Editor" class="podcast-brand-title-icon"
             loading="lazy">
         </h3>
         <div class="floating-panel-session-title" title="Nombre de la sesión"></div>
@@ -1721,11 +1754,6 @@
 
         <div class="floating-panel-head-actions">
           <div class="podcast-header-action-group is-view" role="group" aria-label="Compartir y pantalla completa">
-            <button id="openSidepanelFromEditorBtn" class="row-icon-btn podcast-header-scenes-toggle" type="button"
-              data-sidepanel-toggle aria-controls="podcasterSidepanel" aria-expanded="true"
-              title="Ocultar Panel de Escenas" aria-label="Ocultar Panel de Escenas">
-              <i class="fas fa-chevron-right" aria-hidden="true"></i>
-            </button>
             <div id="podcastSessionShareMenuWrap" class="podcast-session-share-menu-wrap">
               <button id="sharePodcastVideoSessionBtn" class="row-icon-btn" type="button"
                 title="Compartir sesión" aria-label="Compartir sesión" aria-haspopup="menu" aria-expanded="false"
@@ -1830,6 +1858,12 @@
                     <i class="fas fa-sliders-h" aria-hidden="true"></i>
                   </button>
                 </div>
+                <button id="podcastPreviewFullscreenBtn"
+                  class="row-icon-btn podcast-preview-toolbar-btn podcast-preview-fullscreen-toolbar-btn podcast-stage-fullscreen-btn"
+                  type="button" aria-label="Pantalla completa" title="Pantalla completa"
+                  data-tooltip="Pantalla completa" aria-pressed="false">
+                  <i class="fas fa-expand" aria-hidden="true"></i>
+                </button>
               </div>
               <div class="podcast-video-preview">
                 <div id="podcastTimelineFloatingPreviewBar" class="podcast-timeline-floating-preview-bar" hidden>
@@ -1860,10 +1894,6 @@
                 </div>
                 <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
 
-                <button id="podcastPreviewFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
-                  aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
-                  <i class="fas fa-expand" aria-hidden="true"></i>
-                </button>
                 <video id="podcastActiveSpeakerBackdropVideo"
                   class="podcast-active-speaker-video podcast-active-speaker-video-backdrop" playsinline preload="auto"
                   hidden muted></video>
@@ -2510,6 +2540,20 @@
         </button>
       </div>
       <div class="global-config-section">
+        <div class="global-config-section-title">Salida de audio del editor</div>
+        <div class="global-config-row">
+          <label class="compact-field wide" for="snoopyAudioOutput">
+            <span>Dispositivo de reproducción</span>
+            <select id="snoopyAudioOutput" aria-describedby="snoopyAudioOutputStatus">
+              <option value="">Salida del sistema (puede ser Bluetooth)</option>
+            </select>
+          </label>
+          <button id="snoopyChooseAudioOutput" type="button" class="composer-btn">Elegir dispositivo</button>
+        </div>
+        <p id="snoopyAudioOutputStatus" role="status" aria-live="polite"></p>
+        <p>Para evitar Bluetooth, elige los altavoces integrados. Solo cambia el audio de Snoopy Editor en este navegador. Para mostrar los dispositivos, algunos navegadores solicitan permiso de micrófono; no se graba audio.</p>
+      </div>
+      <div class="global-config-section">
         <div class="global-config-section-title">Modelo de Inteligencia Artificial</div>
         <div class="global-config-row">
           <label class="model-select-wrap compact-field wide" for="scriptModelSelect">
@@ -2528,6 +2572,10 @@
           <label class="compact-field">
             <span>Locutores</span>
             <input id="speakerCountInput" type="number" min="1" max="10" value="2">
+          </label>
+          <label class="compact-field wide">
+            <span>Idioma y variante</span>
+            <select id="globalSpeechLocaleSelect" aria-label="Idioma y variante de la locución"></select>
           </label>
           <label class="compact-field">
             <span>Aplicar a</span>
@@ -2551,6 +2599,7 @@
             <span>Reajustar con Gemini</span>
           </label>
         </div>
+        <div id="globalSpeakerSettings" class="global-speaker-settings"></div>
       </div>
 
       <div class="global-config-section">
@@ -2646,12 +2695,56 @@
         </p>
       </div>
 
-      <div id="globalSpeakerSettings" class="global-speaker-settings"></div>
-
       <div class="global-config-actions">
+        <button id="resetSceneVoiceOverridesBtn" class="composer-btn" type="button">Restablecer voces de escenas</button>
         <button id="applyGlobalConfigBtn" class="global-apply-btn" type="button">Aplicar Cambios</button>
       </div>
 
+    </section>
+  </div>
+  <div id="regenerateGeminiAudioConfigModal" class="floating-panel-modal snoopy-editor-child-modal" hidden>
+    <button class="floating-panel-backdrop" type="button"
+      data-action="close-regenerate-gemini-audio-config-modal"
+      aria-label="Cerrar configuración de audios Gemini"></button>
+    <section class="timeline-clip-duration-panel floating-panel-card gemini-audio-regenerate-config-panel"
+      role="dialog" aria-modal="true" aria-labelledby="regenerateGeminiAudioConfigTitle">
+      <header class="timeline-clip-duration-head">
+        <div>
+          <h3 id="regenerateGeminiAudioConfigTitle">Regenerar audios Gemini</h3>
+          <p class="timeline-clip-duration-label">Revisa el idioma y la voz antes de generar todos los audios.</p>
+        </div>
+        <button id="closeRegenerateGeminiAudioConfigBtn" class="row-icon-btn" type="button" title="Cerrar"
+          aria-label="Cerrar configuración de audios Gemini">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="gemini-audio-regenerate-config-body">
+        <label class="row-field">
+          <span>Idioma y variante</span>
+          <select id="regenerateGeminiSpeechLocaleSelect"
+            aria-label="Idioma y variante para regenerar los audios"></select>
+        </label>
+        <div>
+          <div class="gemini-audio-regenerate-config-label">Voces por locutor</div>
+          <div id="regenerateGeminiVoiceSettings" class="global-speaker-settings"></div>
+        </div>
+      </div>
+      <div class="timeline-clip-duration-actions">
+        <button id="continueCurrentGeminiAudioConfigBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn" type="button">
+          <i class="fas fa-forward" aria-hidden="true"></i>
+          <span>Continuar con la actual</span>
+        </button>
+        <button id="cancelRegenerateGeminiAudioConfigBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+          type="button">Cancelar</button>
+        <button id="applyAndRegenerateGeminiAudiosBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-apply-btn is-primary"
+          type="button">
+          <i class="fas fa-wave-square" aria-hidden="true"></i>
+          <span>Aplicar y regenerar</span>
+        </button>
+      </div>
     </section>
   </div>
   <div id="podcastPortraitViewer" class="podcast-portrait-viewer" hidden>
@@ -3106,12 +3199,13 @@
   </div>
 
   <script src="vendor/sortablejs/Sortable.min.js"></script>
-  <script type="module" src="js/chromeLayout.js?v=2026-1.0.10.858"></script>
+  <script data-cache-type="module" data-cache-src="js/chromeLayout.js"></script>
   <script data-cache-src="podcaster/podcaster-scene-media-render-spec.js"></script>
   <script data-cache-src="podcaster/podcaster-stop-motion.js"></script>
   <script data-cache-src="podcaster/podcaster-stop-motion-beats.js"></script>
   <script data-cache-src="podcaster/podcaster-on-screen-text.js"></script>
   <script data-cache-src="podcaster/podcaster-text-render.js"></script>
+  <script data-cache-src="podcaster/podcaster-audio-output.js"></script>
   <script data-cache-src="podcaster/podcaster-threads.js"></script>
   <script data-cache-src="podcaster/podcaster-runtime-globals.js"></script>
   <script data-cache-src="js/sidebar.js" data-cache-type="module"></script>

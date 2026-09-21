@@ -1,5 +1,5 @@
 /**
- * Podcaster Studio - Script Table Editor Module
+ * Snoopy Editor - Script Table Editor Module
  * Handles script rendering, row editor markup builders, field updates,
  * and SortableJS drag-and-drop integration.
  */
@@ -96,6 +96,15 @@ function autoSizeScriptTextareas(root = null) {
   });
 }
 
+function buildReferencePreviewImageMarkup(reference = null, altText = "Imagen de referencia") {
+  const source = String(window.resolveReferenceImagePreviewUrl?.(reference) || "").trim();
+  const alt = String(altText || "Imagen de referencia").trim() || "Imagen de referencia";
+  const sourceAttribute = /^(?:data|blob):/i.test(source)
+    ? `src="${escapeHtml(source)}"`
+    : `data-reference-image-src="${escapeHtml(source)}"`;
+  return `<img ${sourceAttribute} alt="${escapeHtml(alt)}" loading="lazy" decoding="async">`;
+}
+
 /**
  * Renders the entire script table based on the active session's rows.
  */
@@ -120,8 +129,8 @@ function renderScript(session) {
   if (els.openVideoEditorBtn) {
     els.openVideoEditorBtn.hidden = !panelCopy.videoMode;
     els.openVideoEditorBtn.disabled = !panelCopy.videoMode || rows.length === 0;
-    els.openVideoEditorBtn.setAttribute("title", "Pasar guión al editor de video Snoopy Creator");
-    els.openVideoEditorBtn.setAttribute("aria-label", "Pasar guión al editor de video Snoopy Creator");
+    els.openVideoEditorBtn.setAttribute("title", "Pasar guión al editor de video Snoopy Editor");
+    els.openVideoEditorBtn.setAttribute("aria-label", "Pasar guión al editor de video Snoopy Editor");
   }
   if (els.toggleCollapseAllRowsBtn) {
     const resolveAllCollapsed = typeof window.areAllScriptRowsCollapsed === "function"
@@ -305,9 +314,9 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
       .join("");
   };
 
-  const buildVoiceOptions = (selectedValue = "") => {
+  const buildVoiceOptions = (selectedValue = "", options = {}) => {
     if (typeof window.buildVoiceOptions === "function") {
-      return window.buildVoiceOptions(selectedValue);
+      return window.buildVoiceOptions(selectedValue, options);
     }
     const list = window.VOICES || [];
     return list
@@ -378,7 +387,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
         <label class="row-field wide">
           <span class="row-field-head">
             <span class="row-field-title-inline">
-              Elemento visual
+              Acción en escena
               ${(() => {
         const proposals = Array.isArray(creativeRow?.visualNotesProposals) ? creativeRow.visualNotesProposals : [];
         const resolved = Array.isArray(creativeRow?.visualNotesResolvedProposals) ? creativeRow.visualNotesResolvedProposals : [];
@@ -493,7 +502,11 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
       <label class="row-field">
         <span>Voz</span>
         <select data-field="voiceName" data-speaker="${escapeHtml(row.speaker)}" data-row-id="${escapeHtml(row.id)}" data-voice-source="${escapeHtml(window.normalizeVoiceNameSource?.(row.voiceNameSource) || "host")}">
-          ${buildVoiceOptions(window.resolveConfiguredSpeakerVoiceForGeneration(row, session))}
+          ${buildVoiceOptions(window.resolveConfiguredSpeakerVoiceForGeneration(row, session), {
+            includeInheritance: true,
+            inherited: (window.normalizeVoiceNameSource?.(row.voiceNameSource) || "host") !== "row",
+            inheritedVoiceName: window.resolveSpeakerVoiceName(row.speaker, session)
+          })}
         </select>
       </label>
       <!-- El campo Duración (durationSec) ha sido removido para evitar confusión con la velocidad del audio -->
@@ -606,7 +619,7 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
           ${speakerReference ? `<button class="row-icon-btn" type="button" data-action="clear-speaker-reference-image" data-speaker="${escapeHtml(host)}" title="Quitar referencia del locutor"><i class="fas fa-times"></i></button>` : ""}
         </div>
         ${speakerReference
-          ? `<div class="inspector-row-reference-preview"><button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(speakerReference))}" data-reference-title="${escapeHtml(speakerReference.name || host)}" data-reference-meta="Locutor de referencia" aria-label="Ampliar imagen de referencia del locutor"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(speakerReference))}" alt="${escapeHtml(speakerReference.name || host)}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button></div>`
+          ? `<div class="inspector-row-reference-preview"><button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(speakerReference))}" data-reference-title="${escapeHtml(speakerReference.name || host)}" data-reference-meta="Locutor de referencia" aria-label="Ampliar imagen de referencia del locutor">${buildReferencePreviewImageMarkup(speakerReference, speakerReference.name || host)}<span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button></div>`
           : `<div class="inspector-row-reference-empty">Adjunta una imagen de referencia para ${escapeHtml(window.resolveSpeakerDisplayName(host, session))}.</div>`}
       </div>
       <div class="inspector-row-reference">
@@ -622,7 +635,7 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
         </div>
         ${activeScenario
           ? (scenarioReference
-            ? `<div class="inspector-row-reference-preview"><button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(scenarioReference))}" data-reference-title="${escapeHtml(scenarioReference.name || activeScenario.title || "Escenario")}" data-reference-meta="Escenario de referencia" aria-label="Ampliar imagen de referencia del escenario"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(scenarioReference))}" alt="${escapeHtml(scenarioReference.name || activeScenario.title || "Escenario")}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button></div>`
+            ? `<div class="inspector-row-reference-preview"><button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(scenarioReference))}" data-reference-title="${escapeHtml(scenarioReference.name || activeScenario.title || "Escenario")}" data-reference-meta="Escenario de referencia" aria-label="Ampliar imagen de referencia del escenario">${buildReferencePreviewImageMarkup(scenarioReference, scenarioReference.name || activeScenario.title || "Escenario")}<span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button></div>`
             : `<div class="inspector-row-reference-empty">Escenario activo: ${escapeHtml(activeScenario.title || "Escenario")}. Puedes adjuntar una referencia visual para guiarlo.</div>`)
           : `<div class="inspector-row-reference-empty">Selecciona o genera un escenario global para los locutores.</div>`}
       </div>
@@ -689,8 +702,8 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
         ? `<div class="inspector-row-reference-preview">${rowReference.kind === "video"
           ? `<video src="${escapeHtml(rowReference.dataUrl || window.resolveStorageVideoUrl(rowReference.downloadUrl, rowReference.storagePath))}" muted playsinline controls preload="metadata"></video>`
           : rowReferenceImages.length > 1
-            ? `<div class="inspector-row-reference-gallery">${rowReferenceImages.map((image, imageIndex) => `<button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(image))}" data-reference-title="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}" data-reference-meta="Escena ${safeIndex + 1}" aria-label="Ampliar ${escapeHtml(image.name || `referencia ${imageIndex + 1}`)}"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(image))}" alt="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button>`).join("")}</div>`
-            : `<button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(rowReference))}" data-reference-title="${escapeHtml(rowReference.name || `Referencia de escena ${safeIndex + 1}`)}" data-reference-meta="Escena ${safeIndex + 1}" aria-label="Ampliar imagen de referencia de la escena"><img src="${escapeHtml(window.resolveReferenceImagePreviewUrl(rowReference))}" alt="${escapeHtml(rowReference.name)}"><span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button>`
+            ? `<div class="inspector-row-reference-gallery">${rowReferenceImages.map((image, imageIndex) => `<button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-row-id="${escapeHtml(row.id)}" data-reference-index="${imageIndex}" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(image))}" data-reference-title="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}" data-reference-meta="Escena ${safeIndex + 1}" aria-label="Ampliar ${escapeHtml(image.name || `referencia ${imageIndex + 1}`)}">${buildReferencePreviewImageMarkup(image, image.name || `Referencia ${imageIndex + 1}`)}<span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button>`).join("")}</div>`
+            : `<button class="inspector-reference-viewer-trigger" type="button" data-action="open-reference-image-viewer" data-reference-row-id="${escapeHtml(row.id)}" data-reference-index="0" data-reference-src="${escapeHtml(window.resolveReferenceImagePreviewUrl(rowReference))}" data-reference-title="${escapeHtml(rowReference.name || `Referencia de escena ${safeIndex + 1}`)}" data-reference-meta="Escena ${safeIndex + 1}" aria-label="Ampliar imagen de referencia de la escena">${buildReferencePreviewImageMarkup(rowReference, rowReference.name || `Referencia de escena ${safeIndex + 1}`)}<span class="inspector-reference-viewer-hint"><i class="fas fa-search-plus" aria-hidden="true"></i> Ampliar</span></button>`
         }</div>`
         : `<div class="inspector-row-reference-empty">Adjunta una imagen o video para guiar el video de esta escena.</div>`}
           </div>
@@ -896,7 +909,8 @@ function handleScriptFieldUpdate(event) {
     }
     window.stopRowAudio();
     window.stopGeminiLiveSession().catch(() => { });
-    target.dataset.voiceSource = "row";
+    const inheritsGlobalVoice = !String(value || "").trim();
+    target.dataset.voiceSource = inheritsGlobalVoice ? "host" : "row";
     window.upsertActiveSession((current) => ({
       ...current,
       script: {
@@ -905,8 +919,10 @@ function handleScriptFieldUpdate(event) {
           {
             ...entry,
             speaker,
-            voiceName: window.normalizeLiveVoiceName(String(value || "").trim(), ""),
-            voiceNameSource: "row",
+            voiceName: inheritsGlobalVoice
+              ? window.resolveSpeakerVoiceName(speaker, current)
+              : window.normalizeLiveVoiceName(String(value || "").trim(), ""),
+            voiceNameSource: inheritsGlobalVoice ? "host" : "row",
             lastEditedAt: Date.now()
           }
         ))
@@ -1146,6 +1162,7 @@ const podcasterScriptEditorApi = {
   updateSingleScriptRow,
   buildScriptRowEditorMarkup,
   buildInspectorScriptRowMarkup,
+  buildReferencePreviewImageMarkup,
   buildBlankScriptRow,
   shouldHandleScriptFieldOnInput,
   handleScriptFieldUpdate

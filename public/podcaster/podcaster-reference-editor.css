@@ -1,0 +1,116 @@
+/* Reference gallery: the image itself is the surface. */
+.has-reference-editor { --ref-bg: #202733; --ref-field: #151c27; --ref-line: #465065; --ref-text: #eef3fa; --ref-muted: #b2bfd0; }
+.is-snoopy-editor-light-theme .has-reference-editor { --ref-bg: #f7f9fc; --ref-field: #fff; --ref-line: #c6cfdb; --ref-text: #202b3b; --ref-muted: #56657a; }
+.has-reference-editor .podcast-portrait-viewer-card {
+  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto;
+  width: fit-content; max-width: calc(100vw - 48px); max-height: calc(100dvh - 48px);
+  padding: 0 !important; border: 0 !important; border-radius: 0 !important;
+  background: transparent !important; box-shadow: none !important; gap: 0; overflow: visible;
+}
+.has-reference-editor .podcast-portrait-viewer-head { display: none; }
+.has-reference-editor [hidden], .has-reference-editor .hidden { display: none !important; }
+.has-reference-editor .podcast-portrait-viewer-stage {
+  grid-area: 1 / 1; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; overflow: visible;
+  display: flex; align-items: center; justify-content: center; max-height: calc(100dvh - 64px);
+}
+.has-reference-editor .podcast-portrait-viewer-stage img {
+  display: block; width: auto; height: auto; max-width: 100%; max-height: calc(100dvh - 64px);
+  border-radius: 12px; box-shadow: 0 24px 80px #0007; object-fit: contain;
+}
+.snoopy-reference-editor, .snoopy-reference-workspace, .snoopy-reference-gallery { display: contents; color: var(--ref-text); font-size: 14px; line-height: 1.5; }
+.snoopy-reference-editor button, .snoopy-reference-editor a {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 12px;
+  border: 1px solid var(--ref-line); border-radius: 10px; background: var(--ref-field); color: var(--ref-text);
+  font: inherit; text-decoration: none; cursor: pointer;
+}
+.snoopy-reference-editor button:hover:not(:disabled), .snoopy-reference-editor a:hover { border-color: #65a9ff; }
+.snoopy-reference-editor button:disabled { opacity: .4; cursor: default; }
+.snoopy-reference-editor :focus-visible { outline: 2px solid #65a9ff; outline-offset: 3px; }
+.snoopy-reference-editor .snoopy-reference-primary { background: #2868c0; border-color: #4389e4; color: white; }
+.snoopy-reference-editor [aria-pressed="true"] { border-color: #68adff; box-shadow: inset 0 0 0 1px #68adff; }
+.snoopy-reference-gallery > * { position: absolute; z-index: 3; }
+.snoopy-reference-gallery .snoopy-reference-float, .snoopy-reference-gallery [data-ref="previous"], .snoopy-reference-gallery [data-ref="next"] {
+  width: 42px; height: 42px; padding: 0; border-radius: 50%; border: 1px solid #ffffff40;
+  background: #17202de6; color: white; box-shadow: 0 4px 16px #0004;
+}
+.snoopy-reference-gallery [data-ref="edit"] { right: 62px; top: 14px; }
+.snoopy-reference-gallery [data-ref="dismiss"] { right: 12px; top: 14px; }
+.snoopy-reference-gallery [data-ref="previous"] { left: 12px; top: calc(50% - 21px); }
+.snoopy-reference-gallery [data-ref="next"] { right: 12px; top: calc(50% - 21px); }
+.snoopy-reference-gallery [data-ref="position"] { bottom: 12px; left: 50%; transform: translateX(-50%); border-radius: 20px; padding: 4px 12px; background: #17202dcc; color: white; }
+.snoopy-reference-gallery [data-ref="restore"] { bottom: 12px; left: 12px; }
+.snoopy-reference-gallery [data-ref="pending"] { bottom: 58px; left: 12px; }
+.has-reference-editor:not([data-reference-mode="gallery"]) .podcast-portrait-viewer-card { width: min(1400px, calc(100vw - 48px)); grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; max-height: calc(100dvh - 32px); }
+.has-reference-editor:not([data-reference-mode="gallery"]) .snoopy-reference-gallery > :not([data-ref="dismiss"]) { display: none; }
+.has-reference-editor:not([data-reference-mode="gallery"]) .snoopy-reference-gallery [data-ref="dismiss"] { top: -12px; right: -12px; }
+.has-reference-editor:is([data-reference-mode="general"], [data-reference-mode="region"], [data-reference-mode="text"]) { padding: 16px 380px 16px 16px; }
+.has-reference-editor:is([data-reference-mode="general"], [data-reference-mode="region"], [data-reference-mode="text"]) .podcast-portrait-viewer-card { width: min(1100px, 100%); max-width: 100%; grid-template-columns: minmax(0, 1fr); gap: 0; animation: none; transform: none; opacity: 1; }
+.snoopy-reference-sidebar { position: fixed; top: 16px; right: 16px; bottom: 16px; z-index: 5; width: 340px; height: auto; padding: 20px; box-sizing: border-box; background: var(--ref-bg); color: var(--ref-text); border: 1px solid var(--ref-line); border-radius: 12px; box-shadow: 0 20px 60px #0004; display: flex; flex-direction: column; gap: 16px; overflow: auto; overscroll-behavior: contain; }
+.snoopy-reference-modes { display: grid; grid-template-columns: 44px 1fr 1fr; gap: 6px; }
+.snoopy-reference-modes [data-ref="general"] { grid-column: 2 / 4; }
+.snoopy-reference-modes [data-ref="region"] { grid-column: 1 / 3; }
+.snoopy-reference-modes [data-ref="general"] { flex: 1; }
+.snoopy-reference-modes [data-ref="region"], .snoopy-reference-modes [data-ref="text"] { flex: 1; white-space: nowrap; }
+.snoopy-reference-chat { flex: 1; min-height: 90px; overflow-y: auto; color: var(--ref-muted); }
+.snoopy-reference-chat p { margin: 0 0 12px; }
+.snoopy-reference-chat .is-user { background: var(--ref-field); color: var(--ref-text); border-radius: 12px 12px 2px 12px; padding: 12px; margin-left: 18px; overflow-wrap: anywhere; }
+.snoopy-reference-tools { display: flex; justify-content: center; gap: 6px; padding: 6px; border: 1px solid var(--ref-line); border-radius: 14px; }
+.snoopy-reference-tools button { width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
+.snoopy-reference-prompt { display: grid; gap: 12px; }
+.snoopy-reference-editor label { display: grid; gap: 6px; margin: 0; }
+.snoopy-reference-editor textarea, .snoopy-reference-editor input[type="text"], .snoopy-reference-editor select { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--ref-line); border-radius: 10px; background: var(--ref-field); color: var(--ref-text); font: inherit; }
+.snoopy-reference-editor textarea { resize: vertical; min-height: 90px; }
+.snoopy-reference-region { grid-area: 1 / 1; min-width: 0; display: flex; align-items: center; justify-content: center; }
+.snoopy-reference-region canvas { display: block; max-width: 100%; max-height: calc(100dvh - 64px); width: auto; height: auto; touch-action: none; cursor: crosshair; border-radius: 12px; box-shadow: 0 24px 80px #0007; }
+.snoopy-reference-text-fields { display: grid; gap: 12px; }
+.snoopy-reference-text-fields label:has(input[type="radio"]) { display: flex; align-items: center; gap: 8px; }
+.snoopy-reference-status { font-size: 13px; color: var(--ref-muted); margin: 0; }
+.snoopy-reference-status:empty { display: none; }
+.snoopy-reference-status.is-error { color: #ed7777; }
+.snoopy-reference-editor > .snoopy-reference-status { position: absolute; top: 100%; margin-top: 8px; padding: 6px 12px; background: var(--ref-bg); border-radius: 8px; }
+.snoopy-reference-comparison { grid-column: 1 / -1; color: var(--ref-text); }
+.snoopy-reference-compare-images { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.snoopy-reference-compare-images figure { margin: 0; min-width: 0; }
+.snoopy-reference-compare-images figcaption { width: fit-content; background: var(--ref-bg); padding: 6px 12px; border-radius: 8px; margin-bottom: 8px; }
+.snoopy-reference-compare-images img { width: 100%; height: 62dvh; object-fit: contain; border-radius: 12px; }
+.snoopy-reference-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 14px; }
+@media (max-width: 760px) {
+  .has-reference-editor:is([data-reference-mode="general"], [data-reference-mode="region"], [data-reference-mode="text"]) { padding: 16px; }
+  .has-reference-editor:not([data-reference-mode="gallery"]) .podcast-portrait-viewer-card { width: calc(100vw - 32px); grid-template-columns: minmax(0,1fr); max-height: calc(100dvh - 32px); overflow: auto; gap: 12px; }
+  .snoopy-reference-sidebar { position: relative; inset: auto; z-index: auto; grid-area: 2 / 1; width: 100%; height: auto; max-height: 48dvh; }
+  .has-reference-editor:not([data-reference-mode="gallery"]) .podcast-portrait-viewer-stage img, .snoopy-reference-region canvas { max-height: 42dvh; }
+  .has-reference-editor:not([data-reference-mode="gallery"]) .snoopy-reference-gallery [data-ref="dismiss"] { top: 8px; right: 8px; }
+  .snoopy-reference-compare-images { grid-template-columns: 1fr; }
+  .snoopy-reference-compare-images img { height: 30dvh; }
+}
+
+/* Keep the reference panel legible even when the shared modal theme uses
+   muted button text. Its controls use the same palette as its own surface. */
+.has-reference-editor .snoopy-reference-editor :is(button, a, label, input, textarea, select) {
+  color: var(--ref-text) !important;
+}
+.has-reference-editor .snoopy-reference-editor :is(input, textarea, select) {
+  background: var(--ref-field) !important;
+  border-color: var(--ref-line) !important;
+}
+.has-reference-editor .snoopy-reference-editor :is(p, small),
+.has-reference-editor .snoopy-reference-editor ::placeholder {
+  color: var(--ref-muted) !important; opacity: 1;
+}
+.has-reference-editor .snoopy-reference-editor .is-user { color: var(--ref-text) !important; }
+.has-reference-editor .snoopy-reference-editor .snoopy-reference-primary,
+.has-reference-editor .snoopy-reference-gallery .snoopy-reference-float,
+.has-reference-editor .snoopy-reference-gallery :is([data-ref="previous"], [data-ref="next"]) {
+  color: #fff !important;
+}
+.has-reference-editor .snoopy-reference-editor .snoopy-reference-status.is-error { color: #ed7777 !important; }
+
+.has-reference-editor[data-reference-mode="general"] .snoopy-reference-chat {
+  flex: 0 0 auto; min-height: 0; max-height: 20%;
+}
+.has-reference-editor .snoopy-reference-prompt[data-ref="generalPanel"] {
+  display: flex; flex-direction: column; flex: 1 0 180px; min-height: 180px;
+}
+.has-reference-editor .snoopy-reference-prompt [data-ref="instruction"] {
+  flex: 1; min-height: 120px; resize: none;
+}

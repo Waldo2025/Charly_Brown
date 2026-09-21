@@ -89,6 +89,9 @@ async function preloadAllDialogueAudios(session = null, options = {}) {
       };
 
       const onLoaded = () => {
+        const current = window.getActiveSession();
+        const currentClip = window.getDialogueAudioMap(current)?.[rowId];
+        if (current?.id !== activeSession.id || current?.activeThreadId !== activeSession.activeThreadId || String(currentClip?.storagePath || currentClip?.downloadUrl || "") !== String(audioMap[rowId]?.storagePath || audioMap[rowId]?.downloadUrl || "")) { cleanup(); return; }
         const duration = Number(audio.duration);
         if (Number.isFinite(duration) && duration > 0) {
           const nextMs = Math.round(duration * 1000);
@@ -98,34 +101,6 @@ async function preloadAllDialogueAudios(session = null, options = {}) {
           if (Math.abs(nextMs - (window.podcastVideoState.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
             window.podcastVideoState.montageAudioActualDurationsMs[rowId] = nextMs;
 
-            let speedUpdated = false;
-            // Si la duración natural del audio supera los 8 segundos de la escena de video Veo,
-            // ajustamos el playbackRate a 1.14 automáticamente
-            if (nextMs > 8000) {
-              const activeSession = window.getActiveSession();
-              const currentAudioMap = window.getDialogueAudioMap(activeSession) || {};
-              const currentClip = currentAudioMap[rowId];
-
-              if (currentClip && currentClip.playbackRate !== 1.14) {
-                window.upsertActiveSession((current) => {
-                  const map = window.getDialogueAudioMap(current) || {};
-                  const clip = map[rowId];
-                  if (!clip) return current;
-                  return {
-                    ...current,
-                    dialogueAudioMap: {
-                      ...map,
-                      [rowId]: {
-                        ...clip,
-                        playbackRate: 1.14
-                      }
-                    }
-                  };
-                }, { render: false });
-                speedUpdated = true;
-              }
-            }
-
             window.invalidateStudioRuntimeCache?.();
 
             // Reconciliar en segundo plano para que el geminiDialogueTrack tenga la duración real
@@ -133,10 +108,6 @@ async function preloadAllDialogueAudios(session = null, options = {}) {
               window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
             } catch (_) {}
 
-            if (speedUpdated) {
-              window.syncPodcastStudioInspector?.(window.getActiveSession());
-              window.scheduleSessionLocalPersist?.("auto-speed-adjusted");
-            }
 
             // Forzar renderizado de la línea de tiempo para actualizar el ancho de los chips
             if (options.suppressTimelineRender !== true) {
@@ -174,6 +145,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   const session = window.getActiveSession();
   const sessionId = String(session?.id || "").trim();
   if (!sessionId || !key) return null;
+  const selectionContext = window.PodcasterSceneMedia.capture(session, key, "audio");
   const rows = window.getSessionRows(session);
   const row = rows.find((item) => String(item?.id || "").trim() === key);
   if (!row) return null;
@@ -181,7 +153,8 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   const pendingKey = `${sessionId}:${key}`;
   if (dialogueAudioGenerationPending.has(pendingKey)) return null;
 
-  const voiceName = window.resolveConfiguredSpeakerVoiceForGeneration(row, session);
+  const speechConfig = window.resolveSpeechGenerationConfig(row, session);
+  const voiceName = speechConfig.voiceName;
   const dialogueText = window.buildTargetSpeechLine(row);
   const text = dialogueText;
   const targetDurationSec = Math.max(0, Number(row?.durationSec || 0) || 0);
@@ -206,12 +179,14 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
 
   try {
     const body = {
+      selectionContext,
       sessionId,
       rowId: key,
       speaker: String(row?.speaker || "").trim(),
       speakerLabel: String(row?.speaker || "").trim(),
       speakerName: window.resolveSpeakerDisplayName(row?.speaker, session),
       voiceName,
+      speechLocale: speechConfig.speechLocale,
       text,
       targetSpeechLine: text,
       targetDurationSec,
@@ -256,65 +231,11 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     if (!resp?.ok) throw new Error(resp?.error || "Error al generar audio.");
 
     const finalAudio = normalizeDialogueAudioRecord(resp.dialogueAudio);
-    const updatedSession = window.upsertActiveSession((current) => {
-      const currentAudioMap = window.getDialogueAudioMap(current);
-      const existingClip = currentAudioMap[key] || null;
-      const row = window.getSessionRows(current).find((item) => String(item?.id || "").trim() === key) || null;
-      const preservedPlaybackRate = window.normalizeDialogueAudioPlaybackRate?.(
-        existingClip?.playbackRate || row?.playbackRate || finalAudio?.playbackRate || 1
-      ) || 1;
-      return {
-        ...current,
-        dialogueAudioMap: {
-          ...(current.dialogueAudioMap || {}),
-          [key]: {
-            ...(existingClip || {}),
-            ...(finalAudio || {}),
-            rowId: key,
-            playbackRate: preservedPlaybackRate
-          }
-        }
-      };
-    }, { render: false });
-    const nextSession = updatedSession || window.getActiveSession();
-    const nextAudioClip = window.resolveDialogueAudioForRow?.(nextSession, key)
-      || window.getDialogueAudioMap?.(nextSession)?.[key]
-      || finalAudio
-      || null;
-    const nextAudioSourceKey = typeof window.playbackController?.resolveAudioSourceKey === "function"
-      ? window.playbackController.resolveAudioSourceKey(nextAudioClip)
-      : "";
-    if (typeof window.upsertPodcastVideoConfig === "function") {
-      window.upsertPodcastVideoConfig((cfg) => {
-        const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-        if (!Array.isArray(track.excludedRowIds) || !track.excludedRowIds.includes(key)) return cfg;
-        return {
-          ...cfg,
-          geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
-            ...track,
-            excludedRowIds: track.excludedRowIds.filter((rowId) => String(rowId || "").trim() !== key)
-          })
-        };
-      }, { autosave: true });
-    }
-
-    // Evacuar referencias del reproductor viejas
-    const invalidateOptions = {
-      previousClip: previousAudioClip,
-      previousSourceKey: previousAudioSourceKey,
-      nextClip: nextAudioClip,
-      nextSourceKey: nextAudioSourceKey,
-      revokeBlobUrls: true
-    };
-    const invalidationTasks = [];
-    if (typeof window.playbackController?.invalidateRowAudioCache === "function") {
-      invalidationTasks.push(window.playbackController.invalidateRowAudioCache(key, invalidateOptions));
-    }
-    if (typeof window.exportPreviewController?.invalidateRowAudioCache === "function") {
-      invalidationTasks.push(window.exportPreviewController.invalidateRowAudioCache(key, invalidateOptions));
-    }
-    await Promise.allSettled(invalidationTasks);
-
+    finalAudio.playbackRate = previousAudioClip?.playbackRate || row?.playbackRate || 1;
+    const application = await window.PodcasterSceneMedia.apply(selectionContext, finalAudio);
+    if (application.status !== "applied") throw new Error("El audio se creó, pero la selección cambió durante la generación.");
+    const activeNow = window.getActiveSession();
+    if (activeNow?.id !== sessionId || String(activeNow?.activeThreadId || "") !== selectionContext.threadId) return application.clip;
     // La duración medida pertenece al blob anterior. Obliga al probe del chip
     // a medir el archivo regenerado incluso cuando conserva el mismo rowId/path.
     if (window.podcastVideoState?.montageAudioActualDurationsMs) {
@@ -328,7 +249,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     window.syncGeminiDialogueTrackWithRuntime({
       render: false,
       preserveStartMs: true,
-      forceDurationFromAudio: true
+      forceDurationFromAudio: false
     });
     const refreshedSession = window.getActiveSession();
     const refreshedConfig = window.getPodcastVideoConfig?.(refreshedSession);
@@ -349,7 +270,13 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     return finalAudio;
   } catch (error) {
     console.error("[podcaster] audio generation error", error);
-    if (!silent) window.addChatMessage("system", `Error audio escena ${window.resolveSceneNumberByRowId(key, session)}: ${error.message}`);
+    if (!silent) {
+      const isAuthError = error.message === "AUTH_REQUIRED" || error.code === "AUTH_REQUIRED";
+      const userMessage = isAuthError
+        ? "Tu sesión expiró. Recarga la página e inicia sesión nuevamente para generar audio."
+        : `Error audio escena ${window.resolveSceneNumberByRowId(key, session)}: ${error.message}`;
+      window.addChatMessage("system", userMessage);
+    }
     throw error;
   } finally {
     dialogueAudioGenerationPending.delete(pendingKey);

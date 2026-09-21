@@ -309,3 +309,19 @@ test("sanitizer preserves visual direction while dropping text directives", () =
   assert.match(result.value, /Warm sunset light/);
   assert.doesNotMatch(result.value, /FUTURE|logo/);
 });
+
+test("detects Spanish in-scene text and adds explicit language, word count and anti-stutter instructions", () => {
+  const result = buildDialogueVideoPromptBundle(createFixture({
+    generator: "veo",
+    textPolicy: "in_scene",
+    inSceneText: "¿Cómo organizar tanta información?"
+  }));
+
+  assert.match(result.prompt, /Language: Spanish\./);
+  assert.match(result.prompt, /Preserve authentic Spanish orthography, accent marks, and inverted punctuation\./);
+  assert.match(result.prompt, /Word count: exactly 4 words;/);
+  assert.match(result.prompt, /render each word cleanly and strictly once without repeating, duplicating, stuttering, or introducing misspelled variants\./);
+  assert.match(result.prompt, /Spell it exactly as quoted\. No other visible text\./);
+  assert.equal((result.prompt.match(/¿Cómo organizar tanta información\?/g) || []).length, 1);
+});
+

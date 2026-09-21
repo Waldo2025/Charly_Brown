@@ -1,3 +1,4 @@
+import mediaState from "../public/podcaster/podcaster-media-state.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,12 +13,11 @@ const playbackController = readFileSync(new URL("../public/podcaster/podcaster-p
 const homePlayer = readFileSync(new URL("../public/js/home.js", import.meta.url), "utf8");
 
 test("image replacement persists a stable source and resets geometry for the new image", () => {
-  assert.match(replacement, /resolveStableReplacementMediaUrl/);
-  assert.match(replacement, /rawUrl && !\/\^\(\?:blob\|data\):\/i\.test\(rawUrl\)/);
-  assert.match(replacement, /function resolveReplacementPreviewUrl[\s\S]*?\/api\/assets\/proxy-media\?storagePath=/);
-  assert.match(replacement, /mediaScale:\s*1,[\s\S]*?mediaOffsetXPct:\s*0,[\s\S]*?mediaOffsetYPct:\s*0,[\s\S]*?visualLayoutMode:\s*"default"/m);
-  assert.match(replacement, /includeAudio:\s*false/);
-  assert.doesNotMatch(replacement, /else if \(typeof playbackController\?\.invalidateRowAudioCache/);
+  const session = { id: "s", script: { rows: [{ id: "r" }] }, podcastVideoConfig: { timelineClipsByRowId: { r: { mediaScale: 2, mediaOffsetYPct: 45, visualLayoutMode: "blur-backdrop" } } } };
+  const outcome = mediaState.selectSceneMedia(session, "r", { storagePath: "image.png", mimeType: "image/png", manuallyReplaced: true }, mediaState.captureMediaSelection(session, "r", "video", "manual"));
+  const clip = outcome.session.podcastVideoConfig.timelineClipsByRowId.r;
+  assert.equal(outcome.clip.storagePath, "image.png");
+  assert.equal(clip.type, "image"); assert.equal(clip.mediaScale, 1); assert.equal(clip.mediaOffsetYPct, 0); assert.equal(clip.visualLayoutMode, "default");
 });
 
 test("Render rejects browser-only blob URLs before treating them as local files", () => {

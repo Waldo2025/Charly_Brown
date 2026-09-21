@@ -402,7 +402,6 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       }));
       track = rebuilt;
     }
-    const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
     podcastVideoState.timelineAudioSelection.uploadedKeys.clear();
     podcastVideoState.timelineAudioSelection.panelLoopKey = "";
     podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
@@ -415,7 +414,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           STUDIO_TIMELINE_MIN_CLIP_MS,
           Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
         );
-        const maxStartMs = Math.max(0, totalMs - durationMs);
+        const maxStartMs = Number.POSITIVE_INFINITY;
         return {
           rowId: segRowId,
           audioSrc: String(segment?.audioSrc || "").trim(),
@@ -1002,6 +1001,7 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
         podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
       }
+      selectTimelineSceneRow(rowId, { syncStage: false });
       renderPodcastVideoTimeline(getActiveSession());
       return true;
     }
@@ -1427,7 +1427,6 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         const maxStartMs = Number.isFinite(maxStartMsRaw) ? Math.max(minStartMs, Math.round(maxStartMsRaw)) : Number.POSITIVE_INFINITY;
         const unclampedStartMs = snapTimelineMsWithStep(Number(segment.startMs || 0) + targetDelta, dragStepMs);
         const startMs = Math.max(minStartMs, Math.min(maxStartMs, Math.max(0, unclampedStartMs)));
-        const trimInMs = Math.max(0, Number(segment.trimInMs || 0) || 0);
         const anchorStartMs = Number.isFinite(Number(segment.anchorStartMs))
           ? Math.max(0, Math.round(Number(segment.anchorStartMs)))
           : Math.max(0, Math.round(Number(segment.minStartMs || 0) || 0));
@@ -1435,7 +1434,6 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           startMs,
           endMs: startMs + durationMs,
           durationMs,
-          trimOutMs: trimInMs + durationMs,
           anchorStartMs
         }];
       }));
@@ -1448,7 +1446,6 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
           startMs: patch.startMs,
           endMs: patch.endMs,
           durationMs: patch.durationMs,
-          trimOutMs: Number.isFinite(Number(patch.trimOutMs)) ? patch.trimOutMs : segment.trimOutMs,
           anchorStartMs: patch.anchorStartMs,
           manualStartMs: true
         };

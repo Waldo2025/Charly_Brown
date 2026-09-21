@@ -1,10 +1,12 @@
+const podcasterMediaState = require("./podcaster-media-state.js");
 const crypto = require("node:crypto");
 const path = require("node:path");
 const {
   getAdminServices,
   resolveAuthContext,
   asyncRoute,
-  isPrivilegedRole
+  isPrivilegedRole,
+  hasAdminRoleWithProfile
 } = require("./common.js");
 const { validateIdentifier, sanitizeSegment } = require("./uploads.js");
 
@@ -87,35 +89,7 @@ function isManualSceneReplacement(entry = null) {
 }
 
 function mergeMediaMapByEntryUpdatedAt(currentMap = {}, incomingMap = {}) {
-  const current = currentMap && typeof currentMap === "object" ? currentMap : {};
-  const incoming = incomingMap && typeof incomingMap === "object" ? incomingMap : {};
-  const next = {};
-  const keys = new Set([...Object.keys(current), ...Object.keys(incoming)]);
-  keys.forEach((key) => {
-    const currentEntry = current[key];
-    const incomingEntry = incoming[key];
-    if (!currentEntry || typeof currentEntry !== "object") {
-      if (incomingEntry !== undefined) next[key] = incomingEntry;
-      return;
-    }
-    if (!incomingEntry || typeof incomingEntry !== "object") {
-      next[key] = currentEntry;
-      return;
-    }
-    const currentIsManual = isManualSceneReplacement(currentEntry);
-    const incomingIsManual = isManualSceneReplacement(incomingEntry);
-    if (currentIsManual !== incomingIsManual) {
-      next[key] = currentIsManual ? currentEntry : incomingEntry;
-      return;
-    }
-    const currentUpdatedAt = resolveUpdatedAtMs(currentEntry.updatedAt);
-    const incomingUpdatedAt = resolveUpdatedAtMs(incomingEntry.updatedAt);
-    next[key] = Number.isFinite(currentUpdatedAt)
-      && (!Number.isFinite(incomingUpdatedAt) || currentUpdatedAt >= incomingUpdatedAt)
-      ? currentEntry
-      : incomingEntry;
-  });
-  return next;
+  return podcasterMediaState.mergeMediaMapByEntryUpdatedAt(currentMap, incomingMap);
 }
 
 function reconcileDialogueVideoState(currentSession = {}, incomingSession = {}) {
@@ -139,7 +113,27 @@ function reconcileDialogueVideoState(currentSession = {}, incomingSession = {}) 
 function sessionAccess(data, authContext) {
   const ownerId = text(data?.ownerId, 180);
   const shared = Array.isArray(data?.sharedWithIds) ? data.sharedWithIds.map(String) : [];
-  return ownerId === authContext.uid || shared.includes(authContext.uid) || isPrivilegedRole(authContext.role);
+  return ownerId === authContext.uid || shared.includes(authContext.uid);
+}
+
+function isVideoSessionDocument(data = {}) {
+  const nested = data.session && typeof data.session === "object" ? data.session : {};
+  const generationMode = text(nested?.podcastStudioUiState?.composerGenerationMode, 40).toLowerCase();
+  const contentType = text(nested?.script?.videoContentType || nested.videoContentType, 80).toLowerCase();
+  return generationMode === "video" || contentType === "creative";
+}
+
+function resolvePodcasterSessionEditAccess(existing = {}, authContext = {}, isAdmin = false) {
+  const ownerId = text(existing.ownerId, 180);
+  const sharedWithIds = Array.isArray(existing.sharedWithIds) ? existing.sharedWithIds.map(String) : [];
+  const isOwnerOrShared = ownerId === authContext.uid || sharedWithIds.includes(authContext.uid);
+  const canEditArchivedAsAdmin = isAdmin === true && ownerId !== authContext.uid;
+  return {
+    ownerId,
+    allowed: isOwnerOrShared || isAdmin === true,
+    archivedBlocked: existing.archived === true && !canEditArchivedAsAdmin,
+    canEditArchivedAsAdmin
+  };
 }
 
 function resolveSessionMediaIdentity(storagePath = "", metadata = {}, rowIdByStoragePath = new Map(), rowIdByGeneratedJobId = new Map()) {
@@ -238,46 +232,91 @@ function registerSessionRoutes(app) {
     const authContext = await resolveAuthContext(req);
     const session = safeSession(req.body?.session);
     const { db, admin } = getAdminServices();
+    const isAdmin = await hasAdminRoleWithProfile(authContext, db);
     const ref = db.collection("podcaster_sessions").doc(session.id);
     let committedSession = session;
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       const existing = snapshot.exists ? snapshot.data() || {} : {};
-      if (snapshot.exists && text(existing.ownerId, 180) !== authContext.uid) {
+      const editAccess = snapshot.exists
+        ? resolvePodcasterSessionEditAccess(existing, authContext, isAdmin)
+        : { ownerId: authContext.uid, allowed: true, archivedBlocked: false };
+      const ownerId = editAccess.ownerId;
+      if (snapshot.exists && !editAccess.allowed) {
         throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
       }
+      if (snapshot.exists && editAccess.archivedBlocked) {
+        throw Object.assign(new Error("podcaster_session_archived"), { status: 409 });
+      }
       const currentSession = existing.session && typeof existing.session === "object" ? existing.session : {};
-      const reconciledVideoState = reconcileDialogueVideoState(currentSession, session);
-      committedSession = {
-        ...session,
-        ...reconciledVideoState
-      };
-      transaction.set(ref, {
-        ownerId: authContext.uid,
+      committedSession = podcasterMediaState.reconcileSessionMedia(currentSession, session);
+      if (snapshot.exists) committedSession.archived = existing.archived === true;
+      const payload = {
+        ownerId,
         title: session.title,
-        archived: session.archived === true,
+        archived: snapshot.exists ? existing.archived === true : session.archived === true,
         publicar: session.publicar === true,
         sessionUpdatedAt: session.updatedAt,
         session: committedSession,
         sharedWithIds: Array.isArray(existing.sharedWithIds) ? existing.sharedWithIds : [],
         sharedWith: Array.isArray(existing.sharedWith) ? existing.sharedWith : [],
+        lastEditedByUid: authContext.uid,
+        lastEditedAt: admin.firestore.FieldValue.serverTimestamp(),
         createdAt: existing.createdAt || admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      };
+      if (snapshot.exists) transaction.update(ref, payload);
+      else transaction.set(ref, payload);
     });
-    res.status(200).json({ ok: true, sessionId: session.id, ownerId: authContext.uid, savedAt: new Date().toISOString(), session: committedSession });
+    const savedSnapshot = await ref.get();
+    res.status(200).json({ ok: true, sessionId: session.id, ownerId: text(savedSnapshot.data()?.ownerId, 180), savedAt: new Date().toISOString(), session: committedSession });
+  }));
+
+  app.get("/api/podcaster/users/list", asyncRoute(async (req, res) => {
+    const authContext = await resolveAuthContext(req);
+    const { db } = getAdminServices();
+    if (!await hasAdminRoleWithProfile(authContext, db)) {
+      throw Object.assign(new Error("podcaster_admin_required"), { status: 403 });
+    }
+    const snapshot = await db.collection("users").limit(250).get();
+    const users = snapshot.docs
+      .map((doc) => {
+        const data = doc.data() || {};
+        const uid = text(data.uid || data.userId || doc.id, 180);
+        const displayName = text(data.displayName || data.name || `${data.firstName || ""} ${data.lastName || ""}`, 180);
+        return { uid, displayName: displayName || text(data.email, 240, "Usuario"), email: text(data.email, 240) };
+      })
+      .filter((user) => user.uid && user.uid !== authContext.uid)
+      .sort((a, b) => String(a.displayName || a.email).localeCompare(String(b.displayName || b.email), "es"));
+    res.status(200).json({ ok: true, users });
   }));
 
   app.get("/api/podcaster/sessions/list", asyncRoute(async (req, res) => {
     const authContext = await resolveAuthContext(req);
     const { db } = getAdminServices();
-    const [owned, shared] = await Promise.all([
-      db.collection("podcaster_sessions").where("ownerId", "==", authContext.uid).limit(80).get(),
-      db.collection("podcaster_sessions").where("sharedWithIds", "array-contains", authContext.uid).limit(80).get()
-    ]);
+    const requestedOwnerId = text(req.query?.ownerId, 180);
+    const requestedType = text(req.query?.type, 40).toLowerCase();
+    const archivedFilter = text(req.query?.archived, 20).toLowerCase();
+    let owned;
+    let shared;
+    if (requestedOwnerId && requestedOwnerId !== authContext.uid) {
+      if (!await hasAdminRoleWithProfile(authContext, db)) {
+        throw Object.assign(new Error("podcaster_admin_required"), { status: 403 });
+      }
+      owned = await db.collection("podcaster_sessions").where("ownerId", "==", requestedOwnerId).limit(100).get();
+      shared = { docs: [] };
+    } else {
+      [owned, shared] = await Promise.all([
+        db.collection("podcaster_sessions").where("ownerId", "==", authContext.uid).limit(80).get(),
+        db.collection("podcaster_sessions").where("sharedWithIds", "array-contains", authContext.uid).limit(80).get()
+      ]);
+    }
     const merged = new Map();
     [...owned.docs, ...shared.docs].forEach((doc) => {
       const data = doc.data() || {};
+      if (requestedType === "video" && !isVideoSessionDocument(data)) return;
+      if (archivedFilter === "true" && data.archived !== true) return;
+      if (archivedFilter === "false" && data.archived === true) return;
       const nested = data.session && typeof data.session === "object" ? data.session : {};
       const videoContentType = text(nested?.script?.videoContentType || nested.videoContentType, 80).toLowerCase();
       const academicMetadata = resolveSessionAcademicMetadata(data);
@@ -297,7 +336,15 @@ function registerSessionRoutes(app) {
       });
     });
     const sessions = [...merged.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    res.status(200).json({ ok: true, sessions });
+    res.status(200).json({
+      ok: true,
+      sessions,
+      scope: {
+        ownerId: requestedOwnerId || authContext.uid,
+        type: requestedType || null,
+        archived: archivedFilter || null
+      }
+    });
   }));
 
   app.get("/api/podcaster/sessions/get", asyncRoute(async (req, res) => {
@@ -307,7 +354,7 @@ function registerSessionRoutes(app) {
     const snapshot = await db.collection("podcaster_sessions").doc(sessionId).get();
     if (!snapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
     const data = snapshot.data() || {};
-    if (!sessionAccess(data, authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
+    if (!sessionAccess(data, authContext) && !await hasAdminRoleWithProfile(authContext, db)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
     const nested = data.session && typeof data.session === "object" ? data.session : {};
     const academicMetadata = resolveSessionAcademicMetadata(data);
     res.status(200).json({
@@ -368,7 +415,7 @@ function registerSessionRoutes(app) {
     const { db, bucket } = getAdminServices();
     const sessionSnapshot = await db.collection("podcaster_sessions").doc(sessionId).get();
     if (!sessionSnapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
-    if (!sessionAccess(sessionSnapshot.data(), authContext)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
+    if (!sessionAccess(sessionSnapshot.data(), authContext) && !await hasAdminRoleWithProfile(authContext, db)) throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
     const prefix = `podcaster/sessions/${sessionId}/`;
     const [files] = await bucket.getFiles({ prefix, maxResults: 600 });
     const sessionData = sessionSnapshot.data()?.session && typeof sessionSnapshot.data().session === "object"
@@ -417,6 +464,7 @@ function registerSessionRoutes(app) {
         contentType: mimeType,
         type: mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : "video",
         size: Number(metadata?.size || 0),
+        createdAt: String(metadata?.timeCreated || "") || null,
         updatedAt: String(metadata?.updated || metadata?.timeCreated || "") || null
       });
     }
@@ -582,6 +630,8 @@ module.exports = {
   safeSession,
   resolveSessionAcademicMetadata,
   sessionAccess,
+  isVideoSessionDocument,
+  resolvePodcasterSessionEditAccess,
   resolveSessionMediaIdentity,
   normalizeLibraryItem,
   registerPodcasterDataRoutes

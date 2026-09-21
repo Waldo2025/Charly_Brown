@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, doc, updateDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getStorage, ref, getMetadata } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
 import { buildApiUrl, authFetchJson } from "../js/api-client-podcaster.js?v=2026-1.0.10.537";
 import { uploadPodcasterAsset } from "./podcaster-resumable-upload.js?v=2026-08-06.1";
@@ -12,6 +13,47 @@ function escapeHtml(unsafe = "") {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+const mediaCreationDates = new Map();
+const mediaDateLabels = new WeakMap();
+const mediaCreationDateFormatter = new Intl.DateTimeFormat("es-MX", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+});
+
+function parseMediaCreationDate(value) {
+    if (value == null || value === "") return null;
+    const seconds = value?.seconds ?? value?._seconds;
+    const date = typeof value?.toDate === "function" ? value.toDate()
+        : new Date(seconds != null ? Number(seconds) * 1000 : value);
+    return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function renderMediaCreationDate(element, media = {}) {
+    if (!element) return;
+    const token = {};
+    mediaDateLabels.set(element, token);
+    const showDate = (date) => {
+        if (mediaDateLabels.get(element) !== token) return;
+        element.textContent = date ? mediaCreationDateFormatter.format(date) : "Fecha no disponible";
+        element.title = date ? `Fecha de creación: ${mediaCreationDateFormatter.format(date)}` : "Fecha de creación no disponible";
+    };
+    const knownDate = parseMediaCreationDate(media.createdAt || media.timeCreated);
+    if (knownDate) { showDate(knownDate); return; }
+    const source = String(media.storagePath || media.path || media.downloadUrl || "").trim();
+    if (!source || /^(blob:|data:)/i.test(source)) { showDate(null); return; }
+    element.textContent = "Consultando fecha…";
+    // Older list-videos APIs only return updatedAt. Read creation metadata once;
+    // a later replacement/update date must not be presented as file creation.
+    if (!mediaCreationDates.has(source)) {
+        mediaCreationDates.set(source, Promise.resolve().then(() => getMetadata(ref(getStorage(getApp()), source)))
+            .then(metadata => parseMediaCreationDate(metadata.timeCreated)).catch(() => null));
+    }
+    mediaCreationDates.get(source).then(date => {
+        if (date) media.createdAt = date.toISOString();
+        showDate(date);
+    });
 }
 
 function encodeHttpHeaderValue(value = "", fallback = "") {
@@ -49,6 +91,7 @@ async function prepareSceneImageForUpload(file) {
 let db;
 let pond = null;
 let currentEditingRowId = null;
+let replacementModalRevision = 0;
 let uploadedMediaUrl = null;
 let uploadedStoragePath = null;
 let uploadedMediaType = null;
@@ -83,7 +126,6 @@ function resolveStableReplacementMediaUrl(downloadUrl = "", storagePath = "") {
 function resolveReplacementPreviewUrl(downloadUrl = "", storagePath = "") {
     const rawUrl = String(downloadUrl || "").trim();
     const cleanStoragePath = String(storagePath || "").trim();
-    if (rawUrl && /firebasestorage\.googleapis\.com/i.test(rawUrl) && /[?&]token=/i.test(rawUrl)) return rawUrl;
     if (cleanStoragePath) {
         return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
     }
@@ -670,6 +712,7 @@ function normalizeExistingSceneMedia(rowId = "", session = null) {
         id: String(clip.id || key).trim(),
         rowId: key,
         name: String(clip.name || clip.fileName || (isImage ? "Imagen actual" : "Video actual")).trim(),
+        createdAt: clip.createdAt || clip.timeCreated || null,
         type: isImage ? "image" : "video",
         mimeType: mimeType || (isImage ? "image/webp" : "video/mp4"),
         downloadUrl,
@@ -710,7 +753,7 @@ function renderExistingSingleMedia(media = existingSingleMedia) {
         }
     }
     if (els.existingMediaLabel) els.existingMediaLabel.textContent = isVideo ? "Video MP4 actual" : "Imagen actual";
-    if (els.existingMediaName) els.existingMediaName.textContent = String(media.name || (isVideo ? "Video actual.mp4" : "Imagen actual"));
+    renderMediaCreationDate(els.existingMediaName, media);
 }
 
 function hydrateExistingSingleMedia(rowId = "", session = null) {
@@ -1437,50 +1480,23 @@ function setupEventListeners() {
         const effects = getSelectedEffects();
         // console.log("[MediaReplacement] Effects:", effects);
 
+        const targetRowId = currentEditingRowId;
+        const targetModalRevision = replacementModalRevision;
+        const context = window.PodcasterSceneMedia.capture(session, targetRowId);
+        context.effects = effects;
         try {
-            // console.log("[MediaReplacement] Updating Firestore for session:", session.id);
-            const sessionRef = doc(db, 'podcaster_sessions', session.id);
-            const persistedRowId = currentEditingRowId;
-
-            const snap = await getDoc(sessionRef);
-            if (!snap.exists()) {
-                console.error("[MediaReplacement] Session document not found in Firestore");
-                return;
-            }
-            const docData = snap.data();
-            const currentSession = docData.session || {};
-            const rawRows = currentSession.script?.rows || [];
-
-            let rows = [];
-            if (Array.isArray(rawRows)) {
-                rows = [...rawRows];
-            } else if (rawRows && typeof rawRows === 'object') {
-                rows = Object.keys(rawRows)
-                    .sort((a, b) => parseInt(a) - parseInt(b))
-                    .map(k => rawRows[k]);
-            }
-
-            const rowIdx = rows.findIndex(r => String(r.id).trim() === String(currentEditingRowId).trim());
-            if (rowIdx !== -1) {
-                rows[rowIdx] = {
-                    ...rows[rowIdx],
-                    videoSrc: mediaUrl,
-                    mediaType: mediaType,
-                    updatedAt: new Date().toISOString()
-                };
-            }
-
             const isImageMedia = mediaType === 'image' || mediaType.startsWith('image/');
             const mediaData = {
-                id: currentEditingRowId,
-                rowId: currentEditingRowId,
+                id: targetRowId,
+                rowId: targetRowId,
                 downloadUrl: mediaUrl,
                 storagePath: finalStoragePath,
                 mimeType: firstStopMotionFrame?.mimeType || selectedLibrary?.mimeType || (isImageMedia ? 'image/jpeg' : 'video/mp4'),
                 type: mediaType,
                 sourceType: 'manual-replacement',
+                createdAt: selectedLibrary?.createdAt || null,
                 manuallyReplaced: true,
-                updatedAt: serverTimestamp(),
+                updatedAt: new Date().toISOString(),
                 model: mediaType === 'video' ? 'veo' : null,
                 segments: null,
                 variants: null
@@ -1496,151 +1512,11 @@ function setupEventListeners() {
                     frames: stopMotionFrameRecords
                 };
             }
-            const updatePayload = {
-                [`session.dialogueVideoMap.${currentEditingRowId}`]: mediaData,
-                [`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.type`]: mediaType,
-                [`session.script.rows`]: rows,
-                [`session.updatedAt`]: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            };
-            logSceneReplacement("payload:prepared", currentEditingRowId, {
-                nextMediaType: mediaType,
-                isImageMedia,
-                finalStoragePath,
-                effects,
-                updatePayloadKeys: Object.keys(updatePayload)
-            });
-
-            if (isImageMedia) {
-                updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = effects;
-                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaScale`] = 1;
-                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaOffsetXPct`] = 0;
-                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaOffsetYPct`] = 0;
-                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.mediaMotionPreset`] = "none";
-                updatePayload[`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.visualLayoutMode`] = "default";
-            } else {
-                updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = null;
-            }
-
-            // 1. Invalidate caches on the playback controller
-            if (typeof playbackController?.invalidateRowMediaCache === "function") {
-                playbackController.invalidateRowMediaCache(currentEditingRowId, session, {
-                    previousClip: session?.dialogueVideoMap?.[currentEditingRowId] || null,
-                    nextClip: mediaData,
-                    includeAudio: false
-                });
-            }
-
-            // 2. Local sync
-            if (typeof window.upsertActiveSession === "function") {
-                const now = new Date().toISOString();
-                const updatedSession = window.upsertActiveSession((current) => {
-                    const next = { ...current };
-                    const currentRows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
-
-                    next.dialogueVideoMap = { ...(next.dialogueVideoMap || {}) };
-                    next.visualEffectsMap = { ...(next.visualEffectsMap || {}) };
-                    next.podcastVideoConfig = { ...(next.podcastVideoConfig || {}) };
-                    next.podcastVideoConfig.timelineClipsByRowId = { ...(next.podcastVideoConfig.timelineClipsByRowId || {}) };
-                    next.script = {
-                        ...(next.script || {}),
-                        rows: currentRows.map((row) => (
-                            String(row?.id || '').trim() === currentEditingRowId
-                                ? { ...row, videoSrc: mediaUrl, mediaType, updatedAt: now }
-                                : row
-                        ))
-                    };
-                    next.updatedAt = now;
-
-                    const localMediaData = { ...mediaData, updatedAt: now };
-                    next.dialogueVideoMap[currentEditingRowId] = localMediaData;
-                    next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] = {
-                        ...(next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] || {}),
-                        type: mediaType,
-                        ...(isImageMedia ? {
-                            mediaScale: 1,
-                            mediaOffsetXPct: 0,
-                            mediaOffsetYPct: 0,
-                            mediaMotionPreset: "none",
-                            visualLayoutMode: "default"
-                        } : {})
-                    };
-
-                    if (isImageMedia) {
-                        next.visualEffectsMap[currentEditingRowId] = effects;
-                    } else {
-                        next.visualEffectsMap[currentEditingRowId] = null;
-                    }
-
-                    return next;
-                }, { render: false });
-                logSceneReplacement("local-sync:done", currentEditingRowId, {
-                    mediaType,
-                    isImageMedia,
-                    effects
-                });
-
-                const hydratedSession = updatedSession || getActivePodcasterSession();
-                if (hydratedSession && typeof playbackController?.sync === "function") {
-                    const hydratedConfig = typeof window.getPodcastVideoConfig === "function"
-                        ? window.getPodcastVideoConfig(hydratedSession)
-                        : hydratedSession?.podcastVideoConfig;
-                    playbackController.sync(hydratedSession, hydratedConfig);
-                    logSceneReplacement("playback-controller:rehydrated", currentEditingRowId, {
-                        sessionId: String(hydratedSession?.id || "").trim(),
-                        mediaUrl: String(hydratedSession?.dialogueVideoMap?.[currentEditingRowId]?.downloadUrl || "").trim(),
-                        storagePath: String(hydratedSession?.dialogueVideoMap?.[currentEditingRowId]?.storagePath || "").trim()
-                    });
-                }
-
-                if (typeof window.PodcasterUI?.renderPodcastVideoTimeline === "function") {
-                    window.PodcasterUI.renderPodcastVideoTimeline(hydratedSession, {
-                        lightweight: true,
-                        reason: "selection"
-                    });
-                }
-
-                if (!isImageMedia && hydratedSession && typeof playbackController?.getBlobUrl === "function") {
-                    const hydratedClip = hydratedSession?.dialogueVideoMap?.[currentEditingRowId] || mediaData;
-                    const playbackSource = typeof window.resolveStorageVideoUrl === "function"
-                        ? window.resolveStorageVideoUrl(
-                            hydratedClip?.downloadUrl || mediaUrl,
-                            hydratedClip?.storagePath || finalStoragePath,
-                            {
-                                updatedAt: hydratedClip?.updatedAt || "",
-                                type: hydratedClip?.type || mediaType,
-                                mimeType: hydratedClip?.mimeType || selectedLibrary?.mimeType || "video/mp4"
-                            }
-                        )
-                        : mediaUrl;
-                    const hydratedBlobUrl = await playbackController.getBlobUrl(playbackSource, { persistent: true });
-                    logSceneReplacement("video-blob:hydrated", currentEditingRowId, {
-                        playbackSource,
-                        hydratedAsBlob: /^(?:blob|data):/i.test(String(hydratedBlobUrl || ""))
-                    });
-                }
-
-                if (String(window.PodcasterState?.activeRowId || '').trim() === currentEditingRowId && typeof window.syncPodcastVideoStageMedia === "function") {
-                    logSceneReplacement("stage-sync:start", currentEditingRowId, {
-                        activeRowId: String(window.PodcasterState?.activeRowId || '').trim()
-                    });
-                    window.syncPodcastVideoStageMedia(hydratedSession, currentEditingRowId, { force: true });
-                    logSceneReplacement("stage-sync:done", currentEditingRowId, {
-                        activeRowId: String(window.PodcasterState?.activeRowId || '').trim()
-                    });
-                }
-            }
-
-            // 2. Firestore update
-            logSceneReplacement("firestore:update:start", currentEditingRowId, {
-                updatePayloadKeys: Object.keys(updatePayload)
-            });
-            await updateDoc(sessionRef, updatePayload);
-            logSceneReplacement("firestore:update:done", currentEditingRowId, {
-                persistedMediaUrl: mediaUrl,
-                persistedMediaType: mediaType
-            });
-
+            const application = await window.PodcasterSceneMedia.apply(context, mediaData);
+            if (application.status !== "applied") throw new Error(application.reason === "selection-changed"
+                ? "Se seleccionó otro recurso durante el reemplazo. Abre nuevamente el selector para aplicar este video."
+                : "La escena o su versión ya no está disponible. El video creado sigue en la biblioteca.");
+            if (replacementModalRevision !== targetModalRevision || currentEditingRowId !== targetRowId || window.PodcasterState?.activeSession?.id !== session.id) return;
             // Cleanup
             window._selectedLibraryVideo = null;
             existingSingleMedia = null;
@@ -1659,11 +1535,12 @@ function setupEventListeners() {
 
         } catch (err) {
             console.error('[MediaReplacement] Error saving replacement:', err);
-            alert('Error al guardar el reemplazo.');
+            alert(err.message || 'Error al guardar el reemplazo.');
         }
     });
 
     document.addEventListener('podcaster:scene-media-selector-open', (event) => {
+        replacementModalRevision += 1;
         currentEditingRowId = String(event?.detail?.rowId || '').trim();
         currentReplacementRequestMeta = {
             triggerSource: String(event?.detail?.triggerSource || currentReplacementRequestMeta?.triggerSource || "unknown").trim()
@@ -1808,10 +1685,9 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
 
       card.innerHTML = `
         ${mediaHtml}
-        <div style="padding: 0.5rem; font-size: 0.8rem; word-break: break-all;">
-          ${escapeHtml(video.name || video.id || 'Media')}
-        </div>
+        <div class="scene-video-creation-date" style="padding: 0.5rem; font-size: 0.8rem; overflow-wrap: anywhere;"></div>
       `;
+      renderMediaCreationDate(card.querySelector(".scene-video-creation-date"), video);
       const hydratedFrame = isStopMotionMode()
         ? stopMotionFrames.find((frame) => frame.libraryKey === stableLibraryKey)
         : null;
@@ -1840,7 +1716,8 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
           storagePath: storagePath,
           mimeType: String(video.contentType || video.mimeType || (isImg ? "image/jpeg" : "video/mp4")).trim(),
           type: isImg ? 'image' : 'video',
-          name: video.name
+          name: video.name,
+          createdAt: video.createdAt || video.timeCreated || null
         };
         if (isStopMotionMode()) {
           if (!isImg) {

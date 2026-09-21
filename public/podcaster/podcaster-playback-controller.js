@@ -1,3 +1,4 @@
+import { resolveGeminiAudioTimelineDurationMs } from "./podcaster-montage-audio-timing.js?v=snoopy-voice-23";
 import {
   createPodcasterFinalLimiterNode,
   normalizePodcasterFinalLimiterSettings
@@ -171,6 +172,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     };
     this.podcastStageVideoLoadTokenSeq = 0;
     this.podcastStageVideoLoadTokensByEl = new WeakMap();
+    this.stageSourcePreparations = new WeakMap();
     this.stageSwitchSeq = 0;
     this.stageBufferRecoverySeq = 0;
     this.stageBufferRecoveryPromise = null;
@@ -238,7 +240,6 @@ export class PodcasterPlaybackController extends EventEmitter {
       const parsed = new URL(clean, window.location.origin);
       if (/\/api\/assets\/proxy-(?:media|image)$/i.test(String(parsed.pathname || ""))) {
         const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
-        if (nestedUrl && this.hasFirebaseDirectAccessToken(nestedUrl)) return nestedUrl;
         let storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
         if (!storagePath && nestedUrl) {
           const nested = new URL(nestedUrl);
@@ -269,12 +270,6 @@ export class PodcasterPlaybackController extends EventEmitter {
       return this.deps.buildApiUrl(clean);
     }
     return clean;
-  }
-
-  hasFirebaseDirectAccessToken(url = "") {
-    const clean = String(url || "").trim();
-    if (!clean) return false;
-    return clean.includes("token=") || clean.includes("downloadToken=");
   }
 
   toFirebaseStorageGsUrl(firebaseUrl = "", storagePath = "") {
@@ -373,6 +368,31 @@ export class PodcasterPlaybackController extends EventEmitter {
       Math.min(motionDurationSec, (Number(this.state.currentMs || 0) - Number(entry?.startMs || 0)) / 1000)
     );
     if (typeof this.deps?.applySceneMediaScaleToStage === "function") {
+      const container = this.resolveStageMediaScaleContainer();
+      const surface = this.getActiveStageVideoEl();
+      const layoutKey = JSON.stringify([
+        entry?.rowId, entry?.videoSrc, mediaScale, entry?.clip?.mediaOffsetXPct,
+        entry?.clip?.mediaOffsetYPct, entry?.clip?.mediaMotionPreset, visualLayoutMode,
+        motionDurationSec, this.sceneMotionSyncRevision, this.getActiveStageVideoSlot(),
+        surface?.videoWidth, surface?.videoHeight,
+        this.state.isPlaying ? null : motionOffsetSec
+      ]);
+      if (container) {
+        this.sceneLayoutCache ||= new WeakMap();
+        let cached = this.sceneLayoutCache.get(container);
+        if (!cached) {
+          cached = { key: "" };
+          this.sceneLayoutCache.set(container, cached);
+          if (typeof ResizeObserver === "function") {
+            cached.observer = new ResizeObserver(() => { cached.key = ""; });
+            cached.observer.observe(container);
+          }
+        }
+        if (cached.key === layoutKey) return;
+        cached.key = layoutKey;
+      }
+      // CSS animations already advance themselves. Rewriting layout and
+      // reading geometry at every clock tick forces a full synchronous layout.
       this.deps.applySceneMediaScaleToStage({
         rowId: String(entry?.rowId || "").trim(),
         mediaScale,
@@ -380,7 +400,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         mediaOffsetYPct: entry?.clip?.mediaOffsetYPct,
         mediaMotionPreset: entry?.clip?.mediaMotionPreset,
         visualLayoutMode,
-        container: this.resolveStageMediaScaleContainer(),
+        container,
         durationSec: motionDurationSec,
         motionOffsetSec,
         motionSyncRevision: Number(this.sceneMotionSyncRevision || 0)
@@ -566,32 +586,12 @@ export class PodcasterPlaybackController extends EventEmitter {
     return sourceOffsetMs / 1000;
   }
   resolveSegmentTimelineDurationMs(segment = null, clipPlaybackRate = 1) {
-    const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
-    const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
-    const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
-    const rowId = String(segment?.rowId || "").trim();
-    const safeRate = this.clampPlaybackRate(clipPlaybackRate, 0.5, 10);
-    const rawVisibleMs = Math.max(
-      500,
-      trimmedVisibleMs
-      || Number(segment?.durationMs || 0)
-      || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
-      || 500
-    );
-    const segmentTimelineMs = Math.max(500, Math.round(rawVisibleMs / safeRate));
-    const rowAudioDurationMs = rowId
-      ? Math.max(0, Math.round(Number(this.deps?.resolveRowAudioDurationMs?.(rowId, this.state?.session) || 0) || 0))
-      : 0;
-    const measuredAudioVisibleMs = rowId && rowAudioDurationMs > 0
-      ? Math.max(0, rowAudioDurationMs - Math.round(trimInMs / safeRate))
-      : 0;
-    // La metadata real del archivo es la fuente de verdad. `segmentTimelineMs`
-    // puede seguir conteniendo la duración visual heredada de la escena.
-    const durationMs = measuredAudioVisibleMs > 0
-      ? measuredAudioVisibleMs
-      : segmentTimelineMs;
-    return Math.max(500, durationMs);
+    return resolveGeminiAudioTimelineDurationMs({
+      ...segment, persistedDurationMs: segment?.durationMs, persistedEndMs: segment?.endMs,
+      playbackRate: clipPlaybackRate
+    });
   }
+
   resolveGeminiSegmentWindowForRow(session = null, cfg = null, rowId = "", currentMs = 0) {
     const key = String(rowId || "").trim();
     if (!key) return null;
@@ -778,7 +778,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   waitForStageVideoFrame(videoEl = null, expectedSrc = "", timeoutMs = STAGE_VIDEO_FRAME_TIMEOUT_MS) {
     if (!videoEl) return Promise.resolve(false);
     const cleanExpectedSrc = String(expectedSrc || "").trim();
-    const isCurrentSourceReady = () => this.isVideoSurfaceReady(videoEl, cleanExpectedSrc);
+    const isCurrentSourceReady = () => !videoEl.seeking && this.isVideoSurfaceReady(videoEl, cleanExpectedSrc);
 
     return new Promise((resolve) => {
       let settled = false;
@@ -803,7 +803,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       };
       const onError = () => finish(false);
       const onFallbackCandidate = () => {
-        if (!isCurrentSourceReady() || typeof videoEl.requestVideoFrameCallback === "function") return;
+        if (!isCurrentSourceReady()) return;
         if (fallbackFrameId || typeof requestAnimationFrame !== "function") {
           if (typeof requestAnimationFrame !== "function") finish(true);
           return;
@@ -822,8 +822,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       videoEl.addEventListener("emptied", onError, { once: true });
 
       if (typeof videoEl.requestVideoFrameCallback === "function") {
-        frameCallbackId = videoEl.requestVideoFrameCallback(() => finish(true));
-      } else {
+        frameCallbackId = videoEl.requestVideoFrameCallback(() => {
+          // Chromium can deliver the previous frame while a seek is pending.
+          // Keep waiting for seeked instead of rejecting a healthy source.
+          if (isCurrentSourceReady()) finish(true);
+        });
+      }
+      {
         videoEl.addEventListener("seeked", onFallbackCandidate);
         videoEl.addEventListener("loadeddata", onFallbackCandidate);
         videoEl.addEventListener("timeupdate", onFallbackCandidate);
@@ -833,12 +838,12 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
   async waitForStageVideoFrameReady(videoEl = null, expectedSrc = "", timeoutMs = STAGE_VIDEO_FRAME_TIMEOUT_MS, options = {}) {
     const primaryReady = await this.waitForStageVideoFrame(videoEl, expectedSrc, timeoutMs);
-    if (primaryReady || this.isVideoSurfaceReady(videoEl, expectedSrc)) return true;
+    if (primaryReady) return true;
 
     const softTimeoutMs = Number(options?.softTimeoutMs || STAGE_VIDEO_FRAME_SOFT_TIMEOUT_MS) || 0;
     if (softTimeoutMs <= 0) return false;
     const softReady = await this.waitForStageVideoFrame(videoEl, expectedSrc, softTimeoutMs);
-    return softReady || this.isVideoSurfaceReady(videoEl, expectedSrc);
+    return softReady;
   }
   getBlobUrlSync(url) {
     if (!url) return "";
@@ -881,7 +886,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
 
       const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
-      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
+      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-')) {
         if (this.deps?.preferDirectFirebaseStorage === true && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
           return null;
         }
@@ -1161,7 +1166,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         const resolvedDirectSource = this.deps?.resolveStorageAudioUrl?.(directSource, clip?.storagePath);
         if (resolvedDirectSource && String(resolvedDirectSource).trim()) {
           return this.getBlobUrl(resolvedDirectSource, {
-            persistent: this.resolveActiveMediaLoadMode(resolvedDirectSource) === "blob",
+            persistent: options.persistent === true || this.resolveActiveMediaLoadMode(resolvedDirectSource) === "blob",
             signal: options.signal,
             forceAuthorizedRefresh: options.forceAuthorizedRefresh === true
           });
@@ -1175,20 +1180,20 @@ export class PodcasterPlaybackController extends EventEmitter {
       const fallbackUrl = downloadUrl;
       if (!fallbackUrl) return "";
       return this.getBlobUrl(fallbackUrl, {
-        persistent: this.resolveActiveMediaLoadMode(fallbackUrl) === "blob",
+        persistent: options.persistent === true || this.resolveActiveMediaLoadMode(fallbackUrl) === "blob",
         signal: options.signal,
         forceAuthorizedRefresh: options.forceAuthorizedRefresh === true
       });
     }
     return this.getBlobUrl(rawUrl, {
-      persistent: this.resolveActiveMediaLoadMode(rawUrl) === "blob",
+      persistent: options.persistent === true || this.resolveActiveMediaLoadMode(rawUrl) === "blob",
       signal: options.signal,
       forceAuthorizedRefresh: options.forceAuthorizedRefresh === true
     });
   }
 
   async resolveDialoguePlaybackAudioSource(clip = null, options = {}) {
-    const resolvedSource = await this.resolveAudioSource(clip, options);
+    const resolvedSource = await this.resolveAudioSource(clip, { ...options, persistent: true });
     if (!resolvedSource) return "";
     if (/^(?:blob:|data:)/i.test(String(resolvedSource).trim())) return String(resolvedSource).trim();
     const playableSource = await this.getBlobUrl(String(resolvedSource).trim(), {
@@ -1255,7 +1260,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.bumpMediaSourceGeneration(cacheKey);
       const objectUrl = this.blobCache.get(cacheKey);
       if (String(objectUrl || "").startsWith("blob:")) {
-        try { URL.revokeObjectURL(objectUrl); } catch (_) { }
+        (this.retiredMediaObjectUrls ||= new Set()).add(objectUrl);
       }
       this.blobCache.delete(cacheKey);
       this.fetchPromises.delete(cacheKey);
@@ -1391,7 +1396,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const cacheKey = this.resolvePersistentMediaCacheKey(url);
     const blobUrl = this.blobCache.get(url) || (cacheKey && cacheKey !== url ? this.blobCache.get(cacheKey) : "");
     if (blobUrl) {
-      URL.revokeObjectURL(blobUrl);
+      (this.retiredMediaObjectUrls ||= new Set()).add(blobUrl);
       this.blobCache.delete(url);
       if (cacheKey && cacheKey !== url) this.blobCache.delete(cacheKey);
     }
@@ -1441,7 +1446,20 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
 
-  async getBlobUrl(url, options = {}) {
+  getBlobUrl(url, options = {}) {
+    // Share the entire hydration, including IndexedDB reads. Sharing only the
+    // fetch allowed concurrent readers to create competing object URLs.
+    const key = `${this.mediaCacheGeneration}:${this.getMediaSourceGeneration(url)}:${this.resolvePersistentMediaCacheKey(url) || url}:${options.persistent === true}:${options.forceAuthorizedRefresh === true}`;
+    this.mediaHydrationPromises ||= new Map();
+    if (this.mediaHydrationPromises.has(key)) return this.mediaHydrationPromises.get(key);
+    const pending = this.loadMediaSource(url, options).finally(() => {
+      if (this.mediaHydrationPromises.get(key) === pending) this.mediaHydrationPromises.delete(key);
+    });
+    this.mediaHydrationPromises.set(key, pending);
+    return pending;
+  }
+
+  async loadMediaSource(url, options = {}) {
     if (!url) return "";
     const invalidationKey = this.resolveMediaSourceGenerationKey(url) || String(url || "").trim();
     const pendingInvalidation = this.mediaSourceInvalidationPromises.get(invalidationKey);
@@ -1470,10 +1488,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (!cleanValue) return "";
       if (!isCurrentRequest()) {
         if (cleanValue.startsWith("blob:")) {
-          try { URL.revokeObjectURL(cleanValue); } catch (_) { }
+          (this.retiredMediaObjectUrls ||= new Set()).add(cleanValue);
         }
         return "";
       }
+      const existing = this.blobCache.get(url) || this.blobCache.get(cacheKey);
+      if (/^(?:blob:|data:)/i.test(existing || "") && !/^(?:blob:|data:)/i.test(cleanValue)) return existing;
       this.blobCache.set(url, cleanValue);
       if (cacheKey !== url) this.blobCache.set(cacheKey, cleanValue);
       return cleanValue;
@@ -1491,7 +1511,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           if (!isCurrentRequest()) return "";
           const objectUrl = URL.createObjectURL(persistedBlob);
           if (!isCurrentRequest()) {
-            try { URL.revokeObjectURL(objectUrl); } catch (_) { }
+            (this.retiredMediaObjectUrls ||= new Set()).add(objectUrl);
             return "";
           }
           this.emitMediaTelemetry("cache-hit-indexeddb", { kind: "video", source: url });
@@ -1517,7 +1537,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           if (!finalUrl) throw new Error("firebase_storage_url_unavailable");
 
           const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
-          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-') && !this.hasFirebaseDirectAccessToken(finalUrl)) {
+          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-')) {
             if (this.deps?.preferDirectFirebaseStorage === true && typeof this.deps?.resolveFirebaseStorageUrl === "function") {
               const gsUrl = this.toFirebaseStorageGsUrl(finalUrl);
               finalUrl = gsUrl ? await this.deps.resolveFirebaseStorageUrl(gsUrl) : "";
@@ -1609,7 +1629,6 @@ export class PodcasterPlaybackController extends EventEmitter {
             if (
               isDirectFirebaseUrl &&
               finalUrl.includes('firebasestorage.googleapis.com') &&
-              !this.hasFirebaseDirectAccessToken(finalUrl) &&
               !finalUrl.includes('/api/assets/proxy-')
             ) {
               if (this.deps?.preferDirectFirebaseStorage !== true) {
@@ -1619,15 +1638,23 @@ export class PodcasterPlaybackController extends EventEmitter {
           } catch (e) { }
         }
 
-        // Session proxies require Authorization, which a native <video> request
-        // cannot attach. Resolve them through the authenticated signed-url route
-        // before fetching bytes or assigning a source to a media element.
+        const fetchAuthenticatedProxyDirectly = options.persistent === true
+          && this.deps?.preferAuthenticatedMediaProxy === true;
+        // Local persistent hydration can fetch the authenticated proxy with a
+        // bearer header, avoiding Storage signed-URL CORS restrictions.
         if (this.requiresAuthorizedAssetResolution(finalUrl)) {
-          authorizedProxyUrl = finalUrl;
-          finalUrl = String((await this.resolveAuthorizedAssetSource(finalUrl, {
-            forceRefresh: options.forceAuthorizedRefresh === true
-          })).url || "").trim();
-          if (!finalUrl) throw new Error("signed_asset_url_missing");
+          if (fetchAuthenticatedProxyDirectly) {
+            const parsedProxy = new URL(finalUrl, window.location.origin);
+            parsedProxy.pathname = parsedProxy.pathname.replace(/\/proxy-image$/i, "/proxy-media");
+            finalUrl = parsedProxy.toString();
+            authorizedProxyUrl = "";
+          } else {
+            authorizedProxyUrl = finalUrl;
+            finalUrl = String((await this.resolveAuthorizedAssetSource(finalUrl, {
+              forceRefresh: options.forceAuthorizedRefresh === true
+            })).url || "").trim();
+            if (!finalUrl) throw new Error("signed_asset_url_missing");
+          }
         }
 
         if (this.deps?.preferDirectFirebaseStorage === true) {
@@ -1637,7 +1664,6 @@ export class PodcasterPlaybackController extends EventEmitter {
             })).url || "").trim();
           } else if (
             String(finalUrl || "").includes("firebasestorage.googleapis.com")
-            && !this.hasFirebaseDirectAccessToken(finalUrl)
           ) {
             const gsUrl = this.toFirebaseStorageGsUrl(finalUrl);
             finalUrl = gsUrl && typeof this.deps?.resolveFirebaseStorageUrl === "function"
@@ -1700,9 +1726,6 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         // Fallback local si falla o da 404 estando en localhost
         if (!resp.ok) {
-          if (resp.status === 404 && this.deps?.markStaleProxyMediaUrl) {
-            this.deps.markStaleProxyMediaUrl(url, 'proxy-media-404-from-controller');
-          }
           const fetchError = new Error(`Fetch failed with status ${resp.status}`);
           fetchError.status = Number(resp.status || 0);
           throw fetchError;
@@ -1748,6 +1771,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         const msg = String(e?.message || "").toLowerCase();
         if (status === 404 || code === "asset_not_found" || msg.includes("asset_not_found") || msg.includes("status 404")) {
           if (isCurrentRequest()) {
+            this.deps?.markStaleProxyMediaUrl?.(url, "proxy-media-404-from-controller");
             this.blobCache.set(url, "404");
             if (cacheKey !== url) this.blobCache.set(cacheKey, "404");
           }
@@ -1833,10 +1857,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       };
       await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker()));
       return isCurrentPrewarm();
-    })().finally(() => {
-      if (this.videoPrewarmPromise === prewarmPromise) {
-        this.videoPrewarmPromise = null;
-      }
+    })().then((ready) => {
+      if (!ready && this.videoPrewarmPromise === prewarmPromise) this.videoPrewarmPromise = null;
+      return ready;
     });
     this.videoPrewarmPromise = prewarmPromise;
     return prewarmPromise;
@@ -1891,6 +1914,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   releaseSessionRuntimeMedia() {
     this.state.isPlaying = false;
     this.state.isBuffering = false;
+    this.state.bufferOwner = "";
     this.state.isPreparing = false;
     this.stageBufferStartMs = null;
     this.playheadRevision += 1;
@@ -1900,6 +1924,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.stageMachine.imageSwapToken = Number(this.stageMachine.imageSwapToken || 0) + 1;
     this.podcastStageVideoLoadTokenSeq += 1;
     this.podcastStageVideoLoadTokensByEl = new WeakMap();
+    this.stageSourcePreparations = new WeakMap();
     if (this.stageBufferRecoveryTimer) {
       clearTimeout(this.stageBufferRecoveryTimer);
       this.stageBufferRecoveryTimer = null;
@@ -1937,6 +1962,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       try { audioEl.pause(); } catch (_) { }
       try { audioEl.removeAttribute("src"); } catch (_) { audioEl.src = ""; }
       try { audioEl.load(); } catch (_) { }
+      try { audioEl.remove?.(); } catch (_) { }
     });
     this.dialoguePlayers = {};
     this.audioCache = {};
@@ -1961,6 +1987,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         .map((value) => String(value || "").trim())
         .filter((value) => value.startsWith("blob:"))
     );
+    for (const url of this.retiredMediaObjectUrls || []) objectUrls.add(url);
+    this.retiredMediaObjectUrls?.clear();
     objectUrls.forEach((objectUrl) => {
       try { URL.revokeObjectURL(objectUrl); } catch (_) { }
     });
@@ -2009,7 +2037,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     return true;
   }
 
-  sync(session, config) {
+  sync(session, config, options = {}) {
     const previousSession = this.state.session;
     const nextSession = session || this.deps?.getActiveSession?.();
     const previousSessionId = String(previousSession?.id || "").trim();
@@ -2029,10 +2057,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.lastSessionSyncSignature = nextSyncSignature;
       this.playbackRangePreparationSignature = "";
       this.playbackRangePreparationAtMs = 0;
-      void this.prepareSessionMedia({
-        session: this.state.session,
-        onProgress: (progress) => this.reportSessionMediaProgress(progress)
-      }).catch(() => {});
+      if (!previousSession || changedSession || options.prepareMedia !== false) {
+        void this.prepareSessionMedia({
+          session: this.state.session,
+          onProgress: (progress) => this.reportSessionMediaProgress(progress)
+        }).catch(() => {});
+      }
     }
   }
 
@@ -2399,6 +2429,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     }
 
+    if (options.preserveSources === true) urlsToInvalidate.clear();
     const imagePreloadKeysToDelete = new Set();
     urlsToInvalidate.forEach((url) => {
       const cachedSource = this.getBlobUrlSync(url);
@@ -2467,6 +2498,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (AudioContext) {
         this.audioCtx = new AudioContext();
+        window.SnoopyAudioOutput?.register(this.audioCtx);
         if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
       }
     } catch (e) { }
@@ -2621,6 +2653,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     let audio = document.getElementById(this.backgroundAudioRuntimeId);
     if (!(audio instanceof HTMLAudioElement)) {
       audio = new Audio();
+      window.SnoopyAudioOutput?.register(audio);
       audio.id = this.backgroundAudioRuntimeId;
       audio.hidden = true;
       audio.setAttribute("aria-hidden", "true");
@@ -2680,8 +2713,33 @@ export class PodcasterPlaybackController extends EventEmitter {
     return Boolean(started || !audio.paused);
   }
 
+  // Opt-in, bounded local diagnostics. Only media state, never source URLs.
+  tracePlayback(event = "sample", detail = {}) {
+    if (typeof document === "undefined" || !/[?&]playbackDebug=1(?:&|$)/.test(window.location?.href || "")) return;
+    if (this.els?.podcastActiveSpeakerVideo?.id !== "podcastActiveSpeakerVideo") return;
+    if (!this.playbackTrace) {
+      this.playbackTrace = [];
+      this.playbackTraceStart = performance.now();
+      this.playbackTraceTimer = setInterval(() => {
+        if (this.playbackTrace.length < 1800) this.tracePlayback();
+        else clearInterval(this.playbackTraceTimer);
+      }, 250);
+    }
+    const video = this.getActiveStageVideoEl();
+    this.playbackTrace.push({ t: Math.round(performance.now() - this.playbackTraceStart), event,
+      ms: Math.round(this.state.currentMs), playing: this.state.isPlaying, buffering: this.state.isBuffering,
+      owner: this.state.bufferOwner || "", row: video?.dataset?.rowId, video: video?.currentTime,
+      voiceEnabled: this.state.audioTrack?.enabled, voiceSegments: this.state.audioTrack?.segments?.length,
+      voices: Object.entries(this.dialoguePlayers || {}).filter(([, audio]) => !audio.paused || audio.dataset.wasActive === "true").map(([rowId, audio]) => ({ rowId, paused: audio.paused, time: audio.currentTime, volume: audio.volume, muted: audio.muted, ready: audio.readyState, seeking: audio.seeking, rate: audio.playbackRate, ended: audio.ended })),
+      paused: video?.paused, seeking: video?.seeking, ready: video?.readyState, ...detail });
+    let output = document.getElementById("snoopyPlaybackTrace");
+    if (!output) { output = document.createElement("script"); output.type = "application/json"; output.id = "snoopyPlaybackTrace"; document.body.append(output); }
+    output.textContent = JSON.stringify(this.playbackTrace.slice(-1800));
+  }
+
   // --- Transport ---
   emitMediaTelemetry(event = "", detail = {}) {
+    if (event.startsWith("stage-")) this.tracePlayback(event, { reason: detail.reason, superseded: detail.superseded });
     const payload = { event, at: Date.now(), ...detail };
     this.emit("media-telemetry", payload);
   }
@@ -2691,9 +2749,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (mediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve(true);
     return new Promise((resolve) => {
       let settled = false;
+      let timer;
       const done = (ready = false) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         mediaEl.removeEventListener("loadeddata", onReady);
         mediaEl.removeEventListener("canplay", onReady);
         mediaEl.removeEventListener("error", onError);
@@ -2704,7 +2764,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       mediaEl.addEventListener("loadeddata", onReady, { once: true });
       mediaEl.addEventListener("canplay", onReady, { once: true });
       mediaEl.addEventListener("error", onError, { once: true });
-      setTimeout(
+      timer = setTimeout(
         () => done(mediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA),
         Math.max(250, Number(timeoutMs || VIDEO_MEDIA_READY_TIMEOUT_MS))
       );
@@ -2818,35 +2878,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     });
   }
 
-  normalizeRuntimeDialogueSegments(segments = [], entries = []) {
-    const entriesByRowId = new Map(
-      (Array.isArray(entries) ? entries : [])
-        .map((entry) => [String(entry?.rowId || "").trim(), entry])
-        .filter(([rowId]) => rowId)
-    );
-    return (Array.isArray(segments) ? segments : []).map((segment) => {
-      const rowId = String(segment?.rowId || "").trim();
-      const entry = entriesByRowId.get(rowId);
-      if (!entry || segment?.manualStartMs === true || segment?.manualPosition === true) return segment;
-      const sceneStartMs = Math.max(0, Number(entry?.startMs || 0) || 0);
-      const currentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
-      const legacyStartMs = sceneStartMs + LEGACY_AUTOMATIC_DIALOGUE_OFFSET_MS;
-      if (Math.abs(currentStartMs - legacyStartMs) > Math.max(20, this.getTimelineLookupToleranceMs())) return segment;
-      const durationMs = Math.max(
-        1,
-        Number(segment?.durationMs || 0)
-          || (Number(segment?.endMs || 0) - currentStartMs)
-          || Number(entry?.effectiveDurationMs || 0)
-          || 1
-      );
-      return {
-        ...segment,
-        startMs: sceneStartMs,
-        anchorStartMs: sceneStartMs,
-        relativeOffsetMs: 0,
-        endMs: sceneStartMs + durationMs
-      };
-    });
+  normalizeRuntimeDialogueSegments(segments = []) {
+    // Timeline positions are authored values. A numeric offset alone is not a legacy-format marker.
+    return Array.isArray(segments) ? segments : [];
   }
 
   async prepareDialogueRow(session = null, rowId = "", options = {}) {
@@ -2980,6 +3014,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0))[0];
     if (!segment?.rowId) return true;
 
+    const existingPlayer = this.dialoguePlayers[segment.rowId];
+    const clip = this.deps?.resolveDialogueAudioForRow?.(session, segment.rowId);
+    if (existingPlayer?.readyState >= 2 && this.dialogueAudioSourceKeys[segment.rowId] === this.resolveAudioSourceKey(clip) && existingPlayer.dataset.initialized === "true") return true;
     const prepared = await this.prepareDialogueRow(session, segment.rowId, { skipWait: true });
     if (!isCurrentPlayhead()) return false;
     const player = prepared?.player;
@@ -3229,6 +3266,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       const worker = async () => {
         while (pendingTasks.length) {
           if (generation !== this.sessionMediaPreparationGeneration || abortController?.signal?.aborted) return;
+          // Cached resources can finish in microtasks; yield between jobs so
+          // pointer events and rendering are not starved by the whole queue.
+          await new Promise(resolve => setTimeout(resolve, 0));
+          if (generation !== this.sessionMediaPreparationGeneration || abortController?.signal?.aborted) return;
           const task = takeNextTask();
           if (!task) return;
           const isCurrentRowTask = () => !task.rowId
@@ -3447,16 +3488,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     // para que el navegador no bloquee la salida de audio del primer Play.
     this.initAudioContext();
     this.getOrCreateBackgroundAudioElement();
-    // Desbloquear todos los dialogue players dentro del contexto del gesto del usuario.
-    // Un await posterior rompe el contexto de gesto, por lo que el navegador rechaza
-    // audio.play() en los dialogue players con "not allowed" silencioso.
-    Object.values(this.dialoguePlayers).forEach((a) => {
-      if (a && a.paused) {
-        const vol = Number(a.volume || 0);
-        a.volume = 0;
-        a.play().then(() => { a.pause(); a.volume = vol; }).catch(() => { a.volume = vol; });
-      }
-    });
+
 
     if (options.prepare !== false) {
       this.state.isPreparing = true;
@@ -3510,11 +3542,17 @@ export class PodcasterPlaybackController extends EventEmitter {
       return false;
     }
     this.state.isPlaying = true;
+    if (this.deps?.podcastVideoState) {
+      this.deps.podcastVideoState.montageActive = true;
+      this.deps.podcastVideoState.montagePaused = false;
+    }
     // Arranca tanto Gemini como la música ya hidratados antes del reloj maestro.
     // Si el reloj comienza primero, el primer tick puede calcular un offset
     // adelantado y comerse el inicio de la voz mientras el elemento hace canplay.
     const preparedEntry = this.getEntryAtMs(this.state.currentMs);
-    const [, stageReady] = await Promise.all([
+    let stageReady;
+    try {
+    [, stageReady] = await Promise.all([
       this.syncAudio(
         this.state.currentMs,
         this.deps?.getPlaybackSpeed?.() || 1,
@@ -3527,6 +3565,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         })
         : Promise.resolve(true)
     ]);
+    } catch (error) {
+      if (isCurrentPlayRequest()) this.pause();
+      throw error;
+    }
     if (!isCurrentPlayRequest()) {
       return false;
     }
@@ -3566,8 +3608,10 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   pause() {
+    this.tracePlayback("pause");
     this.state.isPlaying = false;
     this.state.isBuffering = false;
+    this.state.bufferOwner = "";
     this.stageBufferStartMs = null;
     if (this.stageBufferRecoveryTimer) {
       clearTimeout(this.stageBufferRecoveryTimer);
@@ -3580,6 +3624,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.stageMachine.imageSwapToken = Number(this.stageMachine.imageSwapToken || 0) + 1;
     this.podcastStageVideoLoadTokenSeq += 1;
     this.podcastStageVideoLoadTokensByEl = new WeakMap();
+    this.stageSourcePreparations = new WeakMap();
     this.stageMachine.loadingSrc = "";
     this.stageMachine.loadingRequest = null;
     this.pendingTimelineSeekTick = null;
@@ -3614,8 +3659,10 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   async stop(opts = {}) {
+    this.tracePlayback("stop", { keepCursor: opts.keepCursor === true, caller: new Error().stack?.split("\n").slice(2, 5).join("\n") });
     this.state.isPlaying = false;
     this.state.isBuffering = false;
+    this.state.bufferOwner = "";
     this.stageBufferStartMs = null;
     if (this.stageBufferRecoveryTimer) {
       clearTimeout(this.stageBufferRecoveryTimer);
@@ -3628,6 +3675,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.stageMachine.imageSwapToken = Number(this.stageMachine.imageSwapToken || 0) + 1;
     this.podcastStageVideoLoadTokenSeq += 1;
     this.podcastStageVideoLoadTokensByEl = new WeakMap();
+    this.stageSourcePreparations = new WeakMap();
     this.stageMachine.loadingSrc = "";
     this.stageMachine.loadingRequest = null;
     this.stageMachine.preloadingSrc = "";
@@ -3728,6 +3776,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           delete el.dataset.pendingSeekSrc;
           return;
         }
+        this.tracePlayback(isVideo ? "video-seek" : "audio-seek", { element: el.id, from: el.currentTime, to: targetSeconds });
         el.currentTime = targetSeconds;
         delete el.dataset.pendingSeek;
         delete el.dataset.pendingSeekSrc;
@@ -3773,11 +3822,83 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
   }
 
+  nextDialogueStartBetween(fromMs, toMs) {
+    const session = this.state.session;
+    const config = this.deps?.getPodcastVideoConfig?.(session) || {};
+    if (config.geminiDialogueTrack?.enabled === false) return null;
+    const segments = config.geminiDialogueTrack?.segments?.length
+      ? config.geminiDialogueTrack.segments
+      : (this.deps?.buildTimelineRuntimeEntries?.(session) || []);
+    const starts = segments.filter(segment => Number(segment.startMs) > fromMs && Number(segment.startMs) <= toMs
+      && this.deps?.resolveDialogueAudioForRow?.(session, segment.rowId)).map(segment => Number(segment.startMs));
+    return starts.length ? Math.min(...starts) : null;
+  }
+
+  isDialogueBoundaryReady(atMs) {
+    const session = this.state.session;
+    const config = this.deps?.getPodcastVideoConfig?.(session) || {};
+    const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
+    const segments = config.geminiDialogueTrack?.segments?.length ? config.geminiDialogueTrack.segments : entries;
+    return segments.filter(segment => Number(segment.startMs) === atMs).every(segment => {
+      const clip = this.deps?.resolveDialogueAudioForRow?.(session, segment.rowId);
+      if (!clip) return true;
+      const player = this.dialoguePlayers[segment.rowId];
+      return player?.readyState >= 2 && !player.error
+        && this.dialogueAudioSourceKeys[segment.rowId] === this.resolveAudioSourceKey(clip);
+    });
+  }
+
+  async startMediaAtBoundary(atMs, options = {}) {
+    if (options.prepared === true) {
+      const revision = this.playheadRevision;
+      // Activate only the new voice. A prepared audio boundary is not a video
+      // transition or a buffer underrun and must not pause the other tracks.
+      try {
+        await this.syncAudio(atMs, this.deps?.getPlaybackSpeed?.() || 1, { playheadRevision: revision, skipBackgroundMusic: true });
+      } catch (error) {
+        if (revision !== this.playheadRevision || !this.state.isPlaying) return;
+        this.pause();
+        this.deps?.setPodcastVideoStatus?.(`${error.message} Pulsa Play para reintentar.`);
+      }
+      return;
+    }
+    const revision = ++this.playheadRevision;
+    this.state.currentMs = atMs;
+    this.state.bufferOwner = "audio-boundary";
+    this.state.isBuffering = true;
+    this.activeLoopId += 1;
+    this.pauseMediaForStageBuffering();
+    try {
+      // A previous tick can still own the video slot when an audio boundary
+      // arrives. Let it settle before claiming that slot for this revision.
+      await this.tickCompletionPromise;
+      if (revision !== this.playheadRevision || !this.state.isPlaying) return;
+      const entry = this.getEntryAtMs(atMs);
+      if (revision !== this.playheadRevision || !this.state.isPlaying) return;
+      const [, stageReady] = await Promise.all([
+        this.syncAudio(atMs, this.deps?.getPlaybackSpeed?.() || 1, { playheadRevision: revision, allowDuringBufferRecovery: true }),
+        entry ? this.syncStageSwitching(entry, atMs, { awaitImageReady: true, requirePlaybackStart: true, allowDuringBufferRecovery: true }) : true
+      ]);
+      if (revision !== this.playheadRevision || !this.state.isPlaying) return;
+      if (!stageReady) throw new Error("No se pudo iniciar la escena.");
+      this.state.isBuffering = false;
+    this.state.bufferOwner = "";
+      this.startClock();
+      this.syncStageMediaMotionPlaybackState(true);
+    } catch (error) {
+      if (revision !== this.playheadRevision) return;
+      this.pause();
+      this.deps?.setPodcastVideoStatus?.(`${error.message} Pulsa Play para reintentar.`);
+    }
+  }
+
   startClock() {
+    this.tracePlayback("clock-start");
     this.stopClock();
     this.activeLoopId++;
     const loopId = this.activeLoopId;
     let lastTime = performance.now();
+    this.playbackClockSample = { timelineMs: this.state.currentMs, wallTime: lastTime, loopId };
     let finishing = false;
 
     const tickLoop = (now) => {
@@ -3791,6 +3912,15 @@ export class PodcasterPlaybackController extends EventEmitter {
         // behind them and the next tick sought the video backwards repeatedly.
         const nextMs = this.state.currentMs + (Math.max(0, delta) * speed);
 
+        const nextVoiceStart = this.nextDialogueStartBetween(this.state.currentMs, nextMs);
+        if (nextVoiceStart !== null && (!this.state.stopAtMs || nextVoiceStart < this.state.stopAtMs) && nextVoiceStart < this.state.totalDurationMs) {
+          if (this.isDialogueBoundaryReady(nextVoiceStart)) {
+            void this.startMediaAtBoundary(nextVoiceStart, { prepared: true });
+          } else {
+            void this.startMediaAtBoundary(nextVoiceStart);
+            return;
+          }
+        }
         if (this.state.stopAtMs > 0 && nextMs >= this.state.stopAtMs) {
           this.state.currentMs = this.state.stopAtMs;
           if (!finishing) {
@@ -3819,6 +3949,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         // The clock advances independently from asynchronous media work. tick()
         // coalesces to the latest requested position while this rAF keeps moving.
         this.state.currentMs = Math.max(this.state.currentMs, nextMs);
+        this.playbackClockSample = { timelineMs: this.state.currentMs, wallTime: now, loopId };
         void this.tick(this.state.currentMs, { playheadRevision: this.playheadRevision });
         if (!this.state.isPlaying || loopId !== this.activeLoopId) return;
         this.clockId = requestAnimationFrame(tickLoop);
@@ -3831,6 +3962,16 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   stopClock() { if (this.clockId) { cancelAnimationFrame(this.clockId); this.clockId = null; } }
+
+  sampleAudioClockMs(requestedMs, speed, options = {}) {
+    const sample = this.playbackClockSample;
+    if (!options.followClock || !sample || sample.loopId !== this.activeLoopId
+      || !this.state.isPlaying || this.state.isBuffering || this.state.forceStageMediaSync) return requestedMs;
+    // HTML media continues while synchronous UI work blocks rAF. Its currentTime
+    // must be compared with the live clock, never the last painted playhead.
+    const liveMs = sample.timelineMs + Math.max(0, performance.now() - sample.wallTime) * speed;
+    return Math.min(this.state.totalDurationMs || Infinity, Math.max(requestedMs, liveMs));
+  }
 
   async prev() {
     this.sync();
@@ -3855,6 +3996,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   async seek(targetMs, options = {}) {
+    this.tracePlayback("seek", { targetMs });
     const ms = Math.max(0, Math.min(this.state.totalDurationMs || 9999999, Number(targetMs) || 0));
     // A seek explícito reemplaza cualquier recuperación pendiente. Conservar
     // stageBufferStartMs hacía que un canplay tardío restaurara la posición
@@ -3869,17 +4011,17 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.stageBufferRecoverySeq += 1;
     }
     this.state.isBuffering = false;
+    this.state.bufferOwner = "";
     this.stageBufferStartMs = null;
     this.playheadRevision += 1;
     const playheadRevision = this.playheadRevision;
     this.state.currentMs = ms;
     this.sceneMotionSyncRevision = Number(this.sceneMotionSyncRevision || 0) + 1;
 
-    const targetEntry = this.getEntryAtMs(ms);
-    const targetActiveRowId = String(targetEntry?.rowId || "").trim();
-
-    Object.entries(this.dialoguePlayers).forEach(([rowId, audio]) => {
-      if (String(rowId || "").trim() !== targetActiveRowId && audio) {
+    // All voices seek to the new timeline position, including those whose video
+    // is elsewhere. syncAudio selects them by their own interval below.
+    Object.values(this.dialoguePlayers).forEach((audio) => {
+      if (audio) {
         audio.dataset.wasActive = "";
         audio.dataset.playIntent = "";
         audio.dataset.pendingPlayIntent = "";
@@ -3899,10 +4041,6 @@ export class PodcasterPlaybackController extends EventEmitter {
     const session = this.state.session || this.deps?.getActiveSession?.();
     this.cachedTickEntries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
     this.cachedTickEntriesTime = performance.now();
-    this.prewarmTimelineStageVideos(session, {
-      currentMs: ms,
-      concurrency: 2
-    }).catch(() => { });
     if (options.prepare === true) {
       await this.preparePlaybackRange({
         atMs: ms,
@@ -3940,9 +4078,14 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   async tick(currentMs, options = {}) {
-    const ms = Number.isFinite(Number(currentMs)) ? Number(currentMs) : this.state.currentMs;
+    const requestedMs = Number.isFinite(Number(currentMs)) ? Number(currentMs) : this.state.currentMs;
+    const ms = this.state.isPlaying && options.explicitSeek !== true
+      ? Math.max(requestedMs, this.state.currentMs) : requestedMs;
     const requestedRevision = Number(options.playheadRevision ?? this.playheadRevision);
     if (requestedRevision !== this.playheadRevision) return;
+    if (this.state.isBuffering && options.explicitSeek !== true) return;
+    const uiStarted = performance.now();
+    if (ms < this.state.currentMs) this.tracePlayback("tick-rewind", { targetMs: ms });
     this.state.currentMs = ms;
 
     if (this.deps?.podcastVideoState) {
@@ -3963,8 +4106,6 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
     const shouldDeferPreview = options.deferPreview === true;
 
-    const activeEntry = this.getEntryAtMs(ms);
-    const activeRowId = activeEntry?.rowId || "";
     const activeClip = this.deps?.getOnScreenTextClipAtMs?.(ms);
 
     if (activeClip) {
@@ -3979,33 +4120,38 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     }
 
-    if (activeRowId && activeRowId !== this.state.activeRowId) {
-      this.state.activeRowId = activeRowId;
-      const session = this.state.session || this.deps?.getActiveSession?.();
-      const speaker = activeEntry?.speakerName || "";
-      if (navigationOnly) {
-        if (this.deps?.podcastVideoState) {
-          this.deps.podcastVideoState.activeRowId = activeRowId;
-        }
-        this.deps?.syncPodcastTimelineSelectionUi?.(session);
-      } else if (session && this.deps?.syncPodcastStudioRuntimeUi) {
-        this.deps.syncPodcastStudioRuntimeUi(session, activeRowId, speaker, {
-          speaking: true,
-          lightweightInspector: true
-        });
-      } else {
-        this.deps?.setPodcastVideoRow?.(activeRowId, {
-          syncStage: !this.state.isPlaying,
-          lightweightUi: true,
-          preserveMontageCursor: true,
-          reason: "playback",
-          skipInspectorSync: false
-        });
-        if (session && this.deps?.setPodcastVideoSpeaker) {
-          this.deps.setPodcastVideoSpeaker(session, speaker, { rowId: activeRowId, syncStageMedia: false });
+    const updateSceneSelectionUi = (atMs = ms) => {
+      const activeEntry = this.getEntryAtMs(atMs);
+      const activeRowId = activeEntry?.rowId || "";
+      if (activeRowId && activeRowId !== this.state.activeRowId) {
+        this.state.activeRowId = activeRowId;
+        const session = this.state.session || this.deps?.getActiveSession?.();
+        const speaker = activeEntry?.speakerName || "";
+        if (navigationOnly) {
+          if (this.deps?.podcastVideoState) {
+            this.deps.podcastVideoState.activeRowId = activeRowId;
+          }
+          this.deps?.syncPodcastTimelineSelectionUi?.(session);
+        } else if (session && this.deps?.syncPodcastStudioRuntimeUi) {
+          this.deps.syncPodcastStudioRuntimeUi(session, activeRowId, speaker, {
+            speaking: true,
+            lightweightInspector: true
+          });
+        } else {
+          this.deps?.setPodcastVideoRow?.(activeRowId, {
+            syncStage: !this.state.isPlaying,
+            lightweightUi: true,
+            preserveMontageCursor: true,
+            reason: "playback",
+            skipInspectorSync: false
+          });
+          if (session && this.deps?.setPodcastVideoSpeaker) {
+            this.deps.setPodcastVideoSpeaker(session, speaker, { rowId: activeRowId, syncStageMedia: false });
+          }
         }
       }
-    }
+    };
+    if (shouldDeferPreview) updateSceneSelectionUi();
 
     // Solo sincronizar el preview externo si este runtime no delega el stage al controller.
     if (!lightweight && this.deps?.syncStudioTimelinePreview && this.deps?.enableExternalStudioPreviewSync === true) {
@@ -4013,11 +4159,15 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.deps.syncStudioTimelinePreview(session, { currentMs: ms, autoplay: false });
     }
 
+    const uiElapsedMs = performance.now() - uiStarted;
+    if (uiElapsedMs > 25) this.tracePlayback("slow-tick-ui", { elapsed: Math.round(uiElapsedMs) });
     if (this.state.isTickProcessing) {
       this.pendingTimelineSeekTick = { ms, options: { ...options } };
       return;
     }
     this.state.isTickProcessing = true;
+    let finishTick;
+    this.tickCompletionPromise = new Promise(resolve => { finishTick = resolve; });
     try {
       if (this.deps?.updatePodcastVideoTransportUi) this.deps.updatePodcastVideoTransportUi();
       const speed = this.deps?.getPlaybackSpeed?.() || 1;
@@ -4034,7 +4184,11 @@ export class PodcasterPlaybackController extends EventEmitter {
         ? ms
         : (this.state.isPlaying ? Math.max(ms, Number(this.state.currentMs || 0)) : ms);
       const tickTasks = [
-        this.syncVideo(syncMs, { playheadRevision: requestedRevision }),
+        // Start audio synchronization before video/layout work. unshift() after
+        // constructing this array changed promise order, not execution order;
+        // a slow scene render left the audio correcting against an old clock.
+        ...(shouldSyncAudio ? [this.syncAudio(syncMs, speed, { playheadRevision: requestedRevision, followClock: options.explicitSeek !== true })] : []),
+        ...(!shouldDeferPreview ? [this.syncVideo(syncMs, { playheadRevision: requestedRevision })] : []),
         ...(!shouldDeferPreview
           ? [
               this.syncOverlay ? this.syncOverlay(syncMs) : null,
@@ -4043,15 +4197,17 @@ export class PodcasterPlaybackController extends EventEmitter {
             ]
           : [])
       ];
-      if (shouldSyncAudio) {
-        tickTasks.unshift(this.syncAudio(syncMs, speed, { playheadRevision: requestedRevision }));
-      }
       await Promise.all(tickTasks);
       if (requestedRevision !== this.playheadRevision) return;
+      if (!shouldDeferPreview) updateSceneSelectionUi(syncMs);
       this.emit('timeupdate', { currentMs: syncMs });
     } catch (e) {
-      void e;
+      if (requestedRevision === this.playheadRevision) {
+        this.pause();
+        this.deps?.setPodcastVideoStatus?.(`Reproducción detenida: ${e.message || "no se pudo preparar el medio"}. Pulsa Play para reintentar.`);
+      }
     } finally {
+      finishTick();
       this.state.isTickProcessing = false;
       const pending = this.pendingTimelineSeekTick;
       this.pendingTimelineSeekTick = null;
@@ -4123,10 +4279,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       try { audio.remove(); } catch (_) { }
       const previousSrc = String(audio.dataset?.originalSrc || audio.src || "").trim();
       if (previousSrc && previousSrc.startsWith("blob:") && previousSrc !== cleanAudioSrc) {
-        try { URL.revokeObjectURL(previousSrc); } catch (_) { }
+        (this.retiredMediaObjectUrls ||= new Set()).add(previousSrc);
       }
     }
     audio = new Audio();
+    window.SnoopyAudioOutput?.register(audio);
     audio.crossOrigin = 'anonymous';
     audio.src = cleanAudioSrc;
     audio.dataset.originalSrc = cleanAudioSrc;
@@ -4157,6 +4314,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
         if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
           pvs.montageAudioActualDurationsMs[rowId] = nextMs;
+          if (typeof window.scheduleGeminiAudioMetadataSync === "function") {
+            window.scheduleGeminiAudioMetadataSync(this.deps?.getActiveSession?.() || session);
+            return;
+          }
           setTimeout(() => {
             if (!isCurrentPlayer()) return;
             if (typeof window.invalidateStudioRuntimeCache === "function") {
@@ -4198,6 +4359,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     const config = this.deps?.getPodcastVideoConfig?.(session) || {};
     const audioTrack = config.geminiDialogueTrack || { segments: [], enabled: true };
     this.state.audioTrack = audioTrack;
+    if (audioTrack.enabled === false) {
+      for (const audio of Object.values(this.dialoguePlayers)) audio.pause();
+      if (!options.skipBackgroundMusic) await this.syncBackgroundMusic(currentMs, speed, false, options);
+      return;
+    }
 
     let segments = audioTrack.segments || [];
     if (!segments.length) {
@@ -4216,14 +4382,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
     segments = this.normalizeRuntimeDialogueSegments(segments, entries);
     const currentTimelineRowIds = this.collectDialogueRowIds(session, entries, segments);
-    const audioCarryToleranceMs = Math.max(0, Number(DIALOGUE_AUDIO_CARRYOVER_TOLERANCE_MS) || 260);
-    const activeTimelineToleranceMs = Math.max(this.getTimelineLookupToleranceMs(), audioCarryToleranceMs);
+
 
     const timelineSegments = segments.map((segment) => {
       const rowId = String(segment?.rowId || "").trim();
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const visibleDurationMs = this.resolveSegmentTimelineDurationMs(segment, clipPlaybackRate);
-      const segmentStartMs = Math.max(0, Number(segment?.startMs || 0));
+      const segmentStartMs = Number(segment?.startMs || 0);
       const segmentEndMs = segmentStartMs + Math.max(1, visibleDurationMs);
       return {
         ...segment,
@@ -4234,83 +4399,15 @@ export class PodcasterPlaybackController extends EventEmitter {
       };
     });
 
-    const segmentWindowByRow = new Map();
-
-    const playerTimelineDurations = new Map();
-    Object.entries(this.dialoguePlayers).forEach(([rowId, audio]) => {
-      const key = String(rowId || "").trim();
-      const playbackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, key) || 1;
-      const normalizedRate = this.clampPlaybackRate(playbackRate, 0.5, 10);
-      const timelineDurationMs = Number(audio?.duration || 0) > 0
-        ? Number(audio.duration || 0) * 1000 / Math.max(0.5, normalizedRate)
-        : 0;
-      if (timelineDurationMs > 0) {
-        playerTimelineDurations.set(key, Math.max(500, timelineDurationMs));
-      }
-    });
-
-    timelineSegments.forEach((segment) => {
-      const rowId = String(segment?.rowId || "").trim();
-      if (!rowId) return;
-      const playerDurationMs = playerTimelineDurations.get(rowId);
-      if (!playerDurationMs) return;
-      const segmentStartMs = Number(segment.__timelineStartMs || 0);
-      const trimInTimelineMs = Math.max(0, Number(segment?.trimInMs || 0) || 0)
-        / Math.max(0.5, Number(segment.__timelinePlaybackRate || 1) || 1);
-      const adjustedEndMs = segmentStartMs + Math.max(0, playerDurationMs - trimInTimelineMs);
-      if (Number(segment.__timelineEndMs || 0) < adjustedEndMs) {
-        segment.__timelineEndMs = adjustedEndMs;
-      }
-    });
-
-    timelineSegments.forEach((segment) => {
-      const rowId = String(segment?.rowId || "").trim();
-      if (!rowId) return;
-      const existing = segmentWindowByRow.get(rowId);
-      if (!existing || segment.__timelineEndMs > existing.endMs) {
-        segmentWindowByRow.set(rowId, {
-          startMs: segment.__timelineStartMs,
-          endMs: segment.__timelineEndMs,
-          timelineDurationMs: Math.max(1, Number(segment.__timelineEndMs || 0) - Number(segment.__timelineStartMs || 0)),
-          trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
-          playbackRate: segment.__timelinePlaybackRate || 1
-        });
-      }
-    });
-
+    currentMs = this.sampleAudioClockMs(currentMs, speed, options);
     const matchingSegments = timelineSegments.filter((segment) => {
       const segmentStartMs = Number(segment.__timelineStartMs || 0);
       const segmentEndMs = Number(segment.__timelineEndMs || segmentStartMs + 1);
-      return this.isTimelineMsInRange(currentMs, segmentStartMs, segmentEndMs, { toleranceMs: activeTimelineToleranceMs });
+      return currentMs >= segmentStartMs && currentMs < segmentEndMs;
     });
 
     const activeSegments = matchingSegments
-      .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0))
-      .slice(0, 1);
-
-    const primaryActiveSegment = activeSegments[0] || null;
-    const primaryActiveRowId = String(primaryActiveSegment?.rowId || "").trim();
-    if (primaryActiveRowId) {
-      const prepareSignature = `${primaryActiveRowId}|${Number(primaryActiveSegment.startMs || 0)}|${primaryActiveRowId}`;
-      const shouldRefreshPrepareState = this.state.isPlaying === true
-        && (this.dialogueAudioActivePrepareSignature !== prepareSignature
-          || (currentMs - Number(this.dialogueAudioActivePrepareAtMs || 0)) > DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS * 2);
-      if (shouldRefreshPrepareState) {
-        this.dialogueAudioActivePrepareSignature = prepareSignature;
-        this.dialogueAudioActivePrepareAtMs = currentMs;
-        const preparePromise = this.prepareDialogueRow(session, primaryActiveRowId, {
-          skipWait: false,
-          generation: syncPreparationGeneration,
-          signal: syncAbortSignal,
-          timeoutMs: DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS
-        });
-        await Promise.race([
-          preparePromise,
-          new Promise((resolve) => setTimeout(resolve, DIALOGUE_AUDIO_ACTIVE_PREPARE_TIMEOUT_MS))
-        ]).catch(() => { });
-        if (!isCurrentAudioSync()) return;
-      }
-    }
+      .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0));
 
     const upcoming = segments.filter((segment) => {
       const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
@@ -4331,6 +4428,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
     });
 
+    const audioLookAheadKey = `${syncSessionId}|${syncPreparationGeneration}|${upcoming.map(segment => this.resolveAudioSourceKey(this.deps?.resolveDialogueAudioForRow?.(session, segment.rowId))).join("|")}`;
+    if (this.audioLookAheadKey !== audioLookAheadKey) {
+    this.audioLookAheadKey = audioLookAheadKey;
     upcoming.forEach((segment) => {
       const rowId = segment?.rowId;
       if (!rowId) return;
@@ -4342,48 +4442,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       }).catch(() => { });
     });
 
+    }
     const activeDialogueRowIds = new Set(activeSegments.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean));
     const activeDialogueVoiceRowIds = new Set(activeDialogueRowIds);
 
     Object.entries(this.dialoguePlayers).forEach(([rowId, audio]) => {
       const isActive = activeDialogueRowIds.has(String(rowId || "").trim());
       const rowKey = String(rowId || "").trim();
-      const carryInfo = segmentWindowByRow.get(rowKey);
-      const wasActive = audio?.dataset?.wasActive === "true";
-
-      if (isActive) {
-        audio.dataset.wasActive = "true";
-        return;
-      }
-
-      if (carryInfo && wasActive) {
-        const carryStartMs = Number(carryInfo.startMs || 0);
-        const playbackRate = Number(carryInfo.playbackRate || audio?.playbackRate || 1) || 1;
-        const measuredDurationMs = Number(audio?.duration || 0) > 0
-          ? Number(audio.duration || 0) * 1000 / Math.max(0.5, playbackRate)
-          : Number(carryInfo.timelineDurationMs || 0);
-        const carryEndMs = Math.max(
-          Number(carryInfo.endMs || 0),
-          carryStartMs + Math.max(0, measuredDurationMs)
-        );
-
-        if (currentMs >= carryStartMs && currentMs <= carryEndMs + audioCarryToleranceMs) {
-          activeDialogueVoiceRowIds.add(rowKey);
-          audio.dataset.wasActive = "true";
-          if (
-            canStartPlayback()
-            && audio?.paused
-            && Number(audio.readyState || 0) >= (typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_CURRENT_DATA : 2)
-          ) {
-            const carryOffsetMs = Math.max(0, Number(currentMs || 0) - carryStartMs);
-            const carryOffsetSec = (carryInfo.trimInMs + carryOffsetMs * playbackRate) / 1000;
-            this.seekTo(audio, carryOffsetSec);
-            audio.play().catch(() => { });
-          }
-          return;
-        }
-      }
-
+      if (isActive) { audio.dataset.wasActive = "true"; return; }
       audio.dataset.wasActive = "";
       audio.dataset.playIntent = "";
       audio.dataset.pendingPlayIntent = "";
@@ -4428,18 +4494,26 @@ export class PodcasterPlaybackController extends EventEmitter {
       audio.volume = this.clamp01((mix.voiceVolume ?? 1) * masterVolumeFactor);
 
       const segmentTrimInMs = Math.max(0, Number(segment?.trimInMs || 0));
+      currentMs = this.sampleAudioClockMs(currentMs, speed, options);
+      if (currentMs >= segment.__timelineEndMs) {
+        audio.pause();
+        audio.dataset.wasActive = "";
+        continue;
+      }
       const offsetSec = this.resolveSegmentSourceOffsetSec(currentMs, segment.startMs, segmentTrimInMs, clipPlaybackRate);
 
       const drift = Math.abs(audio.currentTime - offsetSec);
       const isNewSegment = audio.dataset.activeSegmentSignature !== activeSegmentSignature;
       const isFirstSync = audio.dataset.initialized === "false";
+      const completedDuringPlayback = audio.ended && !isNewSegment && !this.state.forceStageMediaSync;
       const isPaused = audio.paused === true || this.state.isPlaying !== true;
-      const hasPendingStart = Boolean(String(audio.dataset.pendingPlayIntent || "").trim());
+      const hasPendingStart = Boolean(audio.__snoopyPlayPromise || String(audio.dataset.pendingPlayIntent || "").trim());
       const driftToleranceSec = isFirstSync || isNewSegment ? 0.05 : (isPaused ? 0.15 : 0.35);
       const needsSeekWithoutPendingStart = drift > driftToleranceSec;
-      const needsSeek = hasPendingStart ? false : (needsSeekWithoutPendingStart || isNewSegment);
+      const needsSeek = hasPendingStart || (audio.seeking && !this.state.forceStageMediaSync)
+        ? false : (needsSeekWithoutPendingStart || isNewSegment);
 
-      if (needsSeek) {
+      if (needsSeek && !completedDuringPlayback) {
         this.seekTo(audio, offsetSec);
       }
       if (isFirstSync) {
@@ -4448,74 +4522,30 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       audio.dataset.activeSegmentSignature = activeSegmentSignature;
 
-      const isPlayPending = audio.dataset.playPending === "true";
-      if (canStartPlayback() && audio.paused && !isPlayPending) {
-        const playIntent = `${rowId}:${sourceKey}:${Math.round(Number(segment.startMs || 0) || 0)}`;
-        const startPlayback = () => {
-          if (!isCurrentAudioSync() || !canStartPlayback() || audio.dataset.playIntent !== playIntent) {
-            audio.dataset.playPending = "";
-            return;
-          }
-          audio.dataset.pendingPlayIntent = "";
-          audio.dataset.playPending = "true";
-
-          audio.volume = this.clamp01((mix.voiceVolume ?? 1) * masterVolumeFactor);
-          audio.muted = false;
-
-          audio.play().then(() => {
-            audio.dataset.playPending = "";
-            if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
-              audio.playbackRate = effectiveRate;
-            }
-          }).catch((error) => {
-            audio.dataset.playPending = "";
-            this.emitMediaTelemetry("dialogue-audio-play-failed", {
-              rowId,
-              name: String(error?.name || "Error"),
-              message: String(error?.message || "No se pudo iniciar la voz.")
-            });
-          });
-        };
+      if (canStartPlayback() && audio.paused
+        && !completedDuringPlayback) {
+        const playIntent = `${rowId}:${sourceKey}:${segment.startMs}`;
         audio.dataset.playIntent = playIntent;
-        audio.dataset.playPending = "true";
-
-        const HAVE_METADATA = typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_METADATA : 1;
-        const HAVE_CURRENT_DATA = typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_CURRENT_DATA : 2;
-        const canStartOnMetadata = audio.readyState >= HAVE_METADATA && Number(audio.duration || 0) > 0;
-
-        if (audio.readyState >= HAVE_CURRENT_DATA || canStartOnMetadata) {
-          startPlayback();
-        } else if (audio.dataset.pendingPlayIntent !== playIntent) {
-          audio.dataset.pendingPlayIntent = playIntent;
-          const onCanReady = () => {
-            audio.removeEventListener("canplay", onCanReady);
-            audio.removeEventListener("error", onCanError);
-            if (audio.dataset.playIntent === playIntent) startPlayback();
-            else audio.dataset.playPending = "";
-          };
-          const onCanError = () => {
-            audio.removeEventListener("canplay", onCanReady);
-            audio.removeEventListener("error", onCanError);
-            audio.dataset.pendingPlayIntent = "";
-            audio.dataset.playPending = "";
-          };
-          audio.addEventListener("canplay", onCanReady, { once: true });
-          audio.addEventListener("error", onCanError, { once: true });
-          if (audio.readyState === 0) {
-            try { audio.load(); } catch (_) { }
-          }
-        } else {
-          audio.dataset.playPending = "";
+        if (!audio.__snoopyPlayPromise) {
+          audio.__snoopyPlayPromise = (async () => {
+            if (!await this.waitForMediaReady(audio, VIDEO_MEDIA_READY_TIMEOUT_PERSISTENT_MS)) throw new Error(`No se pudo cargar el audio de ${rowId}.`);
+            if (!isCurrentAudioSync() || !canStartPlayback() || audio.dataset.playIntent !== playIntent) return;
+            audio.muted = false;
+            audio.dataset.playPending = "true";
+            await audio.play();
+            if (!isCurrentAudioSync() || !canStartPlayback()) audio.pause();
+          })().finally(() => { audio.dataset.playPending = ""; audio.__snoopyPlayPromise = null; });
         }
-      } else if (!audio.paused && Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
-        audio.playbackRate = effectiveRate;
+        await audio.__snoopyPlayPromise;
       }
+
     }
 
     if (!isCurrentAudioSync()) return;
-    await this.syncBackgroundMusic(currentMs, speed, hasVoice, options);
+    if (!options.skipBackgroundMusic) await this.syncBackgroundMusic(currentMs, speed, hasVoice, options);
   }
   async syncBackgroundMusic(currentMs, speed, hasVoice = false, options = {}) {
+    currentMs = this.sampleAudioClockMs(currentMs, speed, options);
     if (this.state.isBuffering === true && options.allowDuringBufferRecovery !== true) {
       this.pauseBackgroundMusic();
       return;
@@ -4786,6 +4816,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       ? (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct)
       : this.toFiniteNumber(panelCfg.duckingWhenGeminiPct, 60);
     const segmentDurationMs = Math.max(1, Number(activeSegment.endOffsetMs || 0) - Number(activeSegment.startOffsetMs || 0));
+    currentMs = this.sampleAudioClockMs(currentMs, speed, options);
     const elapsedMs = Math.max(0, currentMs - Number(activeSegment.startOffsetMs || 0));
     const remainingMs = Math.max(0, segmentDurationMs - elapsedMs);
     const segmentFadeInMs = Math.min(Math.max(0, Number(fadeInMs || 0)), segmentDurationMs);
@@ -5051,7 +5082,8 @@ export class PodcasterPlaybackController extends EventEmitter {
       && activeEl.hidden !== true
       && String(activeEl.dataset?.src || "").trim() === String(entry?.videoSrc || "").trim()
       && String(activeEl.dataset?.entryKey || "").trim() === this.buildStageEntryIdentity(entry)
-      && this.isVideoSurfaceReady(activeEl, entry.videoSrc));
+      && !activeEl.error
+      && String(activeEl.dataset?.mediaSourceGeneration || "") === String(this.getMediaSourceGeneration(entry.videoSrc)));
   }
 
   isStageEntryPrepared(entry = null, currentMs = this.state.currentMs) {
@@ -5122,7 +5154,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       let transitionToken = 0;
       const transitionRevision = requestedPlayheadRevision ?? this.playheadRevision;
       const transitionSessionId = String(this.state.session?.id || "").trim();
-      const transitionMs = Math.max(0, Number(currentMs || 0) || 0);
+      let transitionMs = Math.max(0, Number(currentMs || 0) || 0);
       const isCurrentTransition = () => transitionToken === this.stageBufferRecoverySeq
         && transitionRevision === this.playheadRevision
         && (!transitionSessionId || transitionSessionId === String(this.state.session?.id || "").trim())
@@ -5132,8 +5164,12 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (shouldCoordinateTransition && transitionToken) return;
         shouldCoordinateTransition = true;
         transitionToken = ++this.stageBufferRecoverySeq;
+        // An awaited stage preparation may finish after newer clock ticks.
+        // Recovery must freeze the current playhead, never the captured tick.
+        transitionMs = Math.max(transitionMs, Number(this.state.currentMs || 0));
         this.stageBufferStartMs = transitionMs;
         this.state.currentMs = transitionMs;
+        this.state.bufferOwner = "scene-transition";
         this.state.isBuffering = true;
         this.activeLoopId += 1;
         this.pauseMediaForStageBuffering();
@@ -5157,6 +5193,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       // run the same coordinated recovery instead of advancing a frozen frame.
       if (!stageReady
         && !shouldCoordinateTransition
+        && this.state.isBuffering !== true
         && transitionRevision === this.playheadRevision
         && this.state.isPlaying === true) {
         beginCoordinatedTransition();
@@ -5167,10 +5204,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (shouldCoordinateTransition) {
         if (!isCurrentTransition()) return false;
         if (!stageReady) {
-          this.state.isPlaying = false;
-          this.state.isBuffering = false;
-          this.stageBufferStartMs = null;
-          this.pauseMediaForStageBuffering();
+          this.pause();
           this.deps?.setPodcastVideoStatus?.("No se pudo preparar la escena actual. Pulsa Play para reintentar.");
           this.deps?.updatePodcastVideoTransportUi?.();
           return false;
@@ -5188,22 +5222,21 @@ export class PodcasterPlaybackController extends EventEmitter {
         ]);
         if (!isCurrentTransition()) return false;
         if (!playbackReady) {
-          this.state.isPlaying = false;
-          this.state.isBuffering = false;
-          this.stageBufferStartMs = null;
-          this.pauseMediaForStageBuffering();
+          this.pause();
           this.deps?.setPodcastVideoStatus?.("No se pudo iniciar la escena actual. Pulsa Play para reintentar.");
           this.deps?.updatePodcastVideoTransportUi?.();
           return false;
         }
         this.state.currentMs = transitionMs;
         this.state.isBuffering = false;
+    this.state.bufferOwner = "";
         this.stageBufferStartMs = null;
         this.startClock();
         this.syncStageMediaMotionPlaybackState(true);
         this.deps?.setPodcastVideoStatus?.("Reproduciendo...");
         this.deps?.updatePodcastVideoTransportUi?.();
       }
+      if (requestedPlayheadRevision !== null && requestedPlayheadRevision !== this.playheadRevision) return false;
       // Only after the current entry has swapped may the released slot be
       // reused for the following scene. Preloading first could overwrite the
       // already-ready current scene at the exact cut.
@@ -5283,6 +5316,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     const videoAlreadyReady = !nextIsImage
       && this.isVideoSurfaceReady(inactiveEl, nextSrc)
       && String(inactiveEl.dataset?.entryKey || "").trim() === nextEntryKey
+      && String(inactiveEl.dataset?.preparedEntryKey || "").trim() === nextEntryKey
+      && !inactiveEl.seeking
       && Number(inactiveEl.readyState || 0) >= haveCurrentData;
     if (imageAlreadyReady || videoAlreadyReady) {
       return Promise.resolve(true);
@@ -5296,7 +5331,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     const preloadGeneration = this.mediaCacheGeneration;
     const preloadSessionId = String(this.state.session?.id || "").trim();
     let preloadingPromise = null;
-    const isCurrentPreload = () => preloadGeneration === this.mediaCacheGeneration
+    const isCurrentPreload = () => inactiveEl !== this.getActiveStageVideoEl()
+      && preloadGeneration === this.mediaCacheGeneration
       && nextSourceGeneration === this.getMediaSourceGeneration(nextSrc)
       && preloadSessionId === String(this.state.session?.id || "").trim()
       && this.stageMachine.preloadingPromise === preloadingPromise;
@@ -5447,8 +5483,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const isDirectFirebaseUrl = resolvedSrc.includes("firebasestorage.googleapis.com");
     if (isDirectFirebaseUrl
-      && !resolvedSrc.includes("/api/assets/proxy-")
-      && !this.hasFirebaseDirectAccessToken(resolvedSrc)) {
+      && !resolvedSrc.includes("/api/assets/proxy-")) {
       let storagePath = "";
       try {
         const encodedObjectPath = String(new URL(resolvedSrc).pathname || "").split("/o/")[1] || "";
@@ -5786,6 +5821,10 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   async syncStageSwitching(entry, currentMs, options = {}) {
     const switchToken = ++this.stageSwitchSeq;
+    const fail = (reason) => {
+      this.emitMediaTelemetry("stage-prepare-failed", { reason, superseded: switchToken !== this.stageSwitchSeq });
+      return false;
+    };
     const sourceState = this.resolveEntryTargetOffsetSec(entry, currentMs);
     const offsetSec = sourceState.targetOffsetSec;
     const activeSlot = this.getActiveStageVideoSlot();
@@ -5798,8 +5837,10 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const isImage = this.isImageStageEntry(entry);
     const entryKey = this.buildStageEntryIdentity(entry);
+    const layoutStarted = performance.now();
     this.applySceneBackground(entry);
     this.applySceneMediaScale(entry);
+    if (performance.now() - layoutStarted > 25) this.tracePlayback("slow-stage-layout", { elapsed: Math.round(performance.now() - layoutStarted) });
 
     if (isImage) {
       const imageEntry = this.resolveStopMotionEntryAtMs(entry, currentMs);
@@ -5823,9 +5864,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       const epsilon = Math.min(STAGE_VIDEO_END_EPSILON_SEC, Math.max(0.001, durationSec / 2));
       const lastFrameSec = Math.max(0, durationSec - epsilon);
+      const completedDuringPlayback = videoEl?.ended === true && this.state.isPlaying && !this.state.forceStageMediaSync;
       return {
-        targetSec: Math.min(Math.max(0, offsetSec), lastFrameSec),
-        isHoldActive: sourceState.isHoldActive === true || offsetSec >= lastFrameSec
+        targetSec: completedDuringPlayback ? lastFrameSec : Math.min(Math.max(0, offsetSec), lastFrameSec),
+        isHoldActive: sourceState.isHoldActive === true || offsetSec >= lastFrameSec || completedDuringPlayback
       };
     };
     const applyAudioMix = (videoEl) => {
@@ -5844,9 +5886,22 @@ export class PodcasterPlaybackController extends EventEmitter {
     };
 
     if (String(activeEl.dataset?.src || "").trim() === String(entry.videoSrc || "").trim()
-      && this.isVideoSurfaceReady(activeEl, entry.videoSrc)
+      && !activeEl.error
+      && String(activeEl.dataset?.mediaSourceGeneration || "") === String(this.getMediaSourceGeneration(entry.videoSrc))
       && String(activeEl.dataset?.entryKey || "").trim() === entryKey) {
+      // A seek temporarily lowers readyState. Keep this surface and preserve
+      // the next scene in the alternate slot while its decoder catches up.
       const target = resolveTarget(activeEl);
+      if (!this.isVideoSurfaceReady(activeEl, entry.videoSrc)) {
+        // Seeking the terminal frame of the outgoing clip must not block the
+        // tick that will reveal the already-prepared next clip. Real underruns
+        // are coordinated by waiting/stalled; explicit seek and recovery wait.
+        if (this.state.isPlaying && !this.state.forceStageMediaSync
+          && options.allowDuringBufferRecovery !== true
+          && (activeEl.seeking || target.isHoldActive)) return true;
+        if (!await this.waitForMediaReady(activeEl, VIDEO_MEDIA_READY_TIMEOUT_MS)) return fail("active-not-ready");
+        if (switchToken !== this.stageSwitchSeq) return false;
+      }
       const activePlaybackRate = (this.deps?.getPlaybackSpeed?.() || 1) * sourceState.playbackRate;
       if (Math.abs(Number(activeEl.playbackRate || 1) - activePlaybackRate) > 0.001) {
         activeEl.playbackRate = activePlaybackRate;
@@ -5864,7 +5919,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           const masterSpeed = this.deps?.getPlaybackSpeed?.() || 1;
           activeEl.playbackRate = masterSpeed * sourceState.playbackRate;
           return true;
-        }).catch(() => false);
+        }).catch(error => fail(error.message));
         if (options.requirePlaybackStart === true && !await startPlayback) return false;
       }
 
@@ -5872,7 +5927,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         isHoldActive: target.isHoldActive,
         playbackRate: sourceState.playbackRate
       });
-      if (!backdropReady || switchToken !== this.stageSwitchSeq) return false;
+      if (!backdropReady || switchToken !== this.stageSwitchSeq) return fail("backdrop-or-stale");
       activeEl.style.zIndex = "2";
       activeEl.style.opacity = "1";
       activeEl.style.visibility = "visible";
@@ -5906,7 +5961,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         && this.stageMachine.preloadingKey === entryKey
         && this.stageMachine.preloadingPromise) {
         ready = await this.stageMachine.preloadingPromise;
-      } else {
+      }
+      if (!ready && switchToken === this.stageSwitchSeq) {
         ready = await this.setStageVideoSourceForElement(targetEl, entry.videoSrc, {
           noWait: false,
           keepHidden: targetEl === inactiveEl,
@@ -5916,13 +5972,13 @@ export class PodcasterPlaybackController extends EventEmitter {
           entryKey
         });
       }
-      if (!ready || switchToken !== this.stageSwitchSeq) return false;
+      if (!ready || switchToken !== this.stageSwitchSeq) return fail("source-or-stale");
 
       const target = resolveTarget(targetEl);
       const wasPreparedAtTarget = String(targetEl.dataset?.preparedEntryKey || "").trim() === entryKey
         && this.isVideoSurfaceReady(targetEl, entry.videoSrc)
         && targetEl.seeking !== true
-        && Math.abs(Number(targetEl.currentTime || 0) - Number(target.targetSec || 0)) <= STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC;
+        && Math.abs(Number(targetEl.currentTime || 0) - Number(target.targetSec || 0)) <= (this.state.isPlaying && !this.state.forceStageMediaSync ? 0.25 : STAGE_VIDEO_RESYNC_MIN_DRIFT_SEC);
       if (!wasPreparedAtTarget) this.seekTo(targetEl, target.targetSec);
       const frameReady = wasPreparedAtTarget
         ? true
@@ -5932,13 +5988,13 @@ export class PodcasterPlaybackController extends EventEmitter {
           STAGE_VIDEO_FRAME_TIMEOUT_MS,
           { softTimeoutMs: STAGE_VIDEO_FRAME_SOFT_TIMEOUT_MS }
         );
-      if (!frameReady || switchToken !== this.stageSwitchSeq) return false;
+      if (!frameReady || switchToken !== this.stageSwitchSeq) return fail("frame-or-stale");
       targetEl.dataset.preparedEntryKey = entryKey;
       const backdropReady = await this.prepareBackdropForEntry(entry, targetSlot, target.targetSec, switchToken, {
         isHoldActive: target.isHoldActive,
         playbackRate: sourceState.playbackRate
       });
-      if (!backdropReady || switchToken !== this.stageSwitchSeq) return false;
+      if (!backdropReady || switchToken !== this.stageSwitchSeq) return fail("backdrop-or-stale");
 
       applyAudioMix(targetEl);
       const targetPlaybackRate = (this.deps?.getPlaybackSpeed?.() || 1) * sourceState.playbackRate;
@@ -5955,7 +6011,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           const masterSpeed = this.deps?.getPlaybackSpeed?.() || 1;
           targetEl.playbackRate = masterSpeed * sourceState.playbackRate;
           return true;
-        }).catch(() => false);
+        }).catch(error => fail(error.message));
         if (options.requirePlaybackStart === true && !await startPlayback) {
           if (targetEl !== activeEl) {
             targetEl.style.opacity = "0";
@@ -5979,9 +6035,11 @@ export class PodcasterPlaybackController extends EventEmitter {
         try { activeEl.pause(); } catch (_) { }
       }
       this.setActiveStageVideoSlot(targetSlot);
+      this.tracePlayback("scene-swap");
       this.hideInactiveBackdrop(targetSlot);
       return true;
-    } catch (_) {
+    } catch (error) {
+      fail(error.message);
       // Keep the previously composited frame visible. A later preparation or
       // explicit retry may recover this source without disrupting the clock.
       return false;
@@ -6373,6 +6431,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!resolvedAudioSrc) return false;
 
     const audio = new Audio(resolvedAudioSrc);
+
+    window.SnoopyAudioOutput?.register(audio);
     audio.preload = "auto";
     audio.volume = this.clamp01(options.volume ?? 1.0);
     audio.playbackRate = options.playbackRate ?? 1.0;
@@ -6512,6 +6572,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   pauseMediaForStageBuffering() {
+    this.tracePlayback("buffer-pause");
     this.stopClock();
     Object.values(this.dialoguePlayers).forEach((audioEl) => {
       try { audioEl?.pause?.(); } catch (_) { }
@@ -6524,6 +6585,13 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   scheduleStageBufferRecovery(videoEl = null, reason = "waiting") {
+    // waiting/stalled are queued events: by dispatch the decoder may already
+    // have recovered. Pausing it here used to interrupt a successful play().
+    if (videoEl && !videoEl.error && Number(videoEl.readyState) >= 3) return false;
+    if (videoEl?.paused || videoEl?.ended) return false;
+    const freezeAtMs = this.sampleAudioClockMs(this.state.currentMs, this.deps?.getPlaybackSpeed?.() || 1, { followClock: true });
+    const entry = this.getEntryAtMs(freezeAtMs);
+    if (entry && String(videoEl?.dataset?.entryKey || "") !== this.buildStageEntryIdentity(entry)) return false;
     if (!videoEl
       || this.state.isPlaying !== true
       || this.state.isBuffering === true
@@ -6533,9 +6601,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       || this.stageBufferRecoveryPromise) {
       return false;
     }
+    this.state.bufferOwner = "media-event";
     const bufferToken = ++this.stageBufferRecoverySeq;
     const scheduledRevision = ++this.playheadRevision;
-    this.stageBufferStartMs = Math.max(0, Number(this.state.currentMs || 0) || 0);
+    this.state.currentMs = Math.max(0, Number(freezeAtMs || 0));
+    this.stageBufferStartMs = this.state.currentMs;
     this.state.isBuffering = true;
     this.activeLoopId += 1;
     this.pauseMediaForStageBuffering();
@@ -6563,6 +6633,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   async resumeStageAfterShortBuffer(videoEl = null, reason = "canplay") {
+    if (this.state.bufferOwner && this.state.bufferOwner !== "media-event") return false;
     if (this.stageBufferRecoveryPromise) return this.stageBufferRecoveryPromise;
     if (!videoEl
       || this.state.isPlaying !== true
@@ -6593,12 +6664,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         entry
           ? this.syncStageSwitching(entry, currentMs, {
             awaitImageReady: true,
-            requirePlaybackStart: true
+            requirePlaybackStart: true,
+            allowDuringBufferRecovery: true
           })
           : videoEl.play().then(() => true).catch(() => false)
       ]);
       if (!stageReady || !isCurrentResume()) return false;
       this.state.isBuffering = false;
+    this.state.bufferOwner = "";
       this.stageBufferStartMs = null;
       this.startClock();
       this.syncStageMediaMotionPlaybackState(true);
@@ -6710,6 +6783,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.hideInactiveBackdrop(targetSlot);
 
       this.state.isBuffering = false;
+    this.state.bufferOwner = "";
       this.stageBufferStartMs = null;
       const [, resumedStage] = await Promise.all([
         this.syncAudio(currentMs, this.deps?.getPlaybackSpeed?.() || 1, {
@@ -6732,6 +6806,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (!ready && isCurrentRecovery()) {
         this.state.isPlaying = false;
         this.state.isBuffering = false;
+    this.state.bufferOwner = "";
         this.stageBufferStartMs = null;
         this.pauseMediaForStageBuffering();
         this.deps?.setPodcastVideoStatus?.(
@@ -6746,6 +6821,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (isCurrentRecovery()) {
         this.state.isPlaying = false;
         this.state.isBuffering = false;
+    this.state.bufferOwner = "";
         this.stageBufferStartMs = null;
         this.pauseMediaForStageBuffering();
         this.deps?.setPodcastVideoStatus?.("No se pudo recuperar la reproducción. Pulsa Play para reintentar.");
@@ -6993,7 +7069,20 @@ export class PodcasterPlaybackController extends EventEmitter {
     return true;
   }
 
-  async setStageVideoSourceForElement(videoEl = null, src = "", options = {}) {
+  setStageVideoSourceForElement(videoEl = null, src = "", options = {}) {
+    if (!videoEl) return Promise.resolve(false);
+    this.stageSourcePreparations ||= new WeakMap();
+    const key = `${src}|${options.entryKey || ""}|${this.mediaCacheGeneration}|${this.getMediaSourceGeneration(src)}|${options.forceAuthorizedRefresh === true}`;
+    const existing = this.stageSourcePreparations.get(videoEl);
+    if (existing?.key === key) return existing.promise;
+    const promise = this.prepareStageVideoSourceElement(videoEl, src, options).finally(() => {
+      if (this.stageSourcePreparations.get(videoEl)?.promise === promise) this.stageSourcePreparations.delete(videoEl);
+    });
+    this.stageSourcePreparations.set(videoEl, { key, promise });
+    return promise;
+  }
+
+  async prepareStageVideoSourceElement(videoEl = null, src = "", options = {}) {
     const video = videoEl || null;
     if (!video) return false;
     const cleanSrc = String(src || "").trim();
@@ -7022,7 +7111,8 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const requestedPersistent = options.forcePersistent === true
       || (options.persistent === true && this.shouldPersistStageVideoSource(cleanSrc));
-    const resolvedSource = String(cachedSource || await this.getBlobUrl(cleanSrc, {
+    const reusableSource = requestedPersistent && !hasCurrentCachedBytes ? "" : cachedSource;
+    const resolvedSource = String(reusableSource || await this.getBlobUrl(cleanSrc, {
       persistent: requestedPersistent,
       forceAuthorizedRefresh: options.forceAuthorizedRefresh === true
     }) || "").trim();
@@ -7049,7 +7139,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     video.preload = "auto";
     if (sourceChanged) {
       try { video.load(); } catch (_) { }
-    } else if (Number(video.readyState || 0) < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    } else if (video.networkState === 0 || video.error) {
       try { video.load(); } catch (_) { }
     }
 

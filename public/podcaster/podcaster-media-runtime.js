@@ -228,6 +228,14 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     if (!isLikelyImageMediaRecord({ ...raw, downloadUrl, storagePath, mimeType })) return null;
     return {
       name: String(raw?.name || fallbackName).trim().slice(0, 180) || fallbackName,
+      ...(raw.referenceRevision ? { referenceRevision: String(raw.referenceRevision), referenceEditId: String(raw.referenceEditId || "") } : {}),
+      ...(Array.isArray(raw.referenceEditHistory) ? { referenceEditHistory: raw.referenceEditHistory.slice(-20).map(item => Object.fromEntries(
+        ["name", "storagePath", "downloadUrl", "mimeType", "localMediaCacheKey", "updatedAt", "createdAt", "width", "height", "referenceRevision", "referenceEditId"]
+          .filter(key => item?.[key] != null).map(key => [key, item[key]])
+      )) } : {}),
+      ...(raw.createdAt ? { createdAt: raw.createdAt } : {}),
+      ...(raw.width ? { width: Number(raw.width) } : {}),
+      ...(raw.height ? { height: Number(raw.height) } : {}),
       dataUrl,
       downloadUrl,
       storagePath,
@@ -248,9 +256,9 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
         try {
           const legacyProxy = new URL(clean, window.location.origin);
           const nestedUrl = String(legacyProxy.searchParams.get("url") || "").trim();
-          if (nestedUrl && !isUnsafeDirectFirebaseMediaUrl(nestedUrl)) return nestedUrl;
           const nestedStorage = deriveStoragePathFromMediaSource(nestedUrl, legacyProxy.searchParams.get("storagePath") || "");
           if (nestedStorage) cleanStoragePath = nestedStorage;
+          if (nestedUrl && !nestedStorage && !isUnsafeDirectFirebaseMediaUrl(nestedUrl)) return nestedUrl;
         } catch (_) {
           // Continue with the normalized storage-path proxy below.
         }
@@ -260,15 +268,6 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
         const host = String(parsed.hostname || "").toLowerCase();
         const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
         if (isFirebaseStorageUrl) {
-          const hasToken = clean.includes("token=") || clean.includes("downloadToken=");
-          if (hasToken) {
-            let directUrl = clean;
-            if (timestamp && !directUrl.includes("u=")) {
-              const separator = directUrl.includes("?") ? "&" : "?";
-              directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
-            }
-            return directUrl;
-          }
           if (!cleanStoragePath) cleanStoragePath = deriveStoragePathFromMediaSource(clean, "");
         }
       } catch (_) {

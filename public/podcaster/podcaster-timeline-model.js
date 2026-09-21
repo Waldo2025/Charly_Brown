@@ -1,3 +1,5 @@
+import { resolveGeminiAudioTimelineDurationMs } from "./podcaster-montage-audio-timing.js?v=snoopy-voice-23";
+import podcasterMediaState from "./podcaster-media-state.js?v=2026-09-11.snoopy-voice-23";
 /**
  * podcaster-timeline-model.js
  * Extracted Timeline Model, Track Structure, and Duration Math Helper functions.
@@ -480,81 +482,11 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
 
 function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
   if (!raw || typeof raw !== "object") return null;
-  const rowId = String(raw.rowId || "").trim();
-  const normalizedMedia = normalizePersistedMediaReference(
-    String(raw.audioSrc || raw.url || raw.downloadUrl || "").trim(),
-    String(raw.storagePath || "").trim()
-  );
-  const downloadUrl = String(normalizedMedia.downloadUrl || "").trim();
-  const storagePath = String(normalizedMedia.storagePath || "").trim();
-  const audioSrc = String(resolveStorageAudioUrl(downloadUrl, storagePath) || downloadUrl || "").trim();
-  if (!rowId || (!audioSrc && !downloadUrl && !storagePath)) return null;
-
-  let startMs = 0;
-  if (raw.startMs !== undefined) {
-    startMs = Math.round(toFiniteNumber(raw.startMs, 0));
-  } else if (raw.start !== undefined) {
-    startMs = Math.round(toFiniteNumber(raw.start, 0) * 1000);
-  }
-
-  let anchorStartMs = startMs;
-  if (raw.anchorStartMs !== undefined && raw.anchorStartMs !== null) {
-    anchorStartMs = Math.max(0, Math.round(Number(raw.anchorStartMs) || 0));
-  } else if (raw.anchorStart !== undefined && raw.anchorStart !== null) {
-    anchorStartMs = Math.max(0, Math.round(Number(raw.anchorStart) * 1000));
-  }
-
-  let trimInMs = 0;
-  if (raw.trimInMs !== undefined) {
-    trimInMs = Math.round(toFiniteNumber(raw.trimInMs, 0));
-  } else if (raw.trimIn !== undefined) {
-    trimInMs = Math.round(toFiniteNumber(raw.trimIn, 0) * 1000);
-  }
-  trimInMs = Math.max(0, trimInMs);
-
-  let trimOutMs = trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS;
-  if (raw.trimOutMs !== undefined) {
-    trimOutMs = Math.round(toFiniteNumber(raw.trimOutMs, trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS));
-  } else if (raw.trimOut !== undefined) {
-    trimOutMs = Math.round(toFiniteNumber(raw.trimOut, 0) * 1000);
-  }
-  trimOutMs = Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs);
-
-  let durationMs = trimOutMs - trimInMs;
-  if (raw.durationMs !== undefined) {
-    durationMs = Math.round(toFiniteNumber(raw.durationMs, trimOutMs - trimInMs));
-  } else if (raw.durationSec !== undefined) {
-    durationMs = Math.round(toFiniteNumber(raw.durationSec, 0) * 1000);
-  } else if (raw.duration !== undefined) {
-    durationMs = Math.round(toFiniteNumber(raw.duration, 0) * 1000);
-  } else if (raw.end !== undefined && raw.start !== undefined) {
-    durationMs = Math.round((toFiniteNumber(raw.end, 0) - toFiniteNumber(raw.start, 0)) * 1000);
-  }
-  durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, durationMs);
-
-  let endMs = startMs + durationMs;
-  if (raw.endMs !== undefined) {
-    endMs = Math.round(toFiniteNumber(raw.endMs, startMs + durationMs));
-  } else if (raw.end !== undefined) {
-    endMs = Math.round(toFiniteNumber(raw.end, 0) * 1000);
-  }
-  endMs = Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, endMs);
-
-  return {
-    rowId,
-    sceneIndex: Math.max(1, Math.round(toFiniteNumber(raw.sceneIndex, index + 1))),
-    speakerName: String(raw.speakerName || "").replace(/\s+/g, " ").trim(),
-    audioSrc,
-    downloadUrl,
-    storagePath,
-    startMs,
-    anchorStartMs,
-    manualStartMs: raw.manualStartMs === true || raw.manualPosition === true,
-    endMs,
-    trimInMs,
-    trimOutMs,
-    durationMs
-  };
+  return podcasterMediaState.normalizeDialogueSegment(raw, index, {
+    resolveReference: normalizePersistedMediaReference,
+    resolveAudioUrl: resolveStorageAudioUrl,
+    minDurationMs: STUDIO_TIMELINE_MIN_CLIP_MS
+  });
 }
 
 function normalizeGeminiDialogueTrack(raw = {}) {
@@ -1489,14 +1421,12 @@ function getTimelineTotalDurationMs(session = null) {
     ? (geminiTrack.segments || []).reduce((acc, segment) => {
       const rowId = String(segment?.rowId || "").trim();
       const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
-      const measuredAudioVisibleMs = rowId
-        ? Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, session || getActiveSession()) || 0) || 0))
-        : 0;
-      const durationMs = Math.max(
-        STUDIO_TIMELINE_MIN_CLIP_MS,
-        measuredAudioVisibleMs,
-        Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS
-      );
+      const playbackRate = window.resolveDialogueAudioPlaybackRate?.(session || getActiveSession(), rowId) || 1;
+      const durationMs = resolveGeminiAudioTimelineDurationMs({
+        ...segment, persistedDurationMs: segment.durationMs, persistedEndMs: segment.endMs,
+        sourceDurationMs: Math.round(resolveRowAudioDurationMs(rowId, session || getActiveSession()) * playbackRate),
+        playbackRate
+      });
       return Math.max(acc, startMs + durationMs);
     }, 0)
     : 0;
@@ -1555,7 +1485,8 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
 
   const useOverrides = Boolean(options && (options.overrideClips || options.overrideConfig));
   const cacheKey = `${activeSession.id}:${activeSession.updatedAt || ''}:${window.state.activeSessionId}:${activeSession.podcastVideoConfig?.geminiDialogueTrack?.updatedAt || ''}`;
-  if (!useOverrides && window.studioRuntimeEntriesCache && window.studioRuntimeEntriesCacheKey === cacheKey) {
+  // Draft snapshots can share timestamps while containing different clip positions.
+  if (!useOverrides && window.studioRuntimeEntriesCacheSession === activeSession && window.studioRuntimeEntriesCache && window.studioRuntimeEntriesCacheKey === cacheKey) {
     return window.studioRuntimeEntriesCache;
   }
 
@@ -1641,6 +1572,7 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
 
   const sorted = entries.sort((a, b) => a.startMs - b.startMs || a.index - b.index);
   if (!useOverrides) {
+    window.studioRuntimeEntriesCacheSession = activeSession;
     window.studioRuntimeEntriesCache = sorted;
     window.studioRuntimeEntriesCacheKey = cacheKey;
   }

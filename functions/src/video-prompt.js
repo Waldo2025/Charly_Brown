@@ -71,9 +71,19 @@ function buildDialogueVideoPrompt(input = {}, options = {}) {
     spokenDialogue
       ? `The visible character speaks this exact dialogue naturally: ${sentence(spokenDialogue)} Never display the dialogue as subtitles or captions.`
       : "No speech, narration, or lip-synced dialogue; use natural ambience only.",
-    inSceneText
-      ? `Render exactly one natural, readable sign or surface that says "${inSceneText.replace(/"/g, '\\"')}". Spell it exactly. No other visible text.`
-      : "No visible text, titles, subtitles, captions, labels, logos, watermarks, interface elements, or text-like glyphs."
+    (() => {
+      if (!inSceneText) {
+        return "No visible text, titles, subtitles, captions, labels, logos, watermarks, interface elements, or text-like glyphs.";
+      }
+      const exactInSceneText = inSceneText.replace(/"/g, '\\"');
+      const isSpanish = /[áéíóúüñ¿¡ÁÉÍÓÚÜÑ]/u.test(inSceneText)
+        || /\b(?:el|la|los|las|un|una|unos|unas|con|sin|sobre|desde|hacia|hasta|entre|mientras|seg[uú]n|para|por|pero|aunque|como|c[oó]mo|cuando|cu[aá]ndo|donde|d[oó]nde|quien|qui[eé]n|que|qu[eé]|cual|cu[aá]l|cuanto|cu[aá]nto|tanto|tanta|tantos|tantas|este|esta|estos|estas|esto|ese|esa|esos|esas|eso|aquel|aquella|aquellos|aquellas|mi|mis|tu|tus|su|sus|nuestro|nuestra|nuestros|nuestras|del|al|m[aá]s|menos|muy|mucho|mucha|muchos|muchas|poco|poca|pocos|pocas|todo|toda|todos|todas|otro|otra|otros|otras|cada|ambos|ambas|organizar|informaci[oó]n|educaci[oó]n|aprender|estudio|escuela|clase|vida|mundo|tiempo|a[nñ]o|a[nñ]os|d[ií]a|d[ií]as|hoy|ayer|siempre|nunca|bien|mal|nuevo|nueva|nuevos|nuevas|bueno|buena|buenos|buenas|gran|grande|grandes|mejor|mejores|peor|peores)\b/iu.test(inSceneText);
+      const wordCount = inSceneText.trim().split(/\s+/).filter(Boolean).length;
+      const langDirect = isSpanish
+        ? "Language: Spanish. Preserve authentic Spanish orthography, accent marks, and inverted punctuation."
+        : "Language: English.";
+      return `Render exactly one natural, readable sign or surface that says "${exactInSceneText}". ${langDirect} Word count: exactly ${wordCount} words; render each word cleanly and strictly once without repeating, duplicating, stuttering, or introducing misspelled variants. Spell it exactly. No other visible text.`;
+    })()
   ].join("\n");
 
   return {

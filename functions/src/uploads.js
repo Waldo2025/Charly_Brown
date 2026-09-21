@@ -4,7 +4,8 @@ const {
   getAdminServices,
   resolveAuthContext,
   asyncRoute,
-  isPrivilegedRole
+  isPrivilegedRole,
+  hasAdminRoleWithProfile
 } = require("./common.js");
 
 const MAX_UPLOAD_BYTES = Object.freeze({
@@ -83,12 +84,17 @@ async function assertSessionAccess({ db, sessionId, authContext }) {
   if (!snapshot.exists) throw Object.assign(new Error("podcaster_session_not_found"), { status: 404 });
   const session = snapshot.data() || {};
   const sharedWithIds = Array.isArray(session.sharedWithIds) ? session.sharedWithIds.map(String) : [];
+  const isAdmin = await hasAdminRoleWithProfile(authContext, db);
   if (
     String(session.ownerId || "") !== authContext.uid
     && !sharedWithIds.includes(authContext.uid)
     && !isPrivilegedRole(authContext.role)
+    && !isAdmin
   ) {
     throw Object.assign(new Error("podcaster_session_forbidden"), { status: 403 });
+  }
+  if (session.archived === true && !(isAdmin && String(session.ownerId || "") !== authContext.uid)) {
+    throw Object.assign(new Error("podcaster_session_archived"), { status: 409 });
   }
 }
 

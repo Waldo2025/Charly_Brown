@@ -28,6 +28,9 @@ export function createPodcasterStageFullscreenController(options = {}) {
   let placeholderNode = null;
   let originalParent = controlsEl?.parentNode || null;
   let originalNextSibling = controlsEl?.nextSibling || null;
+  let buttonPlaceholderNode = null;
+  const buttonOriginalParent = buttonEl.parentNode || null;
+  const buttonOriginalNextSibling = buttonEl.nextSibling || null;
   let usingFallback = false;
 
   let controlsHost = targetEl.querySelector(".podcast-stage-fullscreen-controls-host");
@@ -68,12 +71,45 @@ export function createPodcasterStageFullscreenController(options = {}) {
     }
   }
 
+  function mountButton() {
+    if (targetEl.contains(buttonEl)) return;
+    if (!buttonPlaceholderNode && buttonEl.parentNode) {
+      buttonPlaceholderNode = document.createComment("podcast-stage-fullscreen-button-placeholder");
+      buttonEl.parentNode.insertBefore(buttonPlaceholderNode, buttonEl);
+    }
+    buttonEl.classList.add("is-attached-to-stage-fullscreen");
+    targetEl.appendChild(buttonEl);
+  }
+
+  function restoreButton() {
+    if (!buttonPlaceholderNode && buttonEl.parentNode === buttonOriginalParent) return;
+    buttonEl.classList.remove("is-attached-to-stage-fullscreen");
+    if (buttonPlaceholderNode?.parentNode) {
+      buttonPlaceholderNode.parentNode.insertBefore(buttonEl, buttonPlaceholderNode);
+      buttonPlaceholderNode.parentNode.removeChild(buttonPlaceholderNode);
+      buttonPlaceholderNode = null;
+      return;
+    }
+    if (buttonOriginalParent) {
+      if (buttonOriginalNextSibling && buttonOriginalNextSibling.parentNode === buttonOriginalParent) {
+        buttonOriginalParent.insertBefore(buttonEl, buttonOriginalNextSibling);
+      } else {
+        buttonOriginalParent.appendChild(buttonEl);
+      }
+    }
+  }
+
   function syncState() {
     const active = isActive();
     targetEl.classList.toggle(activeClass, active);
     setButtonExpandedState(buttonEl, active);
-    if (active) mountControls();
-    else restoreControls();
+    if (active) {
+      mountControls();
+      mountButton();
+    } else {
+      restoreControls();
+      restoreButton();
+    }
   }
 
   async function enter() {
@@ -133,6 +169,7 @@ export function createPodcasterStageFullscreenController(options = {}) {
     destroy() {
       document.removeEventListener("fullscreenchange", onFullscreenChange);
       restoreControls();
+      restoreButton();
       targetEl.classList.remove(activeClass, fallbackClass);
       setButtonExpandedState(buttonEl, false);
     }

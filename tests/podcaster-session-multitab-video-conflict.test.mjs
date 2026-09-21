@@ -48,12 +48,12 @@ test("Firestore Timestamp metadata also selects the newest generated video", () 
   assert.equal(merged.row_1.storagePath, "new.mp4");
 });
 
-test("a manual scene replacement takes precedence over generated clips", () => {
+test("a newer committed generation replaces an earlier manual scene", () => {
   const merged = mergeMediaMapByEntryUpdatedAt(
     { row_1: { storagePath: "manual.mp4", sourceType: "manual-replacement", manuallyReplaced: true, updatedAt: "2026-08-21T16:00:00.000Z" } },
     { row_1: { storagePath: "generated.mp4", updatedAt: "2026-08-21T19:00:00.000Z" } }
   );
-  assert.equal(merged.row_1.storagePath, "manual.mp4");
+  assert.equal(merged.row_1.storagePath, "generated.mp4");
 });
 
 test("a deliberate deletion tombstone wins over an older clip but not a later regeneration", () => {
