@@ -7,8 +7,8 @@ import { showModal, closeActiveModal, showToast } from "./modals.js";
 import { openCommandPalette } from "./command-palette.js";
 import { logOutUser } from "../services/marcie-auth-guard.js";
 import { generateWithGemini, getConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
-import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
-import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260831r6";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260908r9";
+import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260908r9";
 import { getActiveMarciePrompt } from "../services/marcie-prompt-settings.js";
 
 const escapeHtml = (unsafe) => {
@@ -63,17 +63,6 @@ Devuelve únicamente JSON válido con este esquema:
   "preservedElements": ["Elementos que no deben cambiar"]
 }
 
-async function saveExpansionReportForSession({ session, report, instruction, preselectedText = "" }) {
-  const safeReport = JSON.parse(JSON.stringify(report || {}));
-  session.expansionApprovalReport = {
-    report: safeReport,
-    instruction: String(instruction || ""),
-    preselectedText: String(preselectedText || ""),
-    generatedAt: new Date().toISOString()
-  };
-  await saveMarcieSession(session);
-  return safeReport;
-}
 El informe debe ser específico, verificable y referirse a títulos, bloques o fragmentos reales del artículo.
   `.trim();
 
@@ -88,101 +77,37 @@ El informe debe ser específico, verificable y referirse a títulos, bloques o f
   return parseGeminiJson(raw);
 }
 
-async function applyAssistantInstruction({ session, instruction, preselectedText = "", approvedReport = null }) {
-  if (sessionUsesAida(session)) {
-    const previousArticle = session.article || {};
-    const scope = preselectedText ? `Fragmento señalado por el usuario: ${preselectedText}\n` : "";
-    const report = approvedReport ? `Informe de cambios aprobado: ${JSON.stringify(approvedReport)}\n` : "";
-    const generatedArticle = await draftArticleForMode({
-      session,
-      title: previousArticle.title || session.title,
-      topic: session.topic || session.title,
-      audience: session.audience || previousArticle.audience || "parents",
-      brief: `${scope}${report}${instruction}`.trim()
-    });
-    session.article = {
-      ...generatedArticle,
-      featuredImage: generatedArticle.featuredImage || previousArticle.featuredImage,
-      templateId: generatedArticle.templateId || previousArticle.templateId,
-      appearance: generatedArticle.appearance || previousArticle.appearance,
-      sourceCitationFormat: generatedArticle.sourceCitationFormat || previousArticle.sourceCitationFormat
-    };
-    ["featuredImage", "templateId", "appearance", "sourceCitationFormat"].forEach((field) => {
-      if (session.article[field] === undefined) delete session.article[field];
-    });
-    session.title = session.article.title || session.title;
-    session.status = "review_required";
-    session.approvedAudiences = (session.approvedAudiences || []).filter((audience) => audience !== session.audience);
-    delete session.audit;
-    if (!session.articlesByAudience) session.articlesByAudience = {};
-    session.articlesByAudience[session.audience || session.article.audience || "parents"] = session.article;
-    await saveMarcieSession(session);
-    return;
-  }
-  const fullContext = `
-${getActiveMarciePrompt("assistant_apply")}
-
-Eres el asistente editorial inteligente de Marcie Blog Editor.
-El artículo completo actual es:
-Título: ${session.title}
-Audiencia: ${session.audience}
-Contenido actual:
-${articleContextForAssistant(session)}
-
-${preselectedText ? `El usuario seleccionó ESTA parte específica y los cambios deben limitarse a ella:\n"${preselectedText}"\n` : ""}
-Instrucción del usuario:
-"${instruction}"
-
-${approvedReport ? `Informe editorial aprobado. Aplica exactamente este alcance y no introduzcas cambios fuera de él:\n${JSON.stringify(approvedReport, null, 2)}\n` : ""}
-El contenido publicable debe ser prosa editorial normal y limpia. No incluyas referencias a IA o al proceso de generación, instrucciones del prompt, etiquetas internas, metadatos, marcas de agua, firmas codificadas, secuencias ocultas ni caracteres invisibles. No uses Unicode engañoso ni códigos destinados a influir en clasificadores. La naturalidad debe provenir exclusivamente de una redacción original, específica, rigurosa y ajustada a la audiencia. El JSON siguiente es solo el formato técnico interno y jamás debe mencionarse dentro del artículo.
-
-Devuelve el artículo actualizado en formato JSON canónico ArticleDocument:
-{
-  "schemaVersion": "1.0",
-  "title": "...",
-  "subtitle": "...",
-  "excerpt": "...",
-  "audience": "${session.audience}",
-  "category": "Educación",
-  "readingTimeMinutes": 6,
-  "publishedDateText": "15 de mayo de 2025",
-  "tags": ["Educación", "IA"],
-  "blocks": [
-    { "id": "b1", "type": "paragraph", "text": "..." },
-    { "id": "b2", "type": "quote", "text": "...", "attribution": "..." },
-    { "id": "b3", "type": "heading", "level": "h3", "text": "..." },
-    { "id": "b4", "type": "bulletList", "items": ["..."] }
-  ],
-  "sources": ${JSON.stringify(session.article?.sources || [])},
-  "seo": ${JSON.stringify(session.article?.seo || {})}
-}
-  `.trim();
-
-  const raw = await generateWithGemini({
-    model: getConfiguredGeminiModel(),
-    prompt: fullContext,
-    payload: {
-      contents: [{ role: "user", parts: [{ text: fullContext }] }],
-      generationConfig: { responseMimeType: "application/json" }
-    }
-  });
-  const generatedArticle = parseGeminiJson(raw);
-  const previousArticle = session.article || {};
-  session.article = {
-    ...previousArticle,
-    ...generatedArticle,
-    featuredImage: generatedArticle.featuredImage || previousArticle.featuredImage,
-    templateId: generatedArticle.templateId || previousArticle.templateId,
-    appearance: generatedArticle.appearance || previousArticle.appearance,
-    sourceCitationFormat: generatedArticle.sourceCitationFormat || previousArticle.sourceCitationFormat
+async function saveExpansionReportForSession({ session, report, instruction, preselectedText = "" }) {
+  const safeReport = JSON.parse(JSON.stringify(report || {}));
+  session.expansionApprovalReport = {
+    report: safeReport,
+    instruction: String(instruction || ""),
+    preselectedText: String(preselectedText || ""),
+    generatedAt: new Date().toISOString()
   };
-  ["featuredImage", "templateId", "appearance", "sourceCitationFormat"].forEach((field) => {
-    if (session.article[field] === undefined) delete session.article[field];
+  await saveMarcieSession(session);
+  return safeReport;
+}
+
+async function applyAssistantInstruction({ session, instruction, preselectedText = "", approvedReport = null }) {
+  const previousArticle = session.article || {};
+  const audience = session.audience;
+  const generated = await draftArticleForMode({
+    session, title: previousArticle.title || session.title, topic: session.topic || session.title, audience,
+    brief: JSON.stringify({ instruction, preselectedText, approvedReport, currentArticle: previousArticle }) + "\nConserva lo que quede fuera del alcance solicitado y sus referencias."
   });
-  session.title = generatedArticle.title || session.title;
-  session.status = "drafting";
-  if (!session.articlesByAudience) session.articlesByAudience = {};
-  session.articlesByAudience[session.audience || session.article.audience || "educators"] = session.article;
+  if (session.audience !== audience) throw new Error("Cambió la audiencia durante la edición. Vuelve a intentarlo.");
+  session.article = { ...previousArticle, ...generated,
+    usedSources: [...(previousArticle.usedSources || previousArticle.sources || []), ...(generated.usedSources || generated.sources || [])],
+    featuredImage: generated.featuredImage || previousArticle.featuredImage,
+    templateId: previousArticle.templateId, appearance: previousArticle.appearance };
+  session.articlesByAudience = { ...session.articlesByAudience, [audience]: session.article };
+  session.title = session.article.title;
+  session.status = "review_required";
+  session.approvedAudiences = (session.approvedAudiences || []).filter(id => id !== audience);
+  delete session.audit;
+  if (session.auditsByAudience) delete session.auditsByAudience[audience];
+  delete session.article.approval;
   await saveMarcieSession(session);
 }
 

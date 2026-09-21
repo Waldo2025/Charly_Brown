@@ -3,19 +3,19 @@
  * Conectado con la API de Gemini / Vertex AI
  */
 
-import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260908r9";
 import { showModal, closeActiveModal, showToast } from "./modals.js";
 import {
   sanitizeTrustedSources
-} from "../services/marcie-gemini-service.js?v=20260831r6";
+} from "../services/marcie-gemini-service.js?v=20260908r9";
 import {
   draftArticleForMode,
   generateProposalsForMode,
   researchTopicForMode,
   reviewArticleForMode,
   sessionUsesAida
-} from "../services/marcie-mode-service.js?v=20260831r6";
-import { articleVerificationBlockers } from "../contracts/editorial-contracts.js";
+} from "../services/marcie-mode-service.js?v=20260908r9";
+import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 
 function normalizeSourceText(value = "") {
   return String(value || "").trim().toLowerCase();
@@ -812,52 +812,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
       }
       session.proposals = proposals;
       session.researchByAudience = resp.researchByAudience || session.researchByAudience || {};
-      await saveMarcieSession(session);
-
-      const previousArticles = session.articlesByAudience || {};
-      const regeneratedArticles = {};
-      for (let index = 0; index < proposals.length; index += 1) {
-        const proposal = proposals[index];
-        const audience = proposal.audience || ["educators", "students", "parents", "coordinators"][index];
-        const audienceLabel = proposal.audienceLabel || (audience === "students" ? "Estudiantes" : audience === "parents" ? "Padres y tutores" : audience === "coordinators" ? "Coordinadores académicos" : "Docentes y directivos");
-        loadingContainer.textContent = `Redactando artículo ${index + 1} de ${requiredCount}: ${audienceLabel}...`;
-
-        const generated = await draftArticleForMode({
-          session,
-          title: proposal.title || session.topic || session.title,
-          topic: session.topic || proposal.title || session.title,
-          audience,
-          brief: proposal.brief || proposal.angle || ""
-        });
-        const previousArticle = previousArticles[audience] || {};
-        const nextArticle = {
-          ...generated,
-          sources: generated.sources || previousArticle.sources || session.trends?.[0]?.sources || [],
-          supplementarySources: Array.isArray(previousArticle.supplementarySources)
-            ? previousArticle.supplementarySources
-            : (Array.isArray(generated.supplementarySources) ? generated.supplementarySources : [])
-        };
-        ["featuredImage", "templateId", "appearance", "sourceCitationStyle"].forEach((field) => {
-          if (previousArticle[field] !== undefined) nextArticle[field] = previousArticle[field];
-          if (nextArticle[field] === undefined) delete nextArticle[field];
-        });
-        regeneratedArticles[audience] = nextArticle;
-      }
-
-      const activeAudience = regeneratedArticles[session.audience]
-        ? session.audience
-        : (proposals[0]?.audience || "educators");
-      Object.entries(regeneratedArticles).forEach(([audience, article]) => {
-        articlesByAud[audience] = article;
-      });
-      session.proposals = proposals;
-      session.articlesByAudience = articlesByAud;
-      session.audience = activeAudience;
-      session.article = regeneratedArticles[activeAudience];
-      session.title = session.article?.title || proposals.find((proposal) => proposal.audience === activeAudience)?.title || session.title;
-      session.status = "review_required";
-      delete session.audit;
-      delete session.auditsByAudience;
+      session.status = "proposal_ready";
       await saveMarcieSession(session);
       if (onUpdateSession) onUpdateSession();
 
@@ -869,10 +824,10 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
       cardsContainer.classList.remove("hidden");
       loadingContainer.classList.add("hidden");
       regenBtn.disabled = false;
-      showToast(`✨ ${requiredCount} enfoques y artículos fueron regenerados.`, "success");
+      showToast(`✨ ${requiredCount} enfoques editoriales fueron generados. Selecciona uno para redactar.`, "success");
     } catch (err) {
       console.error("[MarciePipeline] Error regenerando propuestas:", err);
-      alert(`Error al regenerar propuestas y artículos: ${err.message}`);
+      alert(`Error al regenerar propuestas: ${err.message}`);
       cardsContainer.classList.remove("hidden");
       loadingContainer.classList.add("hidden");
       regenBtn.disabled = false;
@@ -884,6 +839,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
 function handleReviewStep({ getSession, onUpdateSession }) {
   const session = getSession();
   if (!session) return;
+  session.audit = session.auditsByAudience?.[session.audience] || null;
   const aidaMode = sessionUsesAida(session);
 
   const hasExistingAudit = !!session.audit;

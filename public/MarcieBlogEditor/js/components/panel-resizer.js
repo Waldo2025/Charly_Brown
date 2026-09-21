@@ -15,7 +15,7 @@ const DEFAULTS = {
 
 const BOUNDS = {
   left: { min: 220, max: 540 },
-  right: { min: 260, max: 600 }
+  right: { min: 300, max: 600 }
 };
 
 function applyPanelWidth(panel, widthPx) {

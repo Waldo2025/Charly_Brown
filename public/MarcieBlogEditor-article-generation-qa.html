@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QA · Generación de artículo</title>
+  <script src="/js/tailwindcss-3.4.17.js"></script>
+  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260831r12" />
+  <style>
+    body { margin: 0; min-height: 100vh; background: #eef2f7; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #0f172a; }
+    .qa-shell { display: grid; min-height: 100vh; place-items: center; padding: 32px; }
+    #article-view { position: relative; width: min(900px, 100%); min-height: 680px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 18px; background: white; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12); }
+    #article-generation-orbit { animation: spin 1.6s linear infinite; }
+    #article-generation-orbit-secondary { animation: spin-reverse 1.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes spin-reverse { to { transform: rotate(-360deg); } }
+  </style>
+</head>
+<body>
+  <main class="qa-shell">
+    <section id="article-view" aria-label="Vista del artículo">
+      <div id="article-generation-spinner" class="absolute inset-0 z-20 flex items-start justify-center" role="status" aria-live="polite" aria-label="Generando artículo con IA. Marcie está redactando el enfoque para docentes y directivos y organizando sus fuentes.">
+        <div class="w-full py-14 flex flex-col items-center justify-center gap-5 px-6">
+          <div class="relative w-44 h-44 flex items-center justify-center">
+            <div id="article-generation-orbit" class="absolute inset-0 rounded-full border-4 border-transparent border-t-teal-500 border-r-purple-500/90"></div>
+            <div id="article-generation-orbit-secondary" class="absolute inset-4 rounded-full border-4 border-transparent border-b-purple-400 border-l-teal-400/80"></div>
+            <div class="absolute inset-10 rounded-full border border-slate-200/70 bg-white shadow-lg"></div>
+            <div class="absolute inset-14 rounded-full bg-white shadow-xl flex items-center justify-center border border-white">
+              <img src="/MarcieBlogEditorLogo2.png" alt="Marcie" class="w-8 h-8 object-contain rounded" />
+            </div>
+          </div>
+          <div class="text-center max-w-md">
+            <span class="article-generation-count">Artículo 2 de 4</span>
+            <p class="text-sm font-semibold text-slate-800">Generando artículo con IA</p>
+            <p class="text-xs text-slate-500 mt-2">Marcie está redactando el enfoque para docentes y directivos y organizando sus fuentes.</p>
+            <div class="article-generation-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

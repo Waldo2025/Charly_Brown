@@ -1,3 +1,4 @@
+const bibliography = require("./marcie-bibliography.js");
 const dns = require("node:dns").promises;
 const net = require("node:net");
 
@@ -154,22 +155,25 @@ function buildPublicationSlug(sessionId = "", audience = "educators") {
   return slugify(`marcie-${clampText(sessionId, 100)}-${normalizeAudience(audience)}`);
 }
 
+function formatInline(value) {
+  return escapeHtml(value || "").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\*(.*?)\*/g, "<em>$1</em>").replace(/&lt;u&gt;(.*?)&lt;\/u&gt;/g, "<u>$1</u>");
+}
 function renderBlock(block = {}) {
   const type = clampText(block.type, 40);
-  const text = escapeHtml(block.text || "");
+  const text = formatInline(block.text);
   if (type === "heading") {
     const level = block.level === "h3" ? "h3" : "h2";
     return text ? `<${level}>${text}</${level}>` : "";
   }
   if (type === "paragraph") return text ? `<p>${text}</p>` : "";
-  if (type === "bulletList" || type === "numberedList") {
-    const tag = type === "numberedList" ? "ol" : "ul";
-    const items = (Array.isArray(block.items) ? block.items : []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  if (["bulletList", "numberedList", "orderedList", "list"].includes(type)) {
+    const tag = type === "numberedList" || type === "orderedList" || block.listType === "ordered" ? "ol" : "ul";
+    const items = (Array.isArray(block.items) ? block.items : []).map((item) => `<li>${formatInline(item)}</li>`).join("");
     return items ? `<${tag}>${items}</${tag}>` : "";
   }
   if (type === "quote") {
     const attribution = clampText(block.attribution, 500);
-    return text ? `<blockquote><p>${text}</p>${attribution ? `<cite>${escapeHtml(attribution)}</cite>` : ""}</blockquote>` : "";
+    return text ? `<blockquote><p><em>“${text}”</em></p>${attribution ? `<cite>${escapeHtml(attribution)}</cite>` : ""}</blockquote>` : "";
   }
   if (type === "callout") return text ? `<aside class="marcie-callout"><p>${text}</p></aside>` : "";
   if (type === "statistic") {
@@ -190,20 +194,14 @@ function renderBlock(block = {}) {
 }
 
 function renderArticleToWordPressHtml(article = {}) {
+  bibliography.assertIntegrity(article);
   const subtitle = clampText(article.subtitle, 2000);
-  const blocks = (Array.isArray(article.blocks) ? article.blocks : []).map(renderBlock).filter(Boolean).join("\n");
-  const sources = (Array.isArray(article.sources) ? article.sources : [])
-    .map((source) => {
-      const url = safeHttpsUrl(source?.url || source?.canonicalUrl || "");
-      if (!url) return "";
-      const title = clampText(source?.apaCitation || source?.title || new URL(url).hostname, 1200);
-      return `<li><a href="${escapeHtml(url)}" rel="noopener noreferrer">${escapeHtml(title)}</a></li>`;
-    })
-    .filter(Boolean);
+  const blocks = (Array.isArray(article.blocks) ? article.blocks : []).map(block => bibliography.renderCitations(article, block, renderBlock(block))).filter(Boolean).join("\n");
+  const sources = bibliography.sources(article).map((source) => '<li id="source-' + escapeHtml(source.id) + '" style="margin-bottom:1em">' + bibliography.formatHtml(source) + '</li>');
   return [
     subtitle ? `<p class="marcie-article-lead"><em>${escapeHtml(subtitle)}</em></p>` : "",
     blocks,
-    sources.length ? `<hr><section class="marcie-sources"><h2>Fuentes consultadas</h2><ul>${sources.join("")}</ul></section>` : ""
+    sources.length ? `<hr><section class="marcie-sources"><h2>Referencias bibliográficas</h2><ul>${sources.join("")}</ul></section>` : ""
   ].filter(Boolean).join("\n");
 }
 

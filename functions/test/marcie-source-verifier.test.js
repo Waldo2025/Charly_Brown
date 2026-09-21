@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  bibliographicMetadataGaps,
   extractPageContent,
   extractBibliographicMetadata,
   formatApaCitation,
@@ -10,7 +11,7 @@ const {
 const { extractAttributedReferences, generateJson, parseJsonResponse, rankTrendOpportunities, refreshMarcieTrends, researchDateWindow, verifyArticleEvidenceServer } = require("../src/marcie-editorial-research.js");
 
 const publicDns = async () => [{ address: "93.184.216.34", family: 4 }];
-const html = (title, text) => `<!doctype html><html><head><title>${title}</title></head><body><main><h1>${title}</h1><p>${text.repeat(8)}</p></main></body></html>`;
+const html = (title, text) => `<!doctype html><html><head><title>${title}</title><meta property="article:published_time" content="2026-08-10T12:00:00Z"></head><body><main><h1>${title}</h1><p>${text.repeat(8)}</p></main></body></html>`;
 const okPage = (title = "Estudio", text = "La evidencia describe cómo el sueño contribuye a consolidar la memoria. ") => new Response(html(title, text), { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
 
 function modelJson(value) {
@@ -64,8 +65,24 @@ test("bibliographic metadata produces APA 7 without inventing missing fields", (
   assert.deepEqual(metadata.authors, ["María Pérez"]);
   assert.equal(metadata.publisher, "Revista Educación");
   assert.equal(metadata.doi, "10.1234/abc.5");
-  assert.equal(formatApaCitation({ authors: metadata.authors, publishedAt: "2026-08-10", title: "Aprendizaje y memoria", publisher: metadata.publisher, doi: metadata.doi }), "María Pérez (10 de agosto de 2026). Aprendizaje y memoria. Revista Educación. https://doi.org/10.1234/abc.5");
-  assert.equal(formatApaCitation({ authors: [], title: "Guía docente", publisher: "UNESCO", url: "https://unesco.example/guia" }), "UNESCO (s. f.). Guía docente. https://unesco.example/guia");
+  assert.equal(formatApaCitation({ authors: metadata.authors, publishedAt: "2026-08-10", title: "Aprendizaje y memoria", publisher: metadata.publisher, doi: metadata.doi }), "Pérez, M. (2026). Aprendizaje y memoria. Revista Educación. https://doi.org/10.1234/abc.5");
+  assert.equal(formatApaCitation({ authors: [], title: "Guía docente", publisher: "UNESCO", url: "https://unesco.example/guia" }), "UNESCO. (s. f.). Guía docente. https://unesco.example/guia");
+});
+
+test("sources without complete APA metadata are rejected so research can replace them", async () => {
+  assert.deepEqual(bibliographicMetadataGaps({ title: "Documento", publisher: "Institución", url: "https://example.org/doc" }), ["year"]);
+  const result = await verifyCandidateSources({
+    candidates: [{ id: "missing-year", title: "Documento", url: "https://example.org/doc" }],
+    context: "Aprendizaje",
+    retrieveOptions: {
+      resolveHost: publicDns,
+      fetchImpl: async () => new Response(`<!doctype html><title>Documento</title><main>${"Evidencia sobre aprendizaje. ".repeat(20)}</main>`, { status: 200, headers: { "content-type": "text/html" } })
+    },
+    assessSources: async ({ pages }) => pages.map((page) => ({ id: page.id, status: "verified", supportSummary: "Respalda", locator: "Resultados" }))
+  });
+  assert.equal(result.verifiedSources.length, 0);
+  assert.equal(result.rejectedSources[0].reason, "incomplete_bibliographic_metadata");
+  assert.deepEqual(result.rejectedSources[0].metadataGaps, ["year"]);
 });
 
 test("direct quotations survive only when they are short and literally present in the verified page", async () => {

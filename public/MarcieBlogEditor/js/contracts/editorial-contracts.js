@@ -146,16 +146,14 @@ function articleVerificationBlockers(article = {}, context = {}) {
     blockerKeys.add(key);
     blockers.push(text);
   };
+  const citationIntegrity = globalThis.MarcieBibliography?.integrity(article);
+  if (citationIntegrity && !citationIntegrity.valid) addBlocker("Hay citas sin documento bibliográfico asociado: " + citationIntegrity.missing.join(", "));
   const expectedMode = normalizeEditorialMode(context.editorialMode || article.editorialMode || "marcie");
   const evidenceOnly = context.scope === "evidence";
   if (!evidenceOnly && expectedMode === "aida" && !isAidaArticleCompatible(article)) {
     addBlocker("El artículo no tiene una estructura Aida compatible; debe corregirse o regenerarse con el motor Aida.", "aida-structure");
   }
   if (expectedMode === "aida") {
-    const verifiedSources = sources.filter((source) => source?.verificationStatus === "verified" && source?.evidenceRole !== "historical");
-    const institutions = new Set(verifiedSources.map((source) => String(source?.publisher || source?.domain || "").trim().toLowerCase()).filter(Boolean));
-    if (verifiedSources.length < 3) addBlocker(`Aida: ${verifiedSources.length} de 3 páginas mínimas verificadas.`, "aida-source-count");
-    if (institutions.size < 3) addBlocker(`Aida: ${institutions.size} de 3 publicaciones o instituciones independientes.`, "aida-institution-count");
     if (!evidenceOnly) {
       const closingText = String([...(Array.isArray(article.blocks) ? article.blocks : [])].reverse().find((block) => block?.phase === "close")?.text || "").trim();
       const brandLine = String(article.aida?.brandLine || "").trim();
@@ -165,6 +163,7 @@ function articleVerificationBlockers(article = {}, context = {}) {
   }
   if (!sources.length) addBlocker("El artículo no tiene fuentes recuperadas y verificadas.", "sources-empty");
   if (sources.some((source) => source?.verificationStatus !== "verified")) addBlocker("Existen fuentes que no superaron la verificación de contenido.", "sources-unverified");
+  if (sources.some((source) => globalThis.MarcieBibliography?.metadataGaps(source).length)) addBlocker("Existen fuentes sin los metadatos necesarios para una referencia APA 7 completa.", "sources-metadata-incomplete");
   if (!claims.length) addBlocker("El artículo todavía no tiene una comprobación de afirmaciones factuales.", "claims-empty");
   claims.forEach((claim) => {
     const status = String(claim?.status || "unsupported");

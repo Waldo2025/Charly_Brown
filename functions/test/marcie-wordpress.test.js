@@ -50,7 +50,7 @@ test("renderArticleToWordPressHtml escapes untrusted content and renders structu
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /<ul><li>Uno<\/li><li>Dos<\/li><\/ul>/);
-  assert.match(html, /Fuentes consultadas/);
+  assert.match(html, /Referencias bibliográficas/);
 });
 
 test("buildWordPressPostPayload creates a deterministic draft with taxonomy and cover IDs", () => {

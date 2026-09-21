@@ -19,7 +19,7 @@ test("each proposal receives and persists an audience-specific dossier", () => {
 
 test("drafting uses the audience dossier instead of the global trend dossier", () => {
   assert.match(mode, /const researchDossier = await ensureAudienceResearchForDraft/);
-  assert.match(mode, /Object\.prototype\.hasOwnProperty\.call\(existingMap, normalizedAudience\)/);
+  assert.match(mode, /cached\?\.researchFingerprint === fingerprint/);
   const draftSection = mode.slice(mode.indexOf("export async function draftArticleForMode"), mode.indexOf("const AUDIENCE_LABELS"));
   assert.doesNotMatch(draftSection, /session\.trends\?\.\[0\]/);
 });
@@ -27,13 +27,13 @@ test("drafting uses the audience dossier instead of the global trend dossier", (
 test("manual drafting creates the same researched proposal contract as automation", () => {
   assert.match(mode, /id: `manual-\$\{normalizedAudience\}`/);
   assert.match(mode, /origin: "manual"/);
-  assert.match(mode, /Object\.assign\(proposal, \{ sourceIds:[\s\S]*?researchStatus:[\s\S]*?verifiedSourceCount[\s\S]*?targetSourceCount: 6/);
+  assert.match(mode, /Object\.assign\(proposal, \{ sourceIds:[\s\S]*?researchStatus:[\s\S]*?verifiedSourceCount[\s\S]*?targetSourceCount: researchPolicy\.target\(session\)/);
   assert.match(mode, /onResearchProgress/);
 });
 
 test("verified attributions and complete APA bibliographies are part of the article contract", () => {
   assert.match(gemini, /applyVerifiedAttributions/);
-  assert.match(gemini, /entre 2 y 3 referencias atribuidas/);
+  assert.match(gemini, /parsed\.usedSources = \[\.\.\.parsed\.sources\]/);
   assert.match(gemini, /sourceIds/);
   assert.match(pipeline, /Ver bibliografía de esta propuesta/);
   assert.match(pipeline, /mergedSources/);

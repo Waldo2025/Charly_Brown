@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { evidenceBlockers, articleContentHash } = require("../src/marcie-wordpress.js");
+const { evidenceBlockers, articleContentHash, normalizeLegacyAidaClosing } = require("../src/marcie-wordpress.js");
 const { WordPressClient, buildWordPressPostPayload } = require("../src/marcie-wordpress-core.js");
 const { periodKey } = require("../src/marcie-trend-refresh.js");
 
@@ -12,7 +12,7 @@ const verifiedArticle = {
   title: "Cómo aprende el cerebro",
   subtitle: "Evidencia y práctica",
   blocks: [{ id: "b1", type: "paragraph", text: "Dormir contribuye a consolidar la memoria." }],
-  researchSources: [{ id: "s1", title: "Estudio", url: "https://example.edu/paper", qualityTier: 1, verificationStatus: "verified" }],
+  researchSources: [{ id: "s1", title: "Estudio", authors: ["Pérez, M."], year: "2026", publisher: "Revista de Educación", url: "https://example.edu/paper", qualityTier: 1, verificationStatus: "verified" }],
   articleClaims: [{ id: "c1", text: "Dormir contribuye a consolidar la memoria.", status: "supported", sourceIds: ["s1"] }],
   verification: { status: "verified", coverage: 100, contradictions: [] },
   seo: { title: "Cerebro y memoria", description: "Cómo el sueño interviene en la memoria.", slug: "cerebro-memoria", keywords: ["memoria"] }
@@ -23,9 +23,10 @@ test("evidence gate blocks incomplete and contradicted articles", () => {
   assert.ok(evidenceBlockers({ ...verifiedArticle, researchSources: [{ ...verifiedArticle.researchSources[0], verificationStatus: "legacy_unverified" }] }).includes("unverified_sources"));
   assert.ok(evidenceBlockers({ ...verifiedArticle, articleClaims: [{ status: "unsupported" }] }).includes("unsupported_claims"));
   assert.ok(evidenceBlockers({ ...verifiedArticle, verification: { status: "verified", coverage: 100, contradictions: ["conflicto"] } }).includes("contradictions_pending"));
+  assert.ok(evidenceBlockers({ ...verifiedArticle, researchSources: [{ ...verifiedArticle.researchSources[0], year: "" }] }).includes("incomplete_bibliographic_metadata"));
 });
 
-test("Aida publication gate requires its eight phases, three verified sources and three institutions", () => {
+test("Aida publication gate requires structure and verified evidence without a numeric source quota", () => {
   const phases = ["problem", "deepen", "agitate", "turn", "why", "change", "close"];
   const aidaArticle = {
     ...verifiedArticle,
@@ -40,6 +41,8 @@ test("Aida publication gate requires its eight phases, three verified sources an
       url: `https://source-${index + 1}.example.edu/paper`,
       domain: `source-${index + 1}.example.edu`,
       publisher: `Institución ${(index % 4) + 1}`,
+      authors: [`Autor ${index + 1}, A.`],
+      year: "2026",
       qualityTier: 1,
       verificationStatus: "verified"
     })),
@@ -47,10 +50,17 @@ test("Aida publication gate requires its eight phases, three verified sources an
     verification: { status: "verified", coverage: 100, contradictions: [] }
   };
   assert.deepEqual(evidenceBlockers(aidaArticle, { editorialMode: "aida" }), []);
-  assert.ok(evidenceBlockers({ ...aidaArticle, researchSources: aidaArticle.researchSources.slice(0, 2) }, { editorialMode: "aida" }).includes("aida_insufficient_verified_sources"));
-  assert.ok(evidenceBlockers({ ...aidaArticle, researchSources: aidaArticle.researchSources.map((source) => ({ ...source, publisher: "Una institución" })) }, { editorialMode: "aida" }).includes("aida_insufficient_institutions"));
+  assert.deepEqual(evidenceBlockers({ ...aidaArticle, researchSources: aidaArticle.researchSources.slice(0, 2) }, { editorialMode: "aida" }), []);
+  assert.deepEqual(evidenceBlockers({ ...aidaArticle, researchSources: aidaArticle.researchSources.map((source) => ({ ...source, publisher: "Una institución" })) }, { editorialMode: "aida" }), []);
   assert.ok(evidenceBlockers({ ...aidaArticle, blocks: aidaArticle.blocks.filter((block) => block.phase !== "turn") }, { editorialMode: "aida" }).includes("aida_structure_incompatible"));
   assert.ok(evidenceBlockers({ ...aidaArticle, blocks: [...aidaArticle.blocks].reverse() }, { editorialMode: "aida" }).includes("aida_structure_incompatible"));
+});
+
+test("legacy Aida closing is removed only when no custom brand line is configured", () => {
+  const legacy = "Aprender no es esforzarse más. Es aprender como el cerebro estaba hecho para aprender.";
+  const article = { blocks: [{ phase: "close", text: `Cierre pertinente. ${legacy}` }], aida: { brandLine: legacy } };
+  assert.equal(normalizeLegacyAidaClosing({}, article).blocks[0].text, "Cierre pertinente.");
+  assert.equal(normalizeLegacyAidaClosing({ editorialProfileSnapshot: { brandLine: "Marca propia." } }, article).blocks[0].text, article.blocks[0].text);
 });
 
 test("material title, body, sources and SEO changes produce a new content fingerprint", () => {

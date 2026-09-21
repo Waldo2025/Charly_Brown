@@ -7,9 +7,12 @@
 
 import { generateWithGemini, GEMINI_MODEL_OPTIONS, DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
 import { buildApiUrlPreferRemote, buildMarcieApiUrl } from "/js/api-client.js";
-import { getCurrentUser } from "./marcie-firebase.js";
-import { getActiveMarciePrompt } from "./marcie-prompt-settings.js?v=20260831r3";
+import { getDownloadURL, ref, uploadBytes } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import { getCurrentUser, storage } from "./marcie-firebase.js";
+import { getActiveMarciePrompt } from "./marcie-prompt-settings.js?v=20260908r9";
 import { parseMarcieJson } from "./marcie-json.js";
+import "../contracts/marcie-research-policy.js?v=20260908r9";
+import "../contracts/marcie-bibliography.js?v=20260908r9";
 
 export const DEFAULT_MARCIE_MODEL = DEFAULT_GEMINI_MODEL;
 const MARCIE_IMAGE_MODEL = "gemini-2.5-flash-image";
@@ -51,10 +54,13 @@ export function sanitizeTrustedSources(sources = []) {
     if (seen.has(normalizedUrl)) continue;
     seen.add(normalizedUrl);
     trusted.push({
+      journal: String(source?.journal || source?.journalTitle || ""),
+      volume: String(source?.volume || ""), issue: String(source?.issue || ""), pages: String(source?.pages || ""),
+      discoveredVia: source?.discoveredVia || [],
       id: String(source?.id || `source-${trusted.length + 1}`),
       title: String(source?.title || hostname),
       url: normalizedUrl,
-      authors: Array.isArray(source?.authors) ? source.authors.map(String) : String(source?.authors || source?.author || ""),
+      authors: Array.isArray(source?.authors) ? source.authors.map(author => typeof author === "object" ? author : String(author)) : String(source?.authors || source?.author || ""),
       year: String(source?.year || source?.publishedYear || ""),
       publishedAt: String(source?.publishedAt || source?.datePublished || ""),
       dateSource: String(source?.dateSource || "unknown"),
@@ -78,7 +84,7 @@ export function sanitizeTrustedSources(sources = []) {
       verifiedInstitutionalOrigin: HIGH_AUTHORITY_HOST_PATTERNS.some((pattern) => pattern.test(hostname))
     });
   }
-  return trusted.slice(0, 16);
+  return trusted;
 }
 
 function normalizedAttributionText(value = "") {
@@ -89,36 +95,24 @@ export function applyVerifiedAttributions(article = {}, dossier = {}) {
   const validSourceIds = new Set((dossier.sources || []).filter((source) => source?.verificationStatus === "verified").map((source) => String(source.id)));
   const references = (Array.isArray(dossier.attributedReferences) ? dossier.attributedReferences : [])
     .filter((reference) => reference?.verificationStatus === "verified" && validSourceIds.has(String(reference.sourceId)))
-    .slice(0, 6);
+    ;
   const directQuotes = references.filter((reference) => reference.type === "direct_quote");
   const paraphrases = references.filter((reference) => reference.type === "paraphrase");
-  const selectedReferences = [...new Set([directQuotes[0], paraphrases[0], ...references].filter(Boolean))].slice(0, 3);
+  const selectedReferences = [...new Set([directQuotes[0], paraphrases[0], ...references].filter(Boolean))];
+  const citationContext = { ...article, sources: dossier.sources || [], researchSources: dossier.sources || [], usedSources: [], supplementarySources: [], attributedReferences: references, researchDossier: { ...dossier, attributedReferences: references } };
+  globalThis.MarcieBibliography.assertIntegrity(citationContext);
   const blocks = (Array.isArray(article.blocks) ? article.blocks : []).flatMap((block) => {
-    const sourceIds = [...new Set((Array.isArray(block?.sourceIds) ? block.sourceIds : []).map(String).filter((id) => validSourceIds.has(id)))];
-    if (block?.type !== "quote") return [{ ...block, ...(sourceIds.length ? { sourceIds } : {}) }];
+    const sourceIds = [...new Set(globalThis.MarcieBibliography.blockIds(citationContext, block).map(id => globalThis.MarcieBibliography.resolveId(citationContext, id)).filter(id => validSourceIds.has(id)))];
+    if (block?.type !== "quote") return [{ ...block, sourceIds }];
     const normalizedText = normalizedAttributionText(block.text);
     const verifiedQuote = directQuotes.find((reference) => {
       const candidate = normalizedAttributionText(reference.text);
       return candidate && (candidate === normalizedText || normalizedText.includes(candidate));
     });
     if (verifiedQuote) {
-      return [{ ...block, text: verifiedQuote.text, attribution: `${verifiedQuote.personOrInstitution}${verifiedQuote.role ? `, ${verifiedQuote.role}` : ""}`, sourceIds: [String(verifiedQuote.sourceId)] }];
+      return [{ ...block, text: verifiedQuote.text, attribution: `${verifiedQuote.personOrInstitution} (${verifiedQuote.year || "s. f."})${verifiedQuote.locator ? `, ${verifiedQuote.locator}` : ""}`, sourceIds: [String(verifiedQuote.sourceId)] }];
     }
-    const paraphrase = references.find((reference) => reference.type === "paraphrase");
-    if (!paraphrase) return [];
-    return [{ ...block, type: "paragraph", text: `Según ${paraphrase.personOrInstitution}, ${paraphrase.text}`, sourceIds: [String(paraphrase.sourceId)] }];
-  });
-  const paragraphIndexes = blocks.map((block, index) => block?.type === "paragraph" && block?.phase !== "close" ? index : -1).filter((index) => index >= 0);
-  selectedReferences.forEach((reference, referenceIndex) => {
-    const referenceText = normalizedAttributionText(reference.text);
-    if (blocks.some((block) => normalizedAttributionText(block?.text).includes(referenceText))) return;
-    const targetIndex = paragraphIndexes[Math.min(referenceIndex, paragraphIndexes.length - 1)];
-    if (targetIndex == null || targetIndex < 0) return;
-    const sentence = reference.type === "direct_quote"
-      ? `${reference.personOrInstitution} lo expresa así: “${reference.text}”.`
-      : `Según ${reference.personOrInstitution}, ${reference.text}`;
-    const currentIds = Array.isArray(blocks[targetIndex].sourceIds) ? blocks[targetIndex].sourceIds : [];
-    blocks[targetIndex] = { ...blocks[targetIndex], text: `${blocks[targetIndex].text}\n\n${sentence}`.trim(), sourceIds: [...new Set([...currentIds, String(reference.sourceId)])] };
+    throw new Error("La cita textual generada no coincide con una frase verificada del documento. Reintenta la redacción.");
   });
   return { ...article, blocks, attributedReferences: selectedReferences };
 }
@@ -139,15 +133,15 @@ function groundingSourcesFromResponse(data = {}) {
   }));
 }
 
-export async function generateGroundedJson({ prompt, model = getConfiguredGeminiModel(), urls = [] } = {}) {
-  const tools = urls.length ? [{ urlContext: {} }] : [{ googleSearch: {} }];
-  const urlInstruction = urls.length ? `\nURLs que debes recuperar y comprobar:\n${urls.slice(0, 16).join("\n")}` : "";
+export async function generateGroundedJson({ prompt, model = getConfiguredGeminiModel(), urls = [], useResearchTools = true, maxOutputTokens = 8192 } = {}) {
+  const tools = !useResearchTools ? [] : urls.length ? [{ urlContext: {} }] : [{ googleSearch: {} }];
+  const urlInstruction = urls.length ? `\nURLs que debes recuperar y comprobar:\n${urls.join("\n")}` : "";
   const data = await authenticatedJsonRequest("/api/gemini/generate", {
     model,
     payload: {
       contents: [{ role: "user", parts: [{ text: `${prompt}${urlInstruction}` }] }],
       tools,
-      generationConfig: { maxOutputTokens: 8192 }
+      generationConfig: { maxOutputTokens: Math.max(8192, Number(maxOutputTokens) || 8192) }
     }
   });
   const parsed = parseJsonSafe(extractGeminiResponseText(data));
@@ -155,6 +149,8 @@ export async function generateGroundedJson({ prompt, model = getConfiguredGemini
 }
 
 export async function researchArticleEvidence({
+  searchPlatforms,
+  researchInstructions = [],
   topic = "",
   audience = "educators",
   mode = "marcie",
@@ -164,12 +160,13 @@ export async function researchArticleEvidence({
 } = {}) {
   const startedAt = performance.now();
   const response = await authenticatedJsonRequest("/api/marcie/evidence/research", {
-    topic: sanitizeTopicTitle(topic), audience, mode, minimumSources, region, period
+    topic: String(topic || "").trim(), audience, mode, minimumSources, region, period, searchPlatforms, researchInstructions
   });
   const dossier = response?.dossier || {};
-  const sources = sanitizeTrustedSources(dossier.sources || []).map((source) => ({ ...source, verificationStatus: "verified" }));
+  const sources = sanitizeTrustedSources(dossier.sources || []).filter(source => source.verificationStatus === "verified");
   return {
     schemaVersion: String(dossier.schemaVersion || "1.0"),
+    searchPlatforms: dossier.searchPlatforms ?? searchPlatforms,
     editorialMode: String(dossier.editorialMode || mode || "marcie"),
     topic: String(dossier.topic || topic || ""),
     summary: String(dossier.summary || ""),
@@ -179,7 +176,13 @@ export async function researchArticleEvidence({
       : [],
     facts: Array.isArray(dossier.facts) ? dossier.facts : [],
     sources,
+    analysisStatus: dossier.analysisStatus || "pending",
+    analysis: dossier.analysis || null,
+    researchInstructions: dossier.researchInstructions || researchInstructions,
+    researchRegion: dossier.researchRegion || region,
     historicalMilestones: Array.isArray(dossier.historicalMilestones) ? dossier.historicalMilestones : [],
+    platformResults: dossier.platformResults || [],
+    researchPolicyVersion: dossier.researchPolicyVersion || 1,
     attributedReferences: Array.isArray(dossier.attributedReferences) ? dossier.attributedReferences : [],
     researchPeriod: String(dossier.researchPeriod || period || "6m"),
     dateWindow: dossier.dateWindow || null,
@@ -258,6 +261,7 @@ async function authenticatedJsonRequest(path, body) {
     const knownMessages = {
       marcie_research_invalid_json: "La respuesta de tendencias llegó incompleta. Intenta actualizar nuevamente.",
       marcie_research_response_truncated: "La respuesta de tendencias fue demasiado extensa. Reduce los temas vigilados e inténtalo otra vez.",
+      marcie_research_timeout: "La investigación bibliográfica tardó demasiado. El artículo anterior se conservó; vuelve a intentarlo o acota el tema.",
       marcie_verification_timeout: "La comprobación de fuentes tardó demasiado. El artículo se conservó sin cambios; inténtalo nuevamente."
     };
     const error = new Error(String(data?.error?.message || data?.message || knownMessages[code] || code || `HTTP ${response.status}`));
@@ -278,18 +282,6 @@ function extractGeneratedImage(data = {}) {
     if (dataBase64 && /^image\//i.test(mimeType)) return { dataBase64, mimeType };
   }
   throw new Error("Gemini no devolvió una imagen para el artículo.");
-}
-
-function blobToBase64(blob) {
-  return blob.arrayBuffer().then((buffer) => {
-    const bytes = new Uint8Array(buffer);
-    const chunks = [];
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)));
-    }
-    return btoa(chunks.join(""));
-  });
 }
 
 async function optimizeImageForWeb({ dataBase64 = "", mimeType = "image/png" } = {}) {
@@ -318,16 +310,21 @@ async function optimizeImageForWeb({ dataBase64 = "", mimeType = "image/png" } =
   bitmap.close?.();
 
   const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
-  let optimizedBlob = await encode("image/webp", 0.84);
+  let optimizedBlob = await encode("image/webp", 0.82);
   let optimizedMimeType = "image/webp";
   if (!optimizedBlob || optimizedBlob.type !== "image/webp") {
-    optimizedBlob = await encode("image/jpeg", 0.86);
+    optimizedBlob = await encode("image/jpeg", 0.82);
     optimizedMimeType = "image/jpeg";
   }
   if (!optimizedBlob) throw new Error("No se pudo codificar la imagen optimizada.");
+  for (const quality of [0.74, 0.66, 0.58]) {
+    if (optimizedBlob.size <= 512 * 1024) break;
+    const candidate = await encode(optimizedMimeType, quality);
+    if (candidate) optimizedBlob = candidate;
+  }
 
   return {
-    dataBase64: await blobToBase64(optimizedBlob),
+    blob: optimizedBlob,
     mimeType: optimizedMimeType,
     width,
     height,
@@ -361,7 +358,7 @@ Subtítulo: "${String(article.subtitle || "").slice(0, 500)}"
 Audiencia: "${approachLabel || article.audience || "educators"}"
 ${approachDirection}
 Contexto del artículo:
-${articlePlainText(article)}
+${articlePlainText(article).slice(0, 600)}
 
 Dirección visual obligatoria:
 - Fotografía editorial conceptual, humana, contemporánea y de alta calidad.
@@ -394,28 +391,27 @@ Dirección visual obligatoria:
     `portada-${safeStorageSegment(resolvedApproachId, "enfoque")}-${Date.now()}.${extension}`
   ].join("/");
 
-  const uploaded = await authenticatedJsonRequest("/api/unidades/support-graphics/upload", {
-    path: storagePath,
-    mimeType: image.mimeType,
-    dataBase64: image.dataBase64,
-    metadata: {
-      role: "blog_article_cover",
-      subtema: title.slice(0, 180),
-      approachId: resolvedApproachId,
-      approachLabel: String(approachLabel || article.audience || resolvedApproachId).slice(0, 120),
-      optimizedForWeb: "true"
+  const storageRef = ref(storage, storagePath);
+  const uploadSnapshot = await uploadBytes(storageRef, image.blob, {
+    contentType: image.mimeType,
+    cacheControl: "public,max-age=31536000,immutable",
+    customMetadata: {
+      creator: "Asc",
+      copyright: "© Asc"
     }
   });
+  const downloadUrl = await getDownloadURL(uploadSnapshot.ref);
 
   return {
-    url: String(uploaded?.downloadUrl || "").trim(),
-    storagePath: String(uploaded?.storagePath || uploaded?.path || storagePath).trim(),
+    url: String(downloadUrl || "").trim(),
+    storagePath,
     mimeType: image.mimeType,
     width: image.width,
     height: image.height,
     byteSize: image.byteSize,
     metadataStripped: true,
     optimizedForWeb: true,
+    metadata: { creator: "Asc", copyright: "© Asc" },
     approachId: resolvedApproachId,
     approachLabel: String(approachLabel || article.audience || resolvedApproachId),
     model: MARCIE_IMAGE_MODEL,
@@ -572,7 +568,7 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.65,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 1200,
         responseMimeType: "application/json"
       }
     }
@@ -581,43 +577,215 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
   return parseJsonSafe(raw);
 }
 
-export async function refineBlogTopicWithGemini({ topic = "", specifications = [], model = getConfiguredGeminiModel() } = {}) {
+export async function refineBlogTopicWithGemini({ topic = "", specifications = [], audience = "educators", model = getConfiguredGeminiModel() } = {}) {
   const cleanTopic = sanitizeTopicTitle(topic);
+  const audienceLabels = {
+    educators: "docentes",
+    parents: "madres, padres y familias",
+    students: "estudiantes",
+    coordinators: "coordinadores académicos y directivos escolares"
+  };
+  const audienceLabel = audienceLabels[audience] || audienceLabels.educators;
   const constraints = Array.isArray(specifications) && specifications.length
     ? specifications.map((item) => `- ${String(item).trim()}`).join("\n")
     : "- Sin especificaciones adicionales.";
   const prompt = `
 ${getActiveMarciePrompt("topic_refinement")}
 
-Actúa como editor jefe de un blog educativo profesional. Perfecciona el tema proporcionado para convertirlo en una formulación clara, específica, atractiva y útil para generar cuatro enfoques editoriales dirigidos a docentes, estudiantes, familias y coordinadores académicos.
+Actúa como editor jefe de un blog educativo profesional. Mantén el Tema Central ("${cleanTopic}") y genera 6 propuestas de Títulos de Artículo redactadas específicamente para ${audienceLabel}, divididas en dos categorías:
+1. 3 Títulos con HOOK: Atractivos, centrados en curiosidad, beneficio directo, urgencia o gancho provocativo positivo.
+2. 3 Títulos con CONTRAHOOK: Contra-intuitivos, desafiantes de un mito común, contrapuntísticos o reflexivos.
 
-Tema original: "${cleanTopic}"
+Tema Central Original: "${cleanTopic}"
+Público objetivo exclusivo: ${audienceLabel}.
+Cada título debe reflejar sus necesidades, vocabulario, decisiones y contexto. No reutilices títulos genéricos pensados para otro público.
 Especificaciones:
 ${constraints}
 
-Devuelve solamente el tema perfeccionado en una sola línea, sin comillas, listas, explicaciones ni prefijos. Conserva la intención del usuario y no inventes datos.
+Responde ÚNICAMENTE con un objeto JSON válido con la siguiente estructura exacta:
+{
+  "topic": "${cleanTopic}",
+  "hookTitles": [
+    { "title": "Título Hook 1", "rationale": "Explicación breve de por qué engancha" },
+    { "title": "Título Hook 2", "rationale": "Explicación breve" },
+    { "title": "Título Hook 3", "rationale": "Explicación breve" }
+  ],
+  "contrahookTitles": [
+    { "title": "Título Contrahook 1", "rationale": "Explicación breve del mito o ángulo contrapuesto" },
+    { "title": "Título Contrahook 2", "rationale": "Explicación breve" },
+    { "title": "Título Contrahook 3", "rationale": "Explicación breve" }
+  ]
+}
   `.trim();
-  const raw = await generateWithGemini({
-    model,
-    prompt,
-    payload: {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 180 }
+
+  try {
+    const raw = await generateWithGemini({
+      model,
+      prompt,
+      payload: {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.75, maxOutputTokens: 1500, responseMimeType: "application/json" }
+      }
+    });
+    let parsed = parseJsonSafe(raw);
+    if (!parsed || typeof parsed !== "object") {
+      const match = String(raw || "").match(/\{[\s\S]*\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch (_) {}
+      }
     }
+    if (parsed && typeof parsed === "object") {
+      const hooks = Array.isArray(parsed.hookTitles) && parsed.hookTitles.length
+        ? parsed.hookTitles.slice(0, 3).map((h, i) => ({ title: String(h?.title || h || `Propuesta Hook ${i+1}`).trim(), rationale: String(h?.rationale || "Enfoque de gancho y curiosidad").trim() }))
+        : [
+          { title: `Cómo dominar ${cleanTopic} paso a paso`, rationale: "Enfoque práctico y orientado a resultados" },
+          { title: `La guía de ${cleanTopic} que ${audienceLabel} necesitan`, rationale: "Gancho de autoridad y completitud para el público elegido" },
+          { title: `5 claves comprobadas sobre ${cleanTopic}`, rationale: "Curiosidad y estructura ágil" }
+        ];
+      const contrahooks = Array.isArray(parsed.contrahookTitles) && parsed.contrahookTitles.length
+        ? parsed.contrahookTitles.slice(0, 3).map((c, i) => ({ title: String(c?.title || c || `Propuesta Contrahook ${i+1}`).trim(), rationale: String(c?.rationale || "Enfoque contrapuntístico y mito desmentido").trim() }))
+        : [
+          { title: `Por qué casi todo lo que sabes sobre ${cleanTopic} es un error`, rationale: "Desafío a la sabiduría convencional" },
+          { title: `El lado oculto de ${cleanTopic}: lo que la mayoría pasa por alto`, rationale: "Ángulo reflexivo y contraintuitivo" },
+          { title: `Antes de aplicar ${cleanTopic}, deberías saber esto`, rationale: "Advertencia ética y preventiva" }
+        ];
+      return {
+        topic: parsed.topic || cleanTopic,
+        hookTitles: hooks,
+        contrahookTitles: contrahooks
+      };
+    }
+    const cleanRawTitle = String(raw || "").replace(/^```(?:json|text)?/i, "").replace(/```$/i, "").replace(/^['"]|['"]$/g, "").trim();
+    return {
+      topic: cleanTopic,
+      hookTitles: [
+        { title: cleanRawTitle || `Estrategias esenciales para ${cleanTopic}`, rationale: "Propuesta de título directo y claro" },
+        { title: `Guía práctica de ${cleanTopic} con impacto real`, rationale: "Propuesta enfocada en aplicación y evidencia" },
+        { title: `Innovación y futuro en ${cleanTopic}`, rationale: "Perspectiva de tendencias pedagógicas" }
+      ],
+      contrahookTitles: [
+        { title: `Mitos y verdades sobre ${cleanTopic}`, rationale: "Cuestionamiento analítico de prácticas habituales" },
+        { title: `¿Realmente funciona ${cleanTopic}? Lo que dice la evidencia`, rationale: "Contrapunto basado en rigor e investigación" },
+        { title: `Los 3 errores más comunes al abordar ${cleanTopic}`, rationale: "Perspectiva crítica de prevención de fallos" }
+      ]
+    };
+  } catch (error) {
+    return {
+      topic: cleanTopic,
+      hookTitles: [
+        { title: `Claves prácticas para dominar ${cleanTopic}`, rationale: "Propuesta de aplicación inmediata" },
+        { title: `Guía completa sobre ${cleanTopic} para ${audienceLabel}`, rationale: "Estructura panorámica adaptada al público" },
+        { title: `Cómo aprovechar ${cleanTopic}: decisiones para ${audienceLabel}`, rationale: "Enfoque motivador y aplicable" }
+      ],
+      contrahookTitles: [
+        { title: `Lo que nadie te dice sobre ${cleanTopic}`, rationale: "Ángulo de revelación y análisis crítico" },
+        { title: `Mitos comunes en torno a ${cleanTopic}`, rationale: "Desmitificación con evidencia" },
+        { title: `¿Es ${cleanTopic} la solución definitiva? Una mirada rigurosa`, rationale: "Evaluación objetiva y matizada" }
+      ]
+    };
+  }
+}
+
+/**
+  * Limpieza y Humanización Anti-IA para eliminar clichés sintéticos y patrones detectables
+  */
+export function humanizeArticleContent(article = {}) {
+  if (!article || !Array.isArray(article.blocks)) return article;
+
+  const bannedPatterns = [
+    { regex: /\b(en el vertiginoso mundo (de|del))\b/gi, replacement: "En" },
+    { regex: /\b(un pilar fundamental|pilares fundamentales)\b/gi, replacement: "un elemento clave" },
+    { regex: /\b(es fundamental destacar que|es crucial destacar que|cabe señalar que)\b/gi, replacement: "Conviene notar que" },
+    { regex: /\b(en conclusión|en resumen|en resumidas cuentas)\b/gi, replacement: "Por todo ello" },
+    { regex: /\b(sin duda alguna|sin lugar a dudas)\b/gi, replacement: "Ciertamente" },
+    { regex: /\b(sumérgete en|adentrarse en)\b/gi, replacement: "Explora" },
+    { regex: /\b(desentrañar|paradigma|holístico)\b/gi, replacement: "comprender" }
+  ];
+
+  const cleanText = (text = "") => {
+    let result = String(text || "");
+    bannedPatterns.forEach(({ regex, replacement }) => {
+      result = result.replace(regex, replacement);
+    });
+    // Eliminar etiquetas residuales o metadatos de IA entre corchetes robóticos
+    result = result.replace(/\[\s*(IA|AI|Generado|Metadata|Prompt)[^\]]*\]/gi, "");
+    return result.trim();
+  };
+
+  const humanizedBlocks = article.blocks.map(block => {
+    if (!block) return block;
+    const cloned = { ...block };
+    if (typeof cloned.text === "string") cloned.text = cleanText(cloned.text);
+    if (typeof cloned.content === "string") cloned.content = cleanText(cloned.content);
+    if (Array.isArray(cloned.items)) {
+      cloned.items = cloned.items.map(item => typeof item === "string" ? cleanText(item) : item);
+    }
+    return cloned;
   });
-  return String(raw || "").replace(/^```(?:text)?/i, "").replace(/```$/i, "").replace(/^['"]|['"]$/g, "").trim();
+
+  return {
+    ...article,
+    title: cleanText(article.title),
+    subtitle: cleanText(article.subtitle),
+    excerpt: cleanText(article.excerpt),
+    blocks: humanizedBlocks,
+    humanizedAt: new Date().toISOString()
+  };
+}
+
+
+export function getAudienceEditorialDirective(audience = "educators") {
+  const aud = String(audience || "").toLowerCase();
+  if (aud === "students") {
+    return `
+=== DIRECTIVA INNEGOCIABLE DE ENFOQUE: ESTUDIANTES ===
+- Lector objetivo: El estudiante adolescente o joven universitario.
+- Persona gramatical: Dirígete DIRECTAMENTE AL ESTUDIANTE de "tú" (segunda persona singular: "cuando estudias", "tu concentración", "tus apuntes", "organiza tu tiempo", "pon a prueba tu memoria").
+- Tono: Cercano, empático, ágil, motivador y respetuoso. NUNCA infantilices ni uses tono condescendiente o paternalista.
+- Contexto vital: Sus métodos personales de estudio, cómo comprende su propio cerebro, autorregulación, evitar la procrastinación, técnicas prácticas de atención y bienestar mental.
+- PROHIBICIÓN TOTAL: NUNCA hables en tercera persona como si le hablaras a un adulto ("los estudiantes deben...", "para los jóvenes...") ni des consejos de crianza o didáctica docente. El artículo debe ser escrito por un mentor directo PARA el estudiante.`;
+  }
+  if (aud === "parents") {
+    return `
+=== DIRECTIVA INNEGOCIABLE DE ENFOQUE: PADRES Y FAMILIAS ===
+- Lector objetivo: Madres, padres y tutores familiares en el hogar.
+- Persona gramatical: Dirígete a las familias con calidez, comprensión y empatía ("en casa", "con tus hijos", "el acompañamiento familiar").
+- Tono: Práctico, desculpabilizador, cálido y comprensivo. Sin tecnicismos pedagógicos ni jerga curricular abrumadora.
+- Contexto vital: Situaciones cotidianas en el hogar, rutinas de sueño y tareas, convivencia, apoyo emocional del aprendizaje sin convertirlo en una batalla, y diálogo constructivo con la escuela.
+- PROHIBICIÓN TOTAL: Queda prohibido hablar de programación didáctica, rúbricas de evaluación escolar o dirigirte al lector como si fuera el maestro que califica al alumno.`;
+  }
+  if (aud === "coordinators") {
+    return `
+=== DIRECTIVA INNEGOCIABLE DE ENFOQUE: COORDINADORES Y DIRECTIVOS ===
+- Lector objetivo: Coordinadores académicos, directores escolares, jefes de estudio y líderes pedagógicos.
+- Persona gramatical: Colega directivo y líder estratégico.
+    - Tono: Profesional, reflexivo, sistémico, riguroso y orientado a la toma de decisiones institucionales. Emplea una densidad científica alta pero legible.
+    - Precisión científica: Integra el vocabulario editorial configurado sólo cuando el dossier lo respalde y el tema lo requiera. Define cada término especializado al introducirlo y evita jerga ornamental y neuromitos.
+    - Contexto vital: Liderazgo pedagógico, acompañamiento docente, diseño y alineación curricular, implementación institucional basada en evidencia, clima escolar e indicadores observables de mejora. Traduce cada concepto científico en criterios profesionales, seguimiento e indicadores.
+- PROHIBICIÓN TOTAL: Queda estrictamente prohibido dirigirse a padres de familia, hablar de "tus hijos" o centrarse únicamente en la anécdota de un aula individual.`;
+  }
+  return `
+=== DIRECTIVA INNEGOCIABLE DE ENFOQUE: DOCENTES Y PROFESORES ===
+- Lector objetivo: Maestros, profesores y docentes de aula en ejercicio.
+- Persona gramatical: De colega docente a colega docente ("en nuestras clases", "en el aula", "con tus alumnos").
+  - Tono: Didáctico, reflexivo, empático, riguroso y con profundo respeto por la realidad cotidiana del aula. Emplea una densidad científica moderada y accesible.
+  - Precisión científica: Integra el vocabulario editorial configurado sólo cuando el dossier lo respalde y el tema lo requiera. Define cada término especializado al introducirlo y conéctalo con una decisión pedagógica concreta; evita jerga ornamental y neuromitos.
+  - Contexto vital: Gestión de aula, diseño de actividades, dinámicas pedagógicas, evaluación formativa, atención a la diversidad, interacción directa con estudiantes y bienestar docente.
+- PROHIBICIÓN TOTAL: No trates al lector como si fuera el padre del alumno en casa ni como un directivo que supervisa presupuestos. Enfócate 100% en la práctica pedagógica real.`;
 }
 
 /**
  * 3. Redacta el ArticleDocument estructurado completo con PNL, Rapport, Hook, Pregunta Detonante y Fuentes Diversificadas
  */
-export async function draftArticleWithGemini({ title = "", topic = "", audience = "educators", brief = "", model = getConfiguredGeminiModel(), researchDossier = null, verifyEvidence = true, editorialMode = "marcie" } = {}) {
+export async function draftArticleWithGemini({ title = "", topic = "", audience = "educators", brief = "", model = getConfiguredGeminiModel(), researchDossier = null, verifyEvidence = true, editorialMode = "marcie", promptOverrides = null } = {}) {
+  const promptText = id => promptOverrides?.[id] ?? getActiveMarciePrompt(id);
   const startedAt = performance.now();
   const now = new Date();
   const dateStr = now.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
 
   const cleanTitle = sanitizeTopicTitle(title || topic);
   const cleanTopic = sanitizeTopicTitle(topic || cleanTitle);
+  const audienceDirective = getAudienceEditorialDirective(audience);
   let dossier = researchDossier;
   if (!dossier) {
     try {
@@ -627,164 +795,31 @@ export async function draftArticleWithGemini({ title = "", topic = "", audience 
       dossier = { facts: [], sources: [], historicalMilestones: [] };
     }
   }
-  const dossierText = JSON.stringify({ facts: dossier.facts || [], sources: dossier.sources || [], historicalMilestones: dossier.historicalMilestones || [], attributedReferences: dossier.attributedReferences || [] }).slice(0, 22000);
+  globalThis.MarcieResearchPolicy.assertReady(dossier);
+  const dossierText = JSON.stringify({ facts: dossier.facts || [], sources: dossier.sources || [], historicalMilestones: dossier.historicalMilestones || [], attributedReferences: dossier.attributedReferences || [] });
 
   const prompt = `
-${getActiveMarciePrompt("article_drafting")}
-${getActiveMarciePrompt("source_research_policy")}
-${getActiveMarciePrompt("source_citation_policy")}
+${audienceDirective}
 
-Eres un autor y ensayista editorial de clase mundial especializado en pedagogía, neuroeducación y comunicación persuasiva con Programación Neurolingüística (PNL).
+REGLAS DE PRODUCCIÓN Y ESTILO EDITORIAL:
+${promptText("article_drafting")}
+${promptText("source_research_policy")}
+${promptText("source_citation_policy")}
 
-Tu misión es redactar un artículo largo, elocuente, magnético, humano y de altísimo rigor sobre:
-Tema central: "${cleanTopic}"
-Título provisional: "${cleanTitle}"
-Brief editorial: "${brief || cleanTopic}"
-Audiencia objetivo: "${audience}" (donde: educators = Docentes; students = Estudiantes; parents = Padres de familia y tutores; coordinators = Coordinadores académicos, directores y líderes escolares)
-Dossier de evidencia recuperada (única base permitida para datos factuales):
+Redacta un artículo completo en español natural, fiel al tema central: ${cleanTopic}.
+Título asignado a este artículo: ${cleanTitle}.
+Audiencia obligatoria: ${audience}.
+Instrucciones específicas del usuario: ${brief || cleanTopic}.
+
+Usa exclusivamente el dossier para afirmaciones factuales. Incluye sourceIds en cada bloque respaldado, también para paráfrasis y contexto. No inventes autores, fechas, citas ni URLs. Las citas directas deben coincidir literalmente con attributedReferences; atribuye autor y año. Sin cita textual comprobada, usa paráfrasis atribuida.
+Organiza la estructura según el tema y la audiencia, sin rellenar plantillas fijas. Conserva la extensión solicitada. Devuelve solo JSON:
+Para citas en línea utiliza [sourceId] con el ID exacto del documento del dossier; la interfaz lo mostrará como autor o autores y año. No escribas [reference-1], numeraciones ni atribuciones inventadas. Cada cita debe resolver a un artículo, página o libro concreto. Si un documento cita a otro autor que no consultaste directamente, señala la atribución secundaria (como se citó en) y enlaza el documento efectivamente consultado, no inventes una referencia al original.
+{"schemaVersion":"1.0","title":"","subtitle":"","excerpt":"","audience":"${audience}","readingTimeMinutes":6,"tags":[],"blocks":[{"id":"b1","type":"paragraph|heading|quote|bulletList","text":"","level":"h2|h3","items":[],"attribution":"","sourceIds":[]}],"seo":{"title":"","description":"","keywords":[],"slug":""}}
+Dossier completo de contexto y evidencia (la bibliografía se construye desde estos registros):
 ${dossierText}
-
-═══════════════════════════════════════════════════════════════════
-🎯 REGLAS EDITORIALES, IDIOMÁTICAS Y DE PNL DE OBLIGATORIO CUMPLIMIENTO:
-═══════════════════════════════════════════════════════════════════
-
-1. 🌐 PUREZA Y CALIDAD DEL IDIOMA (100% ESPAÑOL CORRECTO Y NATURAL):
-   - Redacta absolutamente TODO el artículo en ESPAÑOL IMPECABLE.
-   - PROHIBICIÓN TOTAL DE SPANGLISH O ANGLICISMOS: Jamás uses palabras en inglés mezcladas en oraciones en español (como 'felt', 'tips', 'hacks', 'feelings', 'feedback', 'inputs', etc. Utiliza sus equivalentes precisos en español: 'sentido', 'consejos', 'estrategias', 'emociones', 'retroalimentación', 'aportes').
-   - Para la audiencia de estudiantes: usa un tuteo cercano, empático, fresco y dinámico, pero con una prosa en español pulcra, elocuente y motivadora.
-
-2. ⚡ GANCHO INICIAL Y PREGUNTA DETONANTE OBLIGATORIA:
-   - El artículo y su primer bloque de texto DEBEN COMENZAR OBLIGATORIAMENTE con una PREGUNTA DETONANTE y disruptiva que sacuda al lector y plantee un dilema inmediato.
-   - Tras la pregunta, genera un RAPPORT instantáneo validando la experiencia, las dudas, el cansancio o los anhelos reales del lector en su día a día.
-
-3. 🧠 PNL, CALIBRACIÓN SENSORIAL (VAK) Y RETENCIÓN:
-   - Emplea predicados sensoriales en español (Visual: lo que se ve en el entorno; Auditivo: lo que se escucha en las conversaciones cotidianas; Kinestésico: lo que se siente de forma tangible).
-   - Maneja bucles de intriga (open loops) para que la lectura sea adictiva y fluida de principio a fin.
-
-4. 🎭 CALIBRACIÓN RIGUROSA POR AUDIENCIA:
-   - Si audience === "educators" (Docentes):
-     * Tono: Colegiado, empático, motivador, profundamente reflexivo y enfocado en devolver la alegría de enseñar y transformar el aula.
-   - Si audience === "students" (Estudiantes):
-     * Tono: Cercano, dinámico, directo (tuteo fresco y respetuoso), cero condescendiente; enfocado en estrategias prácticas de estudio, autonomía y bienestar.
-   - Si audience === "parents" (Padres y tutores):
-     * Tono: Cálido, tranquilizador, orientador y cómplice; enfocado en tender puentes en el hogar sin batallas.
-   - Si audience === "coordinators" (Coordinación y dirección escolar):
-     * Tono: Profesional, estratégico, neuropedagógico y accesible; escribe para coordinadores académicos, directores, subdirectores, jefes de estudio y líderes pedagógicos.
-     * Conecta la evidencia disponible con decisiones institucionales sobre observación y acompañamiento de aula, desarrollo profesional docente, alineación curricular, inclusión, clima escolar y seguimiento de resultados.
-     * Usa con rigor conceptos pertinentes como atención, memoria de trabajo, carga cognitiva, funciones ejecutivas, autorregulación, metacognición y neuroplasticidad. Inclúyelos solo cuando el dossier los respalde y explícalos sin neuromitos, determinismo cerebral ni promesas pseudocientíficas.
-     * Formula acciones para equipos de liderazgo e indicadores observables de implementación; no redactes consejos domésticos.
-     * PROHIBIDO dirigirse a madres o padres, hablar de "tus hijos", usar escenas familiares como eje o reciclar el tono cálido-doméstico de audience === "parents".
-
-5. 📚 EVIDENCIA RECUPERADA:
-   - Usa exclusivamente hechos y páginas concretas presentes en el dossier recuperado.
-   - No inventes citas, títulos, publicaciones, años, DOI, autores ni URLs.
-   - Si un dato no está en el dossier, omítelo o exprésalo como interpretación no factual.
-   - Integra entre 2 y 3 referencias atribuidas del campo attributedReferences cuando estén disponibles: combina citas textuales verificadas y paráfrasis naturales del tipo "Según X...".
-   - Una cita textual solo puede reproducir exactamente el campo text de una referencia direct_quote, con su personOrInstitution y sourceId. Nunca fabriques una frase inspiradora ni una atribución.
-   - Cada bloque que use una afirmación, paráfrasis o cita debe incluir "sourceIds" con los IDs exactos del dossier que lo respaldan.
-
-6. 🚫 PROHIBICIÓN TOTAL DE META-LENGUAJE:
-   - ESTÁ TOTALMENTE PROHIBIDO usar frases como: "En esta nueva sesión editorial", "En este artículo", "A continuación veremos", "En esta entrega", "Como IA".
-   - El contenido publicable debe ser prosa editorial normal y limpia. No incluyas referencias al proceso de generación, avisos sobre IA, instrucciones del prompt, etiquetas internas, metadatos editoriales, firmas codificadas, marcas de agua, secuencias ocultas ni caracteres invisibles.
-   - No alteres palabras mediante Unicode engañoso ni insertes códigos destinados a influir en clasificadores o detectores. La naturalidad debe surgir de una redacción original, específica, rigurosa y adaptada a la audiencia.
-   - El esquema JSON solicitado al final es solamente el formato técnico de transporte del editor; nunca menciones esa estructura dentro del título, subtítulo, extracto o bloques del artículo.
-
-7. 📜 ESTRUCTURA AMPLIA Y RICA (7 A 9 BLOQUES SUSTANCIALES):
-   - Cada párrafo debe tener entre 4 y 7 oraciones profundas y bien argumentadas.
-   - Estructura requerida en "blocks":
-     1) [paragraph] Apertura obligatoria con Pregunta Detonante + Hook + Rapport PNL.
-     2) [paragraph] Profundización en el dilema o punto de dolor real del lector con predicados sensoriales.
-     3) [quote] Cita breve comprobada presente en attributedReferences; si no existe una cita directa verificada, usa un párrafo de paráfrasis "Según X".
-     4) [heading h3] Subtítulo conceptual que plantea un giro de perspectiva.
-     5) [paragraph] Desarrollo profundo de la propuesta o metodología transformadora.
-     6) [list] Lista de 4 a 5 estrategias prácticas y detalladas con explicaciones paso a paso.
-     7) [heading h3] Subtítulo sobre el impacto tangible o caso de aplicación.
-     8) [paragraph] Caso práctico o ejemplo de aplicación en la vida cotidiana.
-     9) [paragraph] Cierre reflexivo inspirador con un llamado a la acción consciente que empodera al lector.
-
-8. ✍️ ESTILO Y FORMATO DE TEXTO INLINE (MARKDOWN):
-   - Dentro de los campos de texto (\`text\` e \`items\`), DEBES usar formato Markdown para dar riqueza visual a la lectura.
-   - Usa **negritas** (\`**concepto clave**\`) para términos importantes, ideas centrales o pasos críticos.
-   - Usa *cursivas* (\`*enfoque*\`) para enfatizar emociones, preguntas introspectivas, matices o palabras especiales.
-   - Aplícalo de manera elegante y equilibrada a lo largo de todo el artículo.
-
-Responde ÚNICAMENTE un JSON válido con esta estructura:
-{
-  "schemaVersion": "1.0",
-  "title": "Título definitivo magnético y revelador (NUNCA incluir 'Nueva sesión')",
-  "subtitle": "Subtítulo elocuente que anticipa el impacto práctico del artículo",
-  "excerpt": "Resumen impactante en una frase persuasiva con gancho.",
-  "audience": "${audience}",
-  "category": "Educación e Innovación",
-  "readingTimeMinutes": 7,
-  "publishedDateText": "${dateStr}",
-  "tags": ["Educación", "Innovación", "Aprendizaje", "Pedagogía"],
-  "blocks": [
-    {
-      "id": "b1",
-      "type": "paragraph",
-      "text": "¿Pregunta detonante inicial?... (Párrafo inmersivo con rapport PNL y validación emocional, 100% en español)"
-    },
-    {
-      "id": "b2",
-      "type": "paragraph",
-      "text": "Párrafo que explora el dilema real y conecta sensorialmente con la vivencia del lector..."
-    },
-    {
-      "id": "b3",
-      "type": "quote",
-      "text": "Frase memorable y potente sobre el arte de educar y aprender...",
-      "attribution": "Persona o institución exacta del dossier",
-      "sourceIds": ["id exacto del dossier"]
-    },
-    {
-      "id": "b4",
-      "type": "heading",
-      "level": "h3",
-      "text": "Subtítulo del giro de perspectiva"
-    },
-    {
-      "id": "b5",
-      "type": "paragraph",
-      "text": "Desarrollo profundo del método o enfoque transformador..."
-    },
-    {
-      "id": "b6",
-      "type": "bulletList",
-      "items": [
-        "Estrategia 1: Explicación detallada, accionable y fundamentada.",
-        "Estrategia 2: Explicación detallada, accionable y fundamentada.",
-        "Estrategia 3: Explicación detallada, accionable y fundamentada.",
-        "Estrategia 4: Explicación detallada, accionable y fundamentada."
-      ]
-    },
-    {
-      "id": "b7",
-      "type": "heading",
-      "level": "h3",
-      "text": "Subtítulo de aplicación tangible en la práctica"
-    },
-    {
-      "id": "b8",
-      "type": "paragraph",
-      "text": "Párrafo que ilustra la aplicación cotidiana y cómo cambia la experiencia real..."
-    },
-    {
-      "id": "b9",
-      "type": "paragraph",
-      "text": "Párrafo final de cierre, empoderamiento reflexivo y llamado a la acción consciente..."
-    }
-  ],
-  "sources": [{"id":"id exacto del dossier","title":"título recuperado","url":"URL concreta recuperada"}],
-  "seo": {
-    "title": "Título SEO optimizado",
-    "description": "Meta descripción atractiva (máx 155 caracteres) con gancho emocional.",
-    "keywords": ["educación", "aprendizaje", "innovación", "pedagogía"]
-  }
-}
 `.trim();
 
-  console.log(`[MarcieGemini] Redactando artículo maestro con PNL, fuentes diversas y ${model}...`);
+  console.log(`[MarcieGemini] Redactando artículo maestro para ${audience} con PNL, fuentes diversas y ${model}...`);
   const raw = await generateWithGemini({
     model,
     prompt,
@@ -806,8 +841,14 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
   parsed = applyVerifiedAttributions(parsed, dossier);
   parsed.sources = sanitizeTrustedSources(dossier.sources || []).filter((source) => source.verificationStatus === "verified");
   parsed.researchSources = parsed.sources;
+  parsed.searchPlatforms = dossier.searchPlatforms;
+  parsed.researchRegion = dossier.researchRegion;
+  parsed.usedSources = [...parsed.sources];
+  parsed.usedSourceIds = parsed.sources.map(source => source.id);
+  parsed.sourceCitationStyle = "apa";
   parsed.researchDossier = { facts: dossier.facts || [], historicalMilestones: dossier.historicalMilestones || [], attributedReferences: dossier.attributedReferences || [], researchedAt: dossier.researchedAt || new Date().toISOString(), verifiedSourceCount: dossier.verifiedSourceCount || parsed.sources.length, targetSourceCount: dossier.targetSourceCount || 6, verificationStatus: dossier.verificationStatus || "blocked" };
   parsed.editorialMode = editorialMode;
+  Object.assign(parsed.researchDossier, { analysisStatus: dossier.analysisStatus, analysis: dossier.analysis, platformResults: dossier.platformResults, researchInstructions: dossier.researchInstructions, researchRegion: dossier.researchRegion, searchPlatforms: dossier.searchPlatforms, researchPolicyVersion: dossier.researchPolicyVersion });
   parsed.generationTelemetry = { model, durationMs: Math.round(performance.now() - startedAt), retrievedUrls: parsed.sources.map((source) => source.url), searches: dossier.telemetry?.searches || 0 };
   return verifyEvidence ? verifyArticleEvidence({ article: parsed, topic: cleanTopic }) : parsed;
 }
@@ -838,7 +879,9 @@ Evalúa:
 3. Si el tono está perfectamente calibrado para ${article.audience}.
 4. Si evita frases cliché o meta-lenguaje tipo "en este artículo".
 5. Diversidad y pertinencia de las fuentes citadas.
-6. Oportunidades de mejora en claridad y ritmo.
+  6. Oportunidades de mejora en claridad y ritmo.
+  7. Para docentes, presencia de vocabulario científico moderado, explicado y aplicado al aula; para coordinadores, precisión científica profesional conectada con currículo, acompañamiento e indicadores institucionales.
+  8. Ausencia de neuromitos, tecnicismos sin respaldo o jerga científica ornamental. No exijas anatomía cerebral cuando el tema o el dossier no la justifiquen.
 
 Responde ÚNICAMENTE un JSON válido con esta estructura:
 {
@@ -873,7 +916,7 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.25,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 1800,
         responseMimeType: "application/json"
       }
     }

@@ -1,3 +1,5 @@
+const researchPolicy = require("./marcie-research-policy.js");
+const bibliography = require("./marcie-bibliography.js");
 const crypto = require("node:crypto");
 const { getAdminServices } = require("./common.js");
 const { createVertexClient, buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js");
@@ -6,13 +8,20 @@ const { verifyCandidateSources } = require("./marcie-source-verifier.js");
 const TREND_SCHEMA_VERSION = 6;
 const DEFAULT_SETTINGS = { cadence: "weekly", region: "MX", timezone: "America/Cancun", discoveryMode: "general_education_brain" };
 const AIDA_PHASES = ["headline", "problem", "deepen", "agitate", "turn", "why", "change", "close"];
-const AIDA_MINIMUM_VERIFIED_SOURCES = 3;
-const AIDA_MINIMUM_INDEPENDENT_INSTITUTIONS = 3;
-const AIDA_TARGET_VERIFIED_SOURCES = 8;
+const RESEARCH_DEADLINE_MS = 510_000;
 const EVIDENCE_VERIFY_DEADLINE_MS = 105_000;
 const RESEARCH_PERIOD_DAYS = Object.freeze({ "24h": 1, "7d": 7, "1m": 30, "3m": 90, "6m": 180, "12m": 365 });
 
 function clampText(value, max = 1000) { return String(value == null ? "" : value).trim().slice(0, max); }
+function stableSourceId(url) {
+  let key = String(url || "").trim();
+  try {
+    const parsed = new URL(key); parsed.hash = "";
+    ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"].forEach(name => parsed.searchParams.delete(name));
+    parsed.searchParams.sort(); key = parsed.toString();
+  } catch (_) {}
+  return "source-" + crypto.createHash("sha256").update(key).digest("hex").slice(0, 20);
+}
 function withDeadline(work, timeoutMs, code) {
   let timer;
   const deadline = new Promise((_resolve, reject) => {
@@ -91,7 +100,7 @@ function parseJsonResponse(response = {}) {
   }
 }
 
-async function generateJson({ client, prompt, tools = [] }) {
+async function generateJson({ client, prompt, tools = [], maxOutputTokens = 8192 }) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const retryInstruction = attempt
@@ -102,7 +111,7 @@ async function generateJson({ client, prompt, tools = [] }) {
       payload: {
         contents: [{ role: "user", parts: [{ text: `${prompt}${retryInstruction}` }] }],
         ...(tools.length ? { tools } : {}),
-        generationConfig: { maxOutputTokens: 8192, ...(tools.length ? {} : { responseMimeType: "application/json" }) }
+        generationConfig: { maxOutputTokens, ...(tools.length ? {} : { responseMimeType: "application/json" }) }
       }
     }));
     try {
@@ -123,12 +132,12 @@ function groundingSources(response = {}) {
 }
 
 function pageAssessmentPrompt(context, pages) {
-  return `Actúa como verificador documental estricto. Decide si cada página recuperada respalda de forma directa al menos una afirmación, señal o antecedente concreto del CONTEXTO; no necesita respaldar el artículo completo. No valides por título, dominio o reputación. Si el texto no contiene ningún dato pertinente, es tangencial o contradice el contexto, recházalo. No inventes citas ni localizadores.\nCONTEXTO:\n${clampText(context, 12000)}\nPÁGINAS RECUPERADAS:\n${pages.map((page) => `ID ${page.id}\nTÍTULO: ${page.retrievedTitle}\nURL FINAL: ${page.finalUrl}\nTEXTO: ${page.text.slice(0, 4200)}`).join("\n\n")}\nDevuelve SOLO JSON: {"assessments":[{"id":"ID","status":"verified|rejected","reason":"content_mismatch|verification_error","supportSummary":"qué información concreta respalda","locator":"encabezado o sección identificable","supports":["summary","signal:0"]}]}`;
+  return `Actúa como verificador documental estricto. Decide si cada página recuperada respalda de forma directa al menos una afirmación, señal o antecedente concreto del CONTEXTO; no necesita respaldar el artículo completo. No valides por título, dominio o reputación. Si el texto no contiene ningún dato pertinente, es tangencial o contradice el contexto, recházalo. No inventes citas ni localizadores.\nCONTEXTO:\n${clampText(context, 12000)}\nPÁGINAS RECUPERADAS:\n${pages.map((page) => `ID ${page.id}\nTÍTULO: ${page.retrievedTitle}\nURL FINAL: ${page.finalUrl}\nTEXTO: ${page.text.slice(0, 6000)}`).join("\n\n")}\nDevuelve SOLO JSON: {"assessments":[{"id":"ID","status":"verified|rejected","reason":"content_mismatch|verification_error","supportSummary":"qué información concreta respalda","locator":"encabezado o sección identificable","supports":["summary","signal:0"]}]}`;
 }
 
 function createSourceAssessor(client) {
   return async ({ context, pages }) => {
-    const { parsed } = await generateJson({ client, prompt: pageAssessmentPrompt(context, pages) });
+    const { parsed } = await generateJson({ client, prompt: pageAssessmentPrompt(context, pages), maxOutputTokens: 2048 });
     return Array.isArray(parsed.assessments) ? parsed.assessments : [];
   };
 }
@@ -139,11 +148,12 @@ function normalizedComparableText(value = "") {
 
 async function extractAttributedReferences({ client, verifiedSources = [], retrievedPages = [] } = {}) {
   const pagesById = new Map(retrievedPages.map((page) => [String(page.id), page]));
-  const usable = verifiedSources.map((source) => ({ source, page: pagesById.get(String(source.id)) })).filter(({ page }) => page).slice(0, 8);
+  const usable = verifiedSources.map((source) => ({ source, page: pagesById.get(String(source.id)) })).filter(({ page }) => page);
   if (!usable.length) return [];
   const prompt = `Extrae referencias atribuibles para un artículo educativo. Devuelve frases textuales solo cuando aparezcan literalmente en la página y limita cada una a 25 palabras. También puedes proponer paráfrasis fieles iniciables como "Según X". La persona o institución debe aparecer en la página o en sus metadatos. No inventes cargos, autores ni frases.\nFUENTES:\n${usable.map(({ source, page }) => `ID ${source.id}\nAUTORÍA: ${(Array.isArray(source.authors) ? source.authors : [source.authors]).filter(Boolean).join(", ")}\nINSTITUCIÓN: ${source.publisher || source.domain}\nTEXTO: ${page.text.slice(0, 2800)}`).join("\n\n")}\nSOLO JSON: {"attributedReferences":[{"personOrInstitution":"","role":"","text":"","type":"direct_quote|paraphrase","sourceId":"","locator":""}]}`;
-  const parsed = (await generateJson({ client, prompt })).parsed;
+  const parsed = (await generateJson({ client, prompt, maxOutputTokens: 2048 })).parsed;
   const sourcesById = new Map(verifiedSources.map((source) => [String(source.id), source]));
+  const quotedWords = new Map();
   return (Array.isArray(parsed.attributedReferences) ? parsed.attributedReferences : []).map((item, index) => {
     const sourceId = String(item?.sourceId || "");
     const source = sourcesById.get(sourceId);
@@ -157,10 +167,15 @@ async function extractAttributedReferences({ client, verifiedSources = [], retri
     const pageText = normalizedComparableText(page.text);
     if (!personOrInstitution || !text || (!knownNames.some((name) => name && (name.includes(normalizedPerson) || normalizedPerson.includes(name))) && !pageText.includes(normalizedPerson))) return null;
     if (type === "direct_quote" && (text.split(/\s+/).filter(Boolean).length > 25 || !pageText.includes(normalizedComparableText(text)))) return null;
+    if (type === "direct_quote") {
+      const count = (quotedWords.get(sourceId) || 0) + text.split(/\s+/).length;
+      if (count > 25) return null;
+      quotedWords.set(sourceId, count);
+    }
     const rawRole = clampText(item.role, 200);
     const role = rawRole && pageText.includes(normalizedComparableText(rawRole)) ? rawRole : "";
-    return { id: `reference-${index + 1}`, personOrInstitution, role, text, type, sourceId, locator: clampText(item.locator || source.locator, 300), verificationStatus: "verified" };
-  }).filter(Boolean).slice(0, 6);
+    return { id: `reference-${index + 1}`, personOrInstitution, year: source.year || "s. f.", role, text, type, sourceId, locator: clampText(item.locator || source.locator, 300), verificationStatus: "verified" };
+  }).filter(Boolean);
 }
 
 function audienceResearchLenses(audience = "educators") {
@@ -304,10 +319,12 @@ async function refreshMarcieTrends({ now = new Date(), force = false, settingsOv
 }
 
 async function researchArticleEvidenceServer({
+  searchPlatforms,
+  researchInstructions = [],
   topic = "",
   audience = "educators",
   mode = "marcie",
-  minimumSources = 6,
+  minimumSources,
   region = "MX",
   period = "6m",
   dependencies = {}
@@ -316,19 +333,40 @@ async function researchArticleEvidenceServer({
   const now = dependencies.now instanceof Date ? dependencies.now : new Date();
   const dateWindow = researchDateWindow(period, now);
   const editorialMode = normalizeToken(mode) === "aida" ? "aida" : "marcie";
-  const requestedMinimum = Math.max(4, Math.min(12, Number(minimumSources) || 6));
-  const researchLenses = audienceResearchLenses(audience);
-  const generatedBatches = await Promise.all(researchLenses.map(async (lens, batchIndex) => {
-    const prompt = editorialMode === "aida"
-      ? `Investiga de forma integral el tema "${clampText(topic, 500)}" para ${audience}, región ${clampText(region, 80)}. VENTANA ACTUAL OBLIGATORIA: desde ${dateWindow.from.slice(0, 10)} hasta ${dateWindow.to.slice(0, 10)} (${dateWindow.period}). Toda fuente marcada current y toda señal actual debe haber sido publicada dentro de esas fechas; no presentes información anterior como actualidad. Las fuentes anteriores solo se permiten como historical para explicar un antecedente o hito explícito y nunca cuentan como evidencia reciente. El tema indicado por el usuario es el centro de la investigación: no lo reemplaces por ciencia o historia. ENFOQUE DE ESTA BÚSQUEDA: ${lens} Propón seis páginas concretas de dominios independientes. Cada URL debe apuntar a una página con contenido legible, no a una portada, buscador, visor vacío ni ruta inventada. Cubre hechos y señales pertinentes; añade ciencia o evolución histórica únicamente cuando exista evidencia. No inventes autores, fechas, métricas, científicos ni descubrimientos. SOLO JSON: {"summary":"síntesis integral","facts":[{"id":"fact-1","claim":"","sourceIds":["source-1"],"risk":"low|medium|high"}],"currentSignals":[{"id":"signal-1","signal":"cambio comprobable dentro de la ventana","sourceIds":["source-1"]}],"sources":[{"id":"source-1","title":"","url":"https://pagina-concreta","authors":[""],"publishedAt":"fecha ISO comprobable","publisher":"","doi":"","sourceType":"paper|official|science_magazine|education_blog","evidenceRole":"current|historical"}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["source-1","source-2"]}]}`
-      : `Investiga el tema "${clampText(topic, 500)}" para ${audience}, región ${clampText(region, 80)}. VENTANA ACTUAL: desde ${dateWindow.from.slice(0, 10)} hasta ${dateWindow.to.slice(0, 10)} (${dateWindow.period}). Las fuentes actuales deben estar dentro de esa ventana. Se permiten fuentes anteriores únicamente como historical para antecedentes o voces influyentes; nunca las presentes como actualidad. ${lens} Encuentra entre ${requestedMinimum} y 12 páginas específicas. No inventes rutas, autores, fechas, frases o descubrimientos. SOLO JSON: {"summary":"síntesis editorial","facts":[{"id":"fact-1","claim":"","sourceIds":["source-1"],"risk":"low|medium|high"}],"currentSignals":[{"id":"signal-1","signal":"señal comprobable dentro de la ventana","sourceIds":["source-1"]}],"sources":[{"id":"source-1","title":"","url":"https://pagina-concreta","authors":[""],"publishedAt":"fecha ISO comprobable","publisher":"","doi":"","sourceType":"paper|official|science_magazine|education_blog","evidenceRole":"current|historical"}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["source-1"]}]}`;
-    const generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }] });
+  const requestedMinimum = researchPolicy.target({ editorialMode, editorialProfileSnapshot: { minimumSources } });
+  const platformResults = [];
+  const selectedPlatforms = researchPolicy.selection({ searchPlatforms });
+  if (!selectedPlatforms.length) throw new Error("Selecciona al menos una plataforma o activa Otros sitios fiables.");
+  const researchLenses = researchPolicy.platforms.filter(platform => selectedPlatforms.includes(platform.id)).map(platform => ({
+    ...platform,
+    instruction: "Busca explícitamente en " + platform.name + " mediante " + platform.domains.map(domain => "site:" + domain).join(" OR ") + ". Sigue registros hacia documentos originales accesibles. No incluyas páginas comerciales ni buscadores como evidencia. Para estudios anteriores o sin fecha comprobada utiliza historical. " + audienceResearchLenses(audience)[0]
+  }));
+  // Broad discovery is optional and follows the saved selection.
+  if (selectedPlatforms.includes("supplemental")) researchLenses.push({ ...researchPolicy.supplemental, instruction: researchPolicy.supplemental.instruction + " " + audienceResearchLenses(audience)[0] + " Excluye de esta búsqueda las plataformas desmarcadas: " + researchPolicy.platforms.filter(platform => !selectedPlatforms.includes(platform.id)).flatMap(platform => platform.domains).map(domain => "-site:" + domain).join(" ") });
+  const discover = async (round, feedback) => Promise.all(researchLenses.map(async (platform) => {
+    const lens = platform.instruction;
+    const prompt = `Investiga el tema "${clampText(topic, 2000)}" para ${audience}, región ${clampText(region, 80)}, perfil ${editorialMode}. El tema completo indicado por el usuario es el centro de la investigación: no lo reemplaces por ciencia o historia.
+La ventana de actualidad ${dateWindow.from.slice(0, 10)} a ${dateWindow.to.slice(0, 10)} solo clasifica las señales recientes; no excluye estudios pertinentes anteriores. Los documentos anteriores o sin fecha comprobada se marcan historical y se pueden usar para explicar conocimientos y contexto, sin presentarlos como novedades.
+ENFOQUE: ${lens}
+PREFERENCIAS DE INVESTIGACIÓN: ${JSON.stringify(researchInstructions)}
+Las preferencias de tipo de fuente orientan la búsqueda; no cambian las plataformas seleccionadas ni permiten inventar evidencia. Región GLOBAL significa todas las regiones, sin restricción geográfica. Diversifica autorías y publicaciones; pueden coexistir varios documentos distintos en el mismo repositorio. Prioriza HTML o PDF accesible y sigue las referencias hacia documentos originales.
+OBJETIVO TOTAL: ${requestedMinimum} documentos verificados. En esta búsqueda encuentra hasta ${Math.max(8, Math.min(20, Math.ceil(requestedMinimum / researchLenses.length) * 2))} documentos pertinentes.
+RONDA ${round}: ${feedback}
+No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases. SOLO JSON: {"summary":"síntesis","sources":[{"id":"s1","title":"","url":"https://documento-concreto","authors":[],"publishedAt":"","publisher":"","doi":"","sourceType":"paper|book|official|report|dataset|other","evidenceRole":"current|historical"}],"facts":[{"id":"f1","claim":"","sourceIds":["s1"],"risk":"low|high"}],"currentSignals":[{"id":"signal-1","signal":"","sourceIds":["s1"]}],"historicalMilestones":[{"year":"","personOrInstitution":"","contribution":"","sourceIds":["s1"]}]}`;
+    let generated;
+    try {
+      generated = await generateJson({ client, prompt, tools: [{ googleSearch: {} }] });
+      platformResults.push({ id: platform.id, name: platform.name, round, query: lens, status: "searched", candidateCount: generated.parsed.sources?.length || 0 });
+    } catch (error) {
+      platformResults.push({ id: platform.id, name: platform.name, round, query: lens, status: "error", error: error.code || error.message });
+      return { summary: "", facts: [], currentSignals: [], historicalMilestones: [], candidates: [] };
+    }
     const idMap = new Map();
-    const candidates = [...(generated.parsed.sources || []), ...groundingSources(generated.response)].slice(0, 10).map((source, sourceIndex) => {
+    const candidates = [...(generated.parsed.sources || []), ...groundingSources(generated.response)].map((source, sourceIndex) => {
       const originalId = clampText(source.id, 120) || `source-${sourceIndex + 1}`;
-      const id = `search-${batchIndex + 1}-${originalId}`;
+      const id = stableSourceId(source.url);
       idMap.set(originalId, id);
-      return { ...source, id };
+      return { ...source, id, discoveredVia: [platform.id] };
     });
     const remapEvidence = (items) => (Array.isArray(items) ? items : []).map((item) => ({
       ...item,
@@ -342,38 +380,74 @@ async function researchArticleEvidenceServer({
       candidates
     };
   }));
-  const candidates = generatedBatches.flatMap((batch) => batch.candidates).slice(0, editorialMode === "aida" ? 24 : 16);
+  const generatedBatches = [];
+  const verified = { verifiedSources: [], rejectedSources: [], retrievedPages: [] };
+  const attempted = new Map();
+  const sourceAliases = new Map();
+  const retrievalCache = new Map();
+  let pendingCandidateCount = 0;
+  for (let round = 1; round <= researchPolicy.searchBudget.maxRounds; round++) {
+    const feedback = round === 1 ? "Primera búsqueda." : `Faltan ${Math.max(0, requestedMinimum - verified.verifiedSources.length)} fuentes. Reformula con sinónimos y enfoques complementarios, y localiza documentos distintos o copias accesibles. Ya comprobados: ${[...attempted.values()].map(source => source.url).join("; ")}. Problemas previos: ${[...new Set(verified.rejectedSources.map(source => source.reason))].join(", ")}.`;
+    const batches = await discover(round, feedback);
+    generatedBatches.push(...batches);
+    const newCandidates = [];
+    for (const candidate of batches.flatMap(batch => batch.candidates)) {
+      const previous = attempted.get(candidate.id);
+      if (previous) {
+        previous.discoveredVia = [...new Set([...previous.discoveredVia, ...candidate.discoveredVia])];
+        const accepted = verified.verifiedSources.find(source => source.id === (sourceAliases.get(candidate.id) || candidate.id));
+        if (accepted) accepted.discoveredVia = [...new Set([...(accepted.discoveredVia || []), ...candidate.discoveredVia])];
+        continue;
+      }
+      if (attempted.size >= researchPolicy.searchBudget.maxCandidates) { pendingCandidateCount++; continue; }
+      attempted.set(candidate.id, candidate);
+      newCandidates.push(candidate);
+    }
+    // Process every discovered candidate, in bounded batches; never one document per domain.
+    for (let offset = 0; offset < newCandidates.length; offset += researchPolicy.searchBudget.verificationBatchSize) {
+      const batch = await verifyCandidateSources({
+        candidates: newCandidates.slice(offset, offset + researchPolicy.searchBudget.verificationBatchSize),
+        context: `${topic}\nPreferencias: ${JSON.stringify(researchInstructions)}`,
+        assessSources: createSourceAssessor(client), retrievalCache,
+        maxCandidates: researchPolicy.searchBudget.verificationBatchSize,
+        retrievalConcurrency: 6, retrieveOptions: dependencies.retrieveOptions, dateWindow, allowHistorical: true
+      });
+      for (const source of batch.verifiedSources) {
+        const key = String(source.doi || source.url).toLowerCase();
+        const previous = verified.verifiedSources.find(item => String(item.doi || item.url).toLowerCase() === key);
+        sourceAliases.set(source.id, previous?.id || source.id);
+        if (previous) previous.discoveredVia = [...new Set([...(previous.discoveredVia || []), ...(source.discoveredVia || [])])];
+        else verified.verifiedSources.push(source);
+      }
+      verified.rejectedSources.push(...batch.rejectedSources);
+      verified.retrievedPages.push(...batch.retrievedPages);
+    }
+    if (verified.verifiedSources.length >= requestedMinimum || pendingCandidateCount) break;
+  }
   const generated = { parsed: {
     summary: generatedBatches.map((batch) => batch.summary).filter(Boolean).join(" "),
     facts: generatedBatches.flatMap((batch) => batch.facts),
     currentSignals: generatedBatches.flatMap((batch) => batch.currentSignals),
     historicalMilestones: generatedBatches.flatMap((batch) => batch.historicalMilestones)
   } };
-  const verified = await verifyCandidateSources({
-    candidates,
-    context: `${topic}\n${generated.parsed.summary || ""}\n${(generated.parsed.facts || []).map((fact) => fact.claim).join("\n")}\n${(generated.parsed.currentSignals || []).map((signal) => signal.signal || signal.text).join("\n")}`,
-    assessSources: createSourceAssessor(client),
-    distinctDomains: editorialMode === "aida",
-    maxCandidates: editorialMode === "aida" ? 24 : 16,
-    retrievalConcurrency: editorialMode === "aida" ? 6 : 4,
-    retrieveOptions: dependencies.retrieveOptions
-    , dateWindow
-    , allowHistorical: true
-  });
   const currentSourceIds = new Set(verified.verifiedSources.filter((source) => source.evidenceRole !== "historical").map((source) => String(source.id)));
   const historicalSourceIds = new Set(verified.verifiedSources.filter((source) => source.evidenceRole === "historical").map((source) => String(source.id)));
   const ids = new Set([...currentSourceIds, ...historicalSourceIds]);
   const sourcesById = new Map(verified.verifiedSources.map((source) => [String(source.id), source]));
   const currentSources = verified.verifiedSources.filter((source) => source.evidenceRole !== "historical");
-  const filterEvidence = (items) => (Array.isArray(items) ? items : []).map((item) => ({ ...item, sourceIds: (item.sourceIds || []).map(String).filter((id) => ids.has(id)) })).filter((item) => item.sourceIds.length);
-  const facts = filterEvidence(generated.parsed.facts).map((fact) => ({
-    ...fact,
-    sourceIds: fact.sourceIds.filter((id) => currentSourceIds.has(id))
-  })).filter((fact) => fact.sourceIds.length).filter((fact) => {
-    if (String(fact.risk || "").toLowerCase() !== "high") return true;
-    const domains = new Set(fact.sourceIds.map((id) => sourcesById.get(id)?.domain).filter(Boolean));
-    return fact.sourceIds.length >= 2 && domains.size >= 2 && fact.sourceIds.some((id) => Number(sourcesById.get(id)?.qualityTier) === 1);
-  });
+  const filterEvidence = items => {
+    const seen = new Set();
+    return (Array.isArray(items) ? items : []).map(item => ({ ...item, sourceIds: [...new Set((item.sourceIds || []).map(id => sourceAliases.get(String(id)) || String(id)).filter(id => ids.has(id)))] })).filter(item => {
+      const key = normalizedComparableText(item.claim || item.signal || item.text || item.contribution || "") + ":" + [...item.sourceIds].sort().join(",");
+      if (!item.sourceIds.length || seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+  };
+  // Findings come from retrieved-document analysis, not unverified search snippets.
+  const facts = verified.verifiedSources.map(source => ({
+    id: `finding-${source.id}`, claim: source.supportSummary, sourceIds: [source.id],
+    locator: source.locator, evidenceRole: source.evidenceRole, year: source.year
+  }));
   const historicalMilestones = filterEvidence(generated.parsed.historicalMilestones).map((milestone) => ({
     ...milestone,
     sourceIds: milestone.sourceIds.filter((id) => historicalSourceIds.has(id))
@@ -390,26 +464,36 @@ async function researchArticleEvidenceServer({
     id: clampText(signal.id, 120) || `signal-${index + 1}`,
     signal: clampText(signal.signal || signal.text, 800)
   })).filter((signal) => signal.signal).slice(0, 8);
-  const institutionCount = new Set(currentSources.map((source) => clampText(source.publisher || source.domain, 300).toLowerCase()).filter(Boolean)).size;
-  const verifiedSummary = [...new Set(currentSources.map((source) => clampText(source.supportSummary, 600)).filter(Boolean))].slice(0, 6).join(" ");
+  const institutionCount = new Set(verified.verifiedSources.map((source) => clampText(source.publisher || source.domain, 300).toLowerCase()).filter(Boolean)).size;
+  const verifiedSummary = facts.map(fact => fact.claim).join(" ");
   const blockers = [];
-  const requiredMinimum = editorialMode === "aida" ? AIDA_MINIMUM_VERIFIED_SOURCES : requestedMinimum;
-  if (editorialMode === "aida" && currentSources.length < requiredMinimum) blockers.push(`Aida requiere al menos ${requiredMinimum} páginas actuales verificadas.`);
-  if (editorialMode !== "aida" && verified.verifiedSources.length < requiredMinimum) blockers.push(`La propuesta tiene ${verified.verifiedSources.length} de ${requiredMinimum} fuentes verificadas objetivo.`);
-  if (editorialMode === "aida" && institutionCount < AIDA_MINIMUM_INDEPENDENT_INSTITUTIONS) blockers.push("Aida requiere al menos tres publicaciones o instituciones independientes.");
-  const recommendations = editorialMode === "aida" ? [
-    ...(currentSources.length < requestedMinimum ? [`Objetivo editorial Aida: ampliar de ${currentSources.length} a ${requestedMinimum} páginas actuales verificadas cuando existan fuentes pertinentes.`] : []),
-    ...(institutionCount < 4 ? [`Recomendación Aida: ampliar de ${institutionCount} a 4 publicaciones o instituciones independientes.`] : [])
-  ] : [];
-  const attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages });
+  const requiredMinimum = requestedMinimum;
+  if (!verified.verifiedSources.length) blockers.push("La investigación no encontró ninguna fuente verificable después de completar las rondas de búsqueda.");
+  if (pendingCandidateCount) blockers.push(`Quedan ${pendingCandidateCount} resultados sin analizar por el límite técnico de esta ejecución. Acota el tema y reintenta.`);
+  const recommendations = institutionCount < 2 ? ["Conviene contrastar con otras autorías o publicaciones independientes."] : [];
+  if (verified.verifiedSources.length > 0 && verified.verifiedSources.length < requiredMinimum) recommendations.push(`Se encontraron y analizaron ${verified.verifiedSources.length} fuentes verificadas de una meta editorial de ${requiredMinimum}; la redacción puede continuar con la evidencia disponible.`);
+  let attributedReferences = [];
+  try { attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages }); }
+  catch (_) { recommendations.push("No se pudieron extraer citas textuales; utiliza paráfrasis de los hallazgos verificados."); }
   return {
     schemaVersion: "2.0",
     editorialMode,
     topic: clampText(topic, 500),
-    summary: clampText(verifiedSummary || "No se encontraron suficientes páginas actuales con fecha comprobable dentro de la ventana seleccionada.", 2400),
+    summary: verifiedSummary || "No se recuperó evidencia documental pertinente y verificable.",
     currentSignals,
     facts,
     sources: verified.verifiedSources,
+    analysisStatus: pendingCandidateCount ? "incomplete" : "complete",
+    analysis: { sourceIds: verified.verifiedSources.map(source => source.id), examinedCandidateCount: attempted.size, rejectedCount: verified.rejectedSources.length, pendingCandidateCount },
+    researchInstructions,
+    researchRegion: region,
+    researchPolicyVersion: researchPolicy.version,
+    searchPlatforms: selectedPlatforms,
+    platformResults: platformResults.map(platform => ({
+      ...platform,
+      verifiedCount: verified.verifiedSources.filter(source => source.discoveredVia?.includes(platform.id)).length,
+      rejected: verified.rejectedSources.filter(source => source.discoveredVia?.includes(platform.id))
+    })),
     researchPeriod: dateWindow.period,
     dateWindow,
     currentSourceCount: currentSources.length,
@@ -421,8 +505,8 @@ async function researchArticleEvidenceServer({
     institutionCount,
     blockers,
     recommendations,
-    minimumSourceCount: requiredMinimum,
-    targetSourceCount: editorialMode === "aida" ? Math.max(AIDA_TARGET_VERIFIED_SOURCES, requestedMinimum) : requestedMinimum,
+    minimumSourceCount: 1,
+    targetSourceCount: requestedMinimum,
     verificationStatus: blockers.length ? "blocked" : "verified",
     researchedAt: now.toISOString(),
     telemetry: { modeUsed: editorialMode, model: DEFAULT_TEXT_MODEL, searches: generatedBatches.length, retrievedUrls: verified.verifiedSources.map((source) => source.url) }
@@ -436,8 +520,16 @@ function articleText(article = {}, topic = "") {
 async function verifyArticleEvidenceServer({ article = {}, topic = "", additionalSearches = 0, dependencies = {} } = {}) {
   const client = dependencies.client || createVertexClient({ location: "global" });
   const text = articleText(article, topic);
-  let candidates = Array.isArray(article.researchSources || article.sources) ? (article.researchSources || article.sources) : [];
-  const verified = await verifyCandidateSources({ candidates, context: text, assessSources: createSourceAssessor(client), retrieveOptions: dependencies.retrieveOptions, allowHistorical: true });
+  const uniqueCandidates = new Map();
+  for (const source of [...(article.researchSources || []), ...(article.sources || []), ...(article.usedSources || []), ...bibliography.sources(article)]) {
+    if (source?.url && !uniqueCandidates.has(source.url)) uniqueCandidates.set(source.url, source);
+  }
+  let candidates = [...uniqueCandidates.values()];
+  const verified = { verifiedSources: [], rejectedSources: [], retrievedPages: [] };
+  for (let offset = 0; offset < candidates.length; offset += 32) {
+    const batch = await verifyCandidateSources({ candidates: candidates.slice(offset, offset + 32), maxCandidates: 32, context: text, assessSources: createSourceAssessor(client), retrieveOptions: dependencies.retrieveOptions, allowHistorical: true });
+    for (const field of Object.keys(verified)) verified[field].push(...batch[field]);
+  }
   const pagesById = new Map(verified.retrievedPages.map((page) => [page.id, page]));
   const usablePages = verified.verifiedSources.map((source) => ({ source, page: pagesById.get(source.id) })).filter((item) => item.page);
   let result = { claims: [], contradictions: [] };
@@ -457,23 +549,21 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
     return { id: clampText(claim.id, 120) || `claim-${index + 1}`, blockId: clampText(claim.blockId, 120), text: clampText(claim.text, 1200), risk, status, sourceIds, supportSummary: clampText(claim.supportSummary, 600), locator: clampText(claim.locator, 300) };
   }).filter((claim) => claim.text);
   const blockers = claims.filter((claim) => claim.status !== "supported").map((claim) => claim.text);
+  const missingCitations = bibliography.integrity(article).missing;
+  if (missingCitations.length) blockers.push("Hay citas sin documento bibliográfico asociado: " + missingCitations.join(", "));
   if (verified.rejectedSources.length) blockers.push(`${verified.rejectedSources.length} fuente(s) fueron descartadas al comprobar su contenido.`);
-  if (String(article.editorialMode || "").toLowerCase() === "aida") {
-    const currentSources = verified.verifiedSources.filter((source) => source.evidenceRole !== "historical");
-    const institutionCount = new Set(currentSources.map((source) => clampText(source.publisher || source.domain, 300).toLowerCase()).filter(Boolean)).size;
-    if (currentSources.length < AIDA_MINIMUM_VERIFIED_SOURCES) blockers.push("Aida requiere al menos 3 páginas actuales concretas verificadas.");
-    if (institutionCount < AIDA_MINIMUM_INDEPENDENT_INSTITUTIONS) blockers.push("Aida requiere al menos tres publicaciones o instituciones independientes.");
-  }
+  const requiredSources = article.researchDossier?.targetSourceCount || (article.editorialMode === "aida" ? researchPolicy.target({ editorialMode: "aida" }) : 0);
+  if (!verified.verifiedSources.length) blockers.push("El artículo no conserva ninguna fuente verificable.");
   const contradictions = Array.isArray(result.contradictions) ? result.contradictions.map((value) => clampText(value, 800)).filter(Boolean) : [];
   if ((blockers.length || !claims.length) && additionalSearches > 0) {
-    const supplemental = await researchArticleEvidenceServer({ topic: `${topic || article.title}. Evidencia faltante: ${blockers.slice(0, 5).join("; ")}`, audience: article.audience || "educators", mode: article.editorialMode || "marcie", minimumSources: 4, period: article.researchPeriod || article.researchDossier?.researchPeriod || "6m", dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
+    const supplemental = await researchArticleEvidenceServer({ searchPlatforms: article.searchPlatforms ?? article.researchDossier?.searchPlatforms, topic: `${topic || article.title}. Evidencia faltante: ${blockers.slice(0, 5).join("; ")}`, audience: article.audience || "educators", mode: article.editorialMode || "marcie", minimumSources: requiredSources || researchPolicy.target({ editorialMode: article.editorialMode }), researchInstructions: article.researchDossier?.researchInstructions || [], region: article.researchDossier?.researchRegion || "MX", period: article.researchPeriod || article.researchDossier?.researchPeriod || "6m", dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
     const combined = [...candidates, ...supplemental.sources];
     if (combined.length > candidates.length) return verifyArticleEvidenceServer({ article: { ...article, sources: combined, researchSources: combined }, topic, additionalSearches: additionalSearches - 1, dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
   }
   const coverage = claims.length ? Math.round((claims.filter((claim) => claim.status === "supported").length / claims.length) * 100) : 0;
   const contentHash = crypto.createHash("sha256").update(JSON.stringify({ title: article.title, subtitle: article.subtitle, blocks: article.blocks, sources: verified.verifiedSources, seo: article.seo })).digest("hex");
   return {
-    ...article, sources: verified.verifiedSources, researchSources: verified.verifiedSources, articleClaims: claims,
+    ...article, usedSources: article.usedSources || article.sources || [], sources: verified.verifiedSources, researchSources: verified.verifiedSources, articleClaims: claims,
     evidenceLinks: claims.flatMap((claim) => claim.sourceIds.map((sourceId) => ({ claimId: claim.id, sourceId, url: sourcesById.get(sourceId)?.url || "", title: sourcesById.get(sourceId)?.title || "", supportSummary: claim.supportSummary, locator: claim.locator }))),
     sourceAudit: verified.rejectedSources,
     verification: { status: blockers.length || contradictions.length || !claims.length ? "blocked" : "verified", coverage, blockers, contradictions, verifiedAt: new Date().toISOString(), contentHash, model: DEFAULT_TEXT_MODEL, checkedUrls: verified.verifiedSources.map((source) => source.url) }
@@ -496,15 +586,29 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
   app.post("/api/marcie/evidence/research", wrapAsync(async (req, res) => {
     const authContext = await resolveRequestAuth(req); const { db } = getServices();
     await assertEditorialAccess(authContext, db);
-    const dossier = await researchArticleEvidenceServer({
-      topic: req.body?.topic,
-      audience: req.body?.audience,
-      mode: req.body?.mode,
-      minimumSources: req.body?.minimumSources,
-      region: req.body?.region,
-      period: req.body?.period,
-      dependencies: { client: dependencies.client }
-    });
+    let dossier;
+    try {
+      dossier = await withDeadline(researchArticleEvidenceServer({
+        topic: req.body?.topic,
+        searchPlatforms: req.body?.searchPlatforms,
+        researchInstructions: Array.isArray(req.body?.researchInstructions) ? req.body.researchInstructions.slice(0, 50).map(value => clampText(value, 2000)) : [],
+        audience: req.body?.audience,
+        mode: req.body?.mode,
+        minimumSources: req.body?.minimumSources,
+        region: req.body?.region,
+        period: req.body?.period,
+        dependencies: { client: dependencies.client }
+      }), RESEARCH_DEADLINE_MS, "marcie_research_timeout");
+    } catch (error) {
+      if (error?.code !== "marcie_research_timeout") throw error;
+      return res.status(503).json({
+        error: {
+          code: error.code,
+          message: "La investigación bibliográfica tardó demasiado. El artículo anterior se conservó; vuelve a intentarlo o acota el tema."
+        },
+        requestId: req.requestId || undefined
+      });
+    }
     return res.status(200).json({ ok: true, dossier });
   }));
   app.post("/api/marcie/evidence/verify", wrapAsync(async (req, res) => {
@@ -520,7 +624,7 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
 }
 
 module.exports = {
-  DEFAULT_SETTINGS, TREND_SCHEMA_VERSION, AIDA_MINIMUM_VERIFIED_SOURCES, AIDA_MINIMUM_INDEPENDENT_INSTITUTIONS, AIDA_TARGET_VERIFIED_SOURCES, EVIDENCE_VERIFY_DEADLINE_MS, RESEARCH_PERIOD_DAYS, assertEditorialAccess, createSourceAssessor, periodKey, researchDateWindow,
+  DEFAULT_SETTINGS, TREND_SCHEMA_VERSION, RESEARCH_DEADLINE_MS, EVIDENCE_VERIFY_DEADLINE_MS, RESEARCH_PERIOD_DAYS, assertEditorialAccess, createSourceAssessor, periodKey, researchDateWindow,
   parseJsonResponse, repairAdjacentJsonContainers, generateJson,
   rankTrendOpportunities, refreshMarcieTrends, researchArticleEvidenceServer, verifyArticleEvidenceServer, extractAttributedReferences,
   registerMarcieEditorialResearchRoutes

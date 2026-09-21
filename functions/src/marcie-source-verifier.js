@@ -1,12 +1,13 @@
+const bibliography = require("./marcie-bibliography.js");
 const crypto = require("node:crypto");
 const dns = require("node:dns").promises;
 const net = require("node:net");
 const { isPrivateIp } = require("./marcie-wordpress-core.js");
 
-const MAX_SOURCE_BYTES = 1024 * 1024;
+const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const SOURCE_TIMEOUT_MS = 9000;
-const SUPPORTED_CONTENT_TYPES = ["text/html", "application/xhtml+xml", "text/plain"];
+const SUPPORTED_CONTENT_TYPES = ["text/html", "application/xhtml+xml", "text/plain", "application/pdf"];
 const HIGH_AUTHORITY_HOST_PATTERNS = [
   /(?:^|\.)doi\.org$/i, /(?:^|\.)pubmed\.ncbi\.nlm\.nih\.gov$/i,
   /(?:^|\.)ncbi\.nlm\.nih\.gov$/i, /(?:^|\.)nature\.com$/i,
@@ -143,6 +144,7 @@ function extractBibliographicMetadata(source = "") {
   const authors = [];
   let publisher = "";
   let doi = "";
+  const publication = { journal:"", volume:"", issue:"", pages:"" };
   const visit = (value) => {
     if (!value || typeof value !== "object") return;
     metadataNames(value.author || value.creator).forEach((name) => authors.push(name));
@@ -157,11 +159,14 @@ function extractBibliographicMetadata(source = "") {
   for (const tag of String(source).match(/<meta\b[^>]*>/gi) || []) {
     const key = (htmlAttribute(tag, "name") || htmlAttribute(tag, "property")).toLowerCase();
     const content = clampText(htmlAttribute(tag, "content"), 500);
+    const field = { citation_journal_title:"journal", citation_volume:"volume", citation_issue:"issue", citation_firstpage:"firstPage", citation_lastpage:"lastPage" }[key];
+    if (field) publication[field] = content;
     if (["author", "citation_author", "dc.creator"].includes(key) && content) authors.push(content);
     if (!publisher && ["og:site_name", "citation_journal_title", "dc.publisher"].includes(key)) publisher = content;
     if (!doi && ["citation_doi", "dc.identifier"].includes(key)) doi = content.match(/10\.\d{4,9}\/[-._;()/:a-z0-9]+/i)?.[0] || "";
   }
-  return { authors: [...new Set(authors)].slice(0, 12), publisher, doi };
+  publication.pages = [publication.firstPage, publication.lastPage].filter(Boolean).join("–");
+  return { authors: [...new Set(authors)], publisher, doi, ...publication };
 }
 
 function formatApaDate(publishedAt = "") {
@@ -171,14 +176,11 @@ function formatApaDate(publishedAt = "") {
 }
 
 function formatApaCitation(source = {}) {
-  const authorList = Array.isArray(source.authors) ? source.authors.filter(Boolean) : [clampText(source.authors, 500)].filter(Boolean);
-  const author = authorList.length ? authorList.join(", ") : clampText(source.publisher || source.domain, 500) || "Fuente sin autor";
-  const date = formatApaDate(source.publishedAt);
-  const title = clampText(source.title, 800) || "Documento sin título";
-  const publisher = clampText(source.publisher, 500);
-  const site = publisher && publisher.toLowerCase() !== author.toLowerCase() ? ` ${publisher}.` : "";
-  const locator = source.doi ? `https://doi.org/${String(source.doi).replace(/^https?:\/\/doi\.org\//i, "")}` : clampText(source.url || source.finalUrl, 3000);
-  return `${author} (${date}). ${title}.${site}${locator ? ` ${locator}` : ""}`.replace(/\s+/g, " ").trim();
+  return bibliography.format(source);
+}
+
+function bibliographicMetadataGaps(source = {}) {
+  return bibliography.metadataGaps(source);
 }
 
 function extractPublicationDate(source = "", pageUrl = "") {
@@ -264,7 +266,16 @@ async function retrieveSourcePage(candidate = {}, options = {}) {
   if (!SUPPORTED_CONTENT_TYPES.includes(contentType)) throw sourceFailure("unsupported_type", { httpStatus: response.status, contentType });
   if ((current.pathname === "/" || !current.pathname) && !current.search) throw sourceFailure("generic_homepage", { httpStatus: response.status });
   const body = await readBoundedBody(response, Number(options.maxBytes || MAX_SOURCE_BYTES));
-  const extracted = extractPageContent(body.toString("utf8"), contentType, current.toString());
+  let extracted;
+  if (contentType === "application/pdf") {
+    const { PDFParse } = require("pdf-parse");
+    const parser = new PDFParse({ data: new Uint8Array(body) });
+    try {
+      const result = await parser.getText();
+      const metadata = await parser.getInfo();
+      extracted = { text: result.text, title: metadata.info?.Title || "", authors: metadata.info?.Author ? [metadata.info.Author] : [], publishedAt: "", dateSource: "unknown", doi: result.text.match(/10\.\d{4,9}\/[-._;()/:a-z0-9]+/i)?.[0] || "" };
+    } finally { await parser.destroy(); }
+  } else extracted = extractPageContent(body.toString("utf8"), contentType, current.toString());
   if (extracted.text.length < 240) throw sourceFailure("empty_content", { httpStatus: response.status });
   return {
     id: clampText(candidate.id, 120) || `source-${crypto.randomUUID()}`,
@@ -273,7 +284,7 @@ async function retrieveSourcePage(candidate = {}, options = {}) {
     text: extracted.text, publishedAt: extracted.publishedAt, dateSource: extracted.dateSource,
     httpStatus: response.status, contentType,
     contentHash: crypto.createHash("sha256").update(extracted.text).digest("hex"), retrievedAt: new Date().toISOString(),
-    metadata: { ...candidate, pageAuthors: extracted.authors, pagePublisher: extracted.publisher, pageDoi: extracted.doi }
+    metadata: { ...candidate, bibliographicMetadata: extracted, pageAuthors: extracted.authors, pagePublisher: extracted.publisher, pageDoi: extracted.doi }
   };
 }
 
@@ -288,6 +299,7 @@ function classifySourceQuality(source = {}) {
 function rejection(candidate = {}, reason = "verification_error", details = {}) {
   return {
     id: clampText(candidate.id, 120), url: clampText(candidate.url, 3000), title: clampText(candidate.title, 500),
+    discoveredVia: candidate.discoveredVia || [], metadataGaps: Array.isArray(details.metadataGaps) ? details.metadataGaps : [],
     reason, httpStatus: Number(details.httpStatus || 0), publishedAt: clampText(details.publishedAt, 80), checkedAt: new Date().toISOString()
   };
 }
@@ -298,7 +310,12 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
   const seenIds = new Set();
   for (const candidate of Array.isArray(candidates) ? candidates : []) {
     const parsed = normalizedSourceUrl(candidate?.url);
-    if (!parsed || seen.has(parsed.toString())) continue;
+    if (!parsed) continue;
+    if (seen.has(parsed.toString())) {
+      const prior = unique.find(source => source.url === parsed.toString());
+      if (prior) prior.discoveredVia = [...new Set([...(prior.discoveredVia || []), ...(candidate.discoveredVia || [])])];
+      continue;
+    }
     seen.add(parsed.toString());
     const baseId = clampText(candidate.id, 120) || `source-${unique.length + 1}`;
     let id = baseId;
@@ -322,10 +339,11 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
       }
     try {
       const page = await pagePromise;
-      const role = String(candidate.evidenceRole || "current").toLowerCase() === "historical" ? "historical" : "current";
+      let role = String(candidate.evidenceRole || "current").toLowerCase() === "historical" ? "historical" : "current";
       const publishedTime = page.publishedAt ? new Date(page.publishedAt).getTime() : NaN;
       const fromTime = dateWindow?.from ? new Date(dateWindow.from).getTime() : NaN;
       const toTime = dateWindow?.to ? new Date(dateWindow.to).getTime() : NaN;
+      if (allowHistorical && (!Number.isFinite(publishedTime) || (Number.isFinite(fromTime) && publishedTime < fromTime))) role = "historical";
       if (dateWindow && role === "current" && !Number.isFinite(publishedTime)) {
         rejectedSources.push(rejection(candidate, "publication_date_unknown", page));
       } else if (dateWindow && role === "current" && ((Number.isFinite(fromTime) && publishedTime < fromTime) || (Number.isFinite(toTime) && publishedTime > toTime))) {
@@ -333,7 +351,7 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
       } else if (role === "historical" && !allowHistorical) {
         rejectedSources.push(rejection(candidate, "outside_period", page));
       } else {
-        retrieved.push({ ...page, id: candidate.id, metadata: { ...candidate, evidenceRole: role } });
+        retrieved.push({ ...page, id: candidate.id, metadata: { ...candidate, ...page.metadata, discoveredVia: candidate.discoveredVia || [], evidenceRole: role } });
       }
     } catch (error) {
       rejectedSources.push(rejection(candidate, error?.code || "verification_error", error));
@@ -351,7 +369,10 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
   try {
     const assessmentBatches = [];
     for (let index = 0; index < retrieved.length; index += 8) assessmentBatches.push(retrieved.slice(index, index + 8));
-    assessments = (await Promise.all(assessmentBatches.map((pages) => assessSources({ context: clampText(context, 12000), pages })))).flat();
+    assessments = (await Promise.all(assessmentBatches.map(async pages => {
+      try { return await assessSources({ context: clampText(context, 12000), pages }); }
+      catch (_) { return pages.map(page => ({ id: page.id, status: "rejected", reason: "verification_error" })); }
+    }))).flat();
   } catch (_) {
     assessments = [];
     assessmentFailed = true;
@@ -361,7 +382,7 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
   const acceptedDomains = new Set();
   for (const page of retrieved) {
     const assessment = byId.get(page.id);
-    if (!assessment || assessment.status !== "verified") {
+    if (!assessment || assessment.status !== "verified" || !String(assessment.supportSummary || "").trim()) {
       rejectedSources.push(rejection(page.metadata, assessment?.reason || (assessmentFailed ? "verification_error" : "content_mismatch"), page));
       continue;
     }
@@ -369,13 +390,18 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
       rejectedSources.push(rejection(page.metadata, "content_mismatch", page));
       continue;
     }
-    acceptedDomains.add(page.domain);
+    const pageAuthors = Array.isArray(page.metadata.pageAuthors) ? page.metadata.pageAuthors.filter(Boolean) : [];
+    const candidateYear = clampText(page.metadata.year || page.metadata.publishedYear, 20).match(/\b(?:18|19|20)\d{2}\b/)?.[0] || "";
+    const verifiedCandidateYear = candidateYear && String(page.text || "").includes(candidateYear) ? candidateYear : "";
     const verifiedSource = {
       id: page.id, title: page.retrievedTitle, url: page.finalUrl, requestedUrl: page.requestedUrl,
-      finalUrl: page.finalUrl, domain: page.domain, publisher: clampText(page.metadata.pagePublisher || page.domain, 300),
-      authors: Array.isArray(page.metadata.pageAuthors) ? page.metadata.pageAuthors : [],
+      journal: page.metadata.bibliographicMetadata?.journal || clampText(page.metadata.journal || page.metadata.journalTitle, 300),
+      volume: page.metadata.bibliographicMetadata?.volume || "", issue: page.metadata.bibliographicMetadata?.issue || "", pages: page.metadata.bibliographicMetadata?.pages || "",
+      discoveredVia: page.metadata.discoveredVia || [],
+      finalUrl: page.finalUrl, domain: page.domain, publisher: clampText(page.metadata.pagePublisher || page.metadata.publisher || page.domain, 300),
+      authors: pageAuthors,
       publishedAt: page.publishedAt || "", dateSource: page.dateSource || "unknown",
-      year: page.publishedAt ? String(new Date(page.publishedAt).getUTCFullYear()) : clampText(page.metadata.year || page.metadata.publishedYear, 20),
+      year: page.publishedAt ? String(new Date(page.publishedAt).getUTCFullYear()) : verifiedCandidateYear,
       evidenceRole: page.metadata.evidenceRole || "current",
       doi: clampText(page.metadata.pageDoi, 300), sourceType: clampText(page.metadata.sourceType, 80) || "web",
       qualityTier: classifySourceQuality(page), verificationStatus: "verified", retrievalStatus: "success",
@@ -383,7 +409,13 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
       supportSummary: clampText(assessment.supportSummary, 600), locator: clampText(assessment.locator, 300),
       supports: Array.isArray(assessment.supports) ? assessment.supports.map((value) => clampText(value, 160)).filter(Boolean).slice(0, 20) : []
     };
-    verifiedSource.apaCitation = formatApaCitation(verifiedSource);
+    const metadataGaps = bibliographicMetadataGaps(verifiedSource);
+    if (metadataGaps.length) {
+      rejectedSources.push(rejection(page.metadata, "incomplete_bibliographic_metadata", { ...page, metadataGaps }));
+      continue;
+    }
+    acceptedDomains.add(page.domain);
+    verifiedSource.apaCitation = bibliography.format(verifiedSource);
     verifiedSources.push(verifiedSource);
   }
   return { verifiedSources, rejectedSources, retrievedPages: retrieved };
@@ -391,6 +423,6 @@ async function verifyCandidateSources({ candidates = [], context = "", assessSou
 
 module.exports = {
   MAX_REDIRECTS, MAX_SOURCE_BYTES, SUPPORTED_CONTENT_TYPES,
-  assertPublicUrl, extractPageContent, extractPublicationDate, extractBibliographicMetadata, formatApaCitation, normalizedSourceUrl, retrieveSourcePage,
+  assertPublicUrl, bibliographicMetadataGaps, extractPageContent, extractPublicationDate, extractBibliographicMetadata, formatApaCitation, normalizedSourceUrl, retrieveSourcePage,
   verifyCandidateSources
 };

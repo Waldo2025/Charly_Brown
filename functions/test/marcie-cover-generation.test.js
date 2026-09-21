@@ -12,15 +12,16 @@ test("las propuestas incluyen coordinadores como cuarta audiencia", () => {
   assert.match(geminiService, /genera EXACTAMENTE cuatro propuestas editoriales diferenciadas/);
   assert.match(geminiService, /"coordinators" \(Coordinadores académicos y directivos escolares\)/);
   assert.match(geminiService, /"id": "prop-coordinators"/);
-  assert.match(modal, /value="coordinators" checked/);
+  assert.match(modal, /ALL_AUDIENCE_KEYS = \["students", "parents", "educators", "coordinators"\]/);
 });
 
 test("el modal ofrece extensiones por cuartillas", () => {
   for (const count of ["1", "2", "3", "4", "5", "6"]) {
-    assert.match(modal, new RegExp(`>${count} cuartilla(?:s)?<`));
+    assert.match(modal, new RegExp(`>${count} cuartilla(?:s)? \\(${Number(count) * 1012} pal\\.\\)<`));
   }
-  assert.match(modal, /Una cuartilla, entre 250 y 300 palabras/);
-  assert.match(modal, /Seis cuartillas, entre 1500 y 1800 palabras/);
+  for (let count = 1; count <= 6; count++) {
+    assert.ok(modal.includes(`${count * 1012} palabras de cuerpo del artículo, sin contar bibliografía`));
+  }
 });
 
 test("cada acción visual genera solamente la portada de su propuesta", () => {
@@ -31,6 +32,17 @@ test("cada acción visual genera solamente la portada de su propuesta", () => {
   assert.match(coverRenderer, /article\.featuredImage = await generateArticleImageWithGemini/);
   assert.doesNotMatch(coverRenderer, /coverEntries|for \(let index = 0; index < .*\.length/);
   assert.match(editor, /data-generate-proposal-image/);
+});
+
+test("la portada se limpia, adapta para web y sube a Storage sin persistir base64", () => {
+  assert.match(geminiService, /import \{ getDownloadURL, ref, uploadBytes \} from "https:\/\/www\.gstatic\.com\/firebasejs\/12\.7\.0\/firebase-storage\.js"/);
+  assert.match(geminiService, /const sourceBlob = new Blob/);
+  assert.match(geminiService, /context\.drawImage\(bitmap, 0, 0, width, height\)/);
+  assert.match(geminiService, /optimizedBlob\.size <= 512 \* 1024/);
+  assert.match(geminiService, /await uploadBytes\(storageRef, image\.blob/);
+  assert.match(geminiService, /customMetadata: \{\s*creator: "Asc",\s*copyright: "© Asc"/);
+  const uploadFlow = geminiService.slice(geminiService.indexOf("async function optimizeImageForWeb"), geminiService.indexOf("/**\n * Limpia títulos"));
+  assert.doesNotMatch(uploadFlow, /dataBase64:\s*image\.dataBase64|blobToBase64|support-graphics\/upload/);
 });
 
 test("la automatización genera portadas secuenciales con protección de cuota", () => {

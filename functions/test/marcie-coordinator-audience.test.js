@@ -10,10 +10,10 @@ async function source(relativePath) {
 
 test("la redacción Marcie contiene un contrato neuropedagógico exclusivo para coordinadores", async () => {
   const code = await source("services/marcie-gemini-service.js");
-  assert.match(code, /coordinators = Coordinadores académicos, directores y líderes escolares/);
-  assert.match(code, /memoria de trabajo, carga cognitiva, funciones ejecutivas, autorregulación, metacognición y neuroplasticidad/);
-  assert.match(code, /PROHIBIDO dirigirse a madres o padres, hablar de "tus hijos"/);
-  assert.match(code, /indicadores observables de implementación/);
+  assert.match(code, /densidad científica alta/);
+  assert.match(code, /Integra el vocabulario editorial configurado sólo cuando el dossier lo respalde/);
+  assert.match(code, /densidad científica moderada/);
+  assert.match(code, /evita jerga ornamental y neuromitos/i);
 });
 
 test("el normalizador no recicla por posición la propuesta de otra audiencia", async () => {

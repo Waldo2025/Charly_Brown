@@ -127,7 +127,7 @@
   <link rel="stylesheet" href="/sidebar.css" />
 
   <!-- Estilos complementarios para resizers, shadcn y adaptación de layout -->
-  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260831r12" />
+  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260908r1" />
 
   <style>
     /* Superficies coherentes para los tres temas de la interfaz.
@@ -175,7 +175,7 @@
       border-color: var(--marcie-ui-border) !important;
     }
 
-    html[data-marcie-ui-theme] :is(.session-filter-tabs, #editorial-steps-list, #trend-insight-container) {
+    html[data-marcie-ui-theme] :is(.session-filter-tabs, #editorial-actions-grid, #trend-insight-container) {
       background-color: var(--marcie-panel-card) !important;
       border-color: var(--marcie-ui-border) !important;
     }
@@ -502,39 +502,27 @@
           Contenido generado
         </h1>
         <div class="editor-toolbar-actions flex items-center gap-1 relative">
+        <button
+            id="btn-automation-progress"
+            type="button"
+            class="btn h-8 px-2.5 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold hidden"
+            title="Marcie está generando tu producción — clic para ver el progreso"
+            aria-label="Ver progreso de generación automatizada"
+          >
+            <span class="automation-toolbar-spinner" aria-hidden="true"></span>
+            <span class="hidden sm:inline">Generando…</span>
+          </button>
           <button
-            id="btn-ai-assistant-header"
-            class="editor-toolbar-action editor-toolbar-action--assistant btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
-            title="Abrir Asistente Editorial"
-            aria-label="Abrir el modal del Asistente Editorial"
+            id="btn-reconfigure-session-header"
+            type="button"
+            class="btn btn-outline h-8 px-2 flex items-center justify-center gap-1.5 rounded-lg text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Modificar la configuración y volver a generar esta misma sesión editorial"
+            aria-label="Configurar y volver a crear esta sesión editorial"
             aria-haspopup="dialog"
+            disabled
           >
-            <i data-lucide="sparkles" class="w-4 h-4"></i>
-          </button>
-          <button
-            id="btn-article-templates"
-            class="editor-toolbar-action editor-toolbar-action--templates btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
-            title="Elegir plantilla"
-            aria-label="Elegir plantilla visual para el artículo"
-            aria-haspopup="dialog"
-          >
-            <i data-lucide="palette" class="w-4 h-4"></i>
-          </button>
-          <button
-            id="btn-export-html-header"
-            class="editor-toolbar-action editor-toolbar-action--export btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
-            title="Exportar HTML"
-            aria-label="Exportar artículo a HTML"
-          >
-            <i data-lucide="file-down" class="w-4 h-4"></i>
-          </button>
-          <button
-            id="btn-publish-wordpress-header"
-            class="editor-toolbar-action editor-toolbar-action--publish btn h-8 w-8 p-0 flex items-center justify-center rounded-lg"
-            title="Publicar en WordPress"
-            aria-label="Preparar publicación en WordPress"
-          >
-            <i data-lucide="send" class="w-4 h-4"></i>
+            <i data-lucide="settings-2" class="w-4 h-4"></i>
+            <span class="hidden md:inline">Configurar y volver a crear</span>
           </button>
           <button
             id="btn-toggle-right-panel-fullscreen"
@@ -603,11 +591,11 @@
           <button data-audience="students" class="audience-btn px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5">
             <i data-lucide="user" class="w-3.5 h-3.5"></i> Estudiantes
           </button>
-          <button data-audience="educators" class="audience-btn px-3.5 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 shrink-0 transition-all cursor-pointer font-bold shadow-xs flex items-center gap-1.5">
-            <i data-lucide="users" class="w-3.5 h-3.5"></i> Docentes
-          </button>
           <button data-audience="parents" class="audience-btn px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5">
             <i data-lucide="user-check" class="w-3.5 h-3.5"></i> Padres
+          </button>
+          <button data-audience="educators" class="audience-btn px-3.5 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 shrink-0 transition-all cursor-pointer font-bold shadow-xs flex items-center gap-1.5">
+            <i data-lucide="users" class="w-3.5 h-3.5"></i> Docentes
           </button>
           <button data-audience="coordinators" class="audience-btn px-3.5 py-1.5 rounded-full text-slate-500 hover:bg-slate-100 border border-transparent shrink-0 transition-all cursor-pointer flex items-center gap-1.5">
             <i data-lucide="network" class="w-3.5 h-3.5"></i> Coordinadores
@@ -684,11 +672,11 @@
             <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
               <div class="flex items-center gap-2">
                 <i data-lucide="book-open" class="w-5 h-5 text-slate-400"></i>
-                <h4 class="text-lg font-bold tracking-tight text-slate-800">Fuentes consultadas</h4>
+                <h4 class="text-lg font-bold tracking-tight text-slate-800">Referencias bibliográficas</h4>
               </div>
               <button id="btn-source-citation-format" type="button" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 shadow-xs transition-all hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2" aria-pressed="false" title="Cambiar fuentes a formato APA">
                 <i data-lucide="book-type" class="h-3.5 w-3.5"></i>
-                <span id="source-citation-format-label">Ver en APA</span>
+                <span id="source-citation-format-label">APA 7</span>
               </button>
             </div>
             <ul id="article-sources-list" class="article-sources-list grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -754,87 +742,75 @@
           Asistente Editorial
         </h2>
         <div class="flex items-center gap-2">
-          <button
-            id="btn-toggle-steps-list"
-            class="text-slate-400 hover:text-slate-600 transition-colors transition-transform duration-200"
-            aria-label="Mostrar u ocultar pasos"
-            aria-expanded="true"
-            title="Ocultar pasos">
-            <i id="icon-steps-chevron-down" data-lucide="chevron-down" class="w-5 h-5 hidden"></i>
-            <i id="icon-steps-chevron-up" data-lucide="chevron-up" class="w-5 h-5"></i>
-          </button>
-          <button id="btn-help-assistant" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <button id="btn-help-assistant" class="text-slate-400 hover:text-slate-600 transition-colors" title="Ayuda del asistente" aria-label="Ayuda del asistente">
             <i data-lucide="help-circle" class="w-5 h-5"></i>
           </button>
         </div>
       </div>
 
       <div class="p-5 flex flex-col gap-6">
-        <!-- Steps List -->
-        <div
-          id="editorial-steps-list"
-          class="editorial-steps-list--compact bg-white border border-border rounded-xl p-4 shadow-sm relative overflow-hidden flex flex-col gap-1">
+        <!-- Grid de Acciones Editoriales Rápidas (Botones cuadrados unidos sin border radius) -->
+        <div id="editorial-actions-grid" class="editorial-actions-grid">
+          <!-- 1. Exportar HTML -->
+          <button
+            id="btn-export-html-header"
+            type="button"
+            class="editorial-action-tile group"
+            title="Exportar artículo a archivo HTML completo"
+            aria-label="Exportar artículo a HTML"
+          >
+            <div class="editorial-action-tile__icon text-[#007b8b]">
+              <i data-lucide="file-down" class="w-4 h-4"></i>
+            </div>
+            <span class="editorial-action-tile__title">Exportar HTML</span>
+            <span class="editorial-action-tile__desc">Descarga .html</span>
+          </button>
 
-          <div data-step-id="1" data-merged-step-ids="1,2" class="flex gap-4 relative z-10 items-center group cursor-pointer">
-            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+          <!-- 2. Publicar WordPress -->
+          <button
+            id="btn-publish-wordpress-header"
+            type="button"
+            class="editorial-action-tile group"
+            title="Publicar o programar entrada en WordPress"
+            aria-label="Publicar en WordPress"
+          >
+            <div class="editorial-action-tile__icon text-[#2563eb]">
+              <i data-lucide="send" class="w-4 h-4"></i>
             </div>
-            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
-              <div class="flex items-center gap-2.5">
-                <div class="font-medium text-sm text-slate-800">Investigar y analizar</div>
-              </div>
-              <div class="step-status-icon"></div>
-            </div>
-          </div>
+            <span class="editorial-action-tile__title">WordPress</span>
+            <span class="editorial-action-tile__desc">Publicar entrada</span>
+          </button>
 
-          <div data-step-id="2" data-merged-step-ids="3,draft,4" class="flex gap-4 relative z-10 items-center group cursor-pointer">
-            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17l4-8 4 4 4-6 4 4"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 17h18"/></svg>
+          <!-- 3. Plantillas de Artículo -->
+          <button
+            id="btn-article-templates"
+            type="button"
+            class="editorial-action-tile group"
+            title="Elegir plantilla visual y formato del artículo"
+            aria-label="Elegir plantilla de artículo"
+          >
+            <div class="editorial-action-tile__icon text-[#9333ea]">
+              <i data-lucide="palette" class="w-4 h-4"></i>
             </div>
-            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
-              <div class="flex items-center gap-2.5">
-                <div class="font-medium text-sm text-slate-700">Crear, redactar y analizar</div>
-              </div>
-              <div class="step-status-icon"></div>
-            </div>
-          </div>
+            <span class="editorial-action-tile__title">Plantillas</span>
+            <span class="editorial-action-tile__desc">Diseño visual</span>
+          </button>
 
-          <div data-step-id="3" data-merged-step-ids="5" class="flex gap-4 relative z-10 items-center group cursor-pointer">
-            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
+          <!-- 4. Reconfigurar Sesión -->
+          <button
+            id="btn-reconfigure-session-grid"
+            type="button"
+            class="editorial-action-tile group disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Modificar configuración y volver a generar la sesión"
+            aria-label="Configurar y volver a crear sesión"
+            disabled
+          >
+            <div class="editorial-action-tile__icon text-[#d97706]">
+              <i data-lucide="settings-2" class="w-4 h-4"></i>
             </div>
-            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
-              <div class="flex items-center gap-2.5">
-                <div class="font-medium text-sm text-slate-700">Exportar y publicar</div>
-              </div>
-              <div class="step-status-icon"></div>
-            </div>
-          </div>
-
-          <div data-step-id="4" class="hidden" aria-hidden="true">
-            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0 1 12 2.944a11.955 11.955 0 0 1-8.618 3.04A12.02 12.02 0 0 0 3 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-            </div>
-            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
-              <div class="flex items-center gap-2.5">
-                <div class="font-medium text-sm text-slate-700">Auditoría y Revisión</div>
-              </div>
-              <div class="step-status-icon"></div>
-            </div>
-          </div>
-
-          <div data-step-id="5" class="hidden" aria-hidden="true">
-            <div class="step-badge w-8 h-8 rounded-full bg-white text-slate-500 flex items-center justify-center text-xs font-bold border border-slate-200 shadow-xs z-10 shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
-            </div>
-            <div class="flex-1 px-3.5 py-2.5 rounded-none flex items-center justify-between transition-all">
-              <div class="flex items-center">
-                <div class="font-medium text-sm text-slate-700">Exportar y Publicar</div>
-              </div>
-              <div class="step-status-icon"></div>
-            </div>
-          </div>
-
+            <span class="editorial-action-tile__title">Configurar</span>
+            <span class="editorial-action-tile__desc">Volver a crear</span>
+          </button>
         </div>
 
         <hr class="border-border">
@@ -899,8 +875,9 @@
   <script type="module" src="/js/chromeLayout.js"></script>
   <script type="module" src="/js/sidebar.js"></script>
   <script src="/vendor/jszip/jszip.min.js"></script>
+  <script src="/js/html-docx.js"></script>
 
   <!-- Script principal de la aplicación Marcie Blog Editor -->
-  <script type="module" src="/MarcieBlogEditor/js/editor-app.js?v=20260831r19"></script>
+  <script type="module" src="/MarcieBlogEditor/js/editor-app.js?v=20260908r9"></script>
 </body>
 </html>

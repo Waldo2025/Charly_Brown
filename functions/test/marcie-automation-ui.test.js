@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, "../..");
 const editor = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/editor-app.js"), "utf8");
 const styles = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/css/MarcieBlogEditor.css"), "utf8");
 const html = fs.readFileSync(path.join(root, "public/MarcieBlogEditor.html"), "utf8");
+const firebaseConfig = require(path.join(root, "firebase.json"));
 
 test("las etiquetas orbitales contrarrotan y permanecen legibles", () => {
   assert.match(editor, /data-agent-orbit-label class="automation-agent-orbit-label">Idea/);
@@ -33,6 +34,19 @@ test("la automatización muestra el estado de generación dentro de article-view
   assert.match(editor, /Artículo \$\{generationProgress\.current\} de \$\{generationProgress\.total\}/);
   assert.match(styles, /#article-generation-spinner \{[\s\S]*min-height:/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("cambiar de público reutiliza el spinner accesible de article-view", () => {
+  const handler = editor.slice(editor.indexOf("async function selectAudienceSafely"), editor.indexOf("async function reconfigureSession"));
+  assert.match(handler, /window\.__marcieShowArticleGenerationSpinner\?\.\(session, \{/);
+  assert.match(handler, /audienceLabel: getEditorialAudienceLabel\(audience\)/);
+  assert.match(handler, /finally \{[\s\S]*window\.__marcieHideArticleGenerationSpinner\?\.\(\)/);
+});
+
+test("abrir el enlace normal de Marcie revalida sus recursos sin hard refresh", () => {
+  const rule = firebaseConfig.hosting.headers.find(entry => entry.source === "/MarcieBlogEditor/**");
+  assert.ok(rule, "Marcie debe tener una política de caché propia");
+  assert.equal(rule.headers.find(header => header.key === "Cache-Control")?.value, "no-cache, must-revalidate");
 });
 
 test("las fuentes APA se presentan siempre en una sola columna", () => {

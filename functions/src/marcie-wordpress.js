@@ -4,6 +4,7 @@ const {
   normalizeAudience,
   readWordPressConfig
 } = require("./marcie-wordpress-core.js");
+const bibliography = require("./marcie-bibliography.js");
 const crypto = require("node:crypto");
 
 const MARCIE_COLLECTION = "MarcieBlogEditor";
@@ -16,6 +17,20 @@ function clampText(value, max = 500) {
 }
 
 const AIDA_REQUIRED_PHASES = ["headline", "problem", "deepen", "agitate", "turn", "why", "change", "close"];
+const AIDA_LEGACY_BRAND_LINE = "Aprender no es esforzarse más. Es aprender como el cerebro estaba hecho para aprender.";
+
+function normalizeLegacyAidaClosing(session = {}, article = {}) {
+  const configuredBrandLine = clampText(session.editorialProfileSnapshot?.brandLine, 1000);
+  if (configuredBrandLine || !Array.isArray(article.blocks)) return article;
+  const closingIndex = article.blocks.map((block) => block?.phase).lastIndexOf("close");
+  if (closingIndex < 0) return article;
+  const closingText = clampText(article.blocks[closingIndex]?.text, 10000);
+  if (!closingText.endsWith(AIDA_LEGACY_BRAND_LINE)) return article;
+  const blocks = article.blocks.map((block, index) => index === closingIndex
+    ? { ...block, text: closingText.slice(0, -AIDA_LEGACY_BRAND_LINE.length).trim().replace(/[,:;–—-]+$/, "").trim() }
+    : block);
+  return { ...article, blocks, aida: { ...(article.aida || {}), brandLine: "" } };
+}
 
 function isAidaArticleCompatible(article = {}) {
   if (String(article.editorialMode || "").toLowerCase() !== "aida") return false;
@@ -42,9 +57,6 @@ function evidenceBlockers(article = {}, context = {}) {
   const expectedMode = String(context.editorialMode || article.editorialMode || "marcie").toLowerCase();
   if (expectedMode === "aida") {
     if (!isAidaArticleCompatible(article) || article.modeCompatibility === "legacy_incompatible") blockers.push("aida_structure_incompatible");
-    const institutions = new Set(sources.map((source) => String(source?.publisher || source?.domain || "").trim().toLowerCase()).filter(Boolean));
-    if (sources.filter((source) => source?.verificationStatus === "verified").length < 3) blockers.push("aida_insufficient_verified_sources");
-    if (institutions.size < 3) blockers.push("aida_insufficient_institutions");
     if (article.aidaCompliance?.status !== "verified") blockers.push("aida_review_incomplete");
     const closingText = String([...((Array.isArray(article.blocks) ? article.blocks : []))].reverse().find((block) => block?.phase === "close")?.text || "").trim();
     const brandLine = String(article.aida?.brandLine || "").trim();
@@ -52,6 +64,7 @@ function evidenceBlockers(article = {}, context = {}) {
     if (/\b(?:compra|contrata|suscr[ií]bete|inscr[ií]bete|agenda (?:una )?(?:llamada|asesor[ií]a)|cont[aá]ctanos|adquiere)\b/i.test(closingText)) blockers.push("aida_commercial_cta");
   }
   if (!sources.length || sources.some((source) => source?.verificationStatus !== "verified")) blockers.push("unverified_sources");
+  if (sources.some((source) => bibliography.metadataGaps(source).length)) blockers.push("incomplete_bibliographic_metadata");
   if (!claims.length) blockers.push("no_claims_verified");
   if (claims.some((claim) => claim.status !== "supported")) blockers.push("unsupported_claims");
   if (Array.isArray(verification.contradictions) && verification.contradictions.length) blockers.push("contradictions_pending");
@@ -127,7 +140,7 @@ async function loadOwnedApprovedSession({ db, uid, sessionId, audience, allowPub
   if (blockers.length) {
     throw Object.assign(new Error("marcie_article_not_verified"), { status: 409, code: "marcie_article_not_verified", blockers });
   }
-  return { ref, session, article, audience: normalizedAudience, sessionId: cleanSessionId };
+  return { ref, session, article: normalizeLegacyAidaClosing(session, article), audience: normalizedAudience, sessionId: cleanSessionId };
 }
 
 function getPublicationId(sessionId, audience) {
@@ -459,6 +472,7 @@ module.exports = {
   isApprovedProfile,
   evidenceBlockers,
   isAidaArticleCompatible,
+  normalizeLegacyAidaClosing,
   articleContentHash,
   withTransientRetry,
   loadOwnedApprovedSession,

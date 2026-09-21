@@ -1,11 +1,11 @@
 /**
  * Menú contextual y acciones de sesiones para Marcie Blog Editor
  */
-import { saveMarcieSession, deleteMarcieSession, createMarcieSession } from "../services/marcie-session-store.js?v=20260831r2";
+import { saveMarcieSession, deleteMarcieSession, createMarcieSession } from "../services/marcie-session-store.js?v=20260908r9";
 import { showModal, closeActiveModal, showToast } from "./modals.js";
-import { articleVerificationBlockers } from "../contracts/editorial-contracts.js";
+import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 
-export function openSessionContextMenu(session, event, onRefresh) {
+export function openSessionContextMenu(session, event, onRefresh, onReconfigure) {
   event.stopPropagation();
   closeExistingMenu();
 
@@ -27,6 +27,7 @@ export function openSessionContextMenu(session, event, onRefresh) {
   menu.style.left = `${left}px`;
 
   menu.innerHTML = `
+    <button data-action="reconfigure" class="w-full text-left px-3 py-2 hover:bg-slate-50">Configurar y volver a crear</button>
     <button data-action="rename" class="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700">
       <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
       Renombrar sesión
@@ -48,11 +49,11 @@ export function openSessionContextMenu(session, event, onRefresh) {
     </button>
     <div class="h-px bg-slate-100 my-1"></div>
     <button data-action="archive" class="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700">
-      ${session.isArchived
+      ${session.archived
         ? '<svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-8a2 2 0 012-2h14a2 2 0 012 2v8M3 21h18M3 21l-2-2m22 2l2-2M8 11V7a4 4 0 018 0v4m-5 4h2"></path></svg>'
         : '<svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>'
       }
-      ${session.isArchived ? 'Desarchivar sesión' : 'Archivar sesión'}
+      ${session.archived ? 'Desarchivar sesión' : 'Archivar sesión'}
     </button>
     <button data-action="delete" class="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 flex items-center gap-2">
       <svg class="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -69,6 +70,7 @@ export function openSessionContextMenu(session, event, onRefresh) {
       const action = btn.getAttribute("data-action");
       closeExistingMenu();
 
+      if (action === "reconfigure") { await onReconfigure?.(session); return; }
       if (action === "rename") {
         const newTitle = prompt("Nuevo título de la sesión:", session.title);
         if (newTitle && newTitle.trim()) {
@@ -120,9 +122,9 @@ export function openSessionContextMenu(session, event, onRefresh) {
         showToast(`Estado actualizado a: ${session.status}`, "success");
         if (onRefresh) onRefresh();
       } else if (action === "archive") {
-        session.isArchived = !session.isArchived;
+        session.archived = !session.archived;
         await saveMarcieSession(session);
-        showToast(session.isArchived ? "Sesión archivada" : "Sesión desarchivada", "success");
+        showToast(session.archived ? "Sesión archivada" : "Sesión desarchivada", "success");
         if (onRefresh) onRefresh();
       } else if (action === "delete") {
         if (confirm(`¿Estás seguro de eliminar la sesión "${session.title}"?`)) {

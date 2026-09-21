@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es" data-marcie-ui-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QA · Animación de producción Marcie</title>
+  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260831r11">
+  <style>
+    :root {
+      --marcie-ui-text: #172033;
+      --marcie-ui-text-soft: #475569;
+      --marcie-ui-text-muted: #64748b;
+      --marcie-ui-border: #e2e8f0;
+      --marcie-ui-surface-raised: #fff;
+      --marcie-ui-surface-soft: #f1f5f9;
+      --marcie-ui-accent: #007b8b;
+    }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; overflow: hidden; background: #f8fafc; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    .qa-animation-stage { width: min(560px, calc(100vw - 24px)); min-height: min(540px, calc(100vh - 24px)); grid-template-columns: 1fr; padding: 28px; }
+    .qa-animation-stage .automation-agent-visual { width: 100%; min-height: 470px; }
+    @media (max-height: 600px) { .qa-animation-stage { min-height: calc(100vh - 20px); } .qa-animation-stage .automation-agent-visual { min-height: calc(100vh - 76px); } }
+  </style>
+</head>
+<body>
+  <main class="automation-agent-experience" aria-label="Vista de prueba de la animación de producción">
+    <section class="automation-agent-stage qa-animation-stage">
+      <span class="automation-agent-spark is-one" aria-hidden="true">✦</span>
+      <span class="automation-agent-spark is-two" aria-hidden="true">●</span>
+      <span class="automation-agent-spark is-three" aria-hidden="true">✦</span>
+      <div class="automation-agent-visual">
+        <div data-agent-orbit class="automation-agent-orbit is-outer" aria-hidden="true"><span data-agent-orbit-label class="automation-agent-orbit-label">Idea</span><span data-agent-orbit-label class="automation-agent-orbit-label">Texto</span><span data-agent-orbit-label class="automation-agent-orbit-label">SEO</span></div>
+        <div data-agent-orbit-reverse class="automation-agent-orbit is-inner" aria-hidden="true"><span class="automation-agent-orbit-glyph">✦</span><span data-agent-orbit-label class="automation-agent-orbit-label">Imagen</span></div>
+        <div data-agent-avatar class="automation-agent-avatar">
+          <div class="automation-agent-halo"></div>
+          <img src="/MarcieBlogEditorLogo2.png" alt="Agente editorial Marcie trabajando">
+          <span class="automation-agent-live-dot"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script type="module">
+    import { animate } from "/vendor/animejs/anime.esm.min.js";
+    animate(document.querySelector("[data-agent-avatar]"), { translateY: [-5, 5], rotate: [-1.5, 1.5], duration: 1900, alternate: true, loop: true, ease: "inOutSine" });
+    animate(document.querySelector("[data-agent-orbit]"), { rotate: [0, 360], duration: 12000, loop: true, ease: "linear" });
+    animate(document.querySelectorAll("[data-agent-orbit] > [data-agent-orbit-label]"), { rotate: [0, -360], duration: 12000, loop: true, ease: "linear" });
+    animate(document.querySelector("[data-agent-orbit-reverse]"), { rotate: [360, 0], duration: 9000, loop: true, ease: "linear" });
+    animate(document.querySelectorAll("[data-agent-orbit-reverse] > [data-agent-orbit-label]"), { rotate: [0, 360], duration: 9000, loop: true, ease: "linear" });
+    window.__marcieAutomationQaReady = true;
+  </script>
+</body>
+</html>

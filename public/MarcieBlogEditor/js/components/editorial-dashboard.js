@@ -4,9 +4,9 @@ import {
   readEditorialSettings, saveCalendarItem,
   seedAidaEditorialCalendar, subscribeEditorialCalendar, subscribeEditorialNotifications, subscribeTrendSnapshots
 } from "../services/marcie-editorial-store.js";
-import { refreshEditorialTrends } from "../services/marcie-gemini-service.js?v=20260831r6";
+import { refreshEditorialTrends } from "../services/marcie-gemini-service.js?v=20260908r9";
 import { cancelScheduledPublication, createWordPressDraft, reconcilePublicationStatus, schedulePublication, reschedulePublication } from "../services/marcie-wordpress-service.js";
-import { articleVerificationBlockers } from "../contracts/editorial-contracts.js";
+import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 import { isEditorialEditor } from "../services/marcie-auth-guard.js";
 
 const TZ = "America/Cancun";
@@ -393,6 +393,82 @@ function removeTrendWinnerNotification() {
   document.getElementById("trend-winner-notification")?.remove();
 }
 
+function enableDraggableCard(element) {
+  const STORAGE_KEY = "marcie_trend_card_pos";
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let initialLeft = 0;
+  let initialTop = 0;
+
+  const onPointerDown = (e) => {
+    if (e.target.closest("button, a, input, textarea, select, [data-trend-notification-dismiss]")) return;
+    if (e.button !== 0) return;
+
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+
+    const rect = element.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+
+    element.style.left = `${initialLeft}px`;
+    element.style.top = `${initialTop}px`;
+    element.style.right = "auto";
+    element.style.bottom = "auto";
+    element.style.margin = "0";
+    element.style.transition = "none";
+    element.classList.add("is-dragging");
+    document.body.style.userSelect = "none";
+
+    try {
+      element.setPointerCapture(e.pointerId);
+    } catch (_) {}
+
+    const onPointerMove = (moveEvent) => {
+      if (!isDragging) return;
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+
+      const newLeft = Math.max(8, Math.min(window.innerWidth - element.offsetWidth - 8, initialLeft + dx));
+      const newTop = Math.max(8, Math.min(window.innerHeight - element.offsetHeight - 8, initialTop + dy));
+
+      element.style.left = `${newLeft}px`;
+      element.style.top = `${newTop}px`;
+    };
+
+    const onPointerUp = (upEvent) => {
+      if (!isDragging) return;
+      isDragging = false;
+      element.classList.remove("is-dragging");
+      element.style.transition = "";
+      document.body.style.userSelect = "";
+
+      // Guardar posición final en localStorage
+      try {
+        const finalLeft = parseFloat(element.style.left) || 0;
+        const finalTop  = parseFloat(element.style.top)  || 0;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ left: finalLeft, top: finalTop }));
+      } catch (_) {}
+
+      try {
+        element.releasePointerCapture(upEvent.pointerId);
+      } catch (_) {}
+
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  };
+
+  element.addEventListener("pointerdown", onPointerDown);
+}
+
 function showTrendWinnerNotification(trend = {}, options = {}, { statusLabel = "Último radar guardado" } = {}) {
   if (!trend?.topic && !trend?.title) return;
   removeTrendWinnerNotification();
@@ -404,7 +480,26 @@ function showTrendWinnerNotification(trend = {}, options = {}, { statusLabel = "
   card.setAttribute("aria-label", "Tendencia editorial ganadora");
   card.innerHTML = `<button type="button" class="radar-winner-notification-close" data-trend-notification-dismiss aria-label="Cerrar tendencia ganadora">×</button><div class="radar-winner-top"><span class="radar-winner-badge"><i aria-hidden="true">↗</i> Trending #1</span><span class="radar-winner-confidence"><i aria-hidden="true"></i> ${esc(statusLabel)}</span></div><div class="radar-winner-content"><div><span class="radar-winner-eyebrow">Tema con mayor oportunidad editorial</span><h2>${esc(trend.topic || trend.title)}</h2><p>${esc(trend.summary || "Conversación educativa con el mayor impulso detectado en esta búsqueda.")}</p></div><div class="radar-winner-score"><strong>${esc(Number(trend.trendingPercent || 0).toFixed(1))}%</strong><span>Trending share</span><small>TrendScore ${esc(trend.trendScore || 0)}/100</small></div></div><div class="radar-winner-footer"><button type="button" class="radar-winner-notification-link" data-trend-notification-open>Ver radar completo</button><div class="radar-winner-actions"><button type="button" data-trend-notification-refresh><span aria-hidden="true">↻</span> Actualizar tendencias</button><button type="button" data-trend-notification-current>Crear artículo aquí</button><button type="button" data-trend-notification-new>Crear en nueva sesión <i aria-hidden="true">→</i></button></div></div>`;
   (document.fullscreenElement || document.webkitFullscreenElement || document.body).appendChild(card);
-  requestAnimationFrame(() => card.classList.add("is-visible"));
+  enableDraggableCard(card);
+
+  // Restaurar posición guardada (doble rAF para asegurar que offsetWidth esté calculado)
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem("marcie_trend_card_pos") || "null");
+        if (saved && typeof saved.left === "number" && typeof saved.top === "number") {
+          const maxLeft = window.innerWidth  - card.offsetWidth  - 8;
+          const maxTop  = window.innerHeight - card.offsetHeight - 8;
+          card.style.left   = `${Math.max(8, Math.min(maxLeft, saved.left))}px`;
+          card.style.top    = `${Math.max(8, Math.min(maxTop,  saved.top))}px`;
+          card.style.right  = "auto";
+          card.style.bottom = "auto";
+          card.style.margin = "0";
+        }
+      } catch (_) {}
+      card.classList.add("is-visible");
+    });
+  });
 
   card.querySelector("[data-trend-notification-dismiss]")?.addEventListener("click", removeTrendWinnerNotification);
   card.querySelector("[data-trend-notification-open]")?.addEventListener("click", () => {

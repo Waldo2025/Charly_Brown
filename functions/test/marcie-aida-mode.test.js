@@ -31,24 +31,54 @@ function aidaResearchClient(sourceCount) {
   } } };
 }
 
-test("Aida keeps eight sources as its target and verifies with three independent institutions", async () => {
+test("Aida keeps the configured source target as an advisory research goal", async () => {
   const dependencies = (count) => ({ client: aidaResearchClient(count), now: new Date("2026-08-25T12:00:00Z"), retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => page() } });
-  const blocked = await researchArticleEvidenceServer({ topic: "Aprendizaje", mode: "aida", minimumSources: 8, dependencies: dependencies(2) });
-  assert.equal(blocked.verificationStatus, "blocked");
-  assert.equal(blocked.verifiedSourceCount, 2);
-  assert.match(blocked.blockers.join(" "), /3 páginas/);
+  const belowTarget = await researchArticleEvidenceServer({ topic: "Aprendizaje", mode: "aida", minimumSources: 8, dependencies: dependencies(2) });
+  assert.equal(belowTarget.verificationStatus, "verified");
+  assert.equal(belowTarget.verifiedSourceCount, 2);
+  assert.equal(belowTarget.targetSourceCount, 8);
+  assert.equal(belowTarget.minimumSourceCount, 1);
+  assert.match(belowTarget.recommendations.join(" "), /meta editorial de 8.*puede continuar/i);
 
-  const verified = await researchArticleEvidenceServer({ topic: "Aprendizaje", mode: "aida", minimumSources: 8, dependencies: dependencies(3) });
+  const verified = await researchArticleEvidenceServer({ topic: "Aprendizaje", mode: "aida", minimumSources: 8, dependencies: dependencies(8) });
   assert.equal(verified.verificationStatus, "verified");
-  assert.equal(verified.verifiedSourceCount, 3);
-  assert.equal(verified.institutionCount, 3);
+  assert.equal(verified.verifiedSourceCount, 8);
+  assert.equal(verified.institutionCount, 4);
   assert.equal(verified.targetSourceCount, 8);
-  assert.equal(verified.minimumSourceCount, 3);
-  assert.equal(verified.recommendations.length, 2);
+  assert.equal(verified.minimumSourceCount, 1);
+  assert.equal(verified.recommendations.length, 0);
   assert.equal(verified.currentSignals.length, 1);
   assert.equal(verified.historicalMilestones.length, 0, "current sources must not be repurposed as historical milestones");
   assert.equal(verified.researchPeriod, "6m");
-  assert.equal(verified.currentSourceCount, 3);
+  assert.equal(verified.currentSourceCount, 8);
+});
+
+test("open academic discovery runs even when platform sources meet the target", async () => {
+  const client = aidaResearchClient(3);
+  const generate = client.models.generateContent;
+  const prompts = [];
+  client.models.generateContent = async request => {
+    const prompt = request.contents[0].parts[0].text;
+    prompts.push(prompt);
+    if (prompt.includes("Busca también fuera de las siete plataformas")) return modelJson({
+      sources: [{ id: "open-1", title: "Repositorio universitario", url: "https://university.edu/research", sourceType: "paper", evidenceRole: "current" }],
+      facts: [{ id: "open-fact", claim: "La investigación universitaria respalda el aprendizaje.", sourceIds: ["open-1"] }]
+    });
+    return generate(request);
+  };
+  const dossier = await researchArticleEvidenceServer({
+    topic: "Aprendizaje", minimumSources: 3,
+    dependencies: { client, now: new Date("2026-08-25T12:00:00Z"), retrieveOptions: { resolveHost: publicDns, fetchImpl: async () => page() } }
+  });
+  assert.equal(dossier.verifiedSourceCount, 4);
+  assert.equal(dossier.telemetry.searches, 8);
+  const source = dossier.sources.find(source => source.url === "https://university.edu/research");
+  assert.ok(source);
+  assert.ok(source.discoveredVia.includes("supplemental"));
+  assert.ok(dossier.facts.some(fact => fact.sourceIds.includes(source.id)));
+  assert.equal(dossier.platformResults.find(result => result.id === "supplemental").verifiedCount, 1);
+  assert.ok(prompts.some(prompt => prompt.includes("Sigue las referencias bibliográficas")));
+  assert.equal(dossier.researchPolicyVersion, 4);
 });
 
 test("all user-facing editorial actions route through marcie-mode-service", () => {
@@ -85,8 +115,22 @@ test("the strict Aida service owns its prompts and eight-phase contract", () => 
   const source = fs.readFileSync(path.resolve(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-aida-service.js"), "utf8");
   assert.doesNotMatch(source, /getActiveMarciePrompt/);
   for (const phase of ["headline", "problem", "deepen", "agitate", "turn", "why", "change", "close"]) assert.match(source, new RegExp(`\\b${phase}\\b`));
-  assert.match(source, /Aida requiere al menos 3 páginas actuales concretas verificadas/);
-  assert.match(source, /al menos tres publicaciones o instituciones diferentes/);
+  assert.match(source, /MarcieResearchPolicy\.assertReady/);
+  assert.match(source, /!verifiedSources\.length/);
+  assert.doesNotMatch(source, /verifiedSources\.length < minimumSources/);
+  assert.match(source, /export const AIDA_DEFAULT_BRAND_LINE = ""/);
+  assert.match(source, /No hay frase de marca configurada/);
+  assert.match(source, /crea un cierre original y pertinente al argumento/);
+});
+
+test("Aida removes only its inherited fixed closing and preserves configured branding", () => {
+  const root = path.resolve(__dirname, "../../public/MarcieBlogEditor/js/services");
+  const service = fs.readFileSync(path.join(root, "marcie-aida-service.js"), "utf8");
+  const router = fs.readFileSync(path.join(root, "marcie-mode-service.js"), "utf8");
+  assert.match(service, /AIDA_LEGACY_BRAND_LINE = "Aprender no es esforzarse más/);
+  assert.match(router, /if \(configuredBrandLine \|\| !Array\.isArray\(article\.blocks\)\) return article/);
+  assert.match(router, /closingText\.endsWith\(AIDA_LEGACY_BRAND_LINE\)/);
+  assert.match(router, /brandLine: ""/);
 });
 
 test("Aida researches the complete user topic and uses science and history as supporting layers", () => {
@@ -94,26 +138,28 @@ test("Aida researches the complete user topic and uses science and history as su
   const backend = fs.readFileSync(path.resolve(__dirname, "../src/marcie-editorial-research.js"), "utf8");
   const editor = fs.readFileSync(path.resolve(__dirname, "../../public/MarcieBlogEditor/js/editor-app.js"), "utf8");
 
-  assert.match(backend, /El tema indicado por el usuario es el centro de la investigación/);
-  assert.match(backend, /añade ciencia o evolución histórica únicamente cuando exista evidencia/);
+  assert.match(backend, /El tema completo indicado por el usuario es el centro de la investigación/);
+  assert.match(backend, /no excluye estudios pertinentes anteriores/);
   assert.match(service, /Los hechos científicos y la historia enriquecen el argumento: no sustituyen el tema principal/);
   assert.match(service, /idea central fiel al tema/);
   assert.match(editor, /Investigar el tema · Aida/);
   assert.doesNotMatch(backend, /Investiga científicamente el tema/);
   assert.doesNotMatch(editor, /Investigar ciencia e historia · Aida/);
-  assert.match(backend, /const researchLenses = audienceResearchLenses\(audience\)/);
+  assert.match(backend, /researchPolicy\.platforms\.filter/);
   assert.match(backend, /Voces influyentes y referencias documentales/);
   assert.match(backend, /generatedBatches\.flatMap/);
 });
 
-test("an audience dossier is reused while drafting even when it has fewer than six sources", () => {
+test("an audience dossier must pass readiness before Aida drafting", () => {
   const service = fs.readFileSync(path.resolve(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-aida-service.js"), "utf8");
   const contracts = fs.readFileSync(path.resolve(__dirname, "../../public/MarcieBlogEditor/js/contracts/editorial-contracts.js"), "utf8");
 
   assert.match(service, /const dossier = researchDossier \|\| await researchAidaTopicWithGemini/);
+  assert.match(service, /MarcieResearchPolicy\.assertReady\(dossier, minimumSources\)/);
   assert.doesNotMatch(service, /existingDossierIsReady/);
   assert.match(service, /No repitas ni parafrasees una afirmación marcada como no respaldada/);
-  assert.match(contracts, /Aida: \$\{verifiedSources\.length\} de 3 páginas mínimas verificadas/);
+  assert.doesNotMatch(contracts, /Aida: \$\{verifiedSources\.length\} de 3 páginas mínimas verificadas/);
+  assert.doesNotMatch(contracts, /Aida: \$\{institutions\.size\} de 3 publicaciones/);
   assert.match(contracts, /blockerKeys\.has\(key\)/);
 });
 
@@ -203,7 +249,7 @@ test("session writes are serialized, deduplicated and retried after Firestore th
   assert.match(store, /500 \* \(2 \*\* attempt\)/);
   assert.match(store, /lastCommittedFingerprints\.get\(session\.id\) === fingerprint/);
   assert.match(store, /LOCAL_STORAGE_PENDING_SAVE_KEY/);
-  assert.match(store, /previous\.catch\(\(\) => undefined\)\.then\(\(\) => persistMarcieSession\(session\)\)/);
+  assert.match(store, /previous\.catch\(\(\) => undefined\)\.then\(\(\) => persistMarcieSession\(snapshot\)\)/);
 });
 
 test("long-running Marcie research bypasses the Firebase Hosting 60-second proxy", () => {
