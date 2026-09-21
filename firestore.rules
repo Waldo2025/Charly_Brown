@@ -51,10 +51,9 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return hasAnyRole([
-        "admin", "Admin", "administrador", "Administrador", "administrator", "Administrator",
-        "superAdmin", "superadmin", "SuperAdmin", "owner", "Owner"
-      ]);
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
     function isEditor() {
@@ -95,6 +94,23 @@ service cloud.firestore {
       );
     }
 
+    function sallyProfileAllowed(p) {
+      let role = p.get("role", p.get("rol", p.get("userRole", p.get("requestedRole", ""))));
+      let status = p.get("approvalStatus", p.get("status", p.get("estado", p.get("estadoAprobacion", ""))));
+      let denied = status in ["pending", "pendiente", "rejected", "rechazado", "blocked", "bloqueado", "denied", "denegado"];
+      return role is string && role.size() > 0 && !(role in ["pending", "pendiente", "Pending", "Pendiente"]) &&
+        !denied && (status in ["approved", "aprobado", "active", "activo"] ||
+          p.get("approved", false) == true || p.get("isApproved", false) == true || p.get("aprobado", false) == true ||
+          (status == "" && p.get("approved", true) != false && p.get("aprobado", true) != false));
+    }
+    function isSallyApprovedUser() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          ? sallyProfileAllowed(get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+          : sallyProfileAllowed(request.auth.token)
+      );
+    }
+
     function isGameDeveloper() {
       return isAdmin() || hasAnyRole([
         "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev"
@@ -112,6 +128,13 @@ service cloud.firestore {
         data.uid == request.auth.uid ||
         data.ownerUid == request.auth.uid ||
         data.createdBy == request.auth.uid
+      );
+    }
+
+    function isSallyParticipant(data) {
+      return isSallyApprovedUser() && (
+        data.ownerId == request.auth.uid ||
+        (data.collaborators is list && data.collaborators.hasAny([request.auth.uid]))
       );
     }
 
@@ -289,6 +312,31 @@ service cloud.firestore {
         (!("sharedWith" in data) || data.sharedWith is list);
     }
 
+    function canEditPodcasterSession(data) {
+      return isSignedIn() && (
+        data.ownerId == request.auth.uid ||
+        ((data.sharedWithIds is list) && data.sharedWithIds.hasAny([request.auth.uid]))
+      );
+    }
+
+    function isPodcasterSessionRestorePatch(before, after) {
+      return before.archived == true &&
+        after.archived == false &&
+        after.session.archived == false &&
+        before.diff(after).affectedKeys().hasOnly(["archived", "session", "sessionUpdatedAt", "updatedAt"]) &&
+        before.session.diff(after.session).affectedKeys().hasOnly(["archived", "updatedAt"]);
+    }
+
+    function canEditPodcasterAcademicMetadata(sessionId) {
+      return exists(/databases/$(database)/documents/podcaster_sessions/$(sessionId)) && (
+        get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data.archived != true ||
+        (
+          isAdmin() &&
+          get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data.ownerId != request.auth.uid
+        )
+      );
+    }
+
     function isAllowedAnalizarPdfStatus(value) {
       return [
         "idle",
@@ -383,14 +431,24 @@ service cloud.firestore {
 
     match /podcaster_sessions/{sessionId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isPodcasterSessionShape(request.resource.data, sessionId);
       allow update: if isSignedIn() &&
         (
           (
             request.resource.data.ownerId == resource.data.ownerId &&
-            isPodcasterSessionShape(request.resource.data, sessionId)
+            isPodcasterSessionShape(request.resource.data, sessionId) &&
+            (
+              (isAdmin() && resource.data.ownerId != request.auth.uid) ||
+              (
+                canEditPodcasterSession(resource.data) &&
+                (resource.data.archived != true || isPodcasterSessionRestorePatch(resource.data, request.resource.data))
+              )
+            )
           ) || (
             isApprovedUser() &&
+            (resource.data.archived != true || (isAdmin() && resource.data.ownerId != request.auth.uid)) &&
             isAcademicMetadataSessionPatch(resource.data, request.resource.data)
           )
         );
@@ -403,7 +461,9 @@ service cloud.firestore {
 
     match /podcaster_academic_metadata/{sessionId} {
       allow read: if isSignedIn();
-      allow create, update: if isApprovedUser() && isAcademicMetadataDocShape(request.resource.data, sessionId);
+      allow create, update: if isApprovedUser() &&
+        canEditPodcasterAcademicMetadata(sessionId) &&
+        isAcademicMetadataDocShape(request.resource.data, sessionId);
       allow delete: if isAdmin();
     }
 
@@ -517,7 +577,7 @@ service cloud.firestore {
     match /charlyBrownUnitSessions/{sessionId} {
       allow read: if isApprovedUser() &&
         resource.data.ownerUid == request.auth.uid;
-      allow create: if isApprovedUser() &&
+      allow create: if isSallyApprovedUser() &&
         request.resource.data.ownerUid == request.auth.uid;
       allow update: if isApprovedUser() &&
         resource.data.ownerUid == request.auth.uid &&
@@ -850,6 +910,41 @@ service cloud.firestore {
         canAccessMoodleCourseData(request.resource.data, docId);
     }
 
+    match /SallyBrownTemplates/{templateId} {
+      function validTemplate(data) {
+        return data.keys().hasOnly(['ownerId', 'name', 'html', 'archived', 'version', 'createdAt', 'updatedAt']) &&
+          data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+          data.html is string && data.html.size() > 0 && data.html.size() <= 150000 &&
+          data.archived is bool && data.version is int && data.version > 0 &&
+          data.createdAt is timestamp && data.updatedAt == request.time;
+      }
+      allow read: if isSallyApprovedUser();
+      allow create: if isSallyApprovedUser() && validTemplate(request.resource.data) &&
+        request.resource.data.ownerId == request.auth.uid && request.resource.data.version == 1 &&
+        request.resource.data.createdAt == request.time;
+      allow update: if isSallyApprovedUser() && resource.data.ownerId == request.auth.uid &&
+        validTemplate(request.resource.data) && request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.version == resource.data.version + 1;
+      allow delete: if false; // Archive is reversible; selected conversation snapshots remain usable.
+    }
+
+    match /SallyBrownTasks/{taskId} {
+      allow read: if isSallyParticipant(get(/databases/$(database)/documents/SallyBrownSessions/$(resource.data.sessionId)).data);
+      allow write: if false; // Only the authenticated server may advance executions.
+    }
+
+    match /SallyBrownSessions/{sessionId} {
+      allow read: if isSallyParticipant(resource.data);
+      allow create: if isApprovedUser() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.collaborators is list;
+      allow update: if isSallyParticipant(resource.data) &&
+        isSallyParticipant(request.resource.data) &&
+        request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isSallyApprovedUser() && resource.data.ownerId == request.auth.uid;
+    }
+
     match /autoresEjemplo/{docId} {
       allow read: if isSignedIn();
       allow write: if isEditor();
@@ -942,7 +1037,7 @@ service cloud.firestore {
     }
 
     match /mindmaps/{docId} {
-      allow read: if isAdmin() || (isSignedIn() && isDocOwner(resource.data));
+      allow read: if isSignedIn();
       allow create: if isSignedIn() && isDocOwner(request.resource.data);
       allow update, delete: if isAdmin() || (isSignedIn() && isDocOwner(resource.data) && isDocOwner(request.resource.data));
     }

@@ -36,7 +36,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, must-revalidate"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -54,7 +54,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=300, must-revalidate"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -63,7 +63,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=300, must-revalidate"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -72,7 +72,61 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=300, must-revalidate"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/MarcieBlogEditor/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/PigPenCreator*",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/js/PigPenCreator.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/js/pigpen-*",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/js/escape-room-*",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/js/{api-client,firebase-default-app,firebase-app-check,html-docx}.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -90,16 +144,34 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, must-revalidate"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
       {
-        "source": "/{scienceActivities.css,js/scienceActivities.js,js/scienceActivities.bundle.js,js/chromeLayout.js,js/sidebar.js,tailwind-lite.css,sidebar.css,header.css}",
+        "source": "/{scienceActivities.css,js/scienceActivities.js,js/scienceActivities.bundle.js,tailwind-lite.css}",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=31536000, immutable"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/{podcaster*,js/chromeLayout.js,js/sidebar.js,sidebar.css,header.css,local-fonts.css,js/api-client-podcaster.js,js/firebase-web-config.js}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/podcaster/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -108,7 +180,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=31536000, immutable"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -117,7 +189,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=31536000, immutable"
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
           }
         ]
       },
@@ -135,7 +207,7 @@
         "headers": [
           {
             "key": "Content-Security-Policy",
-            "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://www.google.com https://www.google.com/recaptcha/ https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' blob: http://127.0.0.1:8787 http://localhost:8787 https://cdn.jsdelivr.net https://www.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebase.googleapis.com https://firebasestorage.googleapis.com https://storage.googleapis.com https://content-firebaseappcheck.googleapis.com https://firebaseappcheck.googleapis.com https://us-central1-charly-brown.cloudfunctions.net https://gemini-live-proxy-128488238449.us-central1.run.app wss://gemini-live-proxy-128488238449.us-central1.run.app; frame-src 'self' https://www.google.com https://recaptcha.google.com; media-src 'self' blob: data: https:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+            "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://www.google.com https://www.google.com/recaptcha/ https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://sally-browser-mm2qel4fka-uc.a.run.app blob: http://127.0.0.1:8787 http://localhost:8787 https://cdn.jsdelivr.net https://www.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebase.googleapis.com https://firebasestorage.googleapis.com https://storage.googleapis.com https://content-firebaseappcheck.googleapis.com https://firebaseappcheck.googleapis.com https://us-central1-charly-brown.cloudfunctions.net https://gemini-live-proxy-128488238449.us-central1.run.app wss://gemini-live-proxy-128488238449.us-central1.run.app; frame-src 'self' https://www.google.com https://recaptcha.google.com; media-src 'self' blob: data: https:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
           },
           {
             "key": "Referrer-Policy",

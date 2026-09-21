@@ -1,4 +1,5 @@
 const express = require("express");
+const { vertexFailureDiagnostic } = require("./vertex-diagnostics.js");
 const { GoogleAuth } = require("google-auth-library");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -13,8 +14,12 @@ const {
 } = require("./common.js");
 const {
   createVertexClient,
-  buildVertexGenerateRequest
+  buildVertexGenerateRequest,
+  isVertexInvalidArgument,
+  buildVertexCompatibilityPayload,
+  sanitizeVertexSchema
 } = require("./vertex.js");
+const { registerCharlyBrownMcpRoutes } = require("./charly-brown-mcp.js");
 const { registerUploadRoutes, registerSupportGraphicUploadRoute } = require("./uploads.js");
 const { registerAssetRoutes } = require("./assets.js");
 const { registerPodcasterDataRoutes } = require("./podcaster-data.js");
@@ -55,19 +60,20 @@ registerMontageRoutes(podcasterApp);
 registerAiJobStatusRoute(podcasterApp);
 installErrorHandler(podcasterApp, { service: "podcaster-api" });
 
-const GEMINI_PROXY_JSON_LIMIT = "2mb";
-const GEMINI_PROXY_PAYLOAD_LIMIT_BYTES = 1536 * 1024;
+const GEMINI_PROXY_JSON_LIMIT = "10mb";
+const GEMINI_PROXY_PAYLOAD_LIMIT_BYTES = 8 * 1024 * 1024;
 const geminiApp = createApp("gemini-api", {
   podcasterDialogueAudioRoute: true,
   geminiLiveProxy: true,
   providerAuth: "adc"
 }, { jsonLimit: GEMINI_PROXY_JSON_LIMIT });
-// Las generaciones editoriales grandes (por ejemplo, Escape Rooms con varios
-// contextos y preguntas) superan con frecuencia 45 s. La Function dispone de
-// 120 s; reservamos 15 s para serializar la respuesta y cerrar la petición.
+// Standard requests retain their existing deadline. Fixed PigPen content uses
+// one sequential call for an entire room; leave 60 s inside the 540 s function
+// budget to serialize the result. This profile never enables extra attempts.
 const GEMINI_PROVIDER_TIMEOUT_MS = 105_000;
+const PIGPEN_CONTENT_TIMEOUT_MS = 480_000;
 
-function generateGeminiContentWithDeadline(client, request) {
+function generateGeminiContentWithDeadline(client, request, timeoutMs = GEMINI_PROVIDER_TIMEOUT_MS) {
   let timeoutId;
   const deadline = new Promise((_resolve, reject) => {
     timeoutId = setTimeout(() => {
@@ -75,7 +81,7 @@ function generateGeminiContentWithDeadline(client, request) {
       error.code = "gemini_upstream_timeout";
       error.status = 503;
       reject(error);
-    }, GEMINI_PROVIDER_TIMEOUT_MS);
+    }, timeoutMs);
   });
   return Promise.race([
     client.models.generateContent(request),
@@ -97,22 +103,38 @@ geminiApp.post("/api/gemini/generate", asyncRoute(async (req, res) => {
   }
   const client = createVertexClient({ location: "global" });
   const requestedModel = String(req.body?.model || "").trim();
+  const primaryRequest = buildVertexGenerateRequest({ model: requestedModel, payload });
+  let failedModel = primaryRequest.model;
   let response;
   try {
-    response = await generateGeminiContentWithDeadline(client, buildVertexGenerateRequest({
-      model: requestedModel,
-      payload
-    }));
+    const timeoutMs = req.body?.singleAttempt === true && req.body?.generationProfile === "pigpen-fixed-content"
+      ? PIGPEN_CONTENT_TIMEOUT_MS : GEMINI_PROVIDER_TIMEOUT_MS;
+    response = await generateGeminiContentWithDeadline(client, primaryRequest, timeoutMs);
   } catch (error) {
-    if (String(error?.code || error?.message || "") === "gemini_upstream_timeout") {
+    let providerError = error;
+    if (isVertexInvalidArgument(error)) {
+      if (req.body?.singleAttempt !== true) {
+        try {
+          response = await generateGeminiContentWithDeadline(client, buildVertexGenerateRequest({
+            model: requestedModel,
+            payload: buildVertexCompatibilityPayload(payload)
+          }));
+          res.set("X-Gemini-Compatibility-Retry", "minimal-payload");
+        } catch (compatibilityError) {
+          providerError = compatibilityError;
+        }
+      }
+    }
+    if (response) return res.status(200).json(JSON.parse(JSON.stringify(response)));
+    if (String(providerError?.code || providerError?.message || "") === "gemini_upstream_timeout") {
       res.set("Retry-After", "2");
     }
-    const status = Number(error?.status || error?.code || error?.response?.status || 0);
-    const errorText = String(error?.message || error?.response?.data || error || "");
+    const status = Number(providerError?.status || providerError?.code || providerError?.response?.status || 0);
+    const errorText = String(providerError?.message || providerError?.response?.data || providerError || "");
     const quotaExhausted = status === 429
       || /RESOURCE_EXHAUSTED|resource has been exhausted|quota/i.test(errorText);
-    if (!quotaExhausted) throw error;
-    if (requestedModel === "gemini-3.1-flash-image") {
+    if (!quotaExhausted) throw providerError;
+    if (req.body?.singleAttempt !== true && requestedModel === "gemini-3.1-flash-image") {
       try {
         response = await generateGeminiContentWithDeadline(client, buildVertexGenerateRequest({
           model: "gemini-3-pro-image",
@@ -123,13 +145,16 @@ geminiApp.post("/api/gemini/generate", asyncRoute(async (req, res) => {
         const fallbackStatus = Number(fallbackError?.status || fallbackError?.code || fallbackError?.response?.status || 0);
         const fallbackText = String(fallbackError?.message || fallbackError?.response?.data || fallbackError || "");
         if (fallbackStatus !== 429 && !/RESOURCE_EXHAUSTED|resource has been exhausted|quota/i.test(fallbackText)) throw fallbackError;
+        providerError = fallbackError;
+        failedModel = buildVertexGenerateRequest({ model: "gemini-3-pro-image", payload }).model;
       }
     }
     if (!response) {
+      console.warn(JSON.stringify(vertexFailureDiagnostic(providerError, { model: failedModel, requestId: req.requestId })));
       res.set("Retry-After", "60");
       return res.status(429).json({
         error: "gemini_quota_exhausted",
-        message: "La cuota de Gemini está temporalmente agotada. Intenta nuevamente más tarde.",
+        message: "Vertex rechazó la solicitud por límite de cuota o capacidad temporal (429). Intenta nuevamente más tarde.",
         retryAfterSeconds: 60,
         requestId: req.requestId || undefined
       });
@@ -140,6 +165,42 @@ geminiApp.post("/api/gemini/generate", asyncRoute(async (req, res) => {
 registerSupportGraphicUploadRoute(geminiApp);
 registerMarcieWordPressRoutes(geminiApp);
 registerMarcieEditorialResearchRoutes(geminiApp);
+registerCharlyBrownMcpRoutes(geminiApp, {
+  db: getAdminServices().db,
+  verifyFirebaseBearer: async (req) => {
+    const auth = await resolveAuthContext(req);
+    return { uid: auth.uid, decoded: auth.token || { role: auth.role } };
+  },
+  generateContent: async ({ model, contents, config = {} } = {}) => {
+    const { systemInstruction, tools, toolConfig, ...generationConfig } = config;
+    const client = createVertexClient({ location: "global" });
+    return generateGeminiContentWithDeadline(client, buildVertexGenerateRequest({
+      model,
+      payload: {
+        contents,
+        ...(systemInstruction ? { systemInstruction } : {}),
+        ...(Array.isArray(tools) ? { tools: sanitizeVertexSchema(tools) } : {}),
+        ...(toolConfig ? { toolConfig } : {}),
+        generationConfig
+      }
+    }));
+  },
+  generateText: async ({ model, prompt = "", json = false, thinkingLevel = "MEDIUM" } = {}) => {
+    const client = createVertexClient({ location: "global" });
+    const response = await generateGeminiContentWithDeadline(client, buildVertexGenerateRequest({
+      model,
+      payload: {
+        contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+        generationConfig: {
+          maxOutputTokens: 32768,
+          thinkingConfig: { thinkingLevel },
+          ...(json ? { responseMimeType: "application/json" } : {})
+        }
+      }
+    }));
+    return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
+  }
+});
 geminiApp.post("/api/gemini/live-token", asyncRoute(async (req, res) => {
   return res.status(201).json(await createLiveTicket(req));
 }));
@@ -157,7 +218,10 @@ const assetApp = createApp("asset-api");
 registerAssetRoutes(assetApp);
 registerPigPenShareRoutes(assetApp);
 const pigpenSheetsAuth = new GoogleAuth({
-  scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+  scopes: [
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/drive.readonly"
+  ]
 });
 registerPigpenSheetsRoutes(assetApp, {
   db: getAdminServices().db,
@@ -199,7 +263,7 @@ exports.geminiApi = onRequest({
   region: REGION,
   serviceAccount: "charly-functions-ai@charly-brown.iam.gserviceaccount.com",
   memory: "1GiB",
-  timeoutSeconds: 120,
+  timeoutSeconds: 540,
   minInstances: 0,
   maxInstances: 10,
   concurrency: 10,

@@ -8,15 +8,22 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/index.js && node --check src/common.js && node --check src/vertex.js && node --check src/uploads.js && node --check src/assets.js && node --check src/pigpen-share.js && node --check src/pigpen-sheets.js && node --check src/tasks.js && node --check src/montage-dispatch.js && node --check src/live-tickets.js && node --check src/podcaster-data.js && node --check src/science-activities.js && node --check src/analizar-pdf-data.js && node --check src/analizar-pdf-worker-proxy.js && node --check src/montage-routes.js && node --check src/video-prompt.js && node --check src/ai-jobs.js && node --check src/stale-job-monitor.js && node --check src/marcie-wordpress-core.js && node --check src/marcie-wordpress.js && node --check src/marcie-editorial-monitor.js && node --check src/marcie-trend-refresh.js && node --check src/marcie-editorial-research.js && node --check src/marcie-source-verifier.js"
+    "check": "node --check src/index.js && node --check src/common.js && node --check src/vertex.js && node --check src/uploads.js && node --check src/assets.js && node --check src/pigpen-share.js && node --check src/pigpen-sheets.js && node --check src/tasks.js && node --check src/montage-dispatch.js && node --check src/live-tickets.js && node --check src/podcaster-data.js && node --check src/science-activities.js && node --check src/analizar-pdf-data.js && node --check src/analizar-pdf-worker-proxy.js && node --check src/montage-routes.js && node --check src/video-prompt.js && node --check src/ai-jobs.js && node --check src/stale-job-monitor.js && node --check src/marcie-wordpress-core.js && node --check src/marcie-wordpress.js && node --check src/marcie-editorial-monitor.js && node --check src/marcie-trend-refresh.js && node --check src/marcie-editorial-research.js && node --check src/marcie-source-verifier.js && node --check src/charly-brown-agent-tools.js && node --check src/charly-brown-export.js && node --check src/charly-brown-mcp.js"
   },
   "dependencies": {
     "@google-cloud/run": "^3.3.0",
     "@google-cloud/tasks": "^6.3.0",
     "@google/genai": "^2.16.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "docx": "^9.7.1",
     "express": "^5.2.1",
     "firebase-admin": "^14.2.0",
     "firebase-functions": "^7.3.2",
-    "google-auth-library": "^10.9.1"
+    "google-auth-library": "^10.9.1",
+    "jszip": "^3.10.2",
+    "node-html-parser": "^7.1.0",
+    "pdf-parse": "2.4.5",
+    "pdfkit": "^0.17.2",
+    "zod": "^4.6.5"
   }
 }

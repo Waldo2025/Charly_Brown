@@ -63,6 +63,31 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function sallyProfileAllowed(p) {
+      let role = p.get("role", p.get("rol", p.get("userRole", p.get("requestedRole", ""))));
+      let status = p.get("approvalStatus", p.get("status", p.get("estado", p.get("estadoAprobacion", ""))));
+      let denied = status in ["pending", "pendiente", "rejected", "rechazado", "blocked", "bloqueado", "denied", "denegado"];
+      return role is string && role.size() > 0 && !(role in ["pending", "pendiente", "Pending", "Pendiente"]) &&
+        !denied && (status in ["approved", "aprobado", "active", "activo"] ||
+          p.get("approved", false) == true || p.get("isApproved", false) == true || p.get("aprobado", false) == true ||
+          (status == "" && p.get("approved", true) != false && p.get("aprobado", true) != false));
+    }
+    function isApprovedUser() {
+      return isSignedIn() && (
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+          ? sallyProfileAllowed(firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data)
+          : sallyProfileAllowed(request.auth.token)
+      );
+    }
+
+    function canAccessSallySession(sessionId) {
+      return isApprovedUser() &&
+        firestore.exists(/databases/(default)/documents/SallyBrownSessions/$(sessionId)) && (
+          firestore.get(/databases/(default)/documents/SallyBrownSessions/$(sessionId)).data.ownerId == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/SallyBrownSessions/$(sessionId)).data.collaborators.hasAny([request.auth.uid])
+        );
+    }
+
     function isConversationParticipant(conversationId) {
       return isSignedIn() && conversationId.matches("^" + request.auth.uid + "_.+$|^.+_" + request.auth.uid + "$");
     }
@@ -95,10 +120,20 @@ service firebase.storage {
       allow read, write: if isOwner(uid);
     }
 
+    match /sallyBrown/{uid}/{sessionId}/{allPaths=**} {
+      allow read: if canAccessSallySession(sessionId);
+      // Task state and evidence are server-managed; clients must not forge approvals.
+      allow create, update: if allPaths[0] != 'tasks' && isOwner(uid) && canAccessSallySession(sessionId) &&
+        request.resource.size < 30 * 1024 * 1024 && !hasBlockedPublicExtension(request.resource.name);
+      allow delete: if allPaths[0] != 'tasks' && isOwner(uid) && canAccessSallySession(sessionId);
+    }
+
     // Assets de escape rooms.
     match /escaperooms/{uid}/{sessionId}/{allPaths=**} {
       allow read: if true;
-      allow write: if isOwner(uid) && isSafePublicAsset(allPaths);
+      allow write: if isOwner(uid) && request.resource != null &&
+        (isSafePublicAsset(request.resource.name) ||
+        (!hasBlockedPublicExtension(request.resource.name) && normalizedContentType().matches('video/(mp4|webm|ogg)')));
     }
 
     // Imágenes sanitizadas de actividades científicas guardadas por Functions.
@@ -159,9 +194,10 @@ service firebase.storage {
       allow write: if isSignedIn() && isSafePublicAsset(fileName);
     }
     // Authenticated users can read and upload safe Firebase Storage assets.
-    match /{allPaths=**} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && hasAllowedPublicContentType();
+    match /{rootFolder}/{allPaths=**} {
+      // Sally uses project membership; this fallback must not override it.
+      allow read: if rootFolder != 'sallyBrown' && isSignedIn();
+      allow write: if rootFolder != 'sallyBrown' && isSignedIn() && hasAllowedPublicContentType();
     }
 
     // Deny-by-default for unauthenticated or unsafe assets.

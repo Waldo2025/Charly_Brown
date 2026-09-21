@@ -1,7 +1,7 @@
 const { GoogleGenAI } = require("@google/genai");
 const { PROJECT_ID } = require("./common.js");
 
-const DEFAULT_TEXT_MODEL = "gemini-3.6-flash";
+const DEFAULT_TEXT_MODEL = "gemini-3.8-flash";
 const DEFAULT_LITE_MODEL = "gemini-3.5-flash-lite";
 const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 const DEFAULT_LIVE_MODEL = "gemini-live-2.5-flash-native-audio";
@@ -19,6 +19,9 @@ const AVAILABLE_VEO_MODELS = Object.freeze([
 const MODEL_ALIASES = Object.freeze({
   "gemini-2.5-flash": DEFAULT_TEXT_MODEL,
   "gemini-3-flash-preview": DEFAULT_TEXT_MODEL,
+  "gemini-3.5-flash": DEFAULT_TEXT_MODEL,
+  "gemini-3.6-flash": DEFAULT_TEXT_MODEL,
+  "gemini-3.7-flash": DEFAULT_TEXT_MODEL,
   "gemini-flash-latest": DEFAULT_TEXT_MODEL,
   "gemini-3-pro-preview": "gemini-3.1-pro-preview",
   "gemini-2.5-flash-lite": DEFAULT_LITE_MODEL,
@@ -83,6 +86,31 @@ function createVertexClient({ location = "global" } = {}) {
   });
 }
 
+function sanitizeVertexSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(sanitizeVertexSchema);
+  const sanitized = {};
+  const unsupportedKeywords = new Set([
+    "minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum",
+    "pattern", "uniqueItems", "$schema", "additionalProperties"
+  ]);
+  for (const [key, value] of Object.entries(schema)) {
+    if (unsupportedKeywords.has(key)) continue;
+    if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+      const sanitizedProps = {};
+      for (const [propKey, propVal] of Object.entries(value)) {
+        sanitizedProps[propKey] = sanitizeVertexSchema(propVal);
+      }
+      sanitized[key] = sanitizedProps;
+    } else if (key === "items" && value && typeof value === "object") {
+      sanitized[key] = sanitizeVertexSchema(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
 function buildVertexGenerateRequest({ model, payload = {} } = {}) {
   const source = payload && typeof payload === "object" ? payload : {};
   const {
@@ -104,6 +132,14 @@ function buildVertexGenerateRequest({ model, payload = {} } = {}) {
     ...(toolConfig && typeof toolConfig === "object" ? { toolConfig } : {}),
     ...(cachedContent ? { cachedContent } : {})
   };
+  const rawSchema = generationConfig?.responseSchema
+    || generationConfig?.responseJsonSchema
+    || source.responseSchema
+    || source.responseJsonSchema;
+  if (rawSchema) {
+    config.responseSchema = sanitizeVertexSchema(rawSchema);
+    delete config.responseJsonSchema;
+  }
   if (normalizedModel === "gemini-3.5-flash-lite"
     || /^gemini-3\.[6-9](?:-|$)/.test(normalizedModel)
     || /^gemini-[4-9](?:\.|-|$)/.test(normalizedModel)) {
@@ -122,6 +158,39 @@ function buildVertexGenerateRequest({ model, payload = {} } = {}) {
   };
 }
 
+function isVertexInvalidArgument(error) {
+  const details = [
+    error?.code,
+    error?.status,
+    error?.message,
+    error?.response?.data,
+    error?.cause?.message
+  ].filter(Boolean).map((value) => (
+    typeof value === "string" ? value : JSON.stringify(value)
+  )).join(" ");
+  return Number(error?.status || error?.code || error?.response?.status || 0) === 400
+    && /INVALID_ARGUMENT|invalid argument/i.test(details);
+}
+
+function buildVertexCompatibilityPayload(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const contents = normalizeGeminiContents(source.contents).map((content) => ({
+    ...content,
+    parts: Array.isArray(content.parts) ? content.parts.map((part) => ({ ...part })) : []
+  }));
+  const systemText = (Array.isArray(source.systemInstruction?.parts) ? source.systemInstruction.parts : [])
+    .map((part) => String(part?.text || "").trim())
+    .filter(Boolean)
+    .join("\n");
+  if (systemText) {
+    const firstUserContent = contents.find((content) => content.role === "user");
+    const firstTextPart = firstUserContent?.parts?.find((part) => typeof part?.text === "string");
+    if (firstTextPart) firstTextPart.text = `${systemText}\n\n${firstTextPart.text}`;
+    else contents.unshift({ role: "user", parts: [{ text: systemText }] });
+  }
+  return { contents };
+}
+
 module.exports = {
   DEFAULT_TEXT_MODEL,
   DEFAULT_LITE_MODEL,
@@ -134,5 +203,8 @@ module.exports = {
   normalizeModel,
   normalizeVeoModel,
   createVertexClient,
-  buildVertexGenerateRequest
+  buildVertexGenerateRequest,
+  isVertexInvalidArgument,
+  buildVertexCompatibilityPayload,
+  sanitizeVertexSchema
 };

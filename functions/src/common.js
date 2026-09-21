@@ -131,6 +131,18 @@ function isPrivilegedRole(role = "") {
     .includes(String(role || "").trim().toLowerCase());
 }
 
+function isAdminRole(role = "") {
+  return String(role || "").trim() === "admin";
+}
+
+async function hasAdminRoleWithProfile(authContext = {}, db = null) {
+  if (!db || !authContext?.uid) return false;
+  const profile = await db.collection("users").doc(authContext.uid).get();
+  if (!profile.exists) return false;
+  const data = profile.data() || {};
+  return isAdminRole(data.role);
+}
+
 module.exports = {
   PROJECT_ID,
   STORAGE_BUCKET,
@@ -142,5 +154,7 @@ module.exports = {
   installCommonMiddleware,
   installErrorHandler,
   isPrivilegedRole,
+  isAdminRole,
+  hasAdminRoleWithProfile,
   isAllowedBrowserOrigin
 };

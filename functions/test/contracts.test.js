@@ -8,7 +8,9 @@ const {
   DEFAULT_VEO_MODEL,
   DEFAULT_VEO_FAST_MODEL,
   normalizeModel,
-  buildVertexGenerateRequest
+  buildVertexGenerateRequest,
+  isVertexInvalidArgument,
+  buildVertexCompatibilityPayload
 } = require("../src/vertex.js");
 const {
   validateUploadRequest,
@@ -31,7 +33,12 @@ const {
 const {
   normalizeVoiceName
 } = require("../src/live-tickets.js");
-const { safeSession, normalizeLibraryItem } = require("../src/podcaster-data.js");
+const {
+  safeSession,
+  normalizeLibraryItem,
+  isVideoSessionDocument,
+  resolvePodcasterSessionEditAccess
+} = require("../src/podcaster-data.js");
 const { sanitizePersistedValue } = require("../src/montage-routes.js");
 const {
   compactInput,
@@ -69,16 +76,82 @@ test("REST Gemini payload is translated to the Vertex SDK request shape", () => 
   });
   assert.equal(request.model, DEFAULT_TEXT_MODEL);
   assert.equal(request.contents[0].parts[0].text, "hola");
-  assert.equal(request.config.temperature, undefined, "Gemini 3.6 Flash no admite controles de muestreo explícitos en este proxy");
+  assert.equal(request.config.temperature, undefined, "Gemini 3.8 Flash no admite controles de muestreo explícitos en este proxy");
   assert.equal(request.config.responseMimeType, "application/json");
   assert.equal(request.config.systemInstruction.parts[0].text, "responde en español");
   assert.equal(request.config.safetySettings.length, 1);
 });
 
-test("Gemini proxy accepts bounded inline vision thumbnails without opening an unbounded body", () => {
+test("buildVertexGenerateRequest normalizes and sanitizes structured output schema for Vertex OpenAPI compliance", () => {
+  const schemaWithUnsupported = {
+    type: "object",
+    properties: {
+      titulo: { type: "string", minLength: 1 },
+      preguntas: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: "object",
+          properties: {
+            reto: { type: "string" },
+            elementos: { type: "array", items: { type: "string" }, minItems: 0, maxItems: 6 }
+          },
+          required: ["reto"]
+        }
+      }
+    },
+    required: ["titulo", "preguntas"]
+  };
+  const request = buildVertexGenerateRequest({
+    model: "gemini-2.5-flash",
+    payload: {
+      contents: [{ role: "user", parts: [{ text: "Genera el escape room" }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: schemaWithUnsupported
+      }
+    }
+  });
+  assert.equal(request.config.responseSchema.type, "object");
+  assert.equal(request.config.responseSchema.properties.titulo.minLength, undefined);
+  assert.equal(request.config.responseSchema.properties.preguntas.minItems, undefined);
+  assert.equal(request.config.responseSchema.properties.preguntas.maxItems, undefined);
+  assert.equal(request.config.responseSchema.properties.preguntas.items.properties.elementos.minItems, undefined);
+  assert.equal(request.config.responseSchema.properties.preguntas.items.properties.elementos.maxItems, undefined);
+  assert.deepEqual(request.config.responseSchema.required, ["titulo", "preguntas"]);
+  assert.equal(request.config.responseJsonSchema, undefined);
+});
+
+test("Gemini invalid arguments fall back to a minimal payload without losing instructions", () => {
+  const source = {
+    systemInstruction: { parts: [{ text: "Devuelve solo JSON." }] },
+    contents: [{ role: "user", parts: [{ text: "Genera el brief." }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: { type: "object" },
+      temperature: 0.2,
+      maxOutputTokens: 16384
+    }
+  };
+  const compatible = buildVertexCompatibilityPayload(source);
+  assert.deepEqual(Object.keys(compatible), ["contents"]);
+  assert.match(compatible.contents[0].parts[0].text, /^Devuelve solo JSON\.\n\nGenera el brief\.$/);
+  assert.equal(source.contents[0].parts[0].text, "Genera el brief.", "the original request must not be mutated");
+  assert.equal(isVertexInvalidArgument({ status: 400, message: '{"error":{"status":"INVALID_ARGUMENT"}}' }), true);
+  assert.equal(isVertexInvalidArgument({ status: 429, message: "RESOURCE_EXHAUSTED" }), false);
+});
+
+test("Gemini proxy retries invalid generation configurations with the compatibility payload", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/index.js"), "utf8");
-  assert.match(source, /const GEMINI_PROXY_JSON_LIMIT = "2mb"/);
-  assert.match(source, /const GEMINI_PROXY_PAYLOAD_LIMIT_BYTES = 1536 \* 1024/);
+  assert.match(source, /if \(isVertexInvalidArgument\(error\)\)[\s\S]*buildVertexCompatibilityPayload\(payload\)/);
+  assert.match(source, /X-Gemini-Compatibility-Retry", "minimal-payload"/);
+});
+
+test("Gemini proxy accepts bounded high-resolution inline vision references", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/index.js"), "utf8");
+  assert.match(source, /const GEMINI_PROXY_JSON_LIMIT = "10mb"/);
+  assert.match(source, /const GEMINI_PROXY_PAYLOAD_LIMIT_BYTES = 8 \* 1024 \* 1024/);
   assert.match(source, /createApp\("gemini-api",[\s\S]*?\{ jsonLimit: GEMINI_PROXY_JSON_LIMIT \}\)/);
   assert.doesNotMatch(source, /> 120 \* 1024/);
 });
@@ -102,6 +175,24 @@ test("large scene videos use a direct resumable upload contract", () => {
     "podcaster/sessions/Session_42/owners/user-1/videos/Row_7-upload-1-toma-final.mp4"
   );
   assert.throws(() => validateUploadRequest({ ...input, sessionId: "../Session_42" }), /invalid_session_id/);
+});
+
+test("podcaster admin browser includes only video sessions", () => {
+  assert.equal(isVideoSessionDocument({ session: { podcastStudioUiState: { composerGenerationMode: "video" } } }), true);
+  assert.equal(isVideoSessionDocument({ session: { script: { videoContentType: "creative" } } }), true);
+  assert.equal(isVideoSessionDocument({ session: { podcastStudioUiState: { composerGenerationMode: "podcast" } } }), false);
+});
+
+test("archived podcaster sessions require restore except for an admin editing another owner", () => {
+  const archived = { ownerId: "owner-1", sharedWithIds: ["shared-1"], archived: true };
+  assert.equal(resolvePodcasterSessionEditAccess(archived, { uid: "owner-1" }, false).archivedBlocked, true);
+  assert.equal(resolvePodcasterSessionEditAccess(archived, { uid: "shared-1" }, false).archivedBlocked, true);
+  const adminAccess = resolvePodcasterSessionEditAccess(archived, { uid: "admin-1" }, true);
+  assert.equal(adminAccess.archivedBlocked, false);
+  assert.equal(adminAccess.ownerId, "owner-1", "admin edits must preserve the original owner");
+  assert.equal(resolvePodcasterSessionEditAccess(archived, { uid: "owner-1" }, true).archivedBlocked, true);
+  assert.equal(resolvePodcasterSessionEditAccess({ ...archived, archived: false }, { uid: "shared-1" }, false).allowed, true);
+  assert.equal(resolvePodcasterSessionEditAccess({ ...archived, archived: false }, { uid: "stranger" }, false).allowed, false);
 });
 
 test("signed asset adapter accepts only podcaster storage paths", () => {

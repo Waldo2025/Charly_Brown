@@ -1,3 +1,4 @@
+import { vertexMetric, vertexPolicy } from "./vertex-alert-config.mjs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -34,14 +35,10 @@ const logMetrics = [
     description: "Podcaster jobs whose Firestore heartbeat or update timestamp expired.",
     filter: 'resource.type="cloud_run_revision" AND (jsonPayload.event="podcaster_job_heartbeat_expired" OR textPayload:"podcaster_job_heartbeat_expired")'
   },
-  {
-    name: "vertex_quota_errors",
-    description: "Vertex AI quota failures observed by Google Cloud runtimes.",
-    filter: 'resource.type="cloud_run_revision" AND (textPayload:"RESOURCE_EXHAUSTED" OR jsonPayload.message:"RESOURCE_EXHAUSTED" OR httpRequest.status=429)'
-  }
+  vertexMetric
 ];
 
-for (const metric of logMetrics) {
+for (const metric of logMetrics.filter(item => !process.argv.includes("--vertex-only") || item.name === vertexMetric.name)) {
   try {
     await client.request({
       url: `https://logging.googleapis.com/v2/projects/${projectId}/metrics`,
@@ -99,17 +96,24 @@ const policies = [
     documentation: { content: "El monitor programado detectó un trabajo running sin heartbeat vigente.", mimeType: "text/markdown" },
     conditions: [condition({ displayName: "Stale Firestore job", filter: 'metric.type="logging.googleapis.com/user/podcaster_heartbeat_expired" AND resource.type="cloud_run_revision"', thresholdValue: 0 })]
   },
-  {
-    displayName: "Podcaster Google Cloud - cuota Vertex",
-    documentation: { content: "Un runtime registró RESOURCE_EXHAUSTED o HTTP 429 al usar Vertex AI.", mimeType: "text/markdown" },
-    conditions: [condition({ displayName: "Vertex quota error", filter: 'metric.type="logging.googleapis.com/user/vertex_quota_errors" AND resource.type="cloud_run_revision"', thresholdValue: 0 })]
-  }
+  vertexPolicy
 ];
 
 const list = await client.request({ url: `https://monitoring.googleapis.com/v3/projects/${projectId}/alertPolicies`, params: { pageSize: 1000 } });
 const existing = new Map((list.data.alertPolicies || []).map((item) => [item.displayName, item]));
-for (const policy of policies) {
-  const currentPolicy = existing.get(policy.displayName);
+for (const policy of policies.filter(item => !process.argv.includes("--vertex-only") || item === vertexPolicy)) {
+  const currentPolicy = existing.get(policy.displayName)
+    || (policy === vertexPolicy ? existing.get("Podcaster Google Cloud - cuota Vertex") : null);
+  if (currentPolicy && policy === vertexPolicy) {
+    await client.request({
+      url: `https://monitoring.googleapis.com/v3/${currentPolicy.name}`,
+      method: "PATCH",
+      params: { updateMask: "display_name,documentation,conditions,severity" },
+      data: { ...currentPolicy, ...vertexPolicy, conditions: vertexPolicy.conditions.map((condition, i) => ({ ...condition, name: currentPolicy.conditions?.[i]?.name })) }
+    });
+    console.log(`[alerts] política Vertex actualizada; canales y preferencias conservados: ${currentPolicy.name}`);
+    continue;
+  }
   if (currentPolicy) {
     const currentChannels = new Set(currentPolicy.notificationChannels || []);
     const missingChannels = notificationChannels.filter((name) => !currentChannels.has(name));

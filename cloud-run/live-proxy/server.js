@@ -11,7 +11,7 @@ const { isAllowedLiveOrigin } = require("./origins.js");
 
 const PORT = Math.max(1, Number(process.env.PORT || 8080) || 8080);
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "charly-brown";
-const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || "global";
+const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "");
 
 if (!getApps().length) initializeApp({ projectId: PROJECT_ID });

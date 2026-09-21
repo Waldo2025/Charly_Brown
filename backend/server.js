@@ -9,6 +9,7 @@ const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const { registerMarcieWordPressRoutes } = require("../functions/src/marcie-wordpress.js");
 const { registerMarcieEditorialResearchRoutes } = require("../functions/src/marcie-editorial-research.js");
+const { registerCharlyBrownMcpRoutes } = require("./charly-brown-mcp.js");
 const { registerPigpenSheetsRoutes } = require("./pigpen-sheets.js");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.resolve(REPO_ROOT, "public");
@@ -337,12 +338,16 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
   "gemini-2.0-flash-preview-image-generation"
 ]);
 const PODCASTER_VIDEO_MODEL_CANDIDATES = VIDEO_MODELS;
-const DEFAULT_GEMINI_TEXT_MODEL = "gemini-3.5-flash";
+const DEFAULT_GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 const GEMINI_TEXT_MODEL_ALIASES = Object.freeze({
   "gemini-2.5-flash": DEFAULT_GEMINI_TEXT_MODEL,
   "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
   "gemini-2.5-pro": "gemini-3.1-pro-preview",
   "gemini-3-flash-preview": DEFAULT_GEMINI_TEXT_MODEL,
+  "gemini-3.5-flash": DEFAULT_GEMINI_TEXT_MODEL,
+  "gemini-3.6-flash": DEFAULT_GEMINI_TEXT_MODEL,
+  "gemini-3.7-flash": DEFAULT_GEMINI_TEXT_MODEL,
+  "gemini-flash-latest": DEFAULT_GEMINI_TEXT_MODEL,
   "gemini-3-pro-preview": "gemini-3.1-pro-preview"
 });
 const GEMINI_LIVE_ALLOWED_VOICE_NAMES = new Set([
@@ -1282,6 +1287,29 @@ registerMarcieEditorialResearchRoutes(app, {
       const status = Math.max(400, Math.min(599, Number(error?.status || 500)));
       return res.status(status).json({ error: String(error?.code || error?.message || "marcie_research_failed") });
     }
+  }
+});
+registerCharlyBrownMcpRoutes(app, {
+  db,
+  verifyFirebaseBearer,
+  generateText: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, prompt = "", json = false, thinkingLevel = "MEDIUM" } = {}) => {
+    if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
+    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const response = await client.models.generateContent({
+      model: normalizeModel(model),
+      contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+      config: {
+        maxOutputTokens: 32768,
+        thinkingConfig: { thinkingLevel },
+        ...(json ? { responseMimeType: "application/json" } : {})
+      }
+    });
+    return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
+  },
+  generateContent: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, contents = [], config = {} } = {}) => {
+    if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
+    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    return client.models.generateContent({ model: normalizeModel(model), contents, config });
   }
 });
 const EXPLICIT_STORAGE_BUCKET_NAME = String(
@@ -8205,6 +8233,7 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
               mimeType,
               type,
               size: Number(metadata?.size || 0),
+              createdAt: String(metadata?.timeCreated || "").trim() || null,
               updatedAt: String(metadata?.updated || metadata?.timeCreated || "").trim() || null
             });
           }
@@ -8515,9 +8544,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       }
     });
 
-    if (regenerate && previousStoragePath && previousStoragePath !== storagePath) {
-      await deleteStoragePath(previousStoragePath).catch(() => {});
-    }
+    // Previous versions remain available for active consumers and the scene library.
 
     return res.status(200).json({
       ok: true,
@@ -8667,9 +8694,7 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
       }
     });
 
-    if (regenerate && previousStoragePath && previousStoragePath !== storagePath) {
-      await deleteStoragePath(previousStoragePath).catch(() => {});
-    }
+    // Previous versions remain available for active consumers and the scene library.
 
     return res.status(200).json({
       ok: true,
@@ -9406,6 +9431,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       headlineText,
       captionText,
       inSceneText,
+      languageCode: clampText(req.body?.languageCode || "es", 12) || "es",
       overlayMode,
       textSource,
       textPolicy: requestedTextPolicy,
@@ -9866,9 +9892,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         kind: "dialogue_video"
       }
     });
-    if (regenerate && previousStoragePath && previousStoragePath !== storagePath) {
-      await deleteStoragePath(previousStoragePath).catch(() => {});
-    }
+    // Previous versions remain available for active consumers and the scene library.
 
     return res.status(200).json({
       ok: true,
@@ -10260,9 +10284,7 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
         kind: "dialogue_audio"
       }
     });
-    if (regenerate && previousStoragePath && previousStoragePath !== storagePath) {
-      await deleteStoragePath(previousStoragePath).catch(() => {});
-    }
+    // Previous versions remain available for active consumers and the scene library.
 
     return res.status(200).json({
       ok: true,
@@ -17709,6 +17731,31 @@ app.get("/api/gemini/generate", (_req, res) => {
   });
 });
 
+function sanitizeGeminiRestSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(sanitizeGeminiRestSchema);
+  const sanitized = {};
+  const unsupportedKeywords = new Set([
+    "minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum",
+    "pattern", "uniqueItems", "$schema", "additionalProperties"
+  ]);
+  for (const [key, value] of Object.entries(schema)) {
+    if (unsupportedKeywords.has(key)) continue;
+    if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+      const sanitizedProps = {};
+      for (const [propKey, propVal] of Object.entries(value)) {
+        sanitizedProps[propKey] = sanitizeGeminiRestSchema(propVal);
+      }
+      sanitized[key] = sanitizedProps;
+    } else if (key === "items" && value && typeof value === "object") {
+      sanitized[key] = sanitizeGeminiRestSchema(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
 app.post("/api/gemini/generate", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
@@ -17793,6 +17840,14 @@ app.post("/api/gemini/generate", async (req, res) => {
         ? payload.generationConfig
         : {};
       payload.generationConfig.temperature = 0.25;
+    }
+
+    if (payload?.generationConfig && typeof payload.generationConfig === "object") {
+      const rawSchema = payload.generationConfig.responseSchema || payload.generationConfig.responseJsonSchema;
+      if (rawSchema) {
+        payload.generationConfig.responseSchema = sanitizeGeminiRestSchema(rawSchema);
+        delete payload.generationConfig.responseJsonSchema;
+      }
     }
 
     const serialized = JSON.stringify(payload || {});
@@ -17905,61 +17960,92 @@ app.get("/api/gemini/models", async (_req, res) => {
 });
 
 app.post("/api/gemini/live-token", async (req, res) => {
-  if (!ensureGeminiGenerativeServiceEnabled(res)) return;
-  if (!ensureGeminiKey(res)) return;
   try {
-    const modelInput = normalizeModel(req.body?.model || "gemini-2.5-flash-native-audio-preview-12-2025");
-    const model = modelInput;
     const requestedVoiceName = String(req.body?.voiceName || "").trim();
-    const voiceName = normalizeLiveVoiceName(requestedVoiceName);
-    if (requestedVoiceName && !voiceName) {
+    const voiceName = normalizeLiveVoiceName(requestedVoiceName) || "Aoede";
+    if (requestedVoiceName && !normalizeLiveVoiceName(requestedVoiceName)) {
       return res.status(400).json({
         error: `Voz no soportada para Gemini Live: ${requestedVoiceName}`
       });
     }
+
     const systemInstruction = String(
       req.body?.systemInstruction || "Eres un asistente pedagógico útil y amable."
-    ).trim();
-    const liveConfig = {
-      responseModalities: ["AUDIO"],
+    ).trim().slice(0, 12000);
+
+    const modelInput = normalizeModel(req.body?.model || "gemini-2.5-flash-native-audio-preview-12-2025");
+    const liveModel = "gemini-live-2.5-flash-native-audio";
+
+    let uid = "";
+    try {
+      const authHeader = String(req.headers.authorization || "");
+      const tokenMatch = authHeader.match(/^\s*Bearer\s+(.+)$/i);
+      if (tokenMatch && tokenMatch[1]) {
+        const decoded = await admin.auth().verifyIdToken(tokenMatch[1].trim()).catch(() => null);
+        if (decoded?.uid) uid = decoded.uid;
+      }
+    } catch (_) {}
+
+    const proxyBaseUrl = String(process.env.GEMINI_LIVE_PROXY_URL || "https://gemini-live-proxy-128488238449.us-central1.run.app").trim().replace(/\/+$/, "");
+    const ticket = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
+
+    await db.collection("gemini_live_tickets").doc(ticket).set({
+      ownerId: uid || "local-dev",
+      model: liveModel,
+      voiceName,
       systemInstruction,
-      sessionResumption: {}
-    };
-    if (voiceName) {
-      liveConfig.speechConfig = {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName
+      status: "issued",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
+    });
+
+    let ephemeralToken = "";
+    let expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    let newSessionExpireTime = new Date(Date.now() + 60 * 1000).toISOString();
+    try {
+      if (process.env.GEMINI_API_KEY) {
+        const ai = buildGeminiLiveClient();
+        const data = await ai.authTokens.create({
+          config: {
+            uses: 1,
+            expireTime,
+            newSessionExpireTime,
+            liveConnectConstraints: {
+              model: modelInput,
+              config: {
+                responseModalities: ["AUDIO"],
+                systemInstruction,
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName }
+                  }
+                }
+              }
+            },
+            lockAdditionalFields: []
           }
+        });
+        if (data?.name) {
+          ephemeralToken = data.name;
+          if (data.expireTime) expireTime = data.expireTime;
+          if (data.newSessionExpireTime) newSessionExpireTime = data.newSessionExpireTime;
         }
-      };
+      }
+    } catch (e) {
+      console.warn("[GEMINI_LIVE_TOKEN] Ephemeral token creation fallback warning:", e?.message);
     }
 
-    const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    const newSessionExpireTime = new Date(Date.now() + 60 * 1000).toISOString();
-    const ai = buildGeminiLiveClient();
-    const data = await ai.authTokens.create({
-      config: {
-        uses: 1,
-        expireTime,
-        newSessionExpireTime,
-        liveConnectConstraints: {
-          model,
-          config: liveConfig
-        },
-        lockAdditionalFields: []
-      }
-    });
-    if (!data?.name) {
-      return res.status(502).json({ error: "Respuesta inválida al crear token efímero.", raw: data });
-    }
-    return res.json({
-      token: data.name,
-      model,
-      requestedVoiceName: requestedVoiceName || null,
-      voiceName: voiceName || null,
-      expireTime: data.expireTime || expireTime,
-      newSessionExpireTime: data.newSessionExpireTime || newSessionExpireTime
+    return res.status(201).json({
+      websocketUrl: `${proxyBaseUrl.replace(/^http/i, "ws")}/live`,
+      ticket,
+      expiresAt: expiresAt.toISOString(),
+      model: liveModel,
+      voiceName,
+      requestedVoiceName: requestedVoiceName || voiceName,
+      token: ephemeralToken || ticket,
+      expireTime,
+      newSessionExpireTime
     });
   } catch (error) {
     const summary = summarizeGeminiLiveError(error);
@@ -17970,7 +18056,7 @@ app.post("/api/gemini/live-token", async (req, res) => {
     });
     return res.status(summary.status >= 400 ? summary.status : 502).json({
       error: "UPSTREAM_GEMINI_LIVE_TOKEN_FAILED",
-      detail: summary.bodySnippet || "No se pudo crear token efímero para Gemini Live."
+      detail: summary.bodySnippet || error?.message || "No se pudo crear token efímero para Gemini Live."
     });
   }
 });
