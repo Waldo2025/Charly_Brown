@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import {createServer} from "node:http";
+import {readFile} from "node:fs/promises";
+import path from "node:path";
+import {chromium} from "playwright";
+import {messagesFor,conversationsFrom,contextFor,reusableInventory} from "../public/js/sally-conversations.js";
+
+const history=[{id:"old",thread:"model",role:"assistant",text:"Legado íntegro",createdAt:"2026-01-01"},{id:"new",conversationId:"a",thread:"model",role:"user",text:"A".repeat(60000),createdAt:"2026-02-01"},{id:"other",conversationId:"b",thread:"model",role:"user",text:"SECRETO_OTRA_CONVERSACION",createdAt:"2026-03-01"}];
+assert.equal(messagesFor(history,"legacy-model")[0].text,"Legado íntegro");
+assert.equal(conversationsFrom(history).length,2);
+const context=contextFor(history,"a");assert.ok(JSON.stringify(context).length<26000);assert.doesNotMatch(JSON.stringify(context),/SECRETO/);assert.match(context[0].text,/\[new\]/);assert.equal(history[1].text.length,60000);
+assert.equal(reusableInventory({url:"x",coverage:{complete:true}},"x","explica el tema"),true);
+assert.equal(reusableInventory({url:"x",stale:true},"x","explica"),false);
+assert.equal(reusableInventory({url:"x"},"x","analiza de nuevo"),false);
+
+const root=path.resolve("public");
+const server=createServer(async(req,res)=>{try{const file=path.join(root,new URL(req.url,"http://localhost").pathname);res.setHeader("Content-Type",file.endsWith(".js")?"text/javascript":file.endsWith(".css")?"text/css":"text/html");res.end(await readFile(file));}catch{res.writeHead(404);res.end();}});
+await new Promise(r=>server.listen(0,"127.0.0.1",r));const browser=await chromium.launch();
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ await page.route("**/js/SallyBrownEditor.js",r=>r.fulfill({body:""}));await page.route("**/js/sidebar.js",r=>r.fulfill({body:""}));
+ await page.goto(`http://127.0.0.1:${server.address().port}/SallyBrownEditor.html`);
+ const source=(await readFile(path.join(root,"js/SallyBrownEditor.js"),"utf8")).replace(/^import .*;\n/gm,"").split("let authResolved = false;")[0];
+ await page.evaluate(async source=>{
+   Object.assign(window,await import("/js/sally-conversations.js"),await import("/js/sally-conversation-ui.js"),await import("/js/sally-workflow.js"));
+   window.saved=[];
+   const stub=`const getDefaultFirebaseApp=()=>({}),getAuth=()=>({}),getFirestore=()=>({}),getStorage=()=>({}),doc=()=>({}),arrayUnion=x=>[x],updateDoc=async()=>{},rememberSession=()=>{},loadHistory=async()=>[],sanitizeTextInput=x=>x,contentMatches=()=>[],courseReport=x=>x.report||"Reporte";const appendHistory=async(_s,_u,sessionId,entry)=>{if(window.failSave)throw Error("storage unavailable");const record={...entry,sessionId,id:crypto.randomUUID(),createdAt:new Date().toISOString()};window.saved.push(record);return record;};`;
+   (0,eval)(stub+source+`;state.user={uid:'fixture'};state.activeId='project';state.conversationId='legacy-model';window.api={state,recordConversation,renderConversation,executePlan,buildPlan};state.conversations=installConversations({state,el,record:recordConversation,readJson:async()=>({url:'https://moodle.test/course/view.php?id=1',sections:[],report:'REPORTE COMPLETO',coverage:{complete:true}}),toast,render:()=>{renderChatScope();renderPlan();renderInventory();renderAttachments();updateApprovalUi('draft');}});`);
+   document.getElementById("sallyAccessGate").remove();document.getElementById("sallyApp").hidden=false;
+   for(const id of ["a","b"])await api.recordConversation({kind:"conversation",conversationId:id,patch:{name:"Conversación "+id},text:""});
+   await api.state.conversations.select("a");
+   await api.recordConversation({kind:"message",role:"assistant",text:"RESPUESTA A "+"completa ".repeat(4000)});
+   await api.recordConversation({kind:"analysis",role:"assistant",text:"REPORTE COMPLETO",inventoryPath:"a.json",courseView:"model"});
+   document.getElementById("sallyBrief").value="Continuar A";
+   await api.state.conversations.select("b");
+   await api.recordConversation({kind:"message",role:"assistant",text:"RESPUESTA B"});
+ },source);
+ assert.match(await page.locator("#sallyConversation").textContent(),/RESPUESTA B/);assert.doesNotMatch(await page.locator("#sallyConversation").textContent(),/RESPUESTA A/);
+ await page.evaluate(async()=>{api.state.workflowBusy=true;api.state.allowConversationSwitch=true;await api.state.conversations.select("a");await api.recordConversation({sessionId:"project",conversationId:"b",thread:"model",role:"assistant",kind:"message",text:"RESPUESTA TARDÍA B"});api.state.workflowBusy=false;api.state.allowConversationSwitch=false;});
+ assert.equal(await page.locator("#sallyBrief").inputValue(),"Continuar A");assert.doesNotMatch(await page.locator("#sallyConversation").textContent(),/TARDÍA B/);
+ assert.ok((await page.locator("#sallyConversation").textContent()).length>30000);
+ assert.equal(await page.locator("#sallyResultsPanel").isVisible(),true);
+ assert.equal(await page.locator("#sallyBriefPane #sallyPlan").count(),0);
+ await page.getByText("Resultados anteriores de la conversación",{exact:true}).click();
+ await page.locator("#sallyResultVersion").selectOption({index:1});assert.match(await page.locator("#sallyResultDetail").textContent(),/REPORTE COMPLETO/);
+ await page.click("#sallyCloseResults");assert.equal(await page.locator("#sallyResultsPanel").isVisible(),false);
+ await page.click("#sallyToggleResults");await page.keyboard.press("Escape");assert.equal(await page.locator("#sallyToggleResults").evaluate(n=>n===document.activeElement),true);
+ await page.evaluate(async()=>{await api.state.conversations.restore();});assert.equal(await page.locator("#sallyConversationSelect").inputValue(),"a");
+ await page.evaluate(()=>{
+   api.state.automation=true;api.state.inventory={url:"https://moodle.test/course/view.php?id=1",coverage:{complete:true},sections:[]};
+   document.getElementById("sallySourceCourse").value=api.state.inventory.url;document.getElementById("sallyBrief").value="Explica lo anterior";
+   window.answerCourseQuestion=payload=>{window.sentContext=payload;return new Promise(resolve=>window.finishAnswer=resolve);};
+   window.pendingBuild=api.buildPlan();
+ });
+ await page.waitForFunction(()=>Boolean(window.finishAnswer));
+ assert.doesNotMatch(await page.evaluate(()=>JSON.stringify(sentContext.history)),/RESPUESTA B|TARDÍA B/);
+ await page.evaluate(async()=>{await api.state.conversations.select("b");finishAnswer({text:"SEGUIMIENTO DE A",finishReason:"STOP"});await pendingBuild;});
+ assert.doesNotMatch(await page.locator("#sallyConversation").textContent(),/SEGUIMIENTO DE A/);
+ await page.evaluate(()=>api.state.conversations.select("a"));assert.match(await page.locator("#sallyConversation").textContent(),/SEGUIMIENTO DE A/);
+ await page.evaluate(async()=>{window.failSave=true;try{await api.recordConversation({kind:"message",text:"NO GUARDADO"});}catch{}window.failSave=false;});assert.doesNotMatch(await page.locator("#sallyConversation").textContent(),/NO GUARDADO/);
+ const execution=await page.evaluate(async()=>{let called=false;api.state.remote={invoke:async()=>{called=true;}};api.state.plan=[{id:"x"}];api.state.planHash="hash";api.state.approvalBinding={conversationId:"b",target:"",plan:JSON.stringify(api.state.plan)};await api.executePlan();return called;});assert.equal(execution,false);
+ page.once("dialog",d=>d.accept("Conversación creada"));await page.click("#sallyNewConversation");await page.waitForFunction(()=>document.getElementById("sallyConversationSelect").selectedOptions[0]?.textContent==="Conversación creada");
+ page.once("dialog",d=>d.accept("Nombre cambiado"));await page.click("#sallyRenameConversation");await page.waitForFunction(()=>document.getElementById("sallyResultsTitle").textContent==="Nombre cambiado");
+ await page.click("#sallyArchiveConversation");await page.waitForFunction(()=>document.getElementById("sallyShowArchived").checked);
+ assert.equal(await page.locator("#sallyArchiveConversation").getAttribute("aria-label"),"Restaurar conversación");
+ await page.click("#sallyArchiveConversation");await page.waitForFunction(()=>!document.getElementById("sallyShowArchived").checked);
+ await page.evaluate(()=>api.state.conversations.select("a"));
+ await page.evaluate(()=>api.state.conversations.open());assert.equal(await page.locator("#sallyResultsPanel").isVisible(),true);await page.screenshot({path:"artifacts/sally-independent-conversations-desktop.png"});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:"artifacts/sally-independent-conversations-mobile.png"});
+ assert.equal(await page.locator("#sallyResultsPanel").isVisible(),true);assert.equal(await page.locator("#sallyResultsPanel").evaluate(n=>n.getBoundingClientRect().right<=innerWidth),true);
+ assert.equal(await page.locator("#sallyResultsPanel").evaluate(n=>{const r=n.getBoundingClientRect();return r.left>=64&&r.top>=64;}),true,"Mobile drawer clears shared header and sidebar");
+ await page.close();console.log("PASS: conversation isolation, immutable legacy mapping, bounded context, late responses, drafts/restoration, storage errors, approval isolation, result versions and responsive drawer.");
+}finally{await browser.close();await new Promise(r=>server.close(r));}

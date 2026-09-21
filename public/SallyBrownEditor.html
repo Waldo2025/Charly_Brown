@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <script src="js/cache-version-loader.js"></script>
+  <meta charset="utf-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sally Brown Editor</title>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" data-cache-href="sidebar.css">
+  <link rel="stylesheet" data-cache-href="header.css">
+  <link rel="stylesheet" data-cache-href="SallyBrownEditor.css">
+  <link rel="stylesheet" href="sally-light.css">
+</head>
+<body data-page="sallybrowneditor.html" class="sidebar-collapsed sally-locked">
+  <div id="sallyAccessGate" class="sally-gate" role="status" aria-live="polite">
+    <div class="sally-gate-mark"><i class="fas fa-circle-notch fa-spin"></i></div>
+    <strong>Verificando acceso</strong><span>Preparando tu espacio editorial…</span>
+  </div>
+
+  <header class="main-header"><div class="header-content"></div></header>
+  <div id="sidebar"><div class="sidebar-menu"></div></div>
+
+  <main id="sallyApp" class="sally-app" hidden aria-label="Sally Brown Editor">
+    <header class="sally-topbar">
+      <button class="sally-icon sally-mobile-only" id="sallyOpenSessions" aria-label="Abrir sesiones"><i class="fas fa-bars"></i></button>
+      <div class="sally-brand"><span class="sally-brand__mark">S</span><div><p>Course operator</p><h1>Sally Brown Editor</h1></div></div>
+      <div class="sally-runtime"><span id="sallyRuntimeDot" class="sally-runtime__dot"></span><span id="sallyRuntimeLabel">Conectando con el servidor…</span></div>
+      <button id="sallyOpenTemplates" class="sally-icon" title="Editor y biblioteca de plantillas" aria-label="Editor y biblioteca de plantillas"><i class="fas fa-file-code"></i></button>
+      <button class="sally-icon sally-mobile-only" id="sallyOpenBrief" aria-label="Abrir brief"><i class="fas fa-list-check"></i></button>
+    </header>
+
+    <div id="sallyWorkspace" class="sally-workspace">
+      <aside id="sallySessionsPane" class="sally-pane sally-sessions-pane">
+        <div class="sally-pane-head"><div><span class="eyebrow">Proyectos</span><h2>Sesiones</h2></div><button id="sallyNewSession" class="sally-icon sally-icon--primary" aria-label="Nueva sesión"><i class="fas fa-plus"></i></button></div>
+        <label class="sally-search"><i class="fas fa-search"></i><input id="sallySessionSearch" type="search" placeholder="Buscar sesión"></label>
+        <div class="sally-filter-row"><button class="sally-filter is-active" data-session-filter="active" title="Sesiones activas" aria-label="Sesiones activas"><i class="fas fa-inbox"></i></button><button class="sally-filter" data-session-filter="archived" title="Sesiones archivadas" aria-label="Sesiones archivadas"><i class="fas fa-box-archive"></i></button></div>
+        <div id="sallySessionStatus" class="sally-small-status">Cargando sesiones…</div>
+        <div id="sallySessionList" class="sally-session-list"></div>
+      </aside>
+      <div class="sally-resizer" data-resizer="left" role="separator" tabindex="0" aria-label="Redimensionar sesiones"></div>
+
+      <section class="sally-browser-pane">
+        <div class="sally-canvas-tools" aria-label="Herramientas del curso">
+          <button id="sallyViewModel" title="Ver curso modelo" aria-label="Ver curso modelo" aria-pressed="true"><i class="fas fa-book-open"></i></button>
+          <button id="sallyViewTarget" title="Ver curso destino" aria-label="Ver curso destino" aria-pressed="false"><i class="fas fa-pen-to-square"></i></button>
+          <span class="sally-tool-divider"></span>
+          <button id="sallyPencil" title="Marcar área para proponer un cambio" aria-label="Marcar área para proponer un cambio" aria-pressed="false"><i class="fas fa-pencil"></i></button>
+          <button id="sallyClearMark" title="Borrar selección" aria-label="Borrar selección"><i class="fas fa-eraser"></i></button>
+          <button id="sallyInspect" title="Analizar curso visible" aria-label="Analizar curso visible"><i class="fas fa-magnifying-glass"></i></button>
+          <span class="sally-tool-divider"></span>
+          <button data-control="pause" title="Pausar" aria-label="Pausar"><i class="fas fa-pause"></i></button>
+          <button data-control="resume" title="Reanudar" aria-label="Reanudar"><i class="fas fa-play"></i></button>
+          <button data-control="cancel" title="Cancelar" aria-label="Cancelar"><i class="fas fa-stop"></i></button>
+        </div>
+        <form id="sallyUrlForm" hidden><input id="sallyMoodleUrl" type="url"></form>
+        <div id="sallyDesktopOnlyNotice" class="sally-notice" hidden><i class="fas fa-cloud"></i><div><strong>No se pudo conectar con el servidor</strong><span>Recarga la página para volver a intentarlo.</span></div></div>
+        <div id="sallyBrowserStage" class="sally-browser-stage" tabindex="0" aria-label="Navegador Moodle interactivo">
+          <div id="sallyEmptyBrowser" class="sally-browser-empty"><span class="sally-orbit"><i class="fas fa-graduation-cap"></i></span><h2>Conecta un curso Moodle</h2><p>Abre el curso, inicia sesión manualmente y deja que Sally construya su mapa.</p></div>
+          <div id="sallyMark" class="sally-mark" hidden></div>
+          <img id="sallyBrowserImage" alt="Vista actual del navegador Moodle" draggable="false" hidden>
+          <div id="sallyBrowserLoading" class="sally-browser-loading" hidden><i class="fas fa-circle-notch fa-spin"></i></div>
+        </div>
+        <footer class="sally-browser-footer"><div><span id="sallyBrowserState" class="sally-badge">Desconectado</span><span id="sallyBrowserTitle">Sin página activa</span></div><div class="sally-execution-controls"><button data-control="pause" aria-label="Pausar"><i class="fas fa-pause"></i></button><button data-control="resume" aria-label="Reanudar"><i class="fas fa-play"></i></button><button data-control="cancel" class="is-danger" aria-label="Cancelar"><i class="fas fa-stop"></i></button></div></footer>
+        <div id="sallyEvidenceStrip" class="sally-evidence-strip" aria-label="Evidencias"></div>
+      </section>
+
+      <div class="sally-resizer" data-resizer="right" role="separator" tabindex="0" aria-label="Redimensionar brief"></div>
+      <aside id="sallyBriefPane" class="sally-pane sally-brief-pane">
+        <div class="sally-pane-head"><div><span class="eyebrow">Construcción guiada</span><h2>Conversaciones de curso</h2></div><span id="sallyPlanStatus" class="sally-badge">Borrador</span></div>
+        <div class="sally-chat-tabs" role="tablist" aria-label="Conversaciones de curso"><button type="button" id="sallyChatModel" role="tab" aria-selected="true" aria-controls="sallyChatPanel">Modelo</button><button type="button" id="sallyChatTarget" role="tab" aria-selected="false" aria-controls="sallyChatPanel" tabindex="-1">Destino</button></div>
+        <div id="sallyChatPanel" role="tabpanel" aria-labelledby="sallyChatModel"><p id="sallyChatScope">Modelo · Solo lectura. No requiere curso destino.</p></div>
+        <div class="sally-conversation-picker">
+          <select id="sallyConversationSelect" aria-label="Conversación"></select>
+          <button id="sallyNewConversation" class="sally-icon" title="Nueva conversación" aria-label="Nueva conversación"><i class="fas fa-plus"></i></button>
+          <button id="sallyRenameConversation" class="sally-icon" title="Renombrar conversación" aria-label="Renombrar conversación"><i class="fas fa-pen"></i></button>
+          <button id="sallyArchiveConversation" class="sally-icon" title="Archivar conversación" aria-label="Archivar conversación"><i class="fas fa-box-archive"></i></button>
+          <button id="sallyToggleResults" class="sally-icon" title="Mostrar u ocultar resultados" aria-label="Mostrar u ocultar resultados" aria-expanded="false" aria-controls="sallyResultsPanel"><i class="fas fa-columns"></i></button>
+        </div>
+        <label class="sally-archive-filter"><input id="sallyShowArchived" type="checkbox"> Conversaciones archivadas</label>
+        <label class="sally-field"><span>Contexto principal</span><textarea id="sallyBrief" rows="5" placeholder="Define el objetivo y contexto del proyecto…"></textarea></label>
+        <p class="sally-model-help">Estudia estructura, contenidos, diseño y redacción del modelo. Aplica los cambios únicamente al destino.</p><div class="sally-two-fields"><label class="sally-field"><span>Curso modelo</span><input id="sallySourceCourse" type="url" placeholder="https://campus…/course/view.php?id=…"></label><label class="sally-field"><span>Curso destino</span><input id="sallyTargetCourse" type="url" placeholder="https://campus…/course/view.php?id=…"></label></div>
+        <div id="sallySelectionContext" class="sally-selection-context" hidden></div><div class="sally-brief-actions"><label class="sally-file-button" title="Adjuntar archivos" aria-label="Adjuntar archivos" tabindex="0"><i class="fas fa-paperclip"></i><input id="sallyFiles" type="file" multiple hidden></label><button id="sallyBuildPlan" class="sally-button" title="Proponer cambios" aria-label="Proponer cambios"><i class="fas fa-wand-magic-sparkles"></i></button></div>
+        <div id="sallyAttachments" class="sally-attachments"></div>
+        <div class="sally-template-selection" id="sallyAppliedTemplate" hidden><span id="sallyAppliedTemplateName"></span><button id="sallyClearTemplate" class="sally-icon" title="Quitar plantilla del cambio" aria-label="Quitar plantilla del cambio"><i class="fas fa-xmark"></i></button></div>
+        <details class="sally-panel-section" id="sallyTemplatesPanel">
+          <summary>Plantillas HTML y contenido</summary>
+          <div class="sally-brief-actions"><button id="sallyAddTemplate" class="sally-icon" title="Añadir plantilla HTML" aria-label="Añadir plantilla HTML"><i class="fas fa-file-code"></i></button><input id="sallyTemplateFile" type="file" accept=".html,.htm,.txt" hidden></div>
+          <label class="sally-field"><span>Plantilla guardada</span><select id="sallyTemplateList"><option value="">Nueva plantilla</option></select></label>
+          <label class="sally-field"><span>Nombre</span><input id="sallyTemplateName" placeholder="Ficha docente"></label>
+          <label class="sally-field"><span>HTML con CSS inline</span><textarea id="sallyTemplateHtml" rows="5" placeholder="&lt;div style=&quot;color:#234&quot;&gt;{{contenido}}&lt;/div&gt;"></textarea></label>
+          <label class="sally-field"><span>Valores de los campos (JSON)</span><textarea id="sallyTemplateValues" rows="3">{"contenido":"Texto correcto"}</textarea></label>
+          <div class="sally-brief-actions"><button id="sallySaveTemplate" class="sally-icon" title="Guardar plantilla" aria-label="Guardar plantilla"><i class="fas fa-floppy-disk"></i></button></div>
+          <div hidden>
+          <label class="sally-field"><span>Recurso destino</span><select id="sallyDestinationModule"><option value="">Crear una página nueva</option></select></label>
+          <label class="sally-field"><span>Título de página nueva</span><input id="sallyResourceTitle"></label>
+          <label class="sally-field"><span>Sección destino (nombre exacto)</span><input id="sallyResourceSection"></label>
+          <label class="sally-field"><span>Tratamiento del contenido</span><select id="sallyContentMode"><option value="append">Añadir al final</option><option value="replace">Reemplazar contenido</option></select></label>
+          <label class="sally-field"><span>Visibilidad Moodle</span><select id="sallyResourceVisibility"><option value="hidden">Oculto a estudiantes</option><option value="visible">Visible a estudiantes</option><option value="keep">Conservar visibilidad (recurso existente)</option></select></label>
+          <p>Oculto a estudiantes utiliza la opción de Moodle. Los roles que pueden ver actividades ocultas dependen de los permisos del curso.</p>
+          <label class="sally-field"><span>Buscar en contenido analizado</span><input id="sallyContentSearch" type="search" placeholder="Palabra o tema"></label>
+          <label class="sally-field"><span>Contenido encontrado</span><select id="sallySourceModule"></select></label>
+          <p id="sallyContentExcerpt"></p>
+          <button id="sallyCopyContent" class="sally-icon" title="Preparar copia del contenido al destino" aria-label="Preparar copia del contenido al destino"><i class="fas fa-copy"></i></button>
+          </div>
+        </details>
+        <p id="sallyWorkflowStatus" role="status" aria-live="polite"></p>
+        <section class="sally-panel-section"><h3>Conversación e historial</h3><div id="sallyConversation" class="sally-conversation" aria-live="polite"></div></section>
+        <section id="sallyDiagnostic" class="sally-panel-section" role="alert" hidden><h3>Detalle del error</h3><p id="sallyDiagnosticMessage"></p></section>
+        <details id="sallyDesktopGuide"><summary>Cómo trabajar con Sally</summary><p>Selecciona Modelo o Destino e indica su URL. Abre el curso con su icono e inicia sesión en el navegador central. Envía el contexto principal; en el panel de trabajo, pulsa Nueva tarea y escribe allí las instrucciones. Usa + para adjuntar una plantilla o referencia. Sally investiga y propone: revisa y aprueba el plan antes de ejecutarlo. Modelo es exclusivamente de lectura y no necesita destino. Si se pierde el navegador, reconecta Moodle y continúa explícitamente.</p></details>
+      </aside>
+      <aside id="sallyResultsPanel" class="sally-results-panel" aria-labelledby="sallyResultsTitle" hidden>
+        <div class="sally-pane-head"><h2 id="sallyResultsTitle">Resultados</h2><button id="sallyCloseResults" class="sally-icon" title="Cerrar resultados" aria-label="Cerrar resultados"><i class="fas fa-xmark"></i></button></div>
+        <section class="sally-task-workspace">
+          <h3>Tareas del agente</h3><div class="sally-conversation-picker"><select id="sallyTaskSelect" aria-label="Tarea operativa"><option value="">Seleccionar tarea</option></select><button id="sallyTaskNew" class="sally-icon" title="Nueva tarea" aria-label="Nueva tarea"><i class="fas fa-plus"></i></button><button id="sallyTaskUpdateContext" class="sally-icon" title="Actualizar contexto de la tarea" aria-label="Actualizar contexto de la tarea"><i class="fas fa-rotate"></i></button></div>
+          <p id="sallyTaskStatus" role="status">Crea una tarea a partir del contexto principal.</p>
+          <label class="sally-field"><span>Instrucciones de la tarea</span><textarea id="sallyTaskMessage" rows="4" placeholder="Indica qué investigar o cambiar en Moodle…"></textarea></label><div id="sallyTaskTags"></div>
+          <div class="sally-brief-actions"><button id="sallyTaskAdd" class="sally-icon" title="Añadir plantilla, archivo o referencia" aria-label="Añadir plantilla, archivo o referencia"><i class="fas fa-plus"></i></button><button id="sallyTaskSend" class="sally-icon" title="Enviar instrucciones" aria-label="Enviar instrucciones"><i class="fas fa-paper-plane"></i></button></div>
+          <div id="sallyTaskHistory" class="sally-conversation"></div>
+          <details open><summary>Plan y ejecución de la tarea</summary><div id="sallyTaskPlan"></div><div class="sally-brief-actions"><button id="sallyTaskApprove" class="sally-icon" title="Aprobar plan" aria-label="Aprobar plan"><i class="fas fa-check"></i></button><button id="sallyTaskExecute" class="sally-icon" title="Ejecutar plan aprobado" aria-label="Ejecutar plan aprobado"><i class="fas fa-play"></i></button><button id="sallyTaskPause" class="sally-icon" title="Pausar tarea" aria-label="Pausar tarea"><i class="fas fa-pause"></i></button><button id="sallyTaskResume" class="sally-icon" title="Continuar investigación" aria-label="Continuar investigación"><i class="fas fa-forward"></i></button><button id="sallyTaskCancel" class="sally-icon" title="Cancelar tarea" aria-label="Cancelar tarea"><i class="fas fa-stop"></i></button></div></details>
+          <details><summary>Reportes y evidencias de la tarea</summary><label class="sally-field"><span>Resultado</span><select id="sallyTaskArtifacts"><option value="">Elegir resultado</option></select></label><div id="sallyTaskResult" class="sally-result-detail"></div></details>
+        </section>
+        <details><summary>Resultados anteriores de la conversación</summary>
+        <label class="sally-field"><span>Versión del resultado</span><select id="sallyResultVersion"><option value="">Resultados actuales</option></select></label>
+        <p id="sallyResultMetadata" role="status"></p>
+        <div id="sallyResultDetail" class="sally-result-detail" aria-live="polite"></div>
+        <div id="sallyCurrentResults">
+        <section class="sally-panel-section"><div class="sally-section-title"><h3>Plan de ejecución</h3><span id="sallyOperationCount">0 acciones</span></div><div id="sallyPlan" class="sally-plan"><div class="sally-empty-compact">El plan aparecerá aquí antes de modificar Moodle.</div></div></section>
+        <section class="sally-panel-section"><h3>Reporte del análisis</h3><div id="sallyAnalysisReport" aria-live="polite">El reporte se mostrará aquí al leer el curso.</div></section>
+        <section class="sally-panel-section"><div class="sally-section-title"><h3>Inventario</h3><span id="sallyInventoryCount">Sin analizar</span></div><div id="sallyInventory" class="sally-inventory"></div></section>
+        <div class="sally-approval-bar"><p id="sallyApprovalHint">Revisa el plan antes de aprobarlo.</p><button id="sallyApprove" class="sally-button sally-button--primary" disabled title="Aprobar plan" aria-label="Aprobar plan"><i class="fas fa-check"></i></button><button id="sallyExecute" class="sally-button sally-button--dark" disabled title="Ejecutar en curso destino" aria-label="Ejecutar en curso destino"><i class="fas fa-play"></i></button></div>
+        </div>
+        <details class="sally-panel-section"><summary>Cambios y respaldos</summary><div id="sallyChanges" class="sally-result-detail">Sin cambios registrados.</div></details>
+        </details>
+      </aside>
+    </div>
+    <div id="sallyDrawerBackdrop" class="sally-drawer-backdrop" hidden></div>
+    <div id="sallyToast" class="sally-toast" role="status" aria-live="polite"></div>
+    <dialog id="sallyTemplateModal" class="sally-template-modal" aria-labelledby="sallyTemplateModalTitle">
+      <header class="sally-template-modal-head"><div><h2 id="sallyTemplateModalTitle">Plantillas Moodle</h2><p>Biblioteca compartida · HTML con CSS inline</p></div><button id="sallyCloseTemplates" class="sally-icon" title="Cerrar plantillas" aria-label="Cerrar plantillas"><i class="fas fa-xmark"></i></button></header>
+      <div class="sally-template-modal-grid">
+        <aside class="sally-template-library"><label class="sally-field"><span>Buscar plantillas</span><input id="sallyTemplateSearch" type="search" placeholder="Nota del maestro…"></label><label><input id="sallyTemplateArchived" type="checkbox"> Archivadas</label><div class="sally-template-library-select"></div><div class="sally-brief-actions"><button id="sallyNewTemplate" class="sally-icon" title="Nueva plantilla" aria-label="Nueva plantilla"><i class="fas fa-plus"></i></button><button id="sallyCopyTemplate" class="sally-icon" title="Guardar una copia global" aria-label="Guardar una copia global"><i class="fas fa-copy"></i></button><button id="sallyArchiveTemplate" class="sally-icon" title="Archivar plantilla" aria-label="Archivar plantilla"><i class="fas fa-box-archive"></i></button></div><p id="sallyTemplateStatus" role="status"></p><p>Todos los usuarios aprobados pueden usar las plantillas. Solo su autor puede editar o archivar el original.</p></aside>
+        <section class="sally-template-editor" aria-label="Editor de plantilla"></section>
+        <section class="sally-template-preview-pane"><h3>Vista previa</h3><iframe id="sallyTemplatePreview" title="Vista previa segura de la plantilla" sandbox referrerpolicy="no-referrer"></iframe><p>Programa el diseño con campos como {{contenido}}. Para usar una plantilla, añádela desde el botón + de una tarea.</p></section>
+      </div>
+    </dialog>
+    <dialog id="sallyTaskPicker" class="sally-template-modal" aria-label="Complementos de la tarea"><div class="sally-template-modal-head"><h2>Añadir a la tarea</h2><button id="sallyTaskPickerClose" class="sally-icon" title="Cerrar complementos" aria-label="Cerrar complementos">×</button></div><div class="sally-task-picker-body"><div class="sally-brief-actions"><button id="sallyTaskAttachFiles" class="sally-icon" title="Adjuntar archivos" aria-label="Adjuntar archivos"><i class="fas fa-paperclip"></i></button><input id="sallyTaskFiles" type="file" multiple hidden><button id="sallyTaskAttachModule" class="sally-icon" title="Elegir módulo analizado" aria-label="Elegir módulo analizado"><i class="fas fa-book"></i></button><button id="sallyTaskAttachSelection" class="sally-icon" title="Añadir selección del navegador" aria-label="Añadir selección del navegador"><i class="fas fa-pencil"></i></button></div><div id="sallyTaskPickerList" class="sally-task-picker-list"></div><iframe id="sallyTaskTemplatePreview" sandbox title="Vista previa de plantilla"></iframe><button id="sallyTaskAttachTemplate" class="sally-icon" title="Añadir esta plantilla" aria-label="Añadir esta plantilla"><i class="fas fa-plus"></i></button></div></dialog>
+  </main>
+
+  <script src="js/chromeLayout.js"></script>
+  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="js/SallyBrownEditor.js"></script>
+</body>
+</html>

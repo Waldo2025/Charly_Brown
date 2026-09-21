@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import {rememberSession,restoredSession} from "../public/js/sally-session-selection.js";
+const values=new Map();
+const storage={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+const sessions=[{id:"recent"},{id:"shared-old"},{id:"archived",archived:true}];
+rememberSession(storage,"alice","shared-old");
+assert.equal(restoredSession(storage,"alice",[sessions[0]]),null,"Wait for both authorized queries, including shared sessions");
+assert.equal(restoredSession(storage,"alice",sessions,{ready:true}),"shared-old","Restore remembered session on reload");
+assert.equal(restoredSession(storage,"bob",sessions,{ready:true}),"recent","Do not reuse another user's preference");
+assert.equal(restoredSession(storage,"alice",[sessions[0]],{ready:true}),"recent","Removed or inaccessible session falls back safely");
+assert.equal(restoredSession(storage,"alice",sessions,{ready:true,activeId:"recent"}),"recent","Live snapshots must not override manual selection");
+rememberSession(storage,"alice","archived");
+assert.equal(restoredSession(storage,"alice",sessions,{ready:true}),"archived");
+assert.equal(restoredSession(storage,"alice",[],{ready:true}),"");
+const blocked={getItem(){throw Error();},setItem(){throw Error();},removeItem(){throw Error();}};
+rememberSession(blocked,"alice","recent");
+assert.equal(restoredSession(blocked,"alice",sessions,{ready:true}),"recent");
+console.log("PASS: restore after reload, wait for shared sessions, isolate users, handle removed/archived sessions and disabled storage.");

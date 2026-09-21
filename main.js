@@ -2,11 +2,44 @@ require('electron-reload')(__dirname, {
   electron: require(`${__dirname}/node_modules/electron`)
 });
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const express = require('express');
+const { createSallyBrownController } = require('./electron/sally-brown-controller.js');
 
 let server; // Para poder cerrarlo al salir
+let sallyController;
+
+const SALLY_COMMANDS = Object.freeze({
+  availability: 'availability',
+  start: 'start',
+  close: 'close',
+  navigate: 'navigate',
+  input: 'input',
+  inspect: 'inspect',
+  selection: 'selection',
+  approve: 'approve',
+  execute: 'execute',
+  control: 'control'
+});
+
+function registerSallyBrownIpc(win) {
+  sallyController = createSallyBrownController({
+    sendEvent(event) {
+      if (!win.isDestroyed()) win.webContents.send('sally-brown:event', event);
+    }
+  });
+  ipcMain.removeHandler('sally-brown:invoke');
+  ipcMain.handle('sally-brown:invoke', async (event, request = {}) => {
+    if (event.sender !== win.webContents) throw new Error('Origen IPC no autorizado.');
+    const command = String(request.command || '');
+    const method = SALLY_COMMANDS[command];
+    if (!method || typeof sallyController[method] !== 'function') throw new Error('Comando Sally Brown no permitido.');
+    if (command === 'availability') return sallyController.availability();
+    const actor = await sallyController.authorize(request.idToken);
+    return sallyController[method](request.payload && typeof request.payload === 'object' ? request.payload : {}, actor);
+  });
+}
 
 async function createServer() {
   return new Promise((resolve, reject) => {
@@ -14,9 +47,19 @@ async function createServer() {
     const publicPath = path.join(__dirname, 'public');
     const GEMINI_EPHEMERAL_URL = 'https://generativelanguage.googleapis.com/v1beta/authTokens';
 
-    // Servimos la carpeta "public" como estático
+    // La aplicación de escritorio siempre debe leer la revisión actual del disco.
     expressApp.use(express.json({ limit: '1mb' }));
-    expressApp.use(express.static(publicPath));
+    expressApp.use(express.static(publicPath, {
+      etag: false,
+      lastModified: false,
+      maxAge: 0,
+      setHeaders(res) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.setHeader('Surrogate-Control', 'no-store');
+      }
+    }));
 
     expressApp.post('/api/gemini-live/token', async (req, res) => {
       const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
@@ -99,8 +142,8 @@ async function createWindow() {
   await createServer();
 
   const win = new BrowserWindow({
-    width: 1000,
-    height: 800,
+    width: 1440,
+    height: 920,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,   // Firebase como en navegador
@@ -108,8 +151,10 @@ async function createWindow() {
     }
   });
 
+  registerSallyBrownIpc(win);
+
   // 👉 En vez de loadFile, cargamos la URL
-  win.loadURL('http://localhost:3000/index.html');
+  win.loadURL('http://localhost:3000/index.html' + (process.argv.includes('--sally') ? '?next=SallyBrownEditor.html' : ''));
 
   win.on('closed', () => {
     // Opcional: si quieres cerrar el server cuando se cierre la ventana

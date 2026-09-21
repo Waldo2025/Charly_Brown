@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import {readFile} from "node:fs/promises";
+import vm from "node:vm";
+const rows=new Map();let serial=0;
+const context=vm.createContext({collection:(_db,name)=>name,doc:(parent,id)=>{id=String(id||++serial);return {id,path:`${parent}/${id}`};},serverTimestamp:()=>"timestamp",onSnapshot:(_ref,fn)=>{fn({docs:[...rows].map(([id,data])=>({id,data:()=>data}))});return()=>{};},runTransaction:async(_db,fn)=>fn({get:async ref=>({exists:()=>rows.has(ref.path),data:()=>rows.get(ref.path)}),set:(ref,data)=>rows.set(ref.path,data)}),Error});
+vm.runInContext((await readFile(new URL("../public/js/sally-template-store.js",import.meta.url),"utf8")).replace(/^import .*;\n/gm,"").replace("export function","function"),context);
+const alice=context.createTemplateStore({},"alice"),bob=context.createTemplateStore({},"bob");
+const path=await alice.save({name:"Nota",html:'<div style="color:red">{{contenido}}</div>'});const id=path.split("/").at(-1);
+await alice.save({id,version:1,name:"Nota revisada",html:"<p>Contenido</p>"});
+await assert.rejects(()=>alice.save({id,version:1,name:"Obsoleta",html:"<p>Otro</p>"}),/cambió/);
+await assert.rejects(()=>bob.save({id,version:2,name:"Ajena",html:"<p>Otro</p>"}),/autor/);
+assert.equal(rows.get("SallyBrownTemplates/"+id).version,2);
+await assert.rejects(()=>alice.save({name:"",html:"<p>x</p>"}),/nombre/);
+console.log("PASS: transactional template saves, author protection, version conflicts and validation.");

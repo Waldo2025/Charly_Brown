@@ -1,0 +1,88 @@
+/* Sally's light canvas: scoped to keep the shared application chrome intact. */
+.sally-app { color-scheme: light; }
+.sally-app {
+  --sally-bg:#fff; --sally-surface:#fff; --sally-surface-2:#f8f9fb;
+  --sally-ink:#252933; --sally-muted:#838895; --sally-line:#e9ebf0;
+  --sally-accent:#5266a8; --sally-accent-soft:#eef1fa;
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.sally-app [hidden] { display:none!important; }
+.sally-app h1,.sally-app h2,.sally-app h3,.sally-brand__mark {
+  font-family:Inter,system-ui,sans-serif; font-weight:600; letter-spacing:-.035em;
+}
+.sally-app button,.sally-app input,.sally-app textarea { font-family:inherit; }
+.sally-app input,.sally-app textarea { font-size:12px; line-height:1.6; }
+.sally-topbar { height:64px; box-shadow:none; background:#fff; }
+.sally-brand__mark { background:transparent;color:var(--sally-ink);font-size:24px; }
+.sally-brand p { color:#9196a3;letter-spacing:.12em; }
+.sally-brand h1 { font-size:15px; }
+.sally-pane-head h2 { font-size:16px; }
+.sally-app button,.sally-file-button {
+  background:transparent!important;border:0!important;box-shadow:none!important;
+  color:#666e80;min-width:32px;min-height:32px;cursor:pointer;
+}
+.sally-app button:hover,.sally-file-button:hover { color:#243f91; }
+.sally-app button[aria-pressed="true"],.sally-app .is-active { color:#425ca4; }
+.sally-app button:disabled { opacity:.3;cursor:not-allowed; }
+.sally-session__icon { background:transparent; }
+.sally-session.is-active { background:#f6f8fc;border-color:transparent; }
+.sally-session__menu { width:auto;display:flex;gap:6px; }
+.sally-session__menu button { width:32px;text-align:center; }
+.sally-session__menu button[hidden] { display:none; }
+.sally-brief-actions .sally-button { flex:0; }
+.sally-brief-actions { justify-content:flex-end; }
+.sally-two-fields { grid-template-columns:1fr;gap:0; }
+.sally-model-help { font-size:11px;line-height:1.6;color:var(--sally-muted);margin:0 0 16px; }
+.sally-pane { padding-top:22px; }
+.sally-browser-pane { background:#fff;position:relative; }
+.sally-browser-stage { background:#fff;display:flex;align-items:center;justify-content:center; }
+.sally-browser-stage img { width:100%;height:auto;max-height:none;box-shadow:none; }
+.sally-browser-empty h2 { font-size:21px; }
+.sally-browser-empty p { font-size:12px; }
+.sally-orbit { background:transparent;box-shadow:none;color:#919aaf; }
+.sally-canvas-tools {
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:4;
+  display:flex;align-items:center;gap:8px;padding:4px 12px;
+  background:rgba(255,255,255,.95);border:1px solid var(--sally-line);border-radius:12px;
+}
+.sally-tool-divider { height:18px;border-left:1px solid var(--sally-line); }
+@media(max-width:480px){.sally-canvas-tools{gap:1px;padding:4px 6px;}.sally-canvas-tools button{min-width:30px;}}
+.sally-browser-footer { display:none; }
+.sally-evidence-strip { display:none!important; }
+.sally-notice { position:absolute;bottom:12px;left:12px;right:12px;z-index:3;background:#f8f9fc;color:#7c8392;border:0;border-radius:9px; }
+.sally-approval-bar { display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;background:#fff; }
+.sally-approval-bar p { width:100%; }
+.sally-mark { position:absolute;z-index:2;border:2px solid #5d74cf;background:rgba(93,116,207,.09);pointer-events:none;border-radius:4px; }
+.sally-browser-stage.is-marking { cursor:crosshair;touch-action:none;user-select:none; }
+.sally-browser-stage.is-marking img { pointer-events:none; }
+.sally-selection-context { font-size:11px;line-height:1.6;border-left:2px solid #687dbb;padding:8px 12px;margin:0 0 14px;color:#56617d; }
+.sally-workspace { height:calc(100% - 64px); }
+.sally-plan details { font-size:11px;margin-top:8px; }
+.sally-plan pre { white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 Inter,system-ui,sans-serif; }
+@media(max-width:1200px) and (min-width:821px) {
+  .sally-workspace { grid-template-columns:210px 5px minmax(200px,1fr) 5px 310px; }
+}
+.sally-app .sally-conversation article{border-bottom:1px solid #e4e7ed;padding:12px 0;overflow-wrap:anywhere}
+.sally-app .sally-history-entry{border-bottom:1px solid #e4e7ed;min-width:0}
+.sally-app .sally-history-entry>summary{padding:12px 4px;cursor:pointer;min-height:44px;overflow-wrap:anywhere}
+.sally-app .sally-history-entry>summary:focus-visible{outline:2px solid #445ca0;outline-offset:-2px;border-radius:4px}
+.sally-app .sally-history-preview{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#647084;font-size:12px;margin-top:5px}
+.sally-app .sally-history-entry[open]>summary .sally-history-preview{display:none}
+.sally-app .sally-history-entry>article{border-bottom:0;padding:0 4px 12px}
+.sally-app .sally-conversation .sally-history-text{white-space:pre-wrap;font-size:14px;line-height:1.5}
+.sally-app .sally-field select{width:100%;min-width:0;padding:10px;border:1px solid #cdd2dd;border-radius:10px;background:#fff;color:#17202f}
+.sally-app .sally-chat-tabs { display:flex; gap:16px; border-bottom:1px solid #e2e5eb; margin-bottom:12px; position:sticky; top:0; background:#fff; z-index:2; }
+.sally-app .sally-chat-tabs button { background:none; border:0; border-bottom:2px solid transparent; padding:12px 4px; color:inherit; cursor:pointer; font:inherit; }
+.sally-app .sally-chat-tabs [aria-selected="true"] { border-bottom-color:#445ca0; color:#445ca0; }
+.sally-app .sally-chat-tabs button:focus-visible { outline:2px solid #445ca0; outline-offset:2px; }
+.sally-app .sally-task-workspace { display:grid; gap:14px; min-width:0; padding:4px 0 20px; }
+.sally-app .sally-task-workspace h3 { margin:0; font-size:18px; }
+.sally-app .sally-task-workspace p[role="status"] { margin:0; font-size:13px; color:#4c5668; overflow-wrap:anywhere; }
+.sally-app .sally-task-workspace>details { border-top:1px solid #e2e5eb; padding-top:12px; }
+.sally-app .sally-task-workspace summary { cursor:pointer; padding:8px 0; }
+.sally-app .sally-task-workspace .sally-conversation { max-height:none; }
+.sally-app .sally-task-picker-body { display:grid; gap:16px; padding:20px; min-width:0; overflow:auto; }
+.sally-app .sally-task-picker-list { display:grid; gap:8px; max-height:220px; overflow:auto; }
+.sally-app .sally-task-picker-list button { background:none; border:0; border-bottom:1px solid #e2e5eb; padding:12px 4px; text-align:left; color:#17202f; font:inherit; cursor:pointer; }
+.sally-app .sally-task-picker-body iframe { width:100%; height:260px; border:1px solid #e2e5eb; border-radius:12px; background:#fff; }
+.sally-app .sally-task-picker-list button:focus-visible { outline:2px solid #445ca0; outline-offset:2px; }
