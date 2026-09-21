@@ -35,6 +35,7 @@ const { registerPigPenShareRoutes } = require("./pigpen-share.js");
 const { registerPigpenSheetsRoutes } = require("./pigpen-sheets.js");
 const { registerMarcieWordPressRoutes } = require("./marcie-wordpress.js");
 const { registerMarcieEditorialResearchRoutes } = require("./marcie-editorial-research.js");
+const { registerMarcieEditorialAgentRoutes } = require("./marcie-editorial-agent.js");
 const { monitorMarcieEditorialCalendar } = require("./marcie-editorial-monitor.js");
 const { refreshMarcieTrendsIfDue } = require("./marcie-trend-refresh.js");
 
@@ -87,6 +88,22 @@ function generateGeminiContentWithDeadline(client, request, timeoutMs = GEMINI_P
     client.models.generateContent(request),
     deadline
   ]).finally(() => clearTimeout(timeoutId));
+}
+
+async function generateMarcieAgentText({ model, prompt = "", json = false, thinkingLevel = "MEDIUM" } = {}) {
+  const client = createVertexClient({ location: "global" });
+  const response = await generateGeminiContentWithDeadline(client, buildVertexGenerateRequest({
+    model,
+    payload: {
+      contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+      generationConfig: {
+        maxOutputTokens: 32768,
+        thinkingConfig: { thinkingLevel },
+        ...(json ? { responseMimeType: "application/json" } : {})
+      }
+    }
+  }));
+  return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
 }
 
 registerGeminiJobRoutes(geminiApp);
@@ -165,6 +182,10 @@ geminiApp.post("/api/gemini/generate", asyncRoute(async (req, res) => {
 registerSupportGraphicUploadRoute(geminiApp);
 registerMarcieWordPressRoutes(geminiApp);
 registerMarcieEditorialResearchRoutes(geminiApp);
+registerMarcieEditorialAgentRoutes(geminiApp, {
+  generateText: generateMarcieAgentText,
+  client: createVertexClient({ location: "global" })
+});
 registerCharlyBrownMcpRoutes(geminiApp, {
   db: getAdminServices().db,
   verifyFirebaseBearer: async (req) => {

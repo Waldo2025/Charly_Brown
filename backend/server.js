@@ -9,6 +9,7 @@ const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const { registerMarcieWordPressRoutes } = require("../functions/src/marcie-wordpress.js");
 const { registerMarcieEditorialResearchRoutes } = require("../functions/src/marcie-editorial-research.js");
+const { registerMarcieEditorialAgentRoutes } = require("../functions/src/marcie-editorial-agent.js");
 const { registerCharlyBrownMcpRoutes } = require("./charly-brown-mcp.js");
 const { registerPigpenSheetsRoutes } = require("./pigpen-sheets.js");
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -1287,6 +1288,32 @@ registerMarcieEditorialResearchRoutes(app, {
       const status = Math.max(400, Math.min(599, Number(error?.status || 500)));
       return res.status(status).json({ error: String(error?.code || error?.message || "marcie_research_failed") });
     }
+  }
+});
+registerMarcieEditorialAgentRoutes(app, {
+  resolveAuthContext: async (req) => {
+    const localAuth = await verifyFirebaseBearer(req);
+    return { uid: localAuth.uid, role: String(localAuth.decoded?.role || ""), token: localAuth.decoded || {} };
+  },
+  getAdminServices: () => ({ db, bucket: storageBucket }),
+  asyncRoute: (handler) => async (req, res) => {
+    try {
+      return await handler(req, res);
+    } catch (error) {
+      const status = Math.max(400, Math.min(599, Number(error?.status || 500)));
+      return res.status(status).json({ error: String(error?.code || error?.message || "marcie_agent_failed") });
+    }
+  },
+  client: GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null,
+  generateText: async ({ model = DEFAULT_GEMINI_TEXT_MODEL, prompt = "", json = false, thinkingLevel = "MEDIUM" } = {}) => {
+    if (!GEMINI_API_KEY) throw new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
+    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const response = await client.models.generateContent({
+      model: normalizeModel(model),
+      contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+      config: { maxOutputTokens: 32768, thinkingConfig: { thinkingLevel }, ...(json ? { responseMimeType: "application/json" } : {}) }
+    });
+    return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "").trim();
   }
 });
 registerCharlyBrownMcpRoutes(app, {

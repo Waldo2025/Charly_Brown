@@ -24,7 +24,7 @@ import { makeArticleEditable } from "./components/inline-editor.js?v=20260908r9"
 import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260908r9";
 import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260908r9";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
-import { showModal, showNewSessionModal, showToast, closeActiveModal } from "./components/modals.js?v=20260908r9";
+import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260921r1";
 import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260908r9";
 import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260908r9";
 import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260908r9";
@@ -32,6 +32,7 @@ import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextMode
 import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260908r9";
 import { cancelScheduledPublication, createWordPressDraft, getWordPressStatus, publishWordPressArticle, testWordPressConnection } from "./services/marcie-wordpress-service.js";
 import { buildStageVisualHtml, startStageOrbitalAnimation, stopStageOrbitalAnimation, transitionToStageVisuals } from "./components/automation-visuals.js";
+import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260921r1";
 
 const MARCIE_UI_THEME_STORAGE_KEY = "marcie_ui_theme_v1";
 const MARCIE_UI_THEMES = [
@@ -104,6 +105,7 @@ const appState = {
   automationWorkflowActive: false,   // true mientras runAutomatedSessionWorkflow corre en background
   showArchived: false
 };
+let marcieAgentPanel = null;
 
 async function runSessionReview(session, article = session?.article, audience = article?.audience || session?.audience || "educators") {
   const result = await reviewArticleForMode({ session, article: article || { title: session?.title, blocks: [] } });
@@ -5059,9 +5061,9 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
   }
 }
 
-async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSession = true, sourceTrend = null } = {}) {
+async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSession = true, sourceTrend = null, requestOverride = null, agentRunId = "" } = {}) {
   const editorialProfiles = await listEditorialProfilesOnce().catch(() => []);
-  const request = await showNewSessionModal({
+  const request = requestOverride || await showNewSessionModal({
     defaultValue,
     allowBlankSession,
     freeModeDefault: getActiveMarciePromptProfileId() === FREE_PROMPT_PROFILE_ID,
@@ -5123,6 +5125,7 @@ async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSe
     trends: trendSnapshot ? [trendSnapshot] : [],
     log: trendSnapshot ? [{ id: `log-${Date.now()}`, at: new Date().toISOString(), message: `Sesión creada desde el radar: ${String(sourceTrend.topic || sourceTrend.title || title)}` }] : []
   };
+  if (agentRunId) sessionPayload.agentRunId = agentRunId;
 
   setSyncStatus("Creando sesión en Firebase...");
   let newId;
@@ -5462,7 +5465,9 @@ function setupEventListeners() {
   if (dom.btnNewSession) {
     dom.btnNewSession.addEventListener("click", async () => {
       try {
-        await createEditorialSessionFromModal({ allowBlankSession: true });
+        const creationMode = await showSessionCreationChoiceModal();
+        if (creationMode === "manual") await createEditorialSessionFromModal({ allowBlankSession: true });
+        if (creationMode === "agent") await marcieAgentPanel?.startGuidedSession();
       } catch (error) {
         console.error("Error al crear sesión:", error);
         setSyncStatus("⚠️ Error al crear sesión", true);
@@ -6455,6 +6460,17 @@ export async function initApp() {
 
   const user = authCheck.user;
   appState.currentUser = user;
+
+  marcieAgentPanel = initMarcieAgentPanel({
+    onCreateSession: (request, agentRunId) => createEditorialSessionFromModal({ requestOverride: request, agentRunId }),
+    onNewSessionRequest: async () => {
+      const creationMode = await showSessionCreationChoiceModal();
+      if (creationMode === "manual") return createEditorialSessionFromModal({ allowBlankSession: true });
+      if (creationMode === "agent") return marcieAgentPanel?.startGuidedSession();
+      return null;
+    },
+    onNotify: (message, type) => showToast(message, type)
+  });
 
   // Actualizar usuario en el header principal global de CharlyBrown
   const updateGlobalHeaderEmail = () => {

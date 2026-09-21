@@ -134,6 +134,42 @@ export function closeActiveModal() {
   if (existing) existing.marcieClose ? existing.marcieClose() : existing.remove();
 }
 
+export function showSessionCreationChoiceModal() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const modal = showModal({
+      title: "Crear una nueva sesión",
+      widthClass: "max-w-2xl",
+      contentHtml: `
+        <p class="mb-5 text-sm text-slate-600">Elige cómo quieres preparar los artículos.</p>
+        <div class="marcie-session-choice-grid">
+          <button type="button" class="marcie-session-choice" data-session-choice="manual">
+            <span class="marcie-session-choice__icon"><i data-lucide="sliders-horizontal"></i></span>
+            <strong>Creación manual</strong>
+            <span>Configura cada opción con los controles del editor.</span>
+          </button>
+          <button type="button" class="marcie-session-choice marcie-session-choice--agent" data-session-choice="agent">
+            <span class="marcie-session-choice__icon"><i data-lucide="messages-square"></i></span>
+            <strong>Usar Agente MCP</strong>
+            <span>Conversa por texto o voz y deja que Marcie te guíe.</span>
+          </button>
+        </div>`,
+      onClose: () => finish(null)
+    });
+    modal.element.querySelectorAll("[data-session-choice]").forEach((button) => button.addEventListener("click", () => {
+      const choice = button.dataset.sessionChoice;
+      finish(choice);
+      modal.close();
+    }));
+    window.lucide?.createIcons?.();
+  });
+}
+
 export async function exportSessionSpecsToWord({
   topic = "",
   topicMode = "shared",
