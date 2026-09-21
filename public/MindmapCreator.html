@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <script src="js/cache-version-loader.js"></script>
+  <meta charset="UTF-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mindmap Creator - Charly Brown</title>
+  <link rel="icon" type="image/png" href="mindmapBackground.png">
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="tailwind-lite.css" data-cache-href="tailwind-lite.css">
+  <link rel="stylesheet" href="sidebar.css" data-cache-href="sidebar.css">
+  <link rel="stylesheet" href="header.css" data-cache-href="header.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="MindmapCreator.css?ui=20260919-switch-v3" data-cache-href="MindmapCreator.css?ui=20260919-switch-v3">
+</head>
+<body data-page="MindmapCreator.html" class="cb-main-layout er-shell" data-theme="light">
+  <div id="updateBanner" class="update-banner" role="button" tabindex="0" aria-live="polite">
+    Nuevas Actualizaciones
+  </div>
+
+  <div id="app-container">
+    <div class="main-header">
+      <div class="header-content">
+        <!-- Injected by chromeLayout.js -->
+      </div>
+    </div>
+
+    <div id="sidebar">
+      <div class="sidebar-menu">
+        <!-- Injected by chromeLayout.js -->
+      </div>
+    </div>
+
+    <div class="content-wrapper">
+      <main class="mc-page-shell">
+        <!-- Header Toolbar -->
+        <header class="mc-header">
+          <h1 class="mc-header__title">MindMaps Creator</h1>
+          <span id="mcStatusBadge" class="sr-only">Borrador nuevo</span>
+
+          <div class="mc-header__actions">
+            <button type="button" id="mcBtnSave" class="mc-btn mc-btn--primary" title="Guardar en la nube" aria-label="Guardar en la nube">
+              <i class="fas fa-cloud-arrow-up mc-icon--emerald"></i>
+              <span>Guardar</span>
+            </button>
+            <span class="mc-control-divider" aria-hidden="true"></span>
+            <button type="button" id="mcBtnExportPNG" class="mc-btn" title="Exportar MindMap" aria-label="Exportar MindMap">
+              <i class="fas fa-download mc-icon--blue"></i>
+              <span>Exportar</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Main Workspace Grid (3 Columnas con Resizers) -->
+        <div class="mc-main-grid" id="mcMainGrid">
+          <!-- Left Sessions Panel (Sesiones / Guardados) -->
+          <aside class="mc-sessions-panel" id="mcSessionsPanel">
+            <div class="mc-sessions-header">
+              <div class="flex items-center justify-between w-full">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-folder-open text-blue-500 text-sm"></i>
+                  <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 m-0">Mis MindMaps</h2>
+                </div>
+                <div class="mc-sessions-header__actions">
+                  <button type="button" id="mcBtnCommunityMindmaps" class="mc-btn mc-btn--ghost mc-btn-icon" title="Ver MindMaps de otros usuarios" aria-label="Ver MindMaps de otros usuarios">
+                    <i class="fas fa-users mc-icon--magenta text-xs"></i>
+                  </button>
+                  <span class="mc-control-divider" aria-hidden="true"></span>
+                  <button type="button" id="mcBtnNuevoSesion" class="mc-btn mc-btn--primary mc-btn-icon" title="Crear nuevo MindMap" aria-label="Crear nuevo MindMap">
+                    <i class="fas fa-plus mc-icon--blue text-xs"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="mc-sessions-body">
+              <div id="mcSessionsList" class="mc-sessions-list">
+                <div class="text-xs text-center text-muted-foreground py-6">Consultando mapas...</div>
+              </div>
+            </div>
+          </aside>
+
+          <!-- Resizer Izquierdo -->
+          <div class="mc-resizer" id="mcResizerLeft" role="separator" aria-orientation="vertical" title="Arrastrar para redimensionar"></div>
+
+          <!-- Canvas Column (Centro) -->
+          <div class="mc-canvas-column" id="mcCanvasColumn">
+            <div class="mc-canvas-viewport" id="mcViewport">
+              <div class="mc-canvas-stage" id="mcCanvasStage">
+                <div class="mc-canvas-scaler" id="mcCanvasScaler">
+                  <div id="canvasMindmap">
+                    <!-- Dynamic SVG blocks layer representing phrases along the serpentine path -->
+                    <svg id="mcBlocksSvg" class="mc-blocks-layer" viewBox="0 0 1366 904" preserveAspectRatio="none">
+                      <!-- Dynamic serpentine blocks and connecting channels rendered here -->
+                    </svg>
+                    <!-- Draggable stickers & text chips layer -->
+                    <div id="mcStickersLayer" class="mc-stickers-layer"></div>
+
+                    <!-- Slider flotante de tamaño del sticker individual seleccionado -->
+                    <div id="mcStickerSizePopup" class="mc-sticker-popup hidden">
+                      <span id="mcStickerPopupLabel" class="mc-sticker-popup-label"></span>
+                      <input type="range" id="mcSelectedStickerSlider" class="mc-slider-range" min="20" max="160" step="2" value="48">
+                      <button type="button" id="mcRotateLeftSelectedSticker" class="mc-btn mc-btn--ghost mc-btn-icon" title="Girar a la izquierda (-15°)" aria-label="Girar a la izquierda">
+                        <i class="fas fa-rotate-left text-indigo-500"></i>
+                      </button>
+                      <button type="button" id="mcResetRotateSelectedSticker" class="mc-btn mc-btn--ghost mc-btn-icon" title="Restablecer orientación original (0°)" aria-label="Restablecer posición original">
+                        <i class="fas fa-arrows-rotate text-slate-500"></i>
+                      </button>
+                      <button type="button" id="mcRotateRightSelectedSticker" class="mc-btn mc-btn--ghost mc-btn-icon" title="Girar a la derecha (+15°)" aria-label="Girar a la derecha">
+                        <i class="fas fa-rotate-right text-indigo-500"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Controles de reproducción y zoom, fijos debajo del MindMap -->
+            <div class="mc-viewport-footer">
+              <div class="mc-footer-controls">
+                <div class="mc-playback-dock" aria-label="Controles de reproducción">
+                  <div class="mc-playback-actions">
+                    <button type="button" id="mcBtnPlay" class="mc-btn mc-btn-icon" title="Iniciar recorrido" aria-label="Iniciar recorrido">
+                      <i class="fas fa-play mc-icon--emerald"></i>
+                    </button>
+                    <span class="mc-control-divider" aria-hidden="true"></span>
+                    <button type="button" id="mcBtnPause" class="mc-btn mc-btn-icon" title="Pausar recorrido" aria-label="Pausar recorrido">
+                      <i class="fas fa-pause mc-icon--amber"></i>
+                    </button>
+                    <span class="mc-control-divider" aria-hidden="true"></span>
+                    <button type="button" id="mcBtnStop" class="mc-btn mc-btn-icon" title="Detener recorrido" aria-label="Detener recorrido">
+                      <i class="fas fa-stop mc-icon--rose"></i>
+                    </button>
+                  </div>
+                  <span class="mc-control-divider" aria-hidden="true"></span>
+                  <button type="button" id="mcBtnLimpiar" class="mc-btn" title="Limpiar canvas" aria-label="Limpiar canvas">
+                    <i class="fas fa-eraser mc-icon--slate"></i>
+                    <span>Limpiar</span>
+                  </button>
+                </div>
+                <span class="mc-control-divider mc-control-divider--tall" aria-hidden="true"></span>
+                <div class="mc-floating-toolbar" aria-label="Controles de zoom">
+                  <button type="button" id="mcZoomOut" class="mc-btn mc-btn--ghost mc-btn-icon" title="Reducir zoom" aria-label="Reducir zoom">
+                    <i class="fas fa-minus mc-icon--slate"></i>
+                  </button>
+                  <span id="mcZoomLevel" class="mc-zoom-label">100%</span>
+                  <button type="button" id="mcZoomIn" class="mc-btn mc-btn--ghost mc-btn-icon" title="Aumentar zoom" aria-label="Aumentar zoom">
+                    <i class="fas fa-plus mc-icon--blue"></i>
+                  </button>
+                  <span class="mc-control-divider" aria-hidden="true"></span>
+                  <button type="button" id="mcZoomFit" class="mc-btn mc-btn--ghost" title="Ajustar a pantalla" aria-label="Ajustar a pantalla">
+                    <i class="fas fa-expand mc-icon--violet"></i>
+                    <span>Ajustar</span>
+                  </button>
+                </div>
+                <span class="mc-control-divider mc-control-divider--tall" aria-hidden="true"></span>
+                <div class="mc-footer-actions" aria-label="Acciones del MindMap">
+                  <button type="button" id="mcBtnGenerar" class="mc-drawer-fab mc-drawer-fab--generate" title="Generar MindMap" aria-label="Generar MindMap">
+                    <i class="fas fa-arrows-rotate"></i>
+                    <span class="sr-only">Generar MindMap en Canvas</span>
+                  </button>
+                  <span class="mc-control-divider" aria-hidden="true"></span>
+                  <button type="button" id="mcBtnQuickLayout" class="mc-drawer-fab" title="Ajustar distribución y tamaño" aria-label="Ajustar distribución y tamaño" aria-controls="mcQuickLayoutPanel" aria-expanded="false">
+                    <i class="fas fa-ruler-combined mc-icon--violet"></i>
+                  </button>
+                  <span class="mc-control-divider" aria-hidden="true"></span>
+                  <button type="button" id="mcBtnBatchStickersFooter" class="mc-drawer-fab" data-mc-start-batch title="Crear stickers faltantes" aria-label="Crear stickers faltantes">
+                    <i class="fas fa-wand-magic-sparkles mc-icon--amber"></i>
+                  </button>
+                  <span class="mc-control-divider" aria-hidden="true"></span>
+                  <button type="button" id="mcBtnOpenStudioDrawer" class="mc-drawer-fab" title="Abrir herramientas del MindMap" aria-label="Abrir herramientas del MindMap" aria-controls="mcDrawerStickers" aria-expanded="false">
+                    <i class="fas fa-sliders mc-icon--blue"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Resizer Derecho -->
+          <div class="mc-resizer hidden" id="mcResizerRight" aria-hidden="true"></div>
+
+          <!-- Right Control Panel (Derecha) - Shadcn UI Aesthetic -->
+          <aside class="mc-sidebar-panel mc-sidebar-panel--pending-drawer" id="mcSidebarPanel">
+            <!-- Panel Header -->
+            <div class="mc-panel-header">
+              <h2 class="mc-panel-title"><i class="fas fa-sliders mc-icon--blue"></i> Contenido & Ajustes</h2>
+              <span id="mcWordsTotalBadge" class="mc-badge mc-badge--outline">0 palabras</span>
+            </div>
+
+            <section class="mc-studio-section" aria-labelledby="mcReadingSectionTitle">
+              <div class="mc-section-header">
+                <h3 id="mcReadingSectionTitle"><i class="fas fa-book-open mc-icon--blue"></i> Texto de la lectura</h3>
+                <button type="button" id="mcBtnRedrawBlocks" class="mc-btn" title="Ajustar bloques al texto" aria-label="Ajustar bloques al texto">
+                  <i class="fas fa-shapes mc-icon--blue"></i>
+                  <span>Ajustar bloques al texto</span>
+                </button>
+              </div>
+
+              <div class="mc-reading-grid">
+                <div class="mc-field-block">
+                  <div class="mc-field-header">
+                    <label for="mcTextoParte1" class="mc-label">Izquierda</label>
+                    <span id="mcCountParte1" class="mc-counter-pill">0 pal</span>
+                  </div>
+                  <textarea id="mcTextoParte1" rows="3" class="mc-textarea" placeholder="Pega el texto de la primera mitad del cuento...">One night, I woke up with a sudden flash of light. My father, who was worried, opened my eyes. We looked outside, and the whole sky was glowing.</textarea>
+                </div>
+
+                <div class="mc-field-block">
+                  <div class="mc-field-header">
+                    <label for="mcTextoParte2" class="mc-label">Derecha</label>
+                    <span id="mcCountParte2" class="mc-counter-pill">0 pal</span>
+                  </div>
+                  <textarea id="mcTextoParte2" rows="3" class="mc-textarea" placeholder="Pega el texto de la segunda mitad del cuento...">Together, we walked toward the quiet hill. Suddenly, a gentle breeze swept through the valley, bringing peace to our sleepy town.</textarea>
+                </div>
+
+              </div>
+            </section>
+
+            <section class="mc-studio-section" aria-labelledby="mcTemplateSectionTitle">
+              <div class="mc-section-header">
+                <h3 id="mcTemplateSectionTitle"><i class="fas fa-shapes mc-icon--violet"></i> Plantilla y ruta</h3>
+              </div>
+
+              <div class="mc-template-grid">
+                <div class="mc-template-field">
+                  <label for="mcModoPlantilla" class="mc-label mb-1">Modo de Plantilla</label>
+                  <select id="mcModoPlantilla" class="mc-input">
+                    <option value="static" selected>Plantilla con Imagen de Fondo (Original)</option>
+                    <option value="dynamic">Bloques Dinámicos SVG</option>
+                  </select>
+                </div>
+
+                <div class="mc-toggle-row">
+                  <label for="mcCheckEtiquetas" class="mc-label cursor-pointer select-none">Mostrar palabras junto a cada sticker</label>
+                  <input type="checkbox" id="mcCheckEtiquetas" checked>
+                </div>
+                <div class="mc-toggle-row">
+                  <label for="mcCheckBajarMismoBloque" class="mc-label select-none">Ruta continua entre filas</label>
+                  <input type="checkbox" id="mcCheckBajarMismoBloque" checked disabled>
+                </div>
+              </div>
+
+            </section>
+
+            <section id="mcAiConceptsCard" class="mc-studio-section" style="display: none;" aria-labelledby="mcConceptsSectionTitle">
+              <div class="mc-section-header">
+                <h3 id="mcConceptsSectionTitle"><i class="fas fa-lightbulb mc-icon--amber"></i> Conceptos clave</h3>
+              </div>
+              <div id="mcAiConceptsList" class="mc-concepts-wrap"></div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Drawer: Mis MindMaps Guardados -->
+  <aside id="mcDrawerSaved" class="mc-drawer">
+    <div class="mc-drawer__header">
+      <h2><i class="fas fa-folder-open text-blue-400"></i> Mis MindMaps</h2>
+          <button type="button" id="mcCloseSavedDrawer" class="mc-btn mc-btn--ghost mc-btn-icon" aria-label="Cerrar mapas guardados">
+        <i class="fas fa-xmark mc-icon--slate"></i>
+      </button>
+    </div>
+    <div class="mc-drawer__body">
+      <div id="mcSavedList" class="space-y-2">
+        <div class="text-sm text-center text-muted py-8">Cargando mapas guardados...</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Drawer: Stickers & Biblioteca -->
+  <aside id="mcDrawerStickers" class="mc-drawer">
+    <div id="mcDrawerStickersResizer" class="mc-drawer-resizer" role="separator" aria-orientation="vertical" aria-label="Cambiar ancho del panel" tabindex="0"></div>
+    <div class="mc-drawer__header">
+      <h2><i class="fas fa-pen-ruler text-blue-500"></i> Herramientas</h2>
+          <button type="button" id="mcCloseStickerDrawer" class="mc-btn mc-btn--ghost mc-btn-icon" aria-label="Cerrar biblioteca de stickers">
+        <i class="fas fa-xmark mc-icon--slate"></i>
+      </button>
+    </div>
+    <div class="mc-drawer__body">
+      <div class="mc-sticker-tabs" role="tablist" aria-label="Herramientas del MindMap">
+        <button type="button" class="mc-sticker-tab is-active" data-mc-sticker-tab="studio" role="tab" aria-selected="true" aria-controls="mcStickerStudioPanel" title="Estudio" aria-label="Estudio">
+          <i class="fas fa-sliders"></i><span class="sr-only">Estudio</span>
+        </button>
+        <button type="button" class="mc-sticker-tab" data-mc-sticker-tab="library" role="tab" aria-selected="false" aria-controls="mcStickerLibraryPanel" tabindex="-1" title="Biblioteca" aria-label="Biblioteca">
+          <i class="fas fa-grip"></i><span class="sr-only">Biblioteca</span>
+        </button>
+        <button type="button" class="mc-sticker-tab" data-mc-sticker-tab="create" role="tab" aria-selected="false" aria-controls="mcStickerCreatePanel" tabindex="-1" title="Crear stickers" aria-label="Crear stickers">
+          <i class="fas fa-wand-magic-sparkles"></i><span class="sr-only">Crear stickers</span>
+        </button>
+      </div>
+      <section id="mcStickerStudioPanel" class="mc-sticker-tab-panel" role="tabpanel"></section>
+      <section id="mcStickerLibraryPanel" class="mc-sticker-tab-panel hidden" role="tabpanel">
+        <div class="mc-sticker-library-actions">
+          <div class="mc-search-field">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="text" id="mcStickerSearch" class="mc-input" placeholder="Buscar sticker..." aria-label="Buscar sticker">
+          </div>
+          <label for="mcUploadStickerInput" class="mc-btn cursor-pointer" title="Subir PNG" aria-label="Subir PNG">
+            <i class="fas fa-arrow-up-from-bracket mc-icon--blue"></i>
+            <span class="sr-only">Subir PNG</span>
+          </label>
+          <input type="file" id="mcUploadStickerInput" accept="image/png" class="hidden">
+          <div class="mc-view-menu-wrap">
+            <button type="button" id="mcBtnStickerView" class="mc-btn" title="Cambiar vista de la biblioteca" aria-label="Cambiar vista de la biblioteca" aria-haspopup="menu" aria-expanded="false">
+              <i class="fas fa-table-cells mc-icon--violet"></i>
+            </button>
+            <div id="mcStickerViewMenu" class="mc-view-menu" role="menu" hidden>
+              <button type="button" role="menuitemradio" data-sticker-view="small" aria-checked="false"><i class="fas fa-border-all"></i><span>Pequeñas</span></button>
+              <button type="button" role="menuitemradio" data-sticker-view="medium" aria-checked="true"><i class="fas fa-table-cells"></i><span>Medianas</span></button>
+              <button type="button" role="menuitemradio" data-sticker-view="large" aria-checked="false"><i class="fas fa-table-cells-large"></i><span>Grandes</span></button>
+              <button type="button" role="menuitemradio" data-sticker-view="list" aria-checked="false"><i class="fas fa-list"></i><span>Lista</span></button>
+            </div>
+          </div>
+        </div>
+        <div id="mcStickerGrid" class="mc-sticker-grid">
+          <div class="text-xs text-center text-muted py-6 col-span-full">Cargando biblioteca...</div>
+        </div>
+      </section>
+      <section id="mcStickerCreatePanel" class="mc-sticker-tab-panel mc-create-panel hidden" role="tabpanel">
+        <div class="mc-modal__header mc-batch-header">
+          <div class="mc-batch-header__identity">
+            <i class="fas fa-wand-magic-sparkles mc-icon--amber"></i>
+            <div class="mc-batch-header__copy">
+              <h3 id="mcBatchTitle">Crear stickers</h3>
+              <div class="mc-batch-progress-meta">
+                <span id="mcBatchProgressText">Sin palabras</span>
+                <span id="mcBatchRemainingBadge">0 pendientes</span>
+              </div>
+            </div>
+          </div>
+          <div class="mc-batch-header__actions">
+            <button type="button" id="mcBtnBatchStickersPanel" class="mc-btn mc-create-launcher" data-mc-start-batch title="Crear stickers faltantes" aria-label="Crear stickers faltantes">
+              <i class="fas fa-images mc-icon--amber"></i><span>Crear stickers faltantes</span>
+            </button>
+            <button type="button" id="mcBatchBtnCrearTodas" class="mc-btn" title="Crear y aceptar todos los stickers faltantes" aria-label="Crear y aceptar todos los stickers faltantes">
+              <i class="fas fa-check-double mc-icon--emerald"></i><span>Crear y aceptar todos</span>
+            </button>
+            <button type="button" id="mcBtnToggleComposite" class="mc-btn" title="Unir dos stickers" aria-label="Unir dos stickers" aria-controls="mcCompositeBuilder" aria-expanded="false">
+              <i class="fas fa-object-group mc-icon--magenta"></i><span>Unir dos stickers</span>
+            </button>
+            <span class="mc-control-divider" aria-hidden="true"></span>
+            <button type="button" id="mcBatchBtnConfig" class="mc-btn mc-btn--ghost mc-btn-icon" title="Configurar estilo predeterminado del prompt" aria-label="Configurar estilo predeterminado del prompt">
+              <i class="fas fa-gear text-slate-500"></i>
+            </button>
+            <button type="button" id="mcCloseBatchModal" class="mc-btn mc-btn--ghost mc-btn-icon mc-batch-inline-close" title="Cerrar ventana" aria-label="Cerrar ventana de stickers">
+              <i class="fas fa-xmark mc-icon--slate"></i>
+            </button>
+          </div>
+          <div class="mc-batch-progress-track" aria-hidden="true">
+            <div id="mcBatchProgressBar" class="mc-batch-progress-bar" style="width: 0%;"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <aside id="mcQuickLayoutPanel" class="mc-quick-layout-panel hidden" aria-labelledby="mcQuickLayoutTitle">
+    <div class="mc-quick-layout-panel__header">
+      <h2 id="mcQuickLayoutTitle"><i class="fas fa-ruler-combined mc-icon--violet"></i> Distribución</h2>
+      <div class="mc-quick-layout-panel__actions">
+        <button type="button" id="mcBtnResetLayout" class="mc-btn" title="Restablecer distribución centrada" aria-label="Restablecer distribución centrada">
+          <i class="fas fa-crosshairs mc-icon--magenta"></i><span>Centrar distribución</span>
+        </button>
+        <span class="mc-control-divider" aria-hidden="true"></span>
+        <button type="button" id="mcCloseQuickLayout" class="mc-btn mc-btn--ghost mc-btn-icon" title="Cerrar distribución" aria-label="Cerrar distribución">
+          <i class="fas fa-xmark mc-icon--slate"></i>
+        </button>
+      </div>
+    </div>
+    <div class="mc-param-grid mt-2">
+      <div class="mc-param-box">
+        <span class="mc-param-badge">Página 1 (Izq)</span>
+        <div class="mc-param-inputs">
+          <div class="mc-param-slider"><div class="mc-param-slider__header"><label for="mcStepXIzq" class="mc-label">Separación horizontal</label><output id="mcStepXIzqVal" for="mcStepXIzq">75px</output></div><input type="range" id="mcStepXIzq" value="75" min="0" max="250" step="5"></div>
+          <div class="mc-param-slider"><div class="mc-param-slider__header"><label for="mcNivelesYIzq" class="mc-label">Niveles</label><output id="mcNivelesYIzqVal" for="mcNivelesYIzq">2 niv.</output></div><input type="range" id="mcNivelesYIzq" value="2" min="1" max="4" step="1"></div>
+          <div class="mc-param-slider"><div class="mc-param-slider__header"><label for="mcAmpYIzq" class="mc-label">Separación vertical</label><output id="mcAmpYIzqVal" for="mcAmpYIzq">48px</output></div><input type="range" id="mcAmpYIzq" value="48" min="0" max="78" step="2"></div>
+        </div>
+      </div>
+      <div class="mc-param-box">
+        <span class="mc-param-badge">Página 2 (Der)</span>
+        <div class="mc-param-inputs">
+          <div class="mc-param-slider"><div class="mc-param-slider__header"><label for="mcStepXDer" class="mc-label">Separación horizontal</label><output id="mcStepXDerVal" for="mcStepXDer">75px</output></div><input type="range" id="mcStepXDer" value="75" min="0" max="250" step="5"></div>
+          <div class="mc-param-slider"><div class="mc-param-slider__header"><label for="mcNivelesYDer" class="mc-label">Niveles</label><output id="mcNivelesYDerVal" for="mcNivelesYDer">2 niv.</output></div><input type="range" id="mcNivelesYDer" value="2" min="1" max="4" step="1"></div>
+          <div class="mc-param-slider"><div class="mc-param-slider__header"><label for="mcAmpYDer" class="mc-label">Separación vertical</label><output id="mcAmpYDerVal" for="mcAmpYDer">48px</output></div><input type="range" id="mcAmpYDer" value="48" min="0" max="78" step="2"></div>
+        </div>
+      </div>
+    </div>
+    <div class="mc-layout-axis-controls" aria-label="Ajustes verticales globales">
+      <div class="mc-layout-slider">
+        <div class="mc-layout-slider__header">
+          <label for="mcRowGapY" class="mc-label"><i class="fas fa-up-down mc-icon--magenta"></i> Separar filas</label>
+          <output id="mcRowGapYVal" for="mcRowGapY">0px</output>
+        </div>
+        <input type="range" id="mcRowGapY" min="-20" max="24" value="0" step="2">
+      </div>
+      <div class="mc-layout-slider">
+        <div class="mc-layout-slider__header">
+          <label for="mcOffsetY" class="mc-label"><i class="fas fa-arrows-up-down mc-icon--blue"></i> Mover todo</label>
+          <output id="mcOffsetYVal" for="mcOffsetY">0px</output>
+        </div>
+        <input type="range" id="mcOffsetY" min="-80" max="80" value="0" step="2">
+      </div>
+    </div>
+    <div class="mc-global-size-control">
+      <div class="mc-global-size-control__header">
+        <label for="mcStickerSizeGlobal" class="mc-label"><i class="fas fa-image mc-icon--blue"></i> Tamaño global</label>
+        <span id="mcStickerSizeVal">42px</span>
+      </div>
+      <div class="mc-global-size-control__inputs">
+        <input type="range" id="mcGlobalStickerSlider" min="20" max="100" value="42" step="2">
+        <div class="mc-input-with-unit"><input type="number" id="mcStickerSizeGlobal" class="mc-input" value="42" min="16" max="120" step="2"><span class="mc-unit">px</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Modal: Opciones de exportación -->
+  <div id="mcModalExportPNG" class="mc-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="mcExportPNGTitle">
+    <div class="mc-modal" style="max-width: 480px;">
+      <div class="mc-modal__header">
+        <h3 id="mcExportPNGTitle"><i class="fas fa-download text-slate-600"></i> Exportar MindMap</h3>
+        <button type="button" id="mcCloseExportPNGModal" class="mc-btn mc-btn--ghost mc-btn-icon" aria-label="Cerrar opciones de exportación">
+          <i class="fas fa-xmark mc-icon--slate"></i>
+        </button>
+      </div>
+      <p class="mc-card__subtitle">Elige el formato y la estructura del archivo.</p>
+      <div class="mc-export-section">
+        <span class="mc-export-section__label">Formato</span>
+        <div class="mc-export-options mc-export-options--formats" role="radiogroup" aria-label="Formato de exportación">
+          <label class="mc-export-option">
+            <input type="radio" name="mcExportFormat" value="png" checked>
+            <span>
+              <strong><i class="fas fa-file-image mc-icon--blue"></i> PNG</strong>
+              <small>Imagen final lista para compartir o imprimir.</small>
+            </span>
+          </label>
+          <label class="mc-export-option">
+            <input type="radio" name="mcExportFormat" value="psd">
+            <span>
+              <strong><i class="fas fa-layer-group mc-icon--magenta"></i> PSD por capas</strong>
+              <small>Una capa nombrada por sticker y los bloques al fondo.</small>
+            </span>
+          </label>
+        </div>
+      </div>
+      <div id="mcExportBackgroundSection" class="mc-export-section">
+        <span class="mc-export-section__label">Fondo del PNG</span>
+        <div class="mc-export-options" role="radiogroup" aria-label="Fondo de la exportación">
+        <label class="mc-export-option">
+          <input type="radio" name="mcExportBackground" value="with-background" checked>
+          <span>
+            <strong>Exportar con fondo</strong>
+            <small>Incluye la plantilla o los bloques dinámicos.</small>
+          </span>
+        </label>
+        <label class="mc-export-option">
+          <input type="radio" name="mcExportBackground" value="transparent">
+          <span>
+            <strong>Exportar PNG sin fondo</strong>
+            <small>Conserva solo stickers, textos y posiciones sobre transparencia.</small>
+          </span>
+        </label>
+        </div>
+      </div>
+      <div class="mc-modal__footer">
+        <button type="button" id="mcCancelExportPNG" class="mc-btn" title="Cancelar exportación" aria-label="Cancelar exportación">
+          <i class="fas fa-xmark mc-icon--rose"></i>
+          <span>Cancelar</span>
+        </button>
+        <span class="mc-control-divider" aria-hidden="true"></span>
+        <button type="button" id="mcConfirmExportPNG" class="mc-btn mc-btn--primary" title="Exportar PNG" aria-label="Exportar PNG">
+          <i class="fas fa-download mc-icon--blue"></i>
+          <span>Exportar PNG</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Datos academicos del MindMap -->
+  <div id="mcModalSave" class="mc-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="mcSaveTitle">
+    <div class="mc-modal mc-modal--academic">
+      <div class="mc-modal__header">
+        <h3 id="mcSaveTitle"><i class="fas fa-graduation-cap text-blue-600"></i> Datos del MindMap</h3>
+        <button type="button" id="mcCloseSaveModal" class="mc-btn mc-btn--ghost mc-btn-icon" aria-label="Cerrar ventana de guardado">
+          <i class="fas fa-xmark mc-icon--slate"></i>
+        </button>
+      </div>
+      <div class="mc-academic-form">
+        <div class="mc-academic-field mc-academic-field--wide">
+          <label for="mcSaveTitleInput" class="mc-label">Nombre o título</label>
+          <input type="text" id="mcSaveTitleInput" class="mc-input" placeholder="Ej. El viaje de Marco Polo" autocomplete="off">
+        </div>
+        <div class="mc-academic-field">
+          <label for="mcAcademicLevel" class="mc-label">Nivel</label>
+          <select id="mcAcademicLevel" class="mc-input">
+            <option value="Preescolar">Preescolar</option>
+            <option value="Primaria" selected>Primaria</option>
+          </select>
+        </div>
+        <div class="mc-academic-field">
+          <label for="mcAcademicGrade" class="mc-label">Grado</label>
+          <select id="mcAcademicGrade" class="mc-input">
+            <option value="Primero">Primero</option>
+            <option value="Segundo">Segundo</option>
+            <option value="Tercero">Tercero</option>
+            <option value="Cuarto">Cuarto</option>
+            <option value="Quinto">Quinto</option>
+            <option value="Sexto">Sexto</option>
+          </select>
+        </div>
+        <div class="mc-academic-field">
+          <label for="mcAcademicTrimester" class="mc-label">Trimestre</label>
+          <select id="mcAcademicTrimester" class="mc-input">
+            <option value="Trim 1">Trim 1</option>
+            <option value="Trim 2">Trim 2</option>
+            <option value="Trim 3">Trim 3</option>
+          </select>
+        </div>
+        <div class="mc-academic-field">
+          <label for="mcAcademicUnit" class="mc-label">Unidad</label>
+          <select id="mcAcademicUnit" class="mc-input">
+            <option value="Unidad 1">Unidad 1</option>
+            <option value="Unidad 2">Unidad 2</option>
+            <option value="Unidad 3">Unidad 3</option>
+            <option value="Unidad 4">Unidad 4</option>
+            <option value="Unidad 5">Unidad 5</option>
+            <option value="Unidad 6">Unidad 6</option>
+            <option value="Unidad 7">Unidad 7</option>
+            <option value="Unidad 8">Unidad 8</option>
+            <option value="Unidad 9">Unidad 9</option>
+            <option value="Unidad 10">Unidad 10</option>
+          </select>
+        </div>
+      </div>
+      <section id="mcModalGemini" class="mc-academic-assistant" aria-labelledby="mcGeminiTitle">
+        <div class="mc-academic-assistant__header">
+          <div>
+            <h4 id="mcGeminiTitle"><i class="fas fa-wand-magic-sparkles text-amber-500"></i> Asistente de lectura</h4>
+            <p>Pega la lectura completa para dividirla automáticamente entre ambos paneles.</p>
+          </div>
+        </div>
+        <label for="mcGeminiFullText" class="mc-label">Lectura completa</label>
+        <textarea id="mcGeminiFullText" rows="5" class="mc-textarea" placeholder="Había una vez..."></textarea>
+        <div class="mc-academic-assistant__actions">
+          <span id="mcGeminiResult" class="mc-assistant-result" aria-live="polite"></span>
+          <button type="button" id="mcExecuteGeminiBtn" class="mc-btn mc-btn--primary" title="Analizar y dividir lectura" aria-label="Analizar y dividir lectura">
+            <i class="fas fa-wand-magic-sparkles mc-icon--amber"></i>
+            <span>Analizar y dividir</span>
+          </button>
+        </div>
+      </section>
+      <div class="mc-modal__footer">
+        <button type="button" id="mcCancelSaveBtn" class="mc-btn" title="Cancelar" aria-label="Cancelar">
+          <i class="fas fa-xmark mc-icon--rose"></i>
+          <span>Cancelar</span>
+        </button>
+        <span class="mc-control-divider" aria-hidden="true"></span>
+        <button type="button" id="mcConfirmSaveBtn" class="mc-btn mc-btn--primary" title="Guardar MindMap" aria-label="Guardar MindMap">
+          <i class="fas fa-check mc-icon--emerald"></i>
+          <span>Guardar</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: MindMaps de otros usuarios -->
+  <div id="mcModalCommunityMindmaps" class="mc-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="mcCommunityTitle">
+    <div class="mc-modal mc-modal--community">
+      <div class="mc-modal__header">
+        <h3 id="mcCommunityTitle"><i class="fas fa-users text-blue-600"></i> MindMaps de otros usuarios</h3>
+        <button type="button" id="mcCloseCommunityMindmaps" class="mc-btn mc-btn--ghost mc-btn-icon" aria-label="Cerrar MindMaps de otros usuarios">
+          <i class="fas fa-xmark mc-icon--slate"></i>
+        </button>
+      </div>
+      <div class="mc-academic-field">
+        <label for="mcCommunityUserSelect" class="mc-label">Usuario</label>
+        <select id="mcCommunityUserSelect" class="mc-input">
+          <option value="">Selecciona un usuario</option>
+        </select>
+      </div>
+      <div id="mcCommunityMindmapsList" class="mc-community-list" aria-live="polite">
+        <p class="mc-community-empty">Selecciona un usuario para consultar sus MindMaps.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Generador de stickers pendientes (Paso a Paso con Aceptación) -->
+  <div id="mcModalBatchStickers" class="mc-modal-backdrop" role="region" aria-labelledby="mcBatchTitle">
+    <div class="mc-modal" style="max-width: 580px;">
+      <!-- Input para añadir palabra manualmente -->
+      <div class="mc-batch-input-row">
+        <input id="mcBatchManualWordInput" type="text" placeholder="Escribe una palabra para generar su sticker..." class="mc-input flex-1 text-sm">
+        <label class="mc-batch-text-mode" for="mcBatchWordAsText" title="Crear la palabra como texto dibujado">
+          <input type="checkbox" id="mcBatchWordAsText">
+          <i class="fas fa-font" aria-hidden="true"></i>
+          <span>Como texto</span>
+        </label>
+        <button type="button" id="mcBatchAddManualWord" class="mc-btn mc-btn--primary text-xs whitespace-nowrap" title="Añadir palabra" aria-label="Añadir palabra">
+          <i class="fas fa-plus mc-icon--blue"></i>
+          <span>Añadir</span>
+        </button>
+      </div>
+
+      <div id="mcCompositeBuilder" class="mc-composite-builder hidden" aria-labelledby="mcCompositeTitle" aria-hidden="true">
+        <div class="mc-composite-builder__header">
+          <span id="mcCompositeTitle">Combinar dos stickers</span>
+        </div>
+        <div class="mc-composite-builder__grid">
+          <input id="mcCompositeTarget" type="text" class="mc-input" placeholder="Palabra final: because" aria-label="Nombre de la palabra final">
+          <input id="mcCompositePartA" type="text" class="mc-input" placeholder="Sticker 1: bee" aria-label="Primer sticker">
+          <span class="mc-composite-builder__plus" aria-hidden="true">+</span>
+          <input id="mcCompositePartB" type="text" class="mc-input" placeholder="Sticker 2: cause" aria-label="Segundo sticker">
+        </div>
+        <div class="mc-composite-previews">
+          <div class="mc-composite-preview">
+            <div class="mc-composite-preview__image">
+              <img id="mcCompositePreviewA" src="" alt="Vista previa del primer sticker" class="hidden">
+              <div id="mcCompositePlaceholderA" class="mc-composite-preview__placeholder"><i class="fas fa-image"></i></div>
+            </div>
+            <button type="button" id="mcCompositeGenerateA" class="mc-btn" title="Crear o rehacer el primer sticker" aria-label="Crear o rehacer el primer sticker">
+              <i class="fas fa-wand-magic-sparkles mc-icon--amber"></i><span>Crear primer sticker</span>
+            </button>
+          </div>
+          <div class="mc-composite-preview">
+            <div class="mc-composite-preview__image">
+              <img id="mcCompositePreviewB" src="" alt="Vista previa del segundo sticker" class="hidden">
+              <div id="mcCompositePlaceholderB" class="mc-composite-preview__placeholder"><i class="fas fa-image"></i></div>
+            </div>
+            <button type="button" id="mcCompositeGenerateB" class="mc-btn" title="Crear o rehacer el segundo sticker" aria-label="Crear o rehacer el segundo sticker">
+              <i class="fas fa-wand-magic-sparkles mc-icon--amber"></i><span>Crear segundo sticker</span>
+            </button>
+          </div>
+        </div>
+        <div class="mc-composite-actions">
+          <button type="button" id="mcBatchBtnCompose" class="mc-btn" title="Aceptar, unir y guardar los dos stickers" aria-label="Aceptar, unir y guardar los dos stickers" disabled>
+            <i class="fas fa-check mc-icon--green"></i><span>Aceptar y unir</span>
+          </button>
+        </div>
+      </div>
+
+
+      <!-- Panel colapsable de configuración del prompt -->
+      <div id="mcBatchConfigPanel" class="mc-batch-config-panel hidden">
+        <div class="flex items-center justify-between font-semibold text-slate-700">
+          <span class="flex items-center gap-1.5"><i class="fas fa-sliders text-blue-500"></i> Estilo predeterminado de los prompts</span>
+          <button type="button" id="mcBatchConfigCloseBtn" class="mc-btn mc-btn--ghost mc-btn-icon" title="Cerrar configuración" aria-label="Cerrar configuración">
+            <i class="fas fa-xmark mc-icon--slate"></i>
+          </button>
+        </div>
+        <div>
+          <label for="mcBatchConfigPrefixInput" class="text-[11px] text-slate-500 block mb-1 font-medium">Prefijo fijo del prompt (primera parte):</label>
+          <input type="text" id="mcBatchConfigPrefixInput" class="mc-input text-xs w-full" placeholder="un elemento, o conjunto de elementos, persona o acción que represente el significado de la palabra">
+        </div>
+        <div>
+          <label for="mcBatchConfigStyleInput" class="text-[11px] text-slate-500 block mb-1 font-medium">Instrucción de estilo (segunda parte, editable):</label>
+          <textarea id="mcBatchConfigStyleInput" rows="2" class="mc-textarea text-xs w-full" placeholder="dibujo minimalista hecho por un niño en blanco y negro con algunos elementos a color, fondo blanco puro sin fondo de sticker ni marco, sin texto"></textarea>
+        </div>
+        <div class="mc-toggle-row">
+          <label for="mcBatchTranslatePrompt" class="mc-label cursor-pointer select-none">Traducir prompt</label>
+          <input type="checkbox" id="mcBatchTranslatePrompt">
+        </div>
+        <div class="flex items-center justify-between gap-2 pt-0.5">
+          <button type="button" id="mcBatchConfigResetBtn" class="mc-btn text-xs py-1" title="Restablecer estilo predeterminado" aria-label="Restablecer estilo predeterminado">
+            <i class="fas fa-rotate-left text-slate-500"></i>
+            <span>Restablecer</span>
+          </button>
+          <button type="button" id="mcBatchConfigSaveBtn" class="mc-btn mc-btn--primary text-xs py-1" title="Guardar cambios de estilo" aria-label="Guardar cambios de estilo">
+            <i class="fas fa-check text-emerald-600"></i>
+            <span>Guardar estilo</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Contenido de Revisión de la Palabra Actual -->
+      <div class="mc-batch-review">
+        <div class="mc-batch-current-row">
+          <div class="mc-batch-current-word">
+            <span class="mc-batch-eyebrow">Palabra</span>
+            <span id="mcBatchCurrentWord" class="mc-batch-current-value">...</span>
+          </div>
+          <span id="mcBatchStatusText" class="mc-batch-status">
+            <i class="fas fa-pen-nib text-slate-400"></i> Listo para crear
+          </span>
+        </div>
+
+        <!-- Card de Previsualización de la Imagen Generada -->
+        <div class="mc-batch-preview">
+          <div class="mc-batch-prompt-wrap">
+            <div>
+                <textarea id="mcBatchPromptInput" rows="2" class="mc-textarea mc-batch-prompt text-xs" aria-label="Prompt del sticker"></textarea>
+            </div>
+          </div>
+
+          <div class="mc-batch-preview__image">
+            <img id="mcBatchPreviewImg" src="" alt="Sticker preview" class="w-full h-full object-contain p-2 hidden">
+            <div id="mcBatchLoadingPlaceholder" class="flex flex-col items-center justify-center p-4 text-center">
+              <i id="mcBatchPlaceholderIcon" class="fas fa-wand-magic-sparkles text-amber-500 text-3xl mb-2"></i>
+              <span id="mcBatchPlaceholderText" class="text-xs font-medium text-slate-600">Escribe una palabra y presiona “Crear sticker”.</span>
+            </div>
+          </div>
+          <div class="mc-batch-preview-actions" aria-label="Acciones de la previsualización">
+            <button type="button" id="mcBatchBtnCrear" class="mc-btn mc-batch-primary-action" title="Crear sticker" aria-label="Crear sticker">
+              <i class="fas fa-wand-magic-sparkles"></i>
+              <span>Crear Sticker</span>
+            </button>
+            <button type="button" id="mcBatchBtnRehacer" class="mc-btn hidden" title="Reintentar o generar otra variante" aria-label="Reintentar o generar otra variante">
+              <i class="fas fa-rotate text-amber-600"></i>
+              <span>Rehacer</span>
+            </button>
+            <span class="mc-control-divider" aria-hidden="true"></span>
+            <button type="button" id="mcBatchBtnAceptar" class="mc-btn mc-btn--primary hidden" title="Guardar sticker y pasar a la siguiente palabra" aria-label="Guardar sticker y pasar a la siguiente palabra">
+              <i class="fas fa-check text-emerald-600"></i>
+              <span>Aceptar y Siguiente</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer con botones de control -->
+      <div class="mc-modal__footer mc-batch-footer">
+        <button type="button" id="mcBatchBtnCancelar" class="mc-btn mc-btn--destructive" title="Detener generación de stickers" aria-label="Detener generación de stickers">
+          <i class="fas fa-stop"></i>
+          <span>Detener</span>
+        </button>
+
+        <div class="mc-batch-footer__actions">
+          <button type="button" id="mcBatchBtnOmitir" class="mc-btn" title="Omitir esta palabra sin guardarla" aria-label="Omitir esta palabra sin guardarla">
+            <i class="fas fa-forward text-slate-500"></i>
+            <span>Omitir</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Menu for Canvas Elements -->
+  <div id="mcContextMenu" class="mc-context-menu">
+    <button type="button" class="mc-context-menu__item" id="mcCtxGenGemini">
+      <i class="fas fa-wand-magic-sparkles text-amber-400"></i> Crear otra versión
+    </button>
+    <button type="button" class="mc-context-menu__item" id="mcCtxReplaceSticker">
+      <i class="fas fa-images"></i> Reemplazar por sticker
+    </button>
+    <button type="button" class="mc-context-menu__item" id="mcCtxUploadSticker">
+      <i class="fas fa-upload"></i> Subir imagen para esta palabra
+    </button>
+    <button type="button" class="mc-context-menu__item mc-context-menu__item--danger" id="mcCtxDelete">
+      <i class="fas fa-trash-can"></i> Eliminar
+    </button>
+  </div>
+
+  <script src="vendor/ag-psd/ag-psd.bundle.js"></script>
+  <script type="module" src="js/MindmapCreator.js?v=20260919-translate-prompt-v40"></script>
+  <script type="module" data-cache-src="js/chromeLayout.js"></script>
+  <script type="module" data-cache-src="js/sidebar.js"></script>
+  <script src="js/update-banner-loader.js" defer></script>
+</body>
+</html>
