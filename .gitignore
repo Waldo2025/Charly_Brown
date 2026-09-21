@@ -88,6 +88,15 @@ public/config.local.json
 # Local backup snapshots
 backups/
 
+# Local Codex and one-off diagnostics
+.codex/
+.tmp_*.js
+scripts/.tmp-*/
+
+# Local QA scratch files and personal exports
+tmp/
+output/
+
 # macOS / generated clutter
 .DS_Store
 .pycache/
