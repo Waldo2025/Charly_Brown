@@ -8715,10 +8715,10 @@ var VoxelJS = (() => {
           /*
           					// fresnel term from skin shader
           					"const float F0 = 0.128;",
-
+          
           					"float base = 1.0 - dot( viewPosition, dirHalfVector );",
           					"float exponential = pow( base, 5.0 );",
-
+          
           					"float fresnel = exponential + F0 * ( 1.0 - exponential );",
           					*/
           /*
@@ -8726,7 +8726,7 @@ var VoxelJS = (() => {
           					"const float mFresnelBias = 0.08;",
           					"const float mFresnelScale = 0.3;",
           					"const float mFresnelPower = 5.0;",
-
+          
           					"float fresnel = mFresnelBias + mFresnelScale * pow( 1.0 + dot( normalize( -viewPosition ), normal ), mFresnelPower );",
           					*/
           // 2.0 => 2.0001 is hack to work around ANGLE bug
@@ -8998,24 +8998,24 @@ var VoxelJS = (() => {
           /*
           						// nested loops breaks shader compiler / validator on some ATI cards when using OpenGL
           						// must enroll loop manually
-
+          
           						"for ( float y = -1.25; y <= 1.25; y += 1.25 )",
           							"for ( float x = -1.25; x <= 1.25; x += 1.25 ) {",
-
+          
           								"vec4 rgbaDepth = texture2D( shadowMap[ i ], vec2( x * xPixelOffset, y * yPixelOffset ) + shadowCoord.xy );",
-
+          
           								// doesn't seem to produce any noticeable visual difference compared to simple "texture2D" lookup
           								//"vec4 rgbaDepth = texture2DProj( shadowMap[ i ], vec4( vShadowCoord[ i ].w * ( vec2( x * xPixelOffset, y * yPixelOffset ) + shadowCoord.xy ), 0.05, vShadowCoord[ i ].w ) );",
-
+          
           								"float fDepth = unpackDepth( rgbaDepth );",
-
+          
           								"if ( fDepth < shadowCoord.z )",
           									"shadow += 1.0;",
-
+          
           						"}",
-
+          
           						"shadow /= 9.0;",
-
+          
           						*/
           "const float shadowDelta = 1.0 / 9.0;",
           "float xPixelOffset = 1.0 / shadowMapSize[ i ].x;",
@@ -15949,17 +15949,17 @@ var VoxelJS = (() => {
         // end triangulate shapes
         /*
         	triangulate2 : function( pts, holes ) {
-
+        
         		// For use with Poly2Tri.js
-
+        
         		var allpts = pts.concat();
         		var shape = [];
         		for (var p in pts) {
         			shape.push(new js.poly2tri.Point(pts[p].x, pts[p].y));
         		}
-
+        
         		var swctx = new js.poly2tri.SweepContext(shape);
-
+        
         		for (var h in holes) {
         			var aHole = holes[h];
         			var newHole = []
@@ -15969,7 +15969,7 @@ var VoxelJS = (() => {
         			}
         			swctx.AddHole(newHole);
         		}
-
+        
         		var find;
         		var findIndexForPt = function (pt) {
         			find = new THREE.Vector2(pt.x, pt.y);
@@ -15979,10 +15979,10 @@ var VoxelJS = (() => {
         			}
         			return -1;
         		};
-
+        
         		// triangulate
         		js.poly2tri.sweep.Triangulate(swctx);
-
+        
         		var triangles =  swctx.GetTriangles();
         		var tr ;
         		var facesPts = [];
@@ -15994,11 +15994,11 @@ var VoxelJS = (() => {
         				findIndexForPt(tr.GetPoint(2))
         					]);
         		}
-
-
+        
+        
         	//	console.log(facesPts);
         	//	console.log("triangles", triangles.length, triangles);
-
+        
         		// Returns array of faces with 3 element each
         	return facesPts;
         	},
@@ -30822,7 +30822,7 @@ z-index: 10;
     `);
           this.outputNode = document.createElement("div");
           this.outputNode.setAttribute("style", `
-    overflow-y: scroll;
+    overflow-y: scroll; 
     width: 100%;
     height: ${this.opts.lineHeightPx * (this.opts.rows - 1)}px;
     `);
@@ -50663,19 +50663,19 @@ gl-matrix/dist/gl-matrix.js:
   @author Brandon Jones
   @author Colin MacKenzie IV
   @version 2.7.0
-
+  
   Copyright (c) 2015-2018, Brandon Jones, Colin MacKenzie IV.
-
+  
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
   in the Software without restriction, including without limitation the rights
   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
   copies of the Software, and to permit persons to whom the Software is
   furnished to do so, subject to the following conditions:
-
+  
   The above copyright notice and this permission notice shall be included in
   all copies or substantial portions of the Software.
-
+  
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -50683,7 +50683,7 @@ gl-matrix/dist/gl-matrix.js:
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
   THE SOFTWARE.
-
+  
   *)
 
 is-buffer/index.js:

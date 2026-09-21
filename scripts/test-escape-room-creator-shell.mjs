@@ -16,6 +16,11 @@ const js = fs.readFileSync(
   "utf8"
 );
 
+const packageBuilderSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/js/escape-room-package-builder.mjs",
+  "utf8"
+);
+
 assert.match(
   html,
   /class="er-brief-panel er-studio-dock is-open" id="briefCollapse"/,
@@ -24,7 +29,7 @@ assert.match(
 
 assert.match(
   html,
-  /id="erBriefResizeHandle"[^>]*role="separator"[^>]*aria-valuemin="280"[^>]*aria-valuemax="560"[^>]*aria-valuenow="340"/,
+  /id="erBriefResizeHandle"[^>]*role="separator"[^>]*aria-valuemin="200"[^>]*aria-valuemax="560"[^>]*aria-valuenow="340"/,
   "El brief debe exponer un separador de resize accesible."
 );
 
@@ -189,16 +194,17 @@ assert.match(
   "El creador debe renderizar y editar todas las preguntas internas de cada sala."
 );
 assert.match(html, /id="erMissionWorkspacePanel"[^>]*class="[^"]*er-editor-dock[^"]*"|class="[^"]*er-editor-dock[^"]*"[^>]*id="erMissionWorkspacePanel"/, "El editor contextual debe usar un panel acoplado independiente.");
+assert.match(html, /id="erMissionWorkspaceResizeHandle"[^>]*role="separator"[^>]*aria-valuemin="240"[^>]*aria-valuemax="560"[^>]*aria-valuenow="360"/, "El editor contextual debe incluir un separador accesible para cambiar su ancho.");
 assert.match(html, /id="btnCloseMissionWorkspace"[^>]*aria-label="Cerrar editor de sala o pregunta"/, "El panel contextual debe poder cerrarse con un control accesible.");
 assert.match(js, /insertBefore\(elements\.missionWorkspacePanel, elements\.inspectorPanel\)/, "El editor debe montarse inmediatamente a la izquierda del inspector de salas y contenido.");
 assert.match(css, /\.er-studio-shell > \.er-editor-dock[\s\S]*grid-column:\s*2;[\s\S]*grid-row:\s*1;[\s\S]*position:\s*sticky;/, "En escritorio el editor debe superponerse al preview sin empujarlo hacia abajo.");
 assert.match(css, /\.er-editor-dock > \.er-mission-list[\s\S]*overflow-y:\s*auto;/, "El contenido del editor contextual debe desplazarse verticalmente de forma independiente.");
 assert.match(
   js,
-  /er-icon-button er-studio-icon-button[^>]*data-question-action="regenerate-question"[^>]*data-er-tooltip="Regenerar pregunta"/,
-  "Las acciones dinámicas de preguntas deben usar el mismo comando icónico y tooltip."
+  /class="er-question-actions-menu hidden"[^>]*role="menu"[\s\S]*data-question-action="regenerate-question"/,
+  "Las acciones generales de pregunta deben permanecer dentro del menú contextual."
 );
-assert.match(js, /data-question-action="regenerate-question-image"/, "Cada pregunta debe permitir regenerar solo su imagen.");
+assert.match(js, /class="er-question-image-actions"[\s\S]*data-question-action="replace-question-image"[\s\S]*data-question-action="regenerate-question-image"/, "Cada pregunta debe permitir sustituir o regenerar su imagen desde la card visual.");
 assert.match(js, /regenerateQuestionImageOnly/, "El control de imagen no debe regenerar el contenido de la pregunta.");
 assert.match(
   js,
@@ -227,15 +233,16 @@ assert.match(js, /data-editor-final-key/, "El editor de actividades debe mostrar
 assert.match(js, /value="verdadero_falso"[^>]*>Verdadero \/ Falso</, "El editor debe ofrecer Verdadero/Falso.");
 assert.match(js, /value="ordenar_secuencia"[^>]*>Ordenar secuencia</, "El editor debe ofrecer Ordenar secuencia.");
 assert.match(js, /value="completar_espacio"[^>]*>Completar espacio</, "El editor debe ofrecer Completar espacio.");
-assert.match(js, /Respeta EXACTAMENTE este orden de tipos/, "El prompt debe recibir un plan explícito por actividad.");
+assert.match(js, /respeta exactamente este plan de tipos[\s\S]*formatInteractionPlanForPrompt\(interactionPlan\)/i, "El prompt debe recibir un plan explícito por actividad.");
 assert.match(js, /Gemini tardó más de lo esperado\. Reintentando la generación una vez/, "La generación completa debe reintentar una vez los timeouts transitorios de Gemini.");
 assert.match(js, /después de dos intentos/, "La interfaz debe explicar el timeout persistente sin mostrar solo el código técnico.");
 
 assert.match(
   js,
-  /function handlePresentationModeChange\(\)[\s\S]*modo_presentacion:\s*nextMode[\s\S]*remapGenericMissionPresentation/,
-  "Cambiar de formato debe actualizar la presentación sin reconstruir el contenido de las actividades."
+  /function handlePresentationModeChange\(\)[\s\S]*modo_presentacion:\s*nextMode[\s\S]*renderOutputsNow\(\)/,
+  "Cambiar de formato debe actualizar solo el modo sin reescribir el contenido editorial."
 );
+assert.doesNotMatch(js, /remapGenericMissionPresentation/, "El cliente no debe renombrar localmente salas o actividades al cambiar de formato.");
 
 for (const behavior of [
   "mountStudioPanels",
@@ -249,6 +256,12 @@ for (const behavior of [
 ]) {
   assert.match(js, new RegExp(`function ${behavior}\\(`), `Debe implementarse ${behavior}.`);
 }
+
+assert.match(
+  js,
+  /function selectQuestionById\(missionId, questionId[\s\S]*const shouldHide = state\.selectedMissionId === missionId && state\.selectedQuestionId === questionId[\s\S]*shouldHide \? null : missionId[\s\S]*shouldHide \? null : questionId/,
+  "La misma pregunta debe alternar entre abrir y cerrar el editor contextual."
+);
 
 assert.match(
   js,
@@ -267,6 +280,31 @@ assert.match(
   /selectedQuestionIndex >= 0[\s\S]*renderQuestionCard\(selectedIndex, selectedQuestionIndex/,
   "Seleccionar una pregunta debe renderizar únicamente su editor en el workspace."
 );
+assert.match(
+  js,
+  /function focusSelectedQuestionInPreview\(\)[\s\S]*type:\s*"pigpen-preview-navigate"[\s\S]*missionId[\s\S]*questionId/,
+  "La selección de una pregunta debe enviarse al preview con sus identificadores."
+);
+assert.match(
+  js,
+  /previewFrame\?\.addEventListener\("load"[\s\S]*focusSelectedQuestionInPreview\(\)/,
+  "El preview debe restaurar la pregunta elegida después de regenerar el iframe."
+);
+assert.match(
+  packageBuilderSource,
+  /function focusEditorialPreviewQuestion\(missionId, questionId\)[\s\S]*state\.galleryScreen = "mission"[\s\S]*data-question-card[\s\S]*scrollIntoView/,
+  "El runtime del preview debe abrir la sala y desplazar la vista hasta la pregunta exacta."
+);
+assert.match(
+  packageBuilderSource,
+  /function focusEditorialPreviewBriefing\(missionId\)[\s\S]*state\.galleryScreen = "mission"[\s\S]*state\.readBriefings\.add\(mission\.id\)[\s\S]*briefing\.open = true[\s\S]*scrollIntoView/,
+  "El runtime del preview debe abrir la sala y desplegar el briefing exacto."
+);
+assert.match(
+  packageBuilderSource,
+  /payload\.target === "briefing"[\s\S]*focusEditorialPreviewBriefing\(payload\.missionId\)/,
+  "El runtime debe atender la navegación específica hacia un briefing."
+);
 const focusedQuestionBlock = js.slice(
   js.indexOf("if (selectedQuestionIndex >= 0)"),
   js.indexOf("const selectedEntries =", js.indexOf("if (selectedQuestionIndex >= 0)"))
@@ -277,7 +315,7 @@ assert.doesNotMatch(
   "La edición enfocada de una pregunta no debe incluir datos generales ni la clave final."
 );
 
-assert.match(css, /\.er-new-session-button\s*\{[\s\S]*width:\s*100%[\s\S]*justify-content:\s*flex-start[\s\S]*background:\s*transparent/, "Nueva sesión debe ser una acción ghost clara y ocupar todo el panel.");
+assert.match(css, /\.er-studio-shell \.er-new-session-button\s*\{[\s\S]*width:\s*auto[\s\S]*justify-content:\s*flex-start[\s\S]*background:\s*transparent/, "Nueva sesión debe conservar su acción ghost compacta.");
 assert.match(
   css,
   /\.er-session-list\s*\{[\s\S]*height:\s*100%[\s\S]*min-height:\s*0[\s\S]*flex:\s*1 1 100%[\s\S]*overflow-x:\s*hidden[\s\S]*border:\s*0[\s\S]*box-shadow:\s*none/,

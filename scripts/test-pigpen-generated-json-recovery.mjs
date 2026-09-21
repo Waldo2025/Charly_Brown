@@ -52,8 +52,8 @@ assert.throws(
 
 assert.match(
   source,
-  /function buildEscapeRoomResponseSchema\([\s\S]*minItems: safeMissionCount[\s\S]*maxItems: safeQuestionCount/,
-  "La generación principal debe restringirse mediante un esquema estructurado."
+  /function buildFoundationResponseSchema\([\s\S]*minItems: safeMissionCount[\s\S]*maxItems: safeMissionCount[\s\S]*function buildEscapeRoomResponseSchema\([\s\S]*items: questionSchema/,
+  "Las dos etapas de generación deben restringirse mediante esquemas estructurados."
 );
 assert.match(
   source,
@@ -62,8 +62,8 @@ assert.match(
 );
 assert.match(
   source,
-  /generatedProject = extractGeneratedJson\(rawText\);[\s\S]*catch \(parseError\)[\s\S]*repairGeneratedEscapeRoomJson\(rawText, formData\)/,
-  "Una respuesta sintácticamente inválida debe activar exactamente el flujo de reparación estructurada."
+  /generatedProject = extractGeneratedJson\(rawText\);[\s\S]*catch \(parseError\)[\s\S]*repairGeneratedEscapeRoomJson\(rawText, formData\)[\s\S]*getGeneratedStructureIssues\(mergedProject, formData\)[\s\S]*contentAttempt === 0/,
+  "Una respuesta inválida debe reparar la sintaxis y una estructura incompleta debe reintentarse con Gemini."
 );
 assert.match(
   source,

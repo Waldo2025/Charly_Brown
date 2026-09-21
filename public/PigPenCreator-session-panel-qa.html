@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QA · Panel de sesiones PigPen</title>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="PigPenCreator.css">
+  <style>
+    html, body { width: 100%; min-height: 100%; margin: 0; background: #e8edf4; }
+    .er-page { width: 100%; min-height: 100vh; margin: 0; padding: 0; }
+    .er-studio-shell { width: 340px; min-height: 100vh; grid-template-columns: 340px; }
+    .er-studio-shell > .er-sessions-panel { position: relative; top: 0; height: 100vh; max-height: none; }
+  </style>
+</head>
+<body class="cb-main-layout er-shell">
+  <main class="er-page">
+    <section class="er-workspace er-studio-shell">
+      <aside class="er-sessions-panel" aria-label="Sesiones de Escape Room">
+        <div class="er-card-header er-sessions-panel-header">
+          <button type="button" class="er-button er-button-compact er-new-session-button">
+            <i class="fas fa-pen-to-square" aria-hidden="true"></i>
+            <span>Nueva sesión</span>
+            <span id="erSessionsCount" class="er-sessions-count">6</span>
+            <i class="fas fa-plus er-new-session-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="er-session-filters" aria-label="Filtros de sesiones">
+          <div class="er-session-trimester-filters" role="group" aria-label="Filtrar por trimestre">
+            <button type="button" class="is-active">Todos</button>
+            <button type="button">T1</button>
+            <button type="button">T2</button>
+            <button type="button">T3</button>
+          </div>
+          <select id="erSessionSubjectFilter" aria-label="Filtrar sesiones por materia"><option>Materia</option></select>
+          <select id="erSessionThemeFilter" aria-label="Filtrar sesiones por tema"><option>Tema</option></select>
+        </div>
+        <div class="er-session-list">
+          <article class="er-session-item is-active">
+            <button class="er-session-title-button"><span class="er-session-title-text">The Secret of the Greek Legacy</span><small class="er-session-item-meta">T1 · Historia · Tema 1</small></button>
+            <button class="er-session-kebab er-studio-icon-button" aria-label="Opciones"><i class="fas fa-ellipsis-vertical"></i></button>
+          </article>
+          <article class="er-session-item">
+            <button class="er-session-title-button"><span class="er-session-title-text">Detective de la Física: El Caso del Movimiento</span><small class="er-session-item-meta">T2 · Física · Tema 3</small></button>
+            <button class="er-session-kebab er-studio-icon-button" aria-label="Opciones"><i class="fas fa-ellipsis-vertical"></i></button>
+          </article>
+          <article class="er-session-item">
+            <button class="er-session-title-button"><span class="er-session-title-text">Sesión sin título</span><small class="er-session-item-meta">T1 · Español · Tema 2</small></button>
+            <button class="er-session-kebab er-studio-icon-button" aria-label="Opciones"><i class="fas fa-ellipsis-vertical"></i></button>
+          </article>
+          <article class="er-session-item">
+            <button class="er-session-title-button"><span class="er-session-title-text">Exploradores de Biomas: La Misión General</span><small class="er-session-item-meta">T3 · Biología · Tema 4</small></button>
+            <button class="er-session-kebab er-studio-icon-button" aria-label="Opciones"><i class="fas fa-ellipsis-vertical"></i></button>
+          </article>
+          <article class="er-session-item">
+            <button class="er-session-title-button"><span class="er-session-title-text">Cifras del Caos: Operación Cibersegura</span><small class="er-session-item-meta">T2 · Tecnología · Tema 2</small></button>
+            <button class="er-session-kebab er-studio-icon-button" aria-label="Opciones"><i class="fas fa-ellipsis-vertical"></i></button>
+          </article>
+        </div>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

@@ -3,6 +3,9 @@
 const COLLECTION = "pigpenSheetSources";
 const MAX_ROWS = 1000;
 const MAX_COLUMNS = 50;
+const MAX_EDITORIAL_WORKBOOK_BYTES = 10 * 1024 * 1024;
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet";
 const HEADER_ALIASES = Object.freeze({
   creator: ["creador", "creator"], status: ["estatus", "estado", "status"],
   level: ["nivel", "level"], grade: ["grado", "grade"],
@@ -108,6 +111,41 @@ function parseSpreadsheetId(value = "") {
   return /^[a-zA-Z0-9_-]{20,}$/.test(id) ? id : "";
 }
 
+function parseDriveFileId(value = "") {
+  const clean = String(value || "").trim();
+  const fromPath = clean.match(/\/(?:spreadsheets\/d|file\/d)\/([a-zA-Z0-9_-]+)/)?.[1];
+  let fromQuery = "";
+  try { fromQuery = new URL(clean).searchParams.get("id") || ""; } catch (_) { /* raw ids are allowed */ }
+  const id = fromPath || fromQuery || clean;
+  return /^[a-zA-Z0-9_-]{20,}$/.test(id) ? id : "";
+}
+
+function buildEditorialDriveDownloadUrl(fileId, mimeType) {
+  const encodedId = encodeURIComponent(fileId);
+  return mimeType === GOOGLE_SHEET_MIME
+    ? `https://www.googleapis.com/drive/v3/files/${encodedId}/export?mimeType=${encodeURIComponent(XLSX_MIME)}`
+    : `https://www.googleapis.com/drive/v3/files/${encodedId}?alt=media&supportsAllDrives=true`;
+}
+
+async function googleDriveResponse(url, accessToken) {
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (response.ok) return response;
+  const body = await response.json().catch(() => ({}));
+  const upstreamMessage = String(body?.error?.message || "");
+  const upstreamReason = String(body?.error?.errors?.[0]?.reason || body?.error?.status || "");
+  const apiDisabled = /accessNotConfigured|SERVICE_DISABLED/i.test(upstreamReason)
+    || /API.+(?:disabled|has not been used)/i.test(upstreamMessage);
+  const error = new Error(apiDisabled
+    ? "La API de Google Drive no está habilitada en el proyecto de PigPen."
+    : response.status === 403 || response.status === 404
+      ? "PigPen no puede acceder al archivo. Compártelo con charly-functions-core@charly-brown.iam.gserviceaccount.com y vuelve a intentarlo."
+      : "Google Drive no pudo completar la descarga.");
+  error.status = response.status === 403 ? 403 : response.status === 404 ? 404 : 502;
+  error.code = "PIGPEN_EDITORIAL_DRIVE_ERROR";
+  error.detail = upstreamMessage;
+  throw error;
+}
+
 async function canManageSources(db, authContext) {
   const decoded = authContext?.decoded || {};
   let role = String(decoded.role || decoded.rol || decoded.userRole || "").trim().toLowerCase();
@@ -139,6 +177,46 @@ function registerPigpenSheetsRoutes(app, { db, verifyFirebaseBearer, getAccessTo
       req.authContext = await verifyFirebaseBearer(req);
       res.setHeader("Cache-Control", "no-store");
       return next();
+    } catch (error) { return sendError(res, error); }
+  });
+
+  app.use("/api/pigpen/editorial-workbook", async (req, res, next) => {
+    if (req.method === "OPTIONS") return next();
+    try {
+      req.authContext = await verifyFirebaseBearer(req);
+      res.setHeader("Cache-Control", "no-store");
+      return next();
+    } catch (error) { return sendError(res, error); }
+  });
+
+  app.post("/api/pigpen/editorial-workbook", async (req, res) => {
+    try {
+      await requireSourceManager(db, req);
+      const fileId = parseDriveFileId(req.body?.fileUrl || req.body?.fileId);
+      if (!fileId) return res.status(400).json({ error: "PIGPEN_EDITORIAL_DRIVE_URL_INVALID", message: "Pega un enlace válido de Google Drive o Google Sheets." });
+      const token = await getAccessToken();
+      const metadataUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,capabilities(canDownload)&supportsAllDrives=true`;
+      const metadata = await (await googleDriveResponse(metadataUrl, token)).json();
+      const mimeType = String(metadata?.mimeType || "");
+      if (![XLSX_MIME, GOOGLE_SHEET_MIME].includes(mimeType)) {
+        return res.status(415).json({ error: "PIGPEN_EDITORIAL_FILE_UNSUPPORTED", message: "El enlace debe apuntar a un archivo XLSX o a una hoja de Google compatible." });
+      }
+      if (metadata?.capabilities?.canDownload === false) {
+        return res.status(403).json({ error: "PIGPEN_EDITORIAL_DOWNLOAD_FORBIDDEN", message: "El propietario del archivo no permite descargarlo." });
+      }
+      if (Number(metadata?.size || 0) > MAX_EDITORIAL_WORKBOOK_BYTES) {
+        return res.status(413).json({ error: "PIGPEN_EDITORIAL_FILE_TOO_LARGE", message: "El archivo excede el límite de 10 MB." });
+      }
+      const download = await googleDriveResponse(buildEditorialDriveDownloadUrl(fileId, mimeType), token);
+      const bytes = Buffer.from(await download.arrayBuffer());
+      if (!bytes.length || bytes.length > MAX_EDITORIAL_WORKBOOK_BYTES) {
+        return res.status(bytes.length ? 413 : 422).json({ error: "PIGPEN_EDITORIAL_FILE_INVALID", message: bytes.length ? "El archivo excede el límite de 10 MB." : "El archivo está vacío." });
+      }
+      const rawName = String(metadata?.name || "archivo-editorial.xlsx").replace(/[\r\n"]/g, "_");
+      const fileName = /\.xlsx$/i.test(rawName) ? rawName : `${rawName}.xlsx`;
+      res.setHeader("Content-Type", XLSX_MIME);
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+      return res.status(200).send(bytes);
     } catch (error) { return sendError(res, error); }
   });
 
@@ -228,4 +306,17 @@ function registerPigpenSheetsRoutes(app, { db, verifyFirebaseBearer, getAccessTo
   });
 }
 
-module.exports = { HEADER_ALIASES, buildHeaderMap, columnLetter, normalizeHeader, normalizeRows, parseSpreadsheetId, registerPigpenSheetsRoutes, sanitizeSource };
+module.exports = {
+  GOOGLE_SHEET_MIME,
+  HEADER_ALIASES,
+  XLSX_MIME,
+  buildEditorialDriveDownloadUrl,
+  buildHeaderMap,
+  columnLetter,
+  normalizeHeader,
+  normalizeRows,
+  parseDriveFileId,
+  parseSpreadsheetId,
+  registerPigpenSheetsRoutes,
+  sanitizeSource
+};

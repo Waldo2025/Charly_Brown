@@ -50,14 +50,14 @@ const manifest = JSON.parse(pkg.files["assets/escape-room.json"]);
 assert.equal(manifest.clave_final, "STOP42");
 assert.deepEqual(manifest.misiones[0].preguntas.map((question) => question.tipo_interaccion), ["verdadero_falso", "ordenar_secuencia", "completar_espacio"]);
 assert.equal(manifest.misiones[0].preguntas[0].respuesta_correcta, false);
-assert.match(pkg.files["index.html"], /Final code: STOP42/);
+assert.match(pkg.files["assets/game.js"], /ESCAPE_ROOM_FINAL_PASSCODE = "STOP42"/);
 assert.match(pkg.files["assets/game.js"], /questionSequenceOrders/);
 assert.match(pkg.files["assets/game.js"], /data-question-boolean/);
 assert.match(pkg.files["assets/game.js"], /fill-blank-block/);
 assert.doesNotThrow(() => new Function(pkg.files["assets/game.js"]), "El runtime exportado debe compilar sin dependencias externas.");
 
 const preview = buildPreviewDocument(project, { editorialReview: true });
-assert.match(preview, /Final code: STOP42/);
+assert.match(preview, /ESCAPE_ROOM_FINAL_PASSCODE = "STOP42"/);
 assert.match(preview, /questionSequenceOrders/);
 const answerKey = buildMoodleAnswerKeyHtml({ topics: [{ title: project.titulo, project }] }).html;
 assert.match(answerKey, /Falso/);

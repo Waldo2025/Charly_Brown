@@ -75,7 +75,8 @@ assert.equal(result.topicCount, 2);
 assert.ok(result.html.startsWith("<div style="), "Moodle debe recibir un único fragmento raíz.");
 assert.doesNotMatch(result.html, /<(?:html|head|style|script)\b/i, "El fragmento no debe depender de documento, scripts ni CSS global.");
 assert.match(result.html, /style="[^"]+"/, "El diseño debe usar CSS inline.");
-assert.match(result.html, /Sesión &lt;Docente&gt;/);
+assert.doesNotMatch(result.html, /Sesión &lt;Docente&gt;|<h1/);
+assert.doesNotMatch(result.text, /Sesión <Docente>/);
 assert.match(result.html, /Tema &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 assert.doesNotMatch(result.html, /<script>alert/);
 assert.ok(result.html.indexOf("Relaciones") < result.html.indexOf("Tema &lt;script"), "Los temas deben ordenarse por número académico.");
@@ -135,7 +136,7 @@ const allStationsResult = buildMoodleAnswerKeyHtml({
     }
   }]
 });
-assert.match(allStationsResult.html, />Respuesta libre<\/strong>/, "Las preguntas abiertas deben identificarse como respuesta libre.");
+assert.match(allStationsResult.html, />Formato retirado · Regenerar pregunta<\/strong>/, "Las preguntas antiguas abiertas deben identificarse como formato retirado.");
 assert.doesNotMatch(allStationsResult.html, /Sin respuesta configurada/, "Una pregunta abierta no debe parecer incompleta.");
 for (const color of ["#fcc659", "#bbd152", "#e95297", "#02b0a3"]) {
   assert.match(allStationsResult.html, new RegExp(`border-top:2px solid ${color}`), `Debe existir un acento compacto con el color de estación ${color}.`);
@@ -202,5 +203,13 @@ const onlyEmptyTopic = buildMoodleAnswerKeyHtml({
 });
 assert.equal(onlyEmptyTopic.questionCount, 0);
 assert.equal(onlyEmptyTopic.topicCount, 0, "Un tema vacío individual no debe incorporarse al código copiado.");
+const mixedLanguages = buildMoodleAnswerKeyHtml({ sessionTitle: 'DO NOT COPY SESSION', topics: ['en-US', 'es-419'].map((idioma, i) => ({
+  academicNumber: i + 1, project: { idioma, titulo: `Activity ${i + 1}`, misiones: [{ preguntas: [{ respuesta_correcta: 'SOL' }] }] }
+})) });
+assert.match(mixedLanguages.html, />Chapter 1</);
+assert.match(mixedLanguages.html, />Tema 2</);
+assert.match(mixedLanguages.text, /^CHAPTER 1: Activity 1/);
+assert.match(mixedLanguages.text, /TEMA 2: Activity 2/);
+assert.doesNotMatch(mixedLanguages.html + mixedLanguages.text, /DO NOT COPY SESSION|Topic 1|TOPIC 1/);
 
 console.log("Escape room Moodle answer export OK.");

@@ -13,7 +13,7 @@
     <link rel="stylesheet" data-cache-href="header.css">
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-    <link rel="stylesheet" data-cache-href="PigPenCreator.css?ui=20260903-room-regeneration-header">
+    <link rel="stylesheet" data-cache-href="PigPenCreator.css?ui=20260917-presets-v105">
 </head>
 <body data-page="PigPenCreator.html" class="cb-main-layout er-shell">
     <div id="pigpenBootSpinner" class="pigpen-boot-spinner" aria-live="polite" aria-label="Cargando PigPen Escape Room Creator">
@@ -61,6 +61,7 @@
                             </div>
                         </div>
                         <div class="er-summary-actions">
+                            <button type="button" id="btnStructuralView" class="er-button er-studio-icon-button" aria-label="Vista estructural" aria-pressed="false" data-er-tooltip="Vista estructural"><i class="fas fa-sitemap" aria-hidden="true"></i></button>
                             <button type="button" class="er-button er-panel-icon-button er-studio-icon-button" data-studio-panel-toggle="inspector" data-er-tooltip="Abrir panel de contenido" aria-label="Abrir panel de contenido" aria-expanded="true" aria-controls="erInspectorPanel">
                                 <i class="fas fa-layer-group" aria-hidden="true"></i>
                             </button>
@@ -86,11 +87,14 @@
                                     </button>
                                 </div>
                             </div>
-                            <button type="button" id="btnExportar" class="er-button er-studio-icon-button" data-er-tooltip="Exportar" aria-label="Exportar" disabled>
+                            <button type="button" id="btnExportar" class="er-button er-studio-icon-button" data-er-tooltip="Exportar paquete jugable ZIP" aria-label="Exportar paquete jugable ZIP" disabled>
                                 <i class="fas fa-file-zipper"></i>
                             </button>
-                            <button type="button" id="btnCopyAllAnswers" class="er-button er-studio-icon-button" data-er-tooltip="Copiar respuestas de todos los temas" aria-label="Copiar respuestas de todos los temas" disabled>
+                            <button type="button" id="btnCopyAllAnswers" class="er-button er-studio-icon-button" data-er-tooltip="Copiar respuestas HTML con CSS inline" aria-label="Copiar respuestas HTML con CSS inline de todos los temas" disabled>
                                 <i class="fas fa-code" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" id="btnEditorialReview" class="er-button er-studio-icon-button" data-bs-toggle="modal" data-bs-target="#erEditorialReviewModal" data-er-tooltip="Revisión editorial" aria-label="Abrir revisión editorial" disabled>
+                                <i class="fas fa-file-pen" aria-hidden="true"></i>
                             </button>
                             <div class="er-publish-switch-wrap" role="group" aria-label="Publicación del escape room">
                                 <span id="publishSwitchLabel" class="er-publish-switch-label">Borrador</span>
@@ -103,12 +107,14 @@
                             </div>
                         </div>
                     </div>
+                    <p id="erRealSessionScope" class="er-real-session-scope" role="status" hidden></p>
                 </section>
 
                 <section class="er-workspace er-studio-shell" id="erStudioWorkspace">
                     <aside class="er-sessions-panel" aria-label="Sesiones de Escape Room">
-                        <div id="erSessionsResizeHandle" class="er-sessions-resizer" role="separator" aria-label="Redimensionar panel de sesiones" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="560" aria-valuenow="340" tabindex="0"></div>
+                        <div id="erSessionsResizeHandle" class="er-sessions-resizer" role="separator" aria-label="Redimensionar panel de sesiones" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="560" aria-valuenow="340" tabindex="0"></div>
                         <div class="er-card-header er-sessions-panel-header">
+                            <span id="erSessionsViewHeading" class="er-sessions-view-heading">Sesiones</span>
                             <button type="button" id="btnNewSession" class="er-button er-button-compact er-new-session-button">
                                 <i class="fas fa-pen-to-square" aria-hidden="true"></i>
                                 <span>Nueva sesión</span>
@@ -117,23 +123,19 @@
                             </button>
                         </div>
                         <div id="erSessionFilters" class="er-session-filters hidden" aria-label="Filtros de sesiones">
+                            <label class="er-session-name-search" for="erSessionNameFilter">
+                                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                                <input id="erSessionNameFilter" type="search" placeholder="Buscar por nombre" aria-label="Buscar sesiones por nombre" autocomplete="off">
+                            </label>
                             <button type="button" id="btnSessionFiltersModal" class="er-studio-icon-button er-session-filter-button" data-bs-toggle="modal" data-bs-target="#erSessionFiltersModal" aria-label="Abrir filtros de sesiones" data-er-tooltip="Filtros de sesiones">
                                 <i class="fas fa-filter" aria-hidden="true"></i>
                             </button>
-                            <select id="erSessionTrimesterFilter" data-session-trimester-filter aria-label="Filtrar sesiones por trimestre">
-                                <option value="">Trim</option>
-                                <option value="1">T1</option>
-                                <option value="2">T2</option>
-                                <option value="3">T3</option>
-                            </select>
-                            <select id="erSessionSubjectFilter" data-session-subject-filter aria-label="Filtrar sesiones por materia">
-                                <option value="">Materia</option>
-                            </select>
-                            <select id="erSessionThemeFilter" data-session-theme-filter aria-label="Filtrar sesiones por tema">
-                                <option value="">Tema</option>
-                            </select>
                         </div>
                         <div id="erSessionsLoading" class="er-empty-inline">Cargando sesiones...</div>
+                        <div id="erSessionIndexWarning" class="er-empty-inline hidden" role="status">
+                            No se pudieron verificar todos los temas. Se conservaron los datos disponibles.
+                            <button type="button" id="btnRetrySessionIndex" class="er-button er-button-compact">Reintentar</button>
+                        </div>
                         <div id="erSessionsEmpty" class="er-empty-inline hidden">Todavía no tienes sesiones guardadas.</div>
                         <div id="erSessionsFilteredEmpty" class="er-empty-inline hidden">No hay sesiones que coincidan con estos filtros.</div>
                         <div id="erSessionList" class="er-session-list hidden"></div>
@@ -141,9 +143,9 @@
 
                     <div class="er-main-column">
                         <aside class="er-brief-panel er-studio-dock is-open" id="briefCollapse" aria-label="Brief del escape room">
-                            <div id="erBriefResizeHandle" class="er-brief-resizer" role="separator" aria-label="Redimensionar el brief" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="560" aria-valuenow="340" tabindex="0"></div>
-                            <form id="escapeRoomForm" class="er-card er-form-card" novalidate>
-                                <div class="er-actions er-brief-actions">
+                            <div id="erBriefResizeHandle" class="er-brief-resizer" role="separator" aria-label="Redimensionar el brief" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="480" aria-valuenow="340" tabindex="0"></div>
+                            <form id="escapeRoomForm" class="er-card er-form-card er-panel-shell" novalidate>
+                                <div class="er-actions er-brief-actions er-panel-toolbar">
                                     <button type="button" id="btnAddTopic" class="er-button er-studio-icon-button" data-er-tooltip="Crear tema" aria-label="Crear tema">
                                         <i class="fas fa-plus"></i>
                                     </button>
@@ -159,37 +161,14 @@
                                     <button type="button" id="btnAttachGoogleSheet" class="er-button er-studio-icon-button" data-er-tooltip="Cargar desde Google Sheets" aria-label="Cargar desde Google Sheets" aria-haspopup="dialog" aria-controls="erSheetsImportModal"><i class="fas fa-paperclip" aria-hidden="true"></i></button>
                                 </div>
 
-                                <div class="er-card-header er-form-header-compact" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                                    <div>
-                                        <div class="er-card-kicker">Brief</div>
-                                        <h2>Configuración base</h2>
-                                    </div>
-                                </div>
-
-                                <div class="er-form-compact-grid er-brief-form-grid">
-                                    <h3 class="er-brief-group-title">Formato y objetivo</h3>
-                                    <label class="er-field er-presentation-mode-field">
-                                        <span>Formato del escape room</span>
-                                        <select id="modoPresentacionSelect" required>
-                                            <option value="salas" selected>Por salas</option>
-                                            <option value="menu_secciones">Menú por secciones</option>
-                                        </select>
-                                        <small class="er-field-help" id="erPresentationModeHelp">Recorrido tradicional por salas encadenadas.</small>
-                                    </label>
-                                    <label class="er-field er-field-topic">
-                                        <span>Tema curricular</span>
-                                        <textarea id="temaInput" class="er-multiline er-compact-textarea" rows="3" placeholder="Un tema o subtema por línea" required></textarea>
-                                    </label>
-                                    <div class="er-field er-field-objective">
-                                        <div class="er-objective-field-header">
-                                            <label class="er-objective-field-label" for="objetivoInput">Objetivo final</label>
-                                            <button type="button" id="btnSugerirObjetivo" class="er-button er-studio-icon-button" data-er-tooltip="Sugerir objetivo" aria-label="Sugerir objetivo">
-                                                <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
-                                            </button>
-                                        </div>
-                                        <textarea id="objetivoInput" class="er-objective-textarea er-compact-textarea" rows="3" placeholder="Qué debe lograr el grupo al terminar"></textarea>
-                                    </div>
-                                    <h3 class="er-brief-group-title">Contexto académico</h3>
+                                <div class="er-brief-form-sections er-panel-scroll">
+                                    <details class="er-brief-section er-brief-section-academic" data-er-brief-section="academic" open>
+                                        <summary class="er-brief-section-heading">
+                                            <span class="er-brief-section-icon" aria-hidden="true"><i class="fas fa-graduation-cap"></i></span>
+                                            <h3 id="erBriefAcademicHeading">Datos académicos</h3>
+                                            <i class="fas fa-chevron-down er-brief-section-chevron" aria-hidden="true"></i>
+                                        </summary>
+                                        <div class="er-form-compact-grid er-brief-section-grid">
                                     <label class="er-field">
                                         <span>Nivel</span>
                                         <select id="nivelSelect" required>
@@ -267,19 +246,73 @@
                                             <option value="Cuarta estación">Cuarta estación</option>
                                         </select>
                                     </label>
+                                        </div>
+                                    </details>
+                                    <details class="er-brief-section er-brief-section-objective" data-er-brief-section="objective" open>
+                                        <summary class="er-brief-section-heading">
+                                            <span class="er-brief-section-icon" aria-hidden="true"><i class="fas fa-bullseye"></i></span>
+                                            <h3 id="erBriefObjectiveHeading">Objetivo</h3>
+                                            <i class="fas fa-chevron-down er-brief-section-chevron" aria-hidden="true"></i>
+                                        </summary>
+                                        <div class="er-form-compact-grid er-brief-section-grid">
+                                    <label class="er-field er-presentation-mode-field">
+                                        <span>Formato del escape room</span>
+                                        <select id="modoPresentacionSelect" required>
+                                            <option value="salas" selected>Por salas</option>
+                                            <option value="menu_secciones">Menú por secciones</option>
+                                        </select>
+                                        <small class="er-field-help" id="erPresentationModeHelp">Recorrido tradicional por salas encadenadas.</small>
+                                    </label>
+                                    <label class="er-field er-field-topic">
+                                        <span>Tema curricular</span>
+                                        <textarea id="temaInput" class="er-multiline er-compact-textarea" rows="3" placeholder="Un tema o subtema por línea" required></textarea>
+                                    </label>
+                                    <div class="er-field er-field-objective">
+                                        <div class="er-objective-field-header">
+                                            <label class="er-objective-field-label" for="objetivoInput">Objetivo final</label>
+                                            <button type="button" id="btnSugerirObjetivo" class="er-button er-studio-icon-button" data-er-tooltip="Recrear y enriquecer objetivo" aria-label="Recrear y enriquecer objetivo">
+                                                <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
+                                        <div class="er-objective-input-stage">
+                                            <button type="button" id="btnExperienceConfig" class="er-button er-button-secondary">Preguntas y recompensas</button>
+                                            <textarea id="objetivoInput" class="er-objective-textarea er-compact-textarea" rows="9" placeholder="Qué debe lograr el grupo al terminar"></textarea>
+                                            <div id="loadingIndicator" class="er-loading hidden" role="status" aria-live="polite" aria-busy="false">
+                                                <span class="er-spinner" aria-hidden="true"></span>
+                                                <div id="erStatusBanner" class="er-status-banner hidden"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                        </div>
+                                    </details>
+                                    <details class="er-brief-section er-brief-section-structure" data-er-brief-section="structure" open>
+                                        <summary class="er-brief-section-heading">
+                                            <span class="er-brief-section-icon" aria-hidden="true"><i class="fas fa-sitemap"></i></span>
+                                            <h3 id="erBriefStructureHeading">Estructura</h3>
+                                            <i class="fas fa-chevron-down er-brief-section-chevron" aria-hidden="true"></i>
+                                        </summary>
+                                        <div class="er-form-compact-grid er-brief-section-grid">
                                     <label class="er-field">
                                         <span id="erMissionFieldLabel">Salas</span>
-                                        <input type="number" id="numMisionesInput" value="4" min="2" max="8" required>
+                                        <input type="number" id="numMisionesInput" value="4" min="1" max="8" required>
                                     </label>
                                     <label class="er-field">
                                         <span id="erQuestionCountLabel">Preguntas / sala</span>
-                                        <input type="number" id="preguntasPorSalaInput" value="4" min="1" max="6" required>
+                                        <input type="number" id="preguntasPorSalaInput" value="4" min="1" step="1" required>
                                     </label>
                                     <label class="er-field">
-                                        <span>Duración</span>
-                                        <input type="number" id="duracionInput" min="10" max="120" step="5" value="20">
+                                        <span>Duración estimada</span>
+                                        <input type="number" id="duracionInput" min="1" step="0.5" value="24" required data-duration-mode="auto">
                                     </label>
-                                    <h3 class="er-brief-group-title">Experiencia visual</h3>
+                                        </div>
+                                    </details>
+                                    <details class="er-brief-section er-brief-section-experience" data-er-brief-section="experience" open>
+                                        <summary class="er-brief-section-heading">
+                                            <span class="er-brief-section-icon" aria-hidden="true"><i class="fas fa-palette"></i></span>
+                                            <h3 id="erBriefExperienceHeading">Experiencia</h3>
+                                            <i class="fas fa-chevron-down er-brief-section-chevron" aria-hidden="true"></i>
+                                        </summary>
+                                        <div class="er-form-compact-grid er-brief-section-grid">
                                     <label class="er-field er-field-wide">
                                         <span>Estilo visual de imágenes</span>
                                         <select id="estiloImagenSelect">
@@ -321,13 +354,6 @@
                                         <span>Tipo de ilustración personalizado</span>
                                         <textarea id="estiloImagenCustomInput" class="er-compact-textarea" rows="3" placeholder="Ejemplo: ilustración de plastilina, personajes expresivos y escenarios hechos a mano"></textarea>
                                         <small class="er-field-help">Describe el estilo, técnica, colores y ambiente que quieres mantener en todas las imágenes.</small>
-                                    </label>
-                                    <label class="er-field">
-                                        <span>Texto en imágenes</span>
-                                        <div style="display: flex; align-items: center; gap: 10px; min-height: 34px;">
-                                            <input type="checkbox" id="strictImagePromptMode">
-                                            <span>Modo estricto: evitar texto visible y texto mixto</span>
-                                        </div>
                                     </label>
                                     <label class="er-field er-field-wide">
                                         <span>Narrativa</span>
@@ -380,6 +406,14 @@
                                         <span>Narrativa personalizada</span>
                                         <input type="text" id="narrativaCustomInput" placeholder="Escribe tu propio estilo narrativo">
                                     </label>
+                                    <label class="er-field er-field-wide">
+                                        <span>Dificultad de las preguntas</span>
+                                        <select id="dificultadSelect">
+                                            <option value="guiada">Guiada · Aplicación con apoyo</option>
+                                            <option value="equilibrada" selected>Equilibrada · Interpretar y aplicar</option>
+                                            <option value="desafiante">Desafiante · Razonamiento de varios pasos</option>
+                                        </select>
+                                    </label>
                                     <div class="er-hidden-defaults hidden" aria-hidden="true">
                                         <select id="publicoSelect">
                                             <option value="Grupo completo" selected>Grupo completo</option>
@@ -393,24 +427,17 @@
                                             <option value="narrativo">Narrativo</option>
                                             <option value="desafiante">Desafiante</option>
                                         </select>
-                                        <select id="dificultadSelect">
-                                            <option value="guiada">Guiada</option>
-                                            <option value="equilibrada" selected>Equilibrada</option>
-                                            <option value="desafiante">Desafiante</option>
-                                        </select>
                                         <select id="pistasSelect">
                                             <option value="suaves">Suaves</option>
                                             <option value="moderadas" selected>Moderadas</option>
                                             <option value="explícitas">Explícitas</option>
                                         </select>
                                     </div>
+                                        </div>
+                                    </details>
                                 </div>
 
                                 <div class="er-brief-footer">
-                                    <div id="loadingIndicator" class="er-loading hidden" aria-live="polite">
-                                        <span class="er-spinner" aria-hidden="true"></span>
-                                        <span>Diseñando la experiencia y normalizando las misiones...</span>
-                                    </div>
                                     <button type="submit" id="btnGenerarBottom" class="er-button er-brief-generate-button" aria-label="Generar escape room">
                                         <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
                                         <span>Generar escape room</span>
@@ -456,53 +483,76 @@
                                 <section class="er-general-cover-control er-field-wide" aria-labelledby="erGeneralCoverTitle">
                                     <div class="er-general-cover-header">
                                         <span class="er-label" id="erGeneralCoverTitle">Imagen de inicio</span>
-                                        <button type="button" id="btnRegenerateCoverImage" class="er-general-cover-action" data-er-tooltip="Regenerar imagen de inicio" aria-label="Regenerar imagen de inicio" disabled>
-                                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
-                                        </button>
                                     </div>
                                     <div class="er-general-cover-preview">
                                         <img id="generalCoverPreview" alt="Vista previa de la imagen de inicio" hidden>
                                         <span id="generalCoverEmpty" class="er-muted">Sin imagen de inicio.</span>
                                     </div>
+                                    <label class="er-field">
+                                        <span>Prompt de la imagen</span>
+                                        <textarea id="generalCoverPromptInput" data-project-field="backgroundImagePrompt" rows="3" placeholder="Describe la imagen de inicio que quieres generar." disabled></textarea>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Texto visible en la imagen</span>
+                                        <input type="text" id="generalCoverAltInput" data-project-field="backgroundImageAlt" placeholder="Texto exacto que debe aparecer en la portada" disabled>
+                                        <small class="er-muted">Se incluirá al regenerar la portada y también se conservará como texto alternativo.</small>
+                                    </label>
+                                    <div class="er-general-cover-actions" aria-label="Acciones de la imagen de inicio">
+                                        <button type="button" id="btnReplaceCoverImage" class="er-button er-button-secondary er-general-cover-button" disabled>
+                                            <i class="fas fa-upload" aria-hidden="true"></i>
+                                            <span id="generalCoverReplaceLabel">Añadir imagen</span>
+                                        </button>
+                                        <button type="button" id="btnRegenerateCoverImage" class="er-button er-button-secondary er-general-cover-button" disabled>
+                                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                                            <span>Regenerar con este prompt</span>
+                                        </button>
+                                    </div>
+                                </section>
+                                <section class="er-general-cover-control er-field-wide" aria-labelledby="erGeneralEndingTitle">
+                                    <div class="er-general-cover-header"><h3 id="erGeneralEndingTitle">Imagen del mensaje final</h3></div>
+                                    <div class="er-general-cover-preview" id="generalEndingPreview" hidden>
+                                        <img id="generalEndingImage" alt="Imagen de misión cumplida">
+                                    </div>
+                                    <div class="er-general-cover-actions" aria-label="Acciones de la imagen del mensaje final">
+                                    <button type="button" id="btnReplaceEndingImage" class="er-button er-button-secondary er-general-cover-button" disabled>
+                                        <i class="fas fa-upload" aria-hidden="true"></i>
+                                        <span>Sustituir imagen</span>
+                                    </button>
+                                    <button type="button" id="btnRegenerateEndingImage" class="er-button er-button-secondary er-general-cover-button" disabled>
+                                        <i class="fas fa-flag-checkered" aria-hidden="true"></i>
+                                        <span>Generar imagen de finalización</span>
+                                    </button>
+                                    </div>
                                 </section>
                             </div>
                         </section>
 
-                        <section class="er-card er-missions-card er-mission-workspace-panel er-editor-dock hidden" id="erMissionWorkspacePanel" role="region" aria-labelledby="erStudioTitle">
-                            <div class="er-card-header er-editor-dock-header">
-                                <div>
-                                    <div class="er-card-kicker" id="erStudioKicker">Sala seleccionada</div>
-                                    <h2 id="erStudioTitle" tabindex="-1">Editor de salas, rutas y preguntas</h2>
-                                </div>
+                        <section class="er-card er-missions-card er-mission-workspace-panel er-editor-dock er-panel-shell hidden" id="erMissionWorkspacePanel" role="region" aria-label="Editor de sala o pregunta" tabindex="-1">
+                            <div id="erMissionWorkspaceResizeHandle" class="er-mission-workspace-resizer" role="separator" aria-label="Redimensionar editor de sala o pregunta" aria-orientation="vertical" aria-valuemin="240" aria-valuemax="560" aria-valuenow="360" tabindex="0"></div>
+                            <div class="er-card-header er-editor-dock-header er-panel-toolbar">
                                 <div class="er-editor-dock-meta">
                                     <button type="button" id="btnRegenerateSelectedMission" class="er-button er-studio-icon-button" data-er-tooltip="Regenerar sala completa" aria-label="Regenerar sala completa con preguntas e imágenes" disabled>
                                         <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
                                     </button>
+                                    <button type="button" id="btnCloseMissionWorkspace" class="er-button er-studio-icon-button" data-er-tooltip="Cerrar editor" aria-label="Cerrar editor de sala o pregunta">
+                                        <i class="fas fa-xmark" aria-hidden="true"></i>
+                                    </button>
                                 </div>
                             </div>
-                            <div id="missionEditorList" class="er-mission-list"></div>
+                            <div id="missionEditorList" class="er-mission-list er-panel-scroll"></div>
                         </section>
 
                         <section class="er-card er-output-card">
-                            <div class="er-card-header">
-                                <div>
-                                    <div class="er-card-kicker">4. Preview y salida</div>
-                                    <h2>Juego exportable y JSON normalizado</h2>
+                            <div class="er-card-header er-actions er-brief-actions er-panel-toolbar">
+                                <div class="er-output-academic-context" aria-label="Contexto académico de la vista previa">
+                                    <strong id="erOutputGrade">—</strong><span aria-hidden="true">,</span>
+                                    <strong id="erOutputTrimester">—</strong><span aria-hidden="true">,</span>
+                                    <strong id="erOutputTopic">—</strong>
                                 </div>
                                 <div class="er-output-header-actions">
-                                    <button type="button" id="btnRepairEscapeRoom" class="er-button er-studio-icon-button" data-er-tooltip="Reparar escape room" aria-label="Reparar escape room">
-                                        <i class="fas fa-screwdriver-wrench"></i>
-                                    </button>
-                                    <button type="button" id="btnPreviewAutofill" class="er-button er-studio-icon-button" data-er-tooltip="Resolver preview" aria-label="Resolver preview">
-                                        <i class="fas fa-wand-magic-sparkles"></i>
-                                    </button>
                                     <button type="button" id="btnPreviewTheme" class="er-button er-studio-icon-button" data-bs-toggle="modal" data-bs-target="#previewThemeModal" data-er-tooltip="Tema del juego" aria-label="Tema del juego">
                                         <i class="fas fa-palette"></i>
                                     </button>
-                                    <div class="er-tab-switcher" role="tablist" aria-label="Panel de salida">
-                                        <button type="button" class="er-tab er-studio-icon-button is-active" data-er-tab="preview" data-er-tooltip="Vista previa" aria-label="Vista previa" aria-pressed="true"><i class="fas fa-eye" aria-hidden="true"></i></button>
-                                        <button type="button" class="er-tab er-studio-icon-button" data-er-tab="json" data-er-tooltip="JSON" aria-label="JSON" aria-pressed="false"><i class="fas fa-code" aria-hidden="true"></i></button>
-                                    </div>
                                 </div>
                             </div>
 
@@ -541,18 +591,17 @@
                             </section>
                         </section>
 
-                        <div id="erStatusBanner" class="er-status-banner hidden" role="status" aria-live="polite"></div>
                     </div>
 
-                    <aside class="er-inspector-panel er-studio-dock is-open" id="erInspectorPanel" aria-label="Contenido y salas">
+                    <aside class="er-inspector-panel er-studio-dock er-panel-shell is-open" id="erInspectorPanel" aria-label="Contenido y salas">
                         <div id="erInspectorResizeHandle" class="er-inspector-resizer" role="separator" aria-label="Redimensionar el subpanel" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="480" aria-valuenow="220" tabindex="0"></div>
-                        <div class="er-inspector-tabs" role="tablist" aria-label="Panel del proyecto">
-                            <button type="button" class="er-inspector-tab" data-er-inspector-tab="topics" role="tab" aria-selected="false" aria-controls="erInspectorTopicsPanel">Temas</button>
+                        <div class="er-inspector-tabs er-panel-toolbar" role="tablist" aria-label="Panel del proyecto">
+                            <button type="button" class="er-inspector-tab is-active" data-er-inspector-tab="topics" role="tab" aria-selected="true" aria-controls="erInspectorTopicsPanel">Temas</button>
                             <button type="button" class="er-inspector-tab" data-er-inspector-tab="content" role="tab" aria-selected="false" aria-controls="erInspectorContentPanel">Contenido general</button>
-                            <button type="button" class="er-inspector-tab is-active" data-er-inspector-tab="rooms" role="tab" aria-selected="true" aria-controls="erInspectorRoomsPanel">Salas</button>
+                            <button type="button" class="er-inspector-tab" data-er-inspector-tab="rooms" role="tab" aria-selected="false" aria-controls="erInspectorRoomsPanel">Salas</button>
                         </div>
-                        <div class="er-inspector-body">
-                            <section id="erInspectorTopicsPanel" class="er-inspector-tab-panel hidden" data-er-inspector-panel="topics" role="tabpanel">
+                        <div class="er-inspector-body er-panel-scroll">
+                            <section id="erInspectorTopicsPanel" class="er-inspector-tab-panel" data-er-inspector-panel="topics" role="tabpanel">
                                 <div class="er-room-list-header">
                                     <div><h3>Temas</h3><p>Selecciona un Escape Room.</p></div>
                                 </div>
@@ -560,7 +609,7 @@
                                 <div id="erTopicEmpty" class="er-empty-inline">Esta sesión todavía no tiene temas.</div>
                             </section>
                             <section id="erInspectorContentPanel" class="er-inspector-tab-panel hidden" data-er-inspector-panel="content" role="tabpanel"></section>
-                            <section id="erInspectorRoomsPanel" class="er-inspector-tab-panel" data-er-inspector-panel="rooms" role="tabpanel">
+                            <section id="erInspectorRoomsPanel" class="er-inspector-tab-panel hidden" data-er-inspector-panel="rooms" role="tabpanel">
                                 <div class="er-room-list-header">
                                     <div>
                                         <h3 id="erRoomListTitle">Salas</h3>
@@ -580,91 +629,113 @@
                     </aside>
 
                     <button type="button" id="erStudioBackdrop" class="er-studio-backdrop hidden" aria-label="Cerrar panel abierto"></button>
+
+                    <dialog id="erDeleteQuestionDialog" class="er-confirm-dialog" aria-labelledby="erDeleteQuestionTitle" aria-describedby="erDeleteQuestionDescription">
+                        <form method="dialog" class="er-confirm-dialog-card">
+                            <div class="er-confirm-dialog-icon" aria-hidden="true"><i class="fas fa-trash"></i></div>
+                            <div class="er-confirm-dialog-copy">
+                                <h2 id="erDeleteQuestionTitle">Eliminar pregunta</h2>
+                                <p id="erDeleteQuestionDescription">La pregunta y toda su configuración se eliminarán permanentemente.</p>
+                            </div>
+                            <div class="er-confirm-dialog-actions">
+                                <button type="submit" class="er-button er-button-secondary" value="cancel">Cancelar</button>
+                                <button type="submit" id="erConfirmDeleteQuestion" class="er-button er-button-danger" value="confirm">Eliminar pregunta</button>
+                            </div>
+                        </form>
+                    </dialog>
                 </section>
             </main>
         </div>
     </div>
 
-    <div class="modal fade" id="erNewTopicModal" tabindex="-1" aria-labelledby="erNewTopicModalTitle" aria-hidden="true">
+    <div class="modal fade" id="erNewTopicModal" tabindex="-1" aria-labelledby="erNewTopicModalTitle" aria-describedby="erNewTopicModalHelp" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content er-modal-content">
+            <div class="modal-content er-modal-content er-new-topic-modal">
                 <form id="erNewTopicForm">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="erNewTopicModalTitle">Crear tema</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    <div class="modal-header er-new-topic-dialog-header">
+                        <div class="er-new-topic-dialog-heading">
+                            <span class="er-new-topic-dialog-icon" aria-hidden="true"><i class="fas fa-book-open"></i></span>
+                            <div>
+                                <h5 class="modal-title" id="erNewTopicModalTitle">Crear tema</h5>
+                                <p id="erNewTopicModalHelp">Añade otro escape room a esta sesión.</p>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                     </div>
                     <div class="modal-body">
-                        <label class="er-field">
-                            <span>Número de tema o unidad</span>
-                            <input type="number" id="erNewTopicNumber" min="1" step="1" inputmode="numeric" required placeholder="Ej. 2">
-                        </label>
+                        <section class="er-new-topic-card" aria-labelledby="erNewTopicNumberLabel">
+                            <div class="er-new-topic-card-heading">
+                                <span aria-hidden="true"><i class="fas fa-layer-group"></i></span>
+                                <div><h6>Selecciona la ubicación</h6><p>Elige el tema o chapter que deseas crear.</p></div>
+                            </div>
+                            <label class="er-field">
+                                <span id="erNewTopicNumberLabel">Tema</span>
+                                <span class="er-new-topic-select-shell">
+                                    <select id="erNewTopicNumber" required aria-describedby="erNewTopicNumberHelp">
+                                        <option value="">Selecciona un tema</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                                </span>
+                            </label>
+                            <p id="erNewTopicNumberHelp" class="er-new-topic-field-help"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Las opciones que ya existen en la sesión aparecerán deshabilitadas.</span></p>
+                        </section>
                         <p id="erNewTopicError" class="er-import-zip-status" role="alert"></p>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button>
-                        <button type="submit" id="erCreateTopicButton" class="er-button er-button-primary">Crear tema</button>
+                    <div class="modal-footer er-new-topic-dialog-footer">
+                        <span><kbd>Esc</kbd> para cancelar</span>
+                        <div>
+                            <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" id="erCreateTopicButton" class="er-button er-button-primary"><i class="fas fa-plus" aria-hidden="true"></i><span>Crear tema</span></button>
+                        </div>
                     </div>
                 </form>
             </div>
         </div>
     </div>
 
-    <div class="modal fade" id="modelConfigModal" tabindex="-1">
+    <div class="modal fade" id="modelConfigModal" tabindex="-1" aria-labelledby="modelConfigModalTitle" aria-describedby="modelConfigModalDescription">
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-            <div class="modal-content er-modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Configuración del modelo</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            <div class="modal-content er-session-filters-modal er-model-config-modal">
+                <div class="modal-header er-session-filter-dialog-header">
+                    <div class="er-session-filter-dialog-heading">
+                        <span class="er-session-filter-dialog-icon" aria-hidden="true"><i class="fas fa-sliders"></i></span>
+                        <div>
+                            <h5 class="modal-title" id="modelConfigModalTitle">Configuración</h5>
+                            <p id="modelConfigModalDescription">Elige el modelo de contenido y el modelo visual.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
+                    <section class="er-session-filter-card" aria-labelledby="erModelGenerationHeading">
+                    <div class="er-session-filter-section-heading">
+                        <span aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></span>
+                        <h6 id="erModelGenerationHeading">Inteligencia artificial</h6>
+                    </div>
+                    <div class="er-model-role-grid">
+                    <div class="er-model-role-card">
                     <label class="er-field">
-                        <span>Modelo Gemini para texto</span>
-                        <select id="modeloSelect">
+                        <span>Contenido, objetivo y acertijos</span>
+                        <select id="objetivoModeloSelect" aria-describedby="erObjectiveModelHelp">
                             <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>
                         </select>
                     </label>
-                    <p class="er-field-help">Este modelo se usa para generar la narrativa, las salas y las preguntas.</p>
-
+                    <p class="er-field-help" id="erObjectiveModelHelp">Planifica, materializa y repara únicamente las salas pendientes.</p>
+                    </div>
+                    <div class="er-model-role-card">
                     <label class="er-field">
-                        <span>Modelo Gemini para imágenes</span>
-                        <select id="imagenModeloSelect">
+                        <span>Modelo de imágenes</span>
+                        <select id="imagenModeloSelect" aria-describedby="erImageModelHelp">
                             <option value="gemini-3.1-flash-image" selected>Gemini 3.1 Flash Image</option>
                         </select>
                     </label>
-                    <p class="er-field-help">Este modelo se usa para la portada y las imágenes de salas y preguntas, incluidas sus regeneraciones.</p>
-                    <p id="geminiModelCatalogStatus" class="er-field-help" role="status" aria-live="polite">Los modelos disponibles se consultarán al abrir esta configuración.</p>
-
-                    <div class="er-modal-divider"></div>
-
-                    <div class="er-theme-config">
-                        <div class="er-card-kicker">Tema visual</div>
-                        <div class="er-theme-presets" role="group" aria-label="Temas de color">
-                            <button type="button" class="er-theme-preset" data-theme-preset="nebula">Nebula</button>
-                            <button type="button" class="er-theme-preset" data-theme-preset="midnight">Midnight</button>
-                            <button type="button" class="er-theme-preset" data-theme-preset="jade">Jade</button>
-                            <button type="button" class="er-theme-preset" data-theme-preset="sunset">Sunset</button>
-                        </div>
-                        <div class="er-theme-grid">
-                            <label class="er-field">
-                                <span>Fondo A</span>
-                                <input type="color" id="themeBgStart" value="#0e0b19">
-                            </label>
-                            <label class="er-field">
-                                <span>Fondo B</span>
-                                <input type="color" id="themeBgEnd" value="#1c1231">
-                            </label>
-                            <label class="er-field">
-                                <span>Primario</span>
-                                <input type="color" id="themePrimary" value="#f472b6">
-                            </label>
-                            <label class="er-field">
-                                <span>Acento</span>
-                                <input type="color" id="themeAccent" value="#22d3ee">
-                            </label>
-                        </div>
+                    <p class="er-field-help" id="erImageModelHelp">Crea solo los recursos visuales que todavía falten.</p>
                     </div>
+                    </div>
+                    <p id="geminiModelCatalogStatus" class="er-field-help" role="status" aria-live="polite">Los modelos disponibles se consultarán al abrir esta configuración.</p>
+                    </section>
                 </div>
-                <div class="modal-footer">
+                <div class="modal-footer er-session-filter-dialog-footer">
                     <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cerrar</button>
                 </div>
             </div>
@@ -745,21 +816,21 @@
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
             <div class="modal-content er-modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="objectiveIdeaModalLabel">Ideas para el objetivo</h5>
+                    <h5 class="modal-title" id="objectiveIdeaModalLabel">Recrear y enriquecer el objetivo</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
                     <label class="er-field">
-                        <span>Escribe o ajusta las ideas del objetivo</span>
-                        <textarea id="objectiveIdeaTextarea" class="er-multiline" rows="10" placeholder="Ejemplo: el objetivo es que aprendan las sumas algebraicas y a refactorizar fórmulas..."></textarea>
+                        <span>Revisa y ajusta el plan pedagógico completo</span>
+                        <textarea id="objectiveIdeaTextarea" class="er-multiline er-objective-plan-editor" rows="24" placeholder="Aquí aparecerá el plan estructurado con objetivos, preguntas, mecánicas, respuestas y desbloqueo."></textarea>
                     </label>
-                    <p class="er-field-help">Este texto se combinará con el tema curricular para redactar el objetivo final del escape room.</p>
+                    <p class="er-field-help">El plan creado ya quedó aplicado y la generación está habilitada. Puedes cerrar para usarlo o modificar los datos sin eliminar encabezados ni etiquetas; al guardar cambios, Gemini recreará el objetivo con esas indicaciones.</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button>
                     <button type="button" id="btnObjectiveIdeaGenerate" class="er-button er-button-primary">
                         <i class="fas fa-wand-magic-sparkles"></i>
-                        <span>Generar objetivo final</span>
+                        <span>Guardar cambios</span>
                     </button>
                 </div>
             </div>
@@ -767,17 +838,59 @@
     </div>
     <div class="modal fade" id="erSheetsImportModal" tabindex="-1" aria-labelledby="erSheetsImportModalLabel" aria-describedby="erSheetsImportHelp" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content er-modal-content er-sheets-import-modal">
-            <div class="modal-header"><div><div class="er-card-kicker">Fuente de datos</div><h5 class="modal-title" id="erSheetsImportModalLabel">Cargar brief desde Google Sheets</h5></div><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
+            <div class="modal-header er-sheets-dialog-header">
+                <div class="er-sheets-dialog-heading">
+                    <span class="er-sheets-dialog-icon" aria-hidden="true"><i class="fas fa-table-cells-large"></i></span>
+                    <div>
+                        <h5 class="modal-title" id="erSheetsImportModalLabel">Cargar brief desde Google Sheets</h5>
+                        <p id="erSheetsImportHelp">Importa una fila y decide si PigPen continúa el proceso automáticamente.</p>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
             <div class="modal-body">
-                <div class="er-sheets-modal-lead"><p id="erSheetsImportHelp" class="er-field-help">Solo se reemplazarán los campos con contenido.</p><button type="button" id="btnShowAddSheet" class="er-button er-button-ghost er-button-compact hidden"><i class="fas fa-plus" aria-hidden="true"></i> Añadir otro Sheets</button></div>
+                <div class="er-sheets-modal-lead"><span><i class="fas fa-circle-info" aria-hidden="true"></i> Solo se reemplazarán los campos con contenido.</span><button type="button" id="btnShowAddSheet" class="er-button er-button-ghost er-button-compact hidden"><i class="fas fa-plus" aria-hidden="true"></i> Añadir fuente</button></div>
                 <section id="erSheetsManagePanel" class="er-sheets-manage-panel hidden" aria-label="Añadir otro Google Sheet">
                     <div class="er-sheets-picker-grid"><label class="er-field er-field-wide"><span>URL de Google Sheets</span><input id="erSheetsNewUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/..."></label><label class="er-field"><span>Nombre en PigPen</span><input id="erSheetsNewName" type="text" maxlength="160" placeholder="Escape Rooms 2027"></label><div class="er-sheets-manage-action"><button type="button" id="btnInspectNewSheet" class="er-button er-button-secondary">Revisar pestañas</button></div></div>
                     <div id="erSheetsNewTabs" class="er-sheets-tab-checklist"></div><p id="erSheetsManageStatus" class="er-sheets-import-status" role="status" aria-live="polite"></p><button type="button" id="btnSaveNewSheet" class="er-button er-button-primary" disabled>Guardar fuente autorizada</button>
                 </section>
-                <div class="er-sheets-picker-grid"><label class="er-field er-field-wide"><span>Archivo autorizado</span><select id="erSheetsSourceSelect"><option value="">Selecciona un archivo</option></select></label><label class="er-field er-field-wide"><span>Hoja</span><select id="erSheetsSheetSelect" disabled><option value="">Selecciona una hoja</option></select></label><label class="er-field" data-sheet-filter="level"><span>Nivel</span><select id="erSheetsLevelFilter"></select></label><label class="er-field" data-sheet-filter="grade"><span>Grado</span><select id="erSheetsGradeFilter"></select></label><label class="er-field" data-sheet-filter="trimester"><span>Trimestre</span><select id="erSheetsTrimesterFilter"></select></label><label class="er-field" data-sheet-filter="subject"><span>Materia</span><select id="erSheetsSubjectFilter"></select></label><label class="er-field er-field-wide" data-sheet-filter="unit"><span>Chapter / Tema</span><select id="erSheetsUnitFilter"></select></label><label class="er-field er-field-wide"><span>Fila</span><select id="erSheetsRowSelect" disabled><option value="">Selecciona una fila</option></select></label></div>
-                <p id="erSheetsImportStatus" class="er-sheets-import-status" role="status" aria-live="polite"></p><section id="erSheetsImportPreview" class="er-sheets-import-preview" aria-label="Vista previa de la fila"><p class="er-sheets-preview-empty">Selecciona una fila para revisar los datos.</p></section>
+                <div class="er-sheets-dialog-grid">
+                    <section class="er-sheets-dialog-card er-sheets-form-card" aria-labelledby="erSheetsSourceTitle">
+                        <div class="er-sheets-section-heading"><span>1</span><div><h6 id="erSheetsSourceTitle">Selecciona los datos</h6><p>Fuente, hoja y fila del brief</p></div></div>
+                        <div class="er-sheets-picker-grid">
+                            <label class="er-field"><span>Archivo autorizado</span><select id="erSheetsSourceSelect"><option value="">Selecciona un archivo</option></select></label>
+                            <label class="er-field"><span>Hoja</span><select id="erSheetsSheetSelect" disabled><option value="">Selecciona una hoja</option></select></label>
+                            <label class="er-field" data-sheet-filter="level"><span>Nivel</span><select id="erSheetsLevelFilter"></select></label>
+                            <label class="er-field" data-sheet-filter="grade"><span>Grado</span><select id="erSheetsGradeFilter"></select></label>
+                            <label class="er-field" data-sheet-filter="trimester"><span>Trimestre</span><select id="erSheetsTrimesterFilter"></select></label>
+                            <label class="er-field" data-sheet-filter="subject"><span>Materia</span><select id="erSheetsSubjectFilter"></select></label>
+                            <label class="er-field" data-sheet-filter="unit"><span>Chapter / Tema</span><select id="erSheetsUnitFilter"></select></label>
+                            <label class="er-field"><span>Fila</span><select id="erSheetsRowSelect" disabled><option value="">Selecciona una fila</option></select></label>
+                        </div>
+                        <p id="erSheetsImportStatus" class="er-sheets-import-status" role="status" aria-live="polite"></p>
+                    </section>
+                    <div class="er-sheets-dialog-side">
+                        <section class="er-sheets-dialog-card" aria-labelledby="erSheetsPreviewTitle">
+                            <div class="er-sheets-section-heading"><span>2</span><div><h6 id="erSheetsPreviewTitle">Vista previa</h6><p>Comprueba los campos antes de importar</p></div></div>
+                            <section id="erSheetsImportPreview" class="er-sheets-import-preview" aria-label="Vista previa de la fila"><p class="er-sheets-preview-empty">Selecciona una fila para revisar los datos.</p></section>
+                        </section>
+                        <fieldset class="er-sheets-automation" aria-describedby="erSheetsAutomationHelp">
+                            <legend><span>3</span><span>Automatiza el siguiente paso</span></legend>
+                            <p id="erSheetsAutomationHelp">PigPen respetará este orden.</p>
+                            <label class="er-sheets-automation-option" for="erSheetsEnrichObjective">
+                                <span class="er-sheets-automation-copy"><i class="fas fa-sparkles" aria-hidden="true"></i><span><strong>Enriquecer objetivo</strong><small>Crear y aceptar la propuesta</small></span></span>
+                                <span class="er-modern-switch"><input id="erSheetsEnrichObjective" type="checkbox"><span aria-hidden="true"></span></span>
+                            </label>
+                            <label class="er-sheets-automation-option" for="erSheetsGenerateEscapeRoom">
+                                <span class="er-sheets-automation-copy"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span><strong>Generar escape room</strong><small>Comenzar al finalizar</small></span></span>
+                                <span class="er-modern-switch"><input id="erSheetsGenerateEscapeRoom" type="checkbox"><span aria-hidden="true"></span></span>
+                            </label>
+                            <div id="erSheetsAutomationSummary" class="er-sheets-automation-summary" aria-live="polite">Solo se cargarán los datos en el brief.</div>
+                        </fieldset>
+                    </div>
+                </div>
             </div>
-            <div class="modal-footer"><button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button><button type="button" id="btnApplySheetsImport" class="er-button er-button-primary" disabled><i class="fas fa-file-import" aria-hidden="true"></i><span>Cargar en brief</span></button></div>
+            <div class="modal-footer er-sheets-dialog-footer"><span><kbd>Esc</kbd> para cancelar</span><div><button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cancelar</button><button type="button" id="btnApplySheetsImport" class="er-button er-button-primary" disabled><i class="fas fa-file-import" aria-hidden="true"></i><span>Cargar en brief</span></button></div></div>
         </div></div>
     </div>
     <div class="modal fade" id="erNewSessionModal" tabindex="-1" aria-labelledby="erNewSessionModalLabel" aria-describedby="erImportZipHelp" aria-hidden="true">
@@ -809,51 +922,122 @@
             </div>
         </div>
     </div>
-    <div class="modal fade" id="erSessionFiltersModal" tabindex="-1" aria-labelledby="erSessionFiltersModalTitle" aria-hidden="true">
+    <div class="modal fade" id="erSessionFiltersModal" tabindex="-1" aria-labelledby="erSessionFiltersModalTitle" aria-describedby="erSessionFiltersModalHelp" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content er-modal-content er-session-filters-modal">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="erSessionFiltersModalTitle">Filtros de sesiones</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                <div class="modal-header er-session-filter-dialog-header">
+                    <div class="er-session-filter-dialog-heading">
+                        <span class="er-session-filter-dialog-icon" aria-hidden="true"><i class="fas fa-sliders"></i></span>
+                        <div>
+                            <h5 class="modal-title" id="erSessionFiltersModalTitle">Filtros de sesiones</h5>
+                            <p id="erSessionFiltersModalHelp">Combina criterios para encontrar rápidamente la sesión que necesitas.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
-                    <label class="er-field">
-                        <span>Trim</span>
-                        <select id="erSessionTrimesterFilterModal" data-session-trimester-filter aria-label="Filtrar sesiones por trimestre">
-                            <option value="">Trim</option>
-                            <option value="1">T1</option>
-                            <option value="2">T2</option>
-                            <option value="3">T3</option>
-                        </select>
-                    </label>
-                    <label class="er-field">
-                        <span>Materia</span>
-                        <select id="erSessionSubjectFilterModal" data-session-subject-filter aria-label="Filtrar sesiones por materia">
-                            <option value="">Materia</option>
-                        </select>
-                    </label>
-                    <label class="er-field">
-                        <span>Tema</span>
-                        <select id="erSessionThemeFilterModal" data-session-theme-filter aria-label="Filtrar sesiones por tema">
-                            <option value="">Tema</option>
-                        </select>
-                    </label>
-                    <label class="er-field">
-                        <span>Nivel</span>
-                        <select id="erSessionNivelFilterModal" data-session-level-filter aria-label="Filtrar sesiones por nivel">
-                            <option value="">Nivel</option>
-                        </select>
-                    </label>
-                    <label class="er-field">
-                        <span>Grado</span>
-                        <select id="erSessionGradoFilterModal" data-session-grade-filter aria-label="Filtrar sesiones por grado">
-                            <option value="">Grado</option>
-                        </select>
-                    </label>
+                    <div class="er-session-filter-modal-lead"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Los resultados se actualizan automáticamente al cambiar cualquier filtro.</span></div>
+                    <section class="er-session-filter-card" aria-labelledby="erSessionFilterCriteriaTitle">
+                        <div class="er-session-filter-section-heading">
+                            <span aria-hidden="true"><i class="fas fa-filter"></i></span>
+                            <div><h6 id="erSessionFilterCriteriaTitle">Criterios académicos</h6><p>Deja un campo en “Todos” para no limitar ese criterio.</p></div>
+                        </div>
+                        <div class="er-session-filter-grid">
+                            <label class="er-field">
+                                <span>Trimestre</span>
+                                <select id="erSessionTrimesterFilterModal" data-session-trimester-filter aria-label="Filtrar sesiones por trimestre">
+                                    <option value="">Todos los trimestres</option>
+                                    <option value="1">Trimestre 1</option>
+                                    <option value="2">Trimestre 2</option>
+                                    <option value="3">Trimestre 3</option>
+                                </select>
+                            </label>
+                            <label class="er-field">
+                                <span>Nivel</span>
+                                <select id="erSessionNivelFilterModal" data-session-level-filter aria-label="Filtrar sesiones por nivel">
+                                    <option value="">Todos los niveles</option>
+                                </select>
+                            </label>
+                            <label class="er-field">
+                                <span>Grado</span>
+                                <select id="erSessionGradoFilterModal" data-session-grade-filter aria-label="Filtrar sesiones por grado">
+                                    <option value="">Todos los grados</option>
+                                </select>
+                            </label>
+                            <label class="er-field">
+                                <span>Materia</span>
+                                <select id="erSessionSubjectFilterModal" data-session-subject-filter aria-label="Filtrar sesiones por materia">
+                                    <option value="">Todas las materias</option>
+                                </select>
+                            </label>
+                            <label class="er-field er-session-filter-wide">
+                                <span>Tema</span>
+                                <select id="erSessionThemeFilterModal" data-session-theme-filter aria-label="Filtrar sesiones por tema">
+                                    <option value="">Todos los temas</option>
+                                </select>
+                            </label>
+                        </div>
+                    </section>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" id="btnResetSessionFilters" class="er-button er-button-ghost">Reiniciar filtros</button>
-                    <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <div class="modal-footer er-session-filter-dialog-footer">
+                    <button type="button" id="btnResetSessionFilters" class="er-button er-button-ghost"><i class="fas fa-rotate-left" aria-hidden="true"></i><span>Reiniciar filtros</span></button>
+                    <button type="button" class="er-button er-button-primary" data-bs-dismiss="modal"><i class="fas fa-check" aria-hidden="true"></i><span>Listo</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="erEditorialReviewModal" tabindex="-1" aria-labelledby="erEditorialReviewTitle" aria-describedby="erEditorialReviewHelp" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
+            <div class="modal-content er-modal-content er-editorial-review-modal">
+                <div class="modal-header er-editorial-dialog-header">
+                    <div class="er-editorial-dialog-heading">
+                        <span class="er-editorial-dialog-icon" aria-hidden="true"><i class="fas fa-file-pen"></i></span>
+                        <div>
+                            <h5 class="modal-title" id="erEditorialReviewTitle">Revisión y corrección de la sesión</h5>
+                            <p id="erEditorialReviewHelp">Exporta los textos, recibe las correcciones y valida cada cambio antes de aplicarlo.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="er-editorial-modal-lead"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Editorial solo debe modificar la columna <strong>Texto</strong>; la estructura técnica del archivo debe conservarse.</span></div>
+                    <div class="er-editorial-review-actions">
+                        <section class="er-editorial-action-card" aria-labelledby="erEditorialExportTitle">
+                            <div class="er-editorial-section-heading"><span>1</span><div><h6 id="erEditorialExportTitle">Descarga el archivo</h6><p>Incluye todos los textos y respuestas de la sesión.</p></div></div>
+                            <button type="button" id="btnExportEditorialWorkbook" class="er-button er-button-primary"><i class="fas fa-file-excel" aria-hidden="true"></i><span>Descargar XLSX editorial</span></button>
+                        </section>
+                        <section class="er-editorial-action-card" aria-labelledby="erEditorialImportTitle">
+                            <div class="er-editorial-section-heading"><span>2</span><div><h6 id="erEditorialImportTitle">Importa las correcciones</h6><p>Selecciona el XLSX editado para comparar los cambios.</p></div></div>
+                            <button type="button" id="btnSelectEditorialWorkbook" class="er-button er-button-secondary"><i class="fas fa-file-import" aria-hidden="true"></i><span>Seleccionar archivo corregido</span></button>
+                        </section>
+                    </div>
+                    <section class="er-editorial-drive-import" aria-labelledby="erEditorialDriveTitle">
+                        <div class="er-editorial-section-heading"><span>3</span><div><h6 id="erEditorialDriveTitle">O carga desde Google Drive</h6><p>Pega el enlace del XLSX corregido o de una copia abierta con Google Sheets.</p></div></div>
+                        <div class="er-editorial-drive-row">
+                            <input id="erEditorialDriveUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/d/…" aria-describedby="erEditorialDriveHelp">
+                            <button type="button" id="btnImportEditorialDrive" class="er-button er-button-secondary"><i class="fab fa-google-drive" aria-hidden="true"></i><span>Cargar enlace</span></button>
+                        </div>
+                        <p id="erEditorialDriveHelp"><i class="fas fa-lock" aria-hidden="true"></i><span>Permite lectura a <strong>charly-functions-core@charly-brown.iam.gserviceaccount.com</strong>.</span></p>
+                    </section>
+                    <input id="erEditorialWorkbookInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="visually-hidden" aria-label="Seleccionar archivo editorial corregido">
+                    <p id="erEditorialReviewStatus" class="er-editorial-review-status" role="status" aria-live="polite"></p>
+                    <section id="erEditorialReviewPreview" class="er-editorial-review-preview hidden" aria-label="Vista previa de cambios editoriales">
+                        <div id="erEditorialReviewSummary" class="er-editorial-review-summary"></div>
+                        <div id="erEditorialReviewIssues" class="er-editorial-review-issues"></div>
+                        <div class="er-editorial-review-table-wrap">
+                            <table class="er-editorial-review-table">
+                                <thead><tr><th>Referencia</th><th>Campo</th><th>Antes</th><th>Después</th></tr></thead>
+                                <tbody id="erEditorialReviewDiff"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+                <div class="modal-footer er-editorial-dialog-footer">
+                    <span><kbd>Esc</kbd> para cerrar</span>
+                    <div>
+                        <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cerrar</button>
+                        <button type="button" id="btnApplyEditorialWorkbook" class="er-button er-button-primary" disabled><i class="fas fa-check" aria-hidden="true"></i><span>Aplicar correcciones</span></button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -881,8 +1065,20 @@
     <script src="js/html-docx.js"></script>
     <script type="module" data-cache-src="js/chromeLayout.js"></script>
     <script type="module" data-cache-src="js/sidebar.js"></script>
-    <script src="js/pigpen-sheets-import.js?v=20260903-new-session-sheets"></script>
-    <script type="module" src="js/PigPenCreator.js?v=20260903-room-regeneration-header"></script>
+    <script src="js/pigpen-sheets-import.js?v=20260910-experience-v4"></script>
+    <div class="modal fade er-transfer-modal" id="erTopicTransferModal" tabindex="-1" aria-labelledby="erTransferTitle" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered"><form class="modal-content" id="erTopicTransferForm">
+        <div class="modal-header"><h5 class="modal-title" id="erTransferTitle">Trasladar tema</h5><button type="button" class="btn-close ms-auto" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
+        <div class="modal-body">
+          <p id="erTransferSummary"></p><small id="erTransferOrigin"></small>
+          <label for="erTransferSearch">Buscar sesión de destino</label><input type="search" id="erTransferSearch" autocomplete="off" placeholder="Nombre de la sesión">
+          <label for="erTransferDestination">Sesión de destino</label><select id="erTransferDestination" required></select>
+          <p id="erTransferStatus" role="status" aria-live="polite"></p>
+        </div>
+        <div class="modal-footer"><button type="button" class="er-button er-button-ghost" data-bs-dismiss="modal">Cerrar</button><button type="button" class="er-button" id="erTransferOpenDestination" hidden>Abrir en destino</button><button type="submit" class="er-button" id="erTransferSubmit">Confirmar</button></div>
+      </form></div>
+    </div>
+    <script type="module" src="js/PigPenCreator.js?v=20260917-schema-caching-v364"></script>
     <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

@@ -1,18 +1,14 @@
-import { SUPPORTED_GAME_LOCALES, formatGameMessage, getGameMessages, normalizeGameLocale } from "./escape-room-game-i18n.mjs";
+import { experience } from "./escape-room-experience.mjs?v=20260912-text-pieces-v9";
+import { normalizeGameLocale } from "./escape-room-game-i18n.mjs";
 
 const DEFAULT_TEXT_SUBTYPE = "palabra";
 const TEXT_SUBTYPES = new Set(["palabra", "letra", "numero", "codigo_corto", "frase_corta", "frase_libre"]);
 const INTERACTION_TYPES = new Set([
   "texto", "opcion_multiple", "relacion_columnas", "drag_drop", "multimedia",
-  "verdadero_falso", "ordenar_secuencia", "completar_espacio"
+  "verdadero_falso", "ordenar_secuencia", "completar_espacio", ...experience.definitions.map(d => d.id)
 ]);
 const DEFAULT_PRESENTATION_MODE = "salas";
 const SECTION_MENU_PRESENTATION_MODE = "menu_secciones";
-
-const DEFAULT_INSTRUCTIONS_BY_MODE = Object.freeze({
-  salas: "Recorre cada sala en orden, resuelve sus desafíos y reúne las claves para completar la misión.",
-  menu_secciones: "Lee la introducción y las instrucciones. Completa cada actividad en orden para desbloquear el mensaje final."
-});
 
 export function normalizeBaseText(value = "") {
   return String(value ?? "")
@@ -27,129 +23,22 @@ export function normalizeString(value = "", fallback = "") {
   return raw || fallback;
 }
 
-function normalizeBriefingContext(value = "", history = "", locale = "es-419") {
-  const messages = getGameMessages(locale);
-  const raw = normalizeString(value, "");
-  if (raw) {
-    const normalizedRaw = normalizeBaseText(raw);
-    const isGeneratedDefault = SUPPORTED_GAME_LOCALES.some((supportedLocale) => (
-      normalizedRaw === normalizeBaseText(getGameMessages(supportedLocale).defaultBriefingContext)
-    ));
-    return isGeneratedDefault ? messages.defaultBriefingContext : raw;
+export function removeQuestionAtIndex(questions = [], questionIndex = -1, minimumQuestions = 1) {
+  const source = Array.isArray(questions) ? questions : [];
+  const index = Number(questionIndex);
+  const minimum = Math.max(0, Number.isFinite(Number(minimumQuestions)) ? Math.trunc(Number(minimumQuestions)) : 1);
+  if (!Number.isInteger(index) || index < 0 || index >= source.length || source.length <= minimum) {
+    return { questions: [...source], removedQuestion: null };
   }
-  return normalizeString(history, messages.defaultBriefingContext);
-}
-
-const LEGACY_SPANISH_HINT_EXACT = new Set([
-  "añade una pista útil, pero no obvia.",
-  "observa con calma y vuelve a intentarlo.",
-  "pista concreta sin revelar la respuesta",
-  "usa la condición exacta del enunciado para descartar opciones y hallar la respuesta."
-]);
-
-export function normalizeHintForLocale(value = "", locale = "es-419") {
-  const messages = getGameMessages(locale);
-  const raw = normalizeString(value, "");
-  if (!raw) return messages.defaultHint;
-  if (String(locale).toLowerCase().startsWith("es")) return raw;
-
-  const normalized = raw.toLocaleLowerCase("es").trim();
-  const detailMatch = raw.match(/en el enunciado(?:[^,]*)?,?\s*usa el detalle\s+(.+?)\s+para descartar opciones/i);
-  if (detailMatch?.[1]) {
-    return formatGameMessage(messages, "fallbackHintDetails", { details: detailMatch[1].trim() });
-  }
-  if (
-    LEGACY_SPANISH_HINT_EXACT.has(normalized)
-    || normalized.startsWith("lee con atención el enunciado y busca una pista concreta")
-  ) {
-    return messages.fallbackHintGeneric || messages.defaultHint;
-  }
-  return raw;
-}
-
-const GENERIC_HINT_PATTERNS = [
-  "añade una pista", "agrega una pista", "pista concreta", "pista útil", "pista util",
-  "lee con atención el enunciado", "en el enunciado", "use the detail", "read the prompt carefully",
-  "utilise le détail", "lis attentivement l'énoncé", "use o detalhe", "leia o enunciado com atenção"
-];
-
-function isRepairableGenericHint(value = "") {
-  const normalized = normalizeString(value, "").toLocaleLowerCase().trim();
-  if (!normalized) return true;
-  return GENERIC_HINT_PATTERNS.some((pattern) => normalized.includes(pattern));
-}
-
-function formatLocalizedHintList(values = [], locale = "es-419") {
-  const items = [...new Set(values.map((value) => normalizeString(value, "")).filter(Boolean))].slice(0, 3);
-  if (!items.length) return "";
-  const quoted = items.map((value) => `«${value}»`);
-  try {
-    return new Intl.ListFormat(normalizeGameLocale(locale), { style: "long", type: "conjunction" }).format(quoted);
-  } catch (_) {
-    return quoted.join(", ");
-  }
-}
-
-export function buildConcreteQuestionHint(question = {}, locale = "es-419") {
-  const language = normalizeGameLocale(locale).split("-")[0];
-  const copies = {
-    es: {
-      pairs: (items) => `Empieza por ${items}: busca en el expediente la definición o relación exacta de cada término y usa cada ficha una sola vez.`,
-      sequence: (items) => `Entre ${items}, localiza primero el paso que el expediente presenta como causa o requisito; después sigue sus relaciones de tiempo o dependencia.`,
-      choices: (items) => `Compara ${items} con los datos exactos del expediente. Descarta primero cualquier opción que contradiga una condición escrita allí.`,
-      blank: (text) => `Lee completa la oración «${text}». Las palabras junto al espacio determinan el concepto y la forma gramatical que encajan.`,
-      boolean: (prompt) => `Comprueba por separado el sujeto y la acción de «${prompt}» contra un dato exacto del expediente antes de elegir Verdadero o Falso.`,
-      text: (prompt) => `Busca en el expediente la frase que responde exactamente a «${prompt}» y usa el término específico que aparece allí.`
-    },
-    en: {
-      pairs: (items) => `Start with ${items}: find their exact definitions or relationships in the briefing, then use every tile only once.`,
-      sequence: (items) => `Among ${items}, first find the step the briefing presents as a cause or prerequisite; then follow its time or dependency links.`,
-      choices: (items) => `Compare ${items} with the briefing’s exact facts. First eliminate any option that contradicts a stated condition.`,
-      blank: (text) => `Read the complete sentence “${text}”. The words next to the blank determine the concept and grammatical form that fit.`,
-      boolean: (prompt) => `Check the subject and action in “${prompt}” separately against an exact fact in the briefing before choosing True or False.`,
-      text: (prompt) => `Find the sentence in the briefing that answers “${prompt}” exactly, then use the specific term written there.`
-    },
-    fr: {
-      pairs: (items) => `Commence par ${items} : retrouve dans le dossier la définition ou la relation exacte de chaque terme, puis n’utilise chaque fiche qu’une fois.`,
-      sequence: (items) => `Parmi ${items}, repère d’abord l’étape présentée dans le dossier comme cause ou condition préalable, puis suis les liens de temps ou de dépendance.`,
-      choices: (items) => `Compare ${items} aux informations exactes du dossier. Écarte d’abord toute option qui contredit une condition écrite.`,
-      blank: (text) => `Lis la phrase complète « ${text} ». Les mots autour du blanc déterminent le concept et la forme grammaticale attendus.`,
-      boolean: (prompt) => `Vérifie séparément le sujet et l’action de « ${prompt} » avec une information exacte du dossier avant de choisir Vrai ou Faux.`,
-      text: (prompt) => `Retrouve dans le dossier la phrase qui répond exactement à « ${prompt} », puis utilise le terme précis qui y apparaît.`
-    },
-    pt: {
-      pairs: (items) => `Comece por ${items}: encontre no dossiê a definição ou relação exata de cada termo e use cada ficha uma única vez.`,
-      sequence: (items) => `Entre ${items}, encontre primeiro a etapa que o dossiê apresenta como causa ou pré-requisito; depois siga as relações de tempo ou dependência.`,
-      choices: (items) => `Compare ${items} com os dados exatos do dossiê. Primeiro elimine qualquer opção que contradiga uma condição escrita.`,
-      blank: (text) => `Leia a frase completa “${text}”. As palavras ao redor do espaço determinam o conceito e a forma gramatical adequados.`,
-      boolean: (prompt) => `Verifique separadamente o sujeito e a ação de “${prompt}” com um dado exato do dossiê antes de escolher Verdadeiro ou Falso.`,
-      text: (prompt) => `Encontre no dossiê a frase que responde exatamente a “${prompt}” e use o termo específico escrito nela.`
-    }
+  return {
+    questions: source.filter((_, itemIndex) => itemIndex !== index),
+    removedQuestion: source[index]
   };
-  const templates = copies[language] || copies.es;
-  const type = question.tipo_interaccion || inferInteractionType(question);
-  if (["relacion_columnas", "drag_drop"].includes(type)) {
-    const pairHint = (question.parejas || []).map((pair) => normalizeString(pair?.pista, "")).find(Boolean);
-    if (pairHint && !isRepairableGenericHint(pairHint)) return pairHint;
-    const items = formatLocalizedHintList((question.parejas || []).map((pair) => pair?.izquierda), locale);
-    if (items) return templates.pairs(items);
-  }
-  if (type === "ordenar_secuencia") {
-    const items = formatLocalizedHintList(question.elementos || [], locale);
-    if (items) return templates.sequence(items);
-  }
-  if (type === "opcion_multiple") {
-    const items = formatLocalizedHintList(question.opciones || [], locale);
-    if (items) return templates.choices(items);
-  }
-  if (type === "completar_espacio" && question.texto_con_hueco) return templates.blank(question.texto_con_hueco);
-  const prompt = normalizeString(question.reto || question.titulo, getGameMessages(locale).question);
-  return type === "verdadero_falso" ? templates.boolean(prompt) : templates.text(prompt);
 }
 
-export function normalizeConcreteQuestionHint(question = {}, locale = "es-419") {
-  const localized = normalizeHintForLocale(question.pista, locale);
-  return isRepairableGenericHint(localized) ? buildConcreteQuestionHint({ ...question, pista: localized }, locale) : localized;
+function normalizeBriefingContext(value = "", history = "", locale = "es-419") {
+  const raw = normalizeString(value, "");
+  return raw || normalizeString(history, "");
 }
 
 export function normalizePresentationMode(value = "") {
@@ -213,87 +102,25 @@ export function resolveFinalPasscode(project = {}) {
 
 export function normalizeAcceptedAnswers(value) {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => normalizeAcceptedAnswers(entry)).filter(Boolean);
+    return [...new Set(value.flatMap((entry) => normalizeAcceptedAnswers(entry)).filter(Boolean))];
   }
 
   const raw = String(value ?? "").trim();
   if (!raw) return [];
 
-  return raw
+  return [...new Set(raw
     .split(/[\r\n|;]+/)
     .map((entry) => entry.trim())
     .filter(Boolean)
     .map((entry) => normalizeBaseText(entry))
-    .filter(Boolean);
+    .filter(Boolean))];
 }
 
 export function isSingleWordAnswer(value = "") {
   const raw = normalizeString(value, "");
-  if (!raw || raw.length > 32) return false;
-  return /^[\p{L}\p{M}]+(?:[-'’][\p{L}\p{M}]+)?$/u.test(raw);
-}
-
-export function extractSingleWordAnswer(value = "", fallback = "") {
-  const raw = normalizeString(Array.isArray(value) ? value[0] : value, "");
-  const candidates = raw.match(/[\p{L}\p{M}]+(?:[-'’][\p{L}\p{M}]+)?/gu) || [];
-  const stopWords = new Set([
-    "a", "al", "ante", "bajo", "con", "contra", "de", "del", "desde", "durante", "e", "el", "ella", "en",
-    "entre", "es", "esa", "ese", "esta", "este", "esto", "la", "las", "lo", "los", "o", "para", "pero",
-    "por", "que", "se", "sin", "sobre", "su", "sus", "un", "una", "unas", "unos", "y"
-  ]);
-  const preferred = candidates.find((candidate) => isSingleWordAnswer(candidate) && !stopWords.has(candidate.toLowerCase()));
-  const firstValid = preferred || candidates.find(isSingleWordAnswer);
-  return firstValid || (isSingleWordAnswer(fallback) ? fallback : "");
-}
-
-export function isOpenEndedTextPrompt(value = "") {
-  return /\b(?:argumenta|comenta|crea|describe|diseña|elabora|explica|expresa|formula|justifica|opina|prop[oó]n|redacta|reflexiona|resume)\b|\b(?:frase|oraci[oó]n|p[aá]rrafo)\b|\b(?:m[aá]ximo|m[aá]s de|menos de)\s+\d+\s+palabras\b/i.test(String(value || ""));
-}
-
-function escapeRegExp(value = "") {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function localizeSingleWordInstruction(value = "", locale = "es-419") {
-  const messages = getGameMessages(locale);
-  let localized = String(value || "");
-  let foundGeneratedInstruction = false;
-
-  for (const supportedLocale of SUPPORTED_GAME_LOCALES) {
-    const instruction = getGameMessages(supportedLocale).singleWordInstruction;
-    const pattern = new RegExp(escapeRegExp(instruction), "giu");
-    if (!pattern.test(localized)) continue;
-    foundGeneratedInstruction = true;
-    localized = localized.replace(pattern, "");
-  }
-
-  if (!foundGeneratedInstruction) return localized;
-  const cleanPrompt = localized
-    .replace(/\s+([,.;:!?])/g, "$1")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  return cleanPrompt ? `${cleanPrompt} ${messages.singleWordInstruction}` : messages.singleWordInstruction;
-}
-
-export function buildSingleWordChallenge(value = "", title = "este reto", answer = "clave", locale = "es-419") {
-  const messages = getGameMessages(locale);
-  const raw = localizeSingleWordInstruction(normalizeString(value, messages.defaultChallenge), locale);
-  const alreadyRequestsSingleWord = normalizeBaseText(raw).includes(normalizeBaseText(messages.singleWordInstruction));
-  if (!extractSingleWordAnswer(answer)) {
-    return alreadyRequestsSingleWord ? raw : `${raw} ${messages.singleWordInstruction}`;
-  }
-  if (!isOpenEndedTextPrompt(raw)) {
-    return alreadyRequestsSingleWord ? raw : `${raw} ${messages.singleWordInstruction}`;
-  }
-
-  const keyword = extractSingleWordAnswer(answer);
-  const letters = Array.from(keyword.replace(/[-'’]/g, ""));
-  const safeTitle = normalizeString(title, "este reto");
-  if (letters.length > 1) {
-    const scrambled = [...letters.slice(1), letters[0]].map((letter) => letter.toUpperCase()).join(" · ");
-    return formatGameMessage(messages, "unscrambleInstruction", { letters: scrambled, title: safeTitle });
-  }
-  return formatGameMessage(messages, "singleLetterInstruction", { title: safeTitle });
+  if (!raw || raw.length > 64) return false;
+  const lexicalWord = "[\\p{L}\\p{M}]+(?:[-'’][\\p{L}\\p{M}]+)*";
+  return new RegExp(`^${lexicalWord}(?:\\s+${lexicalWord})?$`, "u").test(raw);
 }
 
 export function normalizeAcceptedAnswersForSubtype(value, subtype = DEFAULT_TEXT_SUBTYPE) {
@@ -311,7 +138,9 @@ export function normalizeAcceptedAnswersForSubtype(value, subtype = DEFAULT_TEXT
 export function resolveTextSubtypeForAnswer(subtype = DEFAULT_TEXT_SUBTYPE, correctAnswer = "") {
   const normalizedSubtype = normalizeTextSubtype(subtype);
   if (normalizedSubtype === "palabra" && correctAnswer && !isSingleWordAnswer(correctAnswer)) {
-    return "frase_corta";
+    return /^[-+]?\d+(?:[.,]\d+)?$/.test(String(correctAnswer).trim())
+      ? "numero"
+      : "codigo_corto";
   }
   return normalizedSubtype;
 }
@@ -323,6 +152,53 @@ export function replacePrimaryAcceptedAnswer(acceptedAnswers = [], previousCorre
   const aliases = normalizeAcceptedAnswers(acceptedAnswers)
     .filter((answer) => !excludedTokens.has(answer));
   return [...nextTokens, ...aliases];
+}
+
+export function resolveOptionAnswerIndex(options = [], correctAnswer = "", acceptedAnswers = [], storedIndex = -1) {
+  const list = Array.isArray(options) ? options : [];
+  if (!list.length) return -1;
+  const fullToken = value => String(value ?? "").normalize("NFC").trim().replace(/\s+/gu, " ").toLowerCase();
+  const declared = fullToken(correctAnswer);
+  const exactMatches = list.map((value, index) => fullToken(value) === declared && declared ? index : -1).filter(index => index >= 0);
+  if (exactMatches.length) return exactMatches.length === 1 ? exactMatches[0] : -1;
+  const optionTokens = list.map((option) => normalizeBaseText(option));
+  const declaredToken = normalizeBaseText(correctAnswer);
+  const declaredMatches = optionTokens.map((token, index) => token && token === declaredToken ? index : -1).filter(index => index >= 0);
+  if (declaredMatches.length) return declaredMatches.length === 1 ? declaredMatches[0] : -1;
+  const acceptedTokens = normalizeAcceptedAnswers(acceptedAnswers);
+  const acceptedMatches = optionTokens.map((token, index) => token && acceptedTokens.includes(token) ? index : -1).filter(index => index >= 0);
+  if (acceptedMatches.length) return acceptedMatches.length === 1 ? acceptedMatches[0] : -1;
+  const fallbackIndex = Number(storedIndex);
+  return Number.isInteger(fallbackIndex) && fallbackIndex >= 0 && fallbackIndex < list.length
+    ? fallbackIndex
+    : -1;
+}
+
+const FULL_QUESTION_REPAIR_FIELDS = new Set([
+  "reto", "preguntas", "contexto", "respuesta_correcta", "respuestas_aceptadas",
+  "opciones", "parejas", "elementos", "texto_con_hueco", "pista",
+  "retroalimentacion_correcta", "retroalimentacion_incorrecta", "_coverage_anchor"
+]);
+
+export function auditIssueRequiresFullQuestionRepair(issue = {}) {
+  if (issue.questionIndex === null || issue.questionIndex === undefined) return false;
+  if (!Number.isInteger(Number(issue.roomIndex)) || !Number.isInteger(Number(issue.questionIndex))) return false;
+  if (FULL_QUESTION_REPAIR_FIELDS.has(issue.field)) return true;
+  const semanticSignal = `${issue.code || ""} ${issue.message || ""}`;
+  return /repet|duplic|par[aá]fras|too similar|same (?:fact|answer|evidence|concept)|contradict|not (?:supported|provided)|no (?:est[aá]|aparece).*(?:brief|context)/i.test(semanticSignal);
+}
+
+export function collectFullQuestionRepairTargets(issues = []) {
+  const targets = new Map();
+  (Array.isArray(issues) ? issues : []).forEach((issue) => {
+    if (!auditIssueRequiresFullQuestionRepair(issue)) return;
+    const roomIndex = Number(issue.roomIndex);
+    const questionIndex = Number(issue.questionIndex);
+    targets.set(`${roomIndex}:${questionIndex}`, { roomIndex, questionIndex });
+  });
+  return [...targets.values()].sort((first, second) => (
+    first.roomIndex - second.roomIndex || first.questionIndex - second.questionIndex
+  ));
 }
 
 function looksLikeMediaUrl(value = "") {
@@ -390,10 +266,10 @@ export function normalizeAcademicPalette(value = {}) {
 export function normalizePairList(pairs = []) {
   const list = Array.isArray(pairs) ? pairs : [];
   return list
-    .map((pair, index) => {
+    .map((pair) => {
       if (Array.isArray(pair)) {
         return {
-          izquierda: normalizeString(pair[0], `Elemento ${index + 1}`),
+          izquierda: normalizeString(pair[0], ""),
           derecha: normalizeString(pair[1], "")
         };
       }
@@ -401,14 +277,14 @@ export function normalizePairList(pairs = []) {
       if (typeof pair === "string") {
         const [left, right] = pair.split(/[:=|]/);
         return {
-          izquierda: normalizeString(left, `Elemento ${index + 1}`),
+          izquierda: normalizeString(left, ""),
           derecha: normalizeString(right, "")
         };
       }
 
       if (!pair || typeof pair !== "object") return null;
       return {
-        izquierda: normalizeString(pair.izquierda || pair.left || pair.columnaA || pair.a, `Elemento ${index + 1}`),
+        izquierda: normalizeString(pair.izquierda || pair.left || pair.columnaA || pair.a, ""),
         derecha: normalizeString(pair.derecha || pair.right || pair.columnaB || pair.b, ""),
         pista: normalizeString(pair.pista || pair.hint, "")
       };
@@ -422,45 +298,11 @@ export function normalizeTextSubtype(value = "") {
 }
 
 export function normalizeMissionTitle(value = "", fallback = "", presentationMode = DEFAULT_PRESENTATION_MODE) {
-  const raw = normalizeString(value, fallback);
-  const mode = normalizePresentationMode(presentationMode);
-
-  if (mode === SECTION_MENU_PRESENTATION_MODE) {
-    if (/^(?:sala|misi[oó]n|secci[oó]n)\s*#?\s*\d+\s*$/i.test(raw)) {
-      return raw.replace(/^(?:sala|misi[oó]n|secci[oó]n)\b/i, "Actividad");
-    }
-    return raw;
-  }
-
-  if (/^misi[oó]n\b/i.test(raw)) {
-    return raw.replace(/^misi[oó]n\b/i, "Sala");
-  }
-
-  // Permite volver de menú a salas sin reescribir títulos editoriales que solo
-  // casualmente comiencen con "Actividad" o "Sección".
-  if (/^(?:actividad|secci[oó]n)\s*#?\s*\d+\s*$/i.test(raw)) {
-    return raw.replace(/^(?:actividad|secci[oó]n)\b/i, "Sala");
-  }
-
-  return raw;
+  return normalizeString(value, fallback);
 }
 
 export function normalizeMissionRelease(value = "", fallback = "", presentationMode = DEFAULT_PRESENTATION_MODE) {
-  const raw = normalizeString(value, fallback);
-  const mode = normalizePresentationMode(presentationMode);
-
-  if (mode === SECTION_MENU_PRESENTATION_MODE) {
-    if (/^(?:sala|misi[oó]n|secci[oó]n)\s*#?\s*\d+\s*$/i.test(raw)) {
-      return raw.replace(/^(?:sala|misi[oó]n|secci[oó]n)\b/i, "ACTIVIDAD");
-    }
-    return raw;
-  }
-
-  if (/^(?:actividad|secci[oó]n)\s*#?\s*\d+\s*$/i.test(raw)) {
-    return raw.replace(/^(?:actividad|secci[oó]n)\b/i, "SALA");
-  }
-
-  return raw;
+  return normalizeString(value, fallback);
 }
 
 export function normalizeRoomTitle(value = "", fallback = "", presentationMode = DEFAULT_PRESENTATION_MODE) {
@@ -490,7 +332,6 @@ function buildQuestionId(value, roomIndex, questionIndex) {
 }
 
 function normalizeChallenge(item = {}, index = 0, fallbackTitle = "Pregunta", locale = "es-419") {
-  const messages = getGameMessages(locale);
   const tipo_interaccion = inferInteractionType(item);
   const booleanAnswer = item.respuesta_correcta === true || item.respuesta_correcta === false
     ? item.respuesta_correcta
@@ -501,35 +342,40 @@ function normalizeChallenge(item = {}, index = 0, fallbackTitle = "Pregunta", lo
         Array.isArray(item.respuesta_correcta) ? item.respuesta_correcta.join(" | ") : item.respuesta_correcta || item.respuesta,
         ""
       );
+  const requestedSubtype = normalizeTextSubtype(item.subtipo_respuesta || item.answerSubtype || item.textSubtype);
   const resolvedSubtype = resolveTextSubtypeForAnswer(
-    item.subtipo_respuesta || item.answerSubtype || item.textSubtype,
+    requestedSubtype,
     rawCorrectAnswer
   );
   const usesOpenAnswer = tipo_interaccion === "texto" || tipo_interaccion === "multimedia" || tipo_interaccion === "completar_espacio";
-  const subtipo_respuesta = usesOpenAnswer && resolvedSubtype === "frase_corta"
-    ? "palabra"
-    : resolvedSubtype;
+  const usesStructuredAnswer = (tipo_interaccion === 'completar_espacio' && Number(item.interaction_contract_version) === 2)
+    || tipo_interaccion === "relacion_columnas"
+    || tipo_interaccion === "drag_drop"
+    || tipo_interaccion === "ordenar_secuencia";
+  const subtipo_respuesta = resolvedSubtype;
   const requiresSingleWord = usesOpenAnswer && subtipo_respuesta === "palabra";
-  const respuestaCorrecta = requiresSingleWord
-    ? extractSingleWordAnswer(rawCorrectAnswer)
-    : rawCorrectAnswer;
-  const rawAcceptedAnswers = item.respuestas_aceptadas || item.respuestas || item.acceptedAnswers || rawCorrectAnswer;
+  const respuestaCorrecta = usesStructuredAnswer ? "" : rawCorrectAnswer;
+  const rawAcceptedAnswers = usesStructuredAnswer
+    ? []
+    : item.respuestas_aceptadas || item.respuestas || item.acceptedAnswers || rawCorrectAnswer;
   const acceptedSource = requiresSingleWord
     ? [respuestaCorrecta, ...(Array.isArray(rawAcceptedAnswers) ? rawAcceptedAnswers : [rawAcceptedAnswers])]
-        .map((answer) => extractSingleWordAnswer(answer, respuestaCorrecta))
+        .map((answer) => isSingleWordAnswer(answer) ? answer : "")
     : rawAcceptedAnswers;
   const respuestas_aceptadas = normalizeAcceptedAnswersForSubtype(
     acceptedSource,
     subtipo_respuesta
   );
-  const titulo = normalizeString(item.titulo, `${fallbackTitle} ${index + 1}`);
-  const rawChallenge = normalizeString(item.reto || item.enunciado || item.pregunta, messages.defaultChallenge);
+  const titulo = normalizeString(item.titulo, "");
+  const rawChallenge = normalizeString(item.reto || item.enunciado || item.pregunta, "");
 
   const normalizedChallenge = {
+    ...(experience.get(tipo_interaccion) ? { interaction_data: experience.normalizeContract(item.interaction_data, tipo_interaccion) } : {}),
+    interaction_contract_version: [1, 2].includes(Number(item.interaction_contract_version)) ? Number(item.interaction_contract_version) : 0,
     id: normalizeString(item.id || item.slug, buildQuestionId(item.titulo || item.reto, item._roomIndex ?? 0, index)),
-    release: normalizeString(item.release || item.etiqueta, `Q${String(index + 1).padStart(2, "0")}`),
+    release: normalizeString(item.release || item.etiqueta, ""),
     titulo,
-    reto: requiresSingleWord ? buildSingleWordChallenge(rawChallenge, titulo, respuestaCorrecta, locale) : rawChallenge,
+    reto: rawChallenge,
     tipo_interaccion,
     subtipo_respuesta,
     respuesta_correcta: respuestaCorrecta,
@@ -538,24 +384,61 @@ function normalizeChallenge(item = {}, index = 0, fallbackTitle = "Pregunta", lo
     parejas: normalizePairList(item.parejas || item.relacion || item.pairs || []),
     elementos: normalizeSequenceItems(item.elementos || item.sequence || item.items || []),
     texto_con_hueco: normalizeString(item.texto_con_hueco || item.fill_blank_text, ""),
+    content_revision: Math.max(0, Math.floor(Number(item.content_revision) || 0)),
     media: normalizeMediaValue(item.media || item.recurso_multimedia || item.multimedia || item.recurso_visual || null),
-    pista: normalizeHintForLocale(item.pista, locale),
+    extra_hint: normalizeString(item.extra_hint, ""),
+    pista: normalizeString(item.pista || item.hint, ""),
     retroalimentacion_correcta: normalizeString(item.retroalimentacion_correcta || item.feedback_correcto, ""),
     retroalimentacion_incorrecta: normalizeString(item.retroalimentacion_incorrecta || item.feedback_incorrecto, ""),
     requiere_imagen: item.requiere_imagen === true || item.requires_image === true,
-    imagen_funcion: normalizeString(item.imagen_funcion, messages.defaultImagePurpose),
+    imagen_funcion: normalizeString(item.imagen_funcion, ""),
     imagen_prompt: normalizeString(item.imagen_prompt, ""),
     imagen_alt: normalizeString(item.imagen_alt, ""),
     imagen: normalizeString(item.imagen, ""),
+    ...(Object.hasOwn(item, "_coverage_anchor")
+      ? { _coverage_anchor: normalizeString(item._coverage_anchor, "") }
+      : {}),
+    ...(Object.hasOwn(item, "_plan_id")
+      ? { _plan_id: normalizeString(item._plan_id, "") }
+      : {}),
+    ...(Object.hasOwn(item, "_assessment_case_id")
+      ? { _assessment_case_id: normalizeString(item._assessment_case_id, "") }
+      : {}),
+    ...(Object.hasOwn(item, "_case_source")
+      ? { _case_source: normalizeString(item._case_source, "") }
+      : {}),
+    ...(Object.hasOwn(item, "_case_data")
+      ? { _case_data: normalizeTextList(item._case_data || []) }
+      : {}),
+    ...(Object.hasOwn(item, "_transfer_delta")
+      ? { _transfer_delta: normalizeString(item._transfer_delta, "") }
+      : {}),
+    ...(Object.hasOwn(item, "_reasoning_evidence")
+      ? { _reasoning_evidence: normalizeString(item._reasoning_evidence, "") }
+      : {}),
+    ...(Object.hasOwn(item, "_integrates_knowledge_ids")
+      ? { _integrates_knowledge_ids: normalizeTextList(item._integrates_knowledge_ids || []) }
+      : {}),
+    ...(Object.hasOwn(item, "_mechanic_contract")
+      ? { _mechanic_contract: structuredClone(item._mechanic_contract || { kind: "none" }) }
+      : {}),
+    ...(Object.hasOwn(item, "_narrative_effect")
+      ? { _narrative_effect: normalizeString(item._narrative_effect, "") }
+      : {}),
     bloqueada_inicial: Boolean(item.bloqueada_inicial === true || item.locked === true)
   };
-  normalizedChallenge.pista = normalizeConcreteQuestionHint(normalizedChallenge, locale);
+  if (tipo_interaccion === "opcion_multiple" || (tipo_interaccion === "multimedia" && Number(item.interaction_contract_version) === 1)) {
+    const correctIndex = resolveOptionAnswerIndex(normalizedChallenge.opciones, respuestaCorrecta, rawAcceptedAnswers);
+    if (correctIndex >= 0) {
+      normalizedChallenge.respuesta_correcta = normalizedChallenge.opciones[correctIndex];
+      normalizedChallenge.respuestas_aceptadas = [normalizedChallenge.respuesta_correcta];
+    }
+  }
   return normalizedChallenge;
 }
 
 export function normalizeQuestion(question = {}, roomIndex = 0, questionIndex = 0, locale = "es-419") {
-  const messages = getGameMessages(locale);
-  return normalizeChallenge({ ...question, _roomIndex: roomIndex }, questionIndex, messages.question, locale);
+  return normalizeChallenge({ ...question, _roomIndex: roomIndex }, questionIndex, "", locale);
 }
 
 export function normalizeQuestionList(value = [], roomIndex = 0, locale = "es-419") {
@@ -591,9 +474,7 @@ function buildLegacyQuestionFromMission(mission = {}, roomIndex = 0, locale = "e
 }
 
 export function normalizeMission(mission = {}, index = 0, presentationMode = DEFAULT_PRESENTATION_MODE, locale = "es-419") {
-  const messages = getGameMessages(locale);
   const mode = normalizePresentationMode(presentationMode);
-  const usesSectionMenu = mode === SECTION_MENU_PRESENTATION_MODE;
   const hasExplicitQuestions = Array.isArray(mission.preguntas) && mission.preguntas.length > 0;
   const preguntasBase = hasExplicitQuestions
     ? mission.preguntas
@@ -615,18 +496,9 @@ export function normalizeMission(mission = {}, index = 0, presentationMode = DEF
 
   return {
     id: normalizeString(mission.id || mission.slug, buildMissionId(mission.titulo, index)),
-    release: normalizeMissionRelease(
-      mission.release || mission.etiqueta,
-      `${(usesSectionMenu ? messages.activity : messages.room).toLocaleUpperCase(locale)} ${String(index + 1).padStart(2, "0")}`,
-      mode
-    ),
-    titulo: normalizeMissionTitle(mission.titulo, `${usesSectionMenu ? messages.activity : messages.room} ${index + 1}`, mode),
-    historia: normalizeString(
-      mission.historia,
-      usesSectionMenu
-        ? messages.defaultActivityStory
-        : messages.defaultRoomStory
-    ),
+    release: normalizeMissionRelease(mission.release || mission.etiqueta, "", mode),
+    titulo: normalizeMissionTitle(mission.titulo, "", mode),
+    historia: normalizeString(mission.historia, ""),
     contexto: normalizeBriefingContext(
       explicitBriefingSource,
       mission.historia,
@@ -634,7 +506,14 @@ export function normalizeMission(mission = {}, index = 0, presentationMode = DEF
     ),
     contexto_requerido: contextoRequerido,
     datos_clave: normalizeTextList(mission.datos_clave || mission.evidencias || mission.key_facts || mission.keyFacts || []),
-    reto: normalizeString(mission.reto, messages.defaultChallenge),
+    reto: normalizeString(mission.reto, ""),
+    briefing_titulo: normalizeString(mission.briefing_titulo, ""),
+    briefing_instruccion: normalizeString(mission.briefing_instruccion, ""),
+    briefing_evidencias_titulo: normalizeString(mission.briefing_evidencias_titulo, ""),
+    briefing_objetivo_titulo: normalizeString(mission.briefing_objetivo_titulo, ""),
+    briefing_boton_inicio: normalizeString(mission.briefing_boton_inicio, ""),
+    briefing_boton_revisar: normalizeString(mission.briefing_boton_revisar, ""),
+    briefing_mensaje_listo: normalizeString(mission.briefing_mensaje_listo, ""),
     tipo_interaccion: normalizeString(mission.tipo_interaccion, legacyQuestionFallback.tipo_interaccion || "texto"),
     subtipo_respuesta,
     respuesta_correcta: respuestaCorrecta,
@@ -647,13 +526,16 @@ export function normalizeMission(mission = {}, index = 0, presentationMode = DEF
     elementos: normalizeSequenceItems(mission.elementos || legacyQuestionFallback.elementos || []),
     texto_con_hueco: normalizeString(mission.texto_con_hueco || legacyQuestionFallback.texto_con_hueco, ""),
     media: normalizeMediaValue(mission.media || legacyQuestionFallback.media || mission.recurso_multimedia || mission.multimedia || mission.recurso_visual || null),
-    pista: normalizeHintForLocale(mission.pista || legacyQuestionFallback.pista, locale),
+    pista: normalizeString(mission.pista || legacyQuestionFallback.pista, ""),
     retroalimentacion_correcta: normalizeString(mission.retroalimentacion_correcta || legacyQuestionFallback.retroalimentacion_correcta || mission.feedback_correcto, ""),
     retroalimentacion_incorrecta: normalizeString(mission.retroalimentacion_incorrecta || legacyQuestionFallback.retroalimentacion_incorrecta || mission.feedback_incorrecto, ""),
-    imagen_funcion: normalizeString(mission.imagen_funcion || legacyQuestionFallback.imagen_funcion, messages.defaultImagePurpose),
+    imagen_funcion: normalizeString(mission.imagen_funcion || legacyQuestionFallback.imagen_funcion, ""),
     imagen_prompt: normalizeString(mission.imagen_prompt || legacyQuestionFallback.imagen_prompt, ""),
     imagen_alt: normalizeString(mission.imagen_alt || legacyQuestionFallback.imagen_alt, ""),
     imagen: normalizeString(mission.imagen || legacyQuestionFallback.imagen, ""),
+    ...(Object.hasOwn(mission, "_narrative_contract")
+      ? { _narrative_contract: structuredClone(mission._narrative_contract || {}) }
+      : {}),
     paleta_academica: normalizeAcademicPalette(mission.paleta_academica || mission.academicPalette || {}),
     preguntas,
     desbloquea: normalizeTextList(mission.desbloquea || mission.unlocks || []),
@@ -684,31 +566,33 @@ function normalizeThemeConfig(value = {}) {
 
 export function normalizeEscapeRoomProject(data = {}) {
   const idioma = normalizeGameLocale(data.idioma);
-  const messages = getGameMessages(idioma);
   const rawDuration = Number(data.duracion_minutos ?? data.duracion ?? data.durationMinutes ?? 35);
-  const duracion_minutos = Number.isFinite(rawDuration) && rawDuration > 0 ? Math.max(1, Math.round(rawDuration)) : 35;
+  const duracion_minutos = Number.isFinite(rawDuration) && rawDuration > 0
+    ? Math.max(1, Math.round(rawDuration * 2) / 2)
+    : 35;
   const modo_presentacion = normalizePresentationMode(data.modo_presentacion);
   const project = {
+    ...(data.experience_config ? { experience_config: experience.config(data.experience_config) } : {}),
+    ...(data.reward_plan ? { reward_plan: structuredClone(data.reward_plan) } : {}),
     idioma,
     modo_presentacion,
-    titulo: normalizeString(data.titulo, messages.educationalEscapeRoom),
-    subtitulo: normalizeString(data.subtitulo, messages.defaultSubtitle),
-    introduccion: normalizeString(data.introduccion, messages.defaultIntroduction),
-    instrucciones: normalizeString(data.instrucciones, modo_presentacion === SECTION_MENU_PRESENTATION_MODE ? messages.defaultInstructionsMenu : messages.defaultInstructionsRooms),
-    ambientacion: normalizeString(data.ambientacion, messages.defaultAtmosphere),
+    titulo: normalizeString(data.titulo, ""),
+    subtitulo: normalizeString(data.subtitulo, ""),
+    introduccion: normalizeString(data.introduccion, ""),
+    instrucciones: normalizeString(data.instrucciones, ""),
+    ambientacion: normalizeString(data.ambientacion, ""),
     linea_visual_base: normalizeString(data.linea_visual_base, ""),
     estilo_visual: normalizeString(data.estilo_visual, ""),
     personajes_recurrentes: Array.isArray(data.personajes_recurrentes) ? data.personajes_recurrentes : [],
     misiones: Array.isArray(data.misiones)
       ? data.misiones.map((mission, index) => normalizeMission(mission, index, modo_presentacion, idioma))
       : [],
-    conclusion: normalizeString(
-      data.conclusion,
-      modo_presentacion === SECTION_MENU_PRESENTATION_MODE
-        ? messages.defaultConclusionMenu
-        : messages.defaultConclusionRooms
-    ),
+    conclusion: normalizeString(data.conclusion, ""),
     backgroundImage: normalizeString(data.backgroundImage, ""),
+    endingImage: normalizeString(data.endingImage, ""),
+    dedicatedEndingImage: data.dedicatedEndingImage === true,
+    backgroundImagePrompt: normalizeString(data.backgroundImagePrompt ?? data.background_image_prompt, ""),
+    backgroundImageAlt: normalizeString(data.backgroundImageAlt ?? data.background_image_alt, ""),
     nivel: normalizeString(data.nivel, "Primaria"),
     grado: normalizeString(data.grado, "Primero"),
     trimestre: normalizeString(data.trimestre, "1"),
@@ -722,7 +606,9 @@ export function normalizeEscapeRoomProject(data = {}) {
     // y el builder aplica después sus propios límites seguros de color/tamaño.
     themeConfig: normalizeThemeConfig(data.themeConfig)
   };
-  project.clave_final = resolveFinalPasscode({ ...data, ...project }).code;
+  project.clave_final = normalizeFinalPasscode(
+    data.clave_final ?? data.final_key ?? data.final_code ?? data.passcode ?? data.clave
+  );
   return project;
 }
 
@@ -771,10 +657,39 @@ export function validateMissionAnswer(mission = {}, answer = "") {
 }
 
 export function validateQuestionAnswer(question = {}, answer = "") {
+  if (experience.get(question.tipo_interaccion)) return experience.evaluate(question.tipo_interaccion, question.interaction_data, answer) === "correct";
+  if (question.tipo_interaccion === 'completar_espacio' && question.interaction_contract_version === 2) {
+    const pairs = question.parejas || [];
+    return Array.isArray(answer) && pairs.length > 0 && answer.length === pairs.length
+      && pairs.every((pair, index) => normalizeBaseText(answer[index]) === normalizeBaseText(pair.derecha));
+  }
   if (normalizeTextSubtype(question.subtipo_respuesta) === "frase_libre") {
     return Boolean(String(answer ?? "").trim());
   }
   const normalizedAnswer = normalizePlayerAnswer(answer, question);
   if (!normalizedAnswer) return false;
   return getQuestionAcceptedAnswers(question).includes(normalizedAnswer);
+}
+
+export function stripPrivateGenerationFields(project = {}) {
+  const cleanProject = structuredClone(project || {});
+  delete cleanProject._generation_manifest;
+  (cleanProject.misiones || []).forEach((mission) => {
+    delete mission._generation_manifest;
+    delete mission._narrative_contract;
+    (mission.preguntas || []).forEach((question) => {
+      delete question._coverage_anchor;
+      delete question._plan_id;
+      delete question._assessment_case_id;
+      delete question._case_source;
+      delete question._case_data;
+      delete question._transfer_delta;
+      delete question._reasoning_evidence;
+      delete question._integrates_knowledge_ids;
+      delete question._mechanic_contract;
+      delete question._narrative_effect;
+      delete question._generation_manifest;
+    });
+  });
+  return cleanProject;
 }

@@ -93,7 +93,7 @@ try {
   if (process.env.PIGPEN_DRAG_DROP_SCREENSHOT) {
     await page.screenshot({ path: process.env.PIGPEN_DRAG_DROP_SCREENSHOT, fullPage: true });
   }
-  const savedBeforeReload = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.includes(".v3.menu_secciones."))?.[1] || "");
+  const savedBeforeReload = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.includes(".v5.menu_secciones."))?.[1] || "");
   assert.match(savedBeforeReload, /"questionDragLocked":\{"actividad-drag::pregunta-drag":\{"2":true\}\}/, "La pareja correcta debe guardarse antes de recargar.");
 
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -115,7 +115,7 @@ try {
   const state = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
   assert.equal(state.progress.completed, 1, "Completar las parejas debe completar la actividad.");
   assert.equal(state.currentActivity.questions[0].completed, true, "La salida textual debe exponer la pregunta completada.");
-  const stored = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.includes(".v3.menu_secciones."))?.[1] || "");
+  const stored = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.includes(".v5.menu_secciones."))?.[1] || "");
   assert.match(stored, /questionDragMatches/, "El progreso persistido debe incluir las asignaciones drag & drop.");
   assert.deepEqual(pageErrors, [], "El runtime no debe producir errores de página.");
 } finally {

@@ -18,10 +18,10 @@ const project = {
     contexto: "The NOVA protocol organizes an Earth systems investigation. Alpha begins the sequence, Beta connects the observations, and Gamma closes the analysis. The protocol is inactive when the safety statement is false. Earth is the keyword used for the family metaphor activity.",
     datos_clave: ["Alpha comes first.", "Gamma closes the sequence.", "Earth is the keyword."],
     preguntas: [
-      { id: "boolean", titulo: "Boolean", reto: "Choose false.", pista: "Añade una pista útil, pero no obvia.", tipo_interaccion: "verdadero_falso", respuesta_correcta: false },
+      { id: "boolean", titulo: "Boolean", reto: "The NOVA safety protocol is active.", pista: "Check the briefing to determine whether the NOVA protocol is active or inactive.", tipo_interaccion: "verdadero_falso", respuesta_correcta: false },
       { id: "sequence", titulo: "Sequence", reto: "Order the phases.", tipo_interaccion: "ordenar_secuencia", elementos: ["Alpha", "Beta", "Gamma"] },
       { id: "blank", titulo: "Blank", reto: "Complete the protocol.", tipo_interaccion: "completar_espacio", texto_con_hueco: "Protocol ___ is active.", respuesta_correcta: "NOVA", respuestas_aceptadas: ["NOVA"] },
-      { id: "word", titulo: "Earth family", reto: "Reconnect the Earth family metaphors by linking images and natural elements with their appropriate kinship titles. Responde con una sola palabra.", tipo_interaccion: "texto", subtipo_respuesta: "palabra", respuesta_correcta: "Earth" }
+      { id: "word", titulo: "Earth family", reto: "Enter the keyword used for the family metaphor activity.", tipo_interaccion: "texto", subtipo_respuesta: "palabra", respuesta_correcta: "Earth" }
     ]
   }]
 };
@@ -60,14 +60,16 @@ try {
   assert.equal(await page.locator("[data-question-boolean]").count(), 2, "Verdadero/Falso debe renderizar dos controles semánticos.");
   const booleanCard = page.locator("[data-question-key='catalog-room::boolean']");
   await booleanCard.locator("[data-question-hint]").click();
-  assert.match(await booleanCard.locator("[data-question-hint-box]").innerText(), /^Check the subject and action/);
-  assert.doesNotMatch(await booleanCard.locator("[data-question-hint-box]").innerText(), /pista|añade|read the prompt carefully/i);
+  assert.equal(
+    await booleanCard.locator("[data-question-hint-box]").innerText(),
+    "Check the briefing to determine whether the NOVA protocol is active or inactive.",
+    "El runtime debe mostrar literalmente la pista editorial sin reemplazarla localmente."
+  );
   assert.equal(await page.locator("[data-sequence-item]").count(), 3, "La secuencia debe renderizar sus tres elementos.");
   assert.ok(await page.locator("[data-sequence-move]").first().evaluate((button) => button.getBoundingClientRect().height >= 44), "Los controles de secuencia deben medir al menos 44 px.");
   assert.equal(await page.locator(".fill-blank-input").count(), 1, "Completar espacio debe renderizar la entrada dentro de la frase.");
   const wordPrompt = await page.locator("[data-question-key='catalog-room::word'] .question-story").innerText();
-  assert.match(wordPrompt, /Answer with one word\.$/);
-  assert.doesNotMatch(wordPrompt, /Responde con una sola palabra/i);
+  assert.equal(wordPrompt, "Enter the keyword used for the family metaphor activity.", "El runtime no debe añadir instrucciones al reto.");
 
   await page.locator('[data-sequence-move][data-sequence-position="0"][data-sequence-delta="1"]').click();
   const movedOrder = JSON.parse(await page.evaluate(() => window.render_game_to_text())).currentActivity.questions.find((question) => question.id === "sequence").sequenceOrder;
@@ -83,10 +85,11 @@ try {
   assert.equal(state.progress.completed, 1, "El autofill y la verificación deben completar los tres tipos nuevos.");
 
   await page.locator("[data-menu-next]").click();
-  assert.equal(await page.locator(".final-code-reveal").isVisible(), true, "La clave debe mostrarse en el panel final.");
-  assert.match(await page.locator(".final-code-reveal").innerText(), /HALT77/);
-  await page.locator("#masterPasscodeInput").fill("HALT77");
-  await page.locator("#btnVerifyMasterPasscode").click();
+  const finalTiles = page.locator("#finalPasscodeTiles .final-passcode-tile");
+  assert.equal(await finalTiles.count(), 6, "El panel final debe mostrar el rompecabezas editorial sin revelar la clave.");
+  await page.locator("[data-editorial-autofill]").click();
+  assert.equal((await finalTiles.allTextContents()).join(""), "HALT77", "El autofill editorial debe ordenar las fichas de la clave.");
+  await page.locator("[data-editorial-autofill]").click();
   await page.waitForTimeout(2100);
   state = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
   assert.equal(state.finished, true, "La clave correcta debe finalizar la partida.");

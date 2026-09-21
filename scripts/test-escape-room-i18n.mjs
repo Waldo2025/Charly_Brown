@@ -70,10 +70,10 @@ for (const locale of SUPPORTED_GAME_LOCALES) {
 }
 
 const englishFallbacks = normalizeEscapeRoomProject({ idioma: "en-US", misiones: [{}] });
-assert.equal(englishFallbacks.misiones[0].titulo, "Room 1");
-assert.equal(englishFallbacks.misiones[0].preguntas[0].titulo, "Question 1");
-assert.match(englishFallbacks.misiones[0].historia, /room's story/i);
-assert.match(englishFallbacks.misiones[0].contexto, /investigation/i);
+assert.equal(englishFallbacks.misiones[0].titulo, "");
+assert.equal(englishFallbacks.misiones[0].preguntas[0].titulo, "");
+assert.equal(englishFallbacks.misiones[0].historia, "");
+assert.equal(englishFallbacks.misiones[0].contexto, "");
 const legacyBriefingFallback = normalizeEscapeRoomProject({
   idioma: "en-US",
   misiones: [{ historia: "This legacy story contains the facts needed to solve the room." }]
@@ -83,7 +83,7 @@ const migratedDefaultBriefing = normalizeEscapeRoomProject({
   idioma: "fr-FR",
   misiones: [{ contexto: getGameMessages("es-419").defaultBriefingContext }]
 });
-assert.equal(migratedDefaultBriefing.misiones[0].contexto, getGameMessages("fr-FR").defaultBriefingContext, "Los expedientes automáticos antiguos deben adoptar el idioma elegido.");
+assert.equal(migratedDefaultBriefing.misiones[0].contexto, getGameMessages("es-419").defaultBriefingContext, "El normalizador no debe traducir ni sustituir expedientes editoriales.");
 const localizedBriefingLabels = {
   "es-419": "He leído el expediente · Comenzar",
   "en-US": "I’ve read the briefing · Start",
@@ -97,30 +97,43 @@ for (const [locale, label] of Object.entries(localizedBriefingLabels)) {
   });
   assert.ok(preview.includes(label), `${locale} debe localizar el botón del expediente.`);
 }
+const customBriefingPreview = buildPreviewDocument({
+  idioma: "en-US",
+  misiones: [{
+    id: "custom-briefing",
+    historia: "Story",
+    contexto: "Context",
+    datos_clave: ["Evidence"],
+    briefing_titulo: "Case file",
+    briefing_instruccion: "Read this custom dossier first.",
+    briefing_evidencias_titulo: "Verified clues",
+    briefing_objetivo_titulo: "Current objective",
+    briefing_boton_inicio: "Dossier reviewed · Begin",
+    briefing_boton_revisar: "Open the dossier again",
+    briefing_mensaje_listo: "The dossier is ready.",
+    preguntas: [{ respuesta_correcta: "A" }]
+  }]
+});
+for (const expected of ["Case file", "Read this custom dossier first.", "Verified clues", "Current objective", "Dossier reviewed · Begin", "Open the dossier again", "The dossier is ready."]) {
+  assert.ok(customBriefingPreview.includes(expected), `El preview debe usar el texto editorial «${expected}».`);
+}
 const migratedEnglishHint = normalizeEscapeRoomProject({
   idioma: "en-US",
   misiones: [{ preguntas: [{ reto: "Find the correct option.", respuesta_correcta: "A", pista: "Lee con atención el enunciado y busca una pista concreta (número, acción, personaje, lugar o condición). No des la respuesta; identifica qué detalle permite descartar opciones incorrectas." }] }]
 });
-assert.match(migratedEnglishHint.misiones[0].preguntas[0].pista, /^Find the sentence in the briefing/);
-assert.doesNotMatch(buildPreviewDocument(migratedEnglishHint), /Lee con atención/);
+assert.match(migratedEnglishHint.misiones[0].preguntas[0].pista, /^Lee con atención/);
+assert.match(buildPreviewDocument(migratedEnglishHint), /Lee con atención/);
 const migratedDetailedHint = normalizeEscapeRoomProject({
   idioma: "fr-FR",
   misiones: [{ preguntas: [{ reto: "Choisis.", respuesta_correcta: "A", pista: 'En el enunciado, usa el detalle "triangle" para descartar opciones que no cumplan esa condición.' }] }]
 });
-assert.match(migratedDetailedHint.misiones[0].preguntas[0].pista, /^Retrouve dans le dossier/);
-assert.doesNotMatch(migratedDetailedHint.misiones[0].preguntas[0].pista, /triangle|Utilise le détail/i);
+assert.equal(migratedDetailedHint.misiones[0].preguntas[0].pista, 'En el enunciado, usa el detalle "triangle" para descartar opciones que no cumplan esa condición.');
 const customSpanishHintInEnglishProject = normalizeEscapeRoomProject({
   idioma: "en-US",
   misiones: [{ preguntas: [{ reto: "Choose.", respuesta_correcta: "A", pista: "Recuerda el experimento realizado ayer en clase." }] }]
 });
 assert.equal(customSpanishHintInEnglishProject.misiones[0].preguntas[0].pista, "Recuerda el experimento realizado ayer en clase.", "Una pista editorial personalizada no debe traducirse ni sobrescribirse automáticamente.");
-const concreteDragHintStarts = {
-  "es-419": "Empieza por",
-  "en-US": "Start with",
-  "fr-FR": "Commence par",
-  "pt-BR": "Comece por"
-};
-for (const [locale, expectedStart] of Object.entries(concreteDragHintStarts)) {
+for (const locale of ["es-419", "en-US", "fr-FR", "pt-BR"]) {
   const project = normalizeEscapeRoomProject({
     idioma: locale,
     misiones: [{ preguntas: [{
@@ -136,20 +149,11 @@ for (const [locale, expectedStart] of Object.entries(concreteDragHintStarts)) {
     }] }]
   });
   const hint = project.misiones[0].preguntas[0].pista;
-  assert.ok(hint.startsWith(expectedStart), `${locale} debe construir una pista conceptual localizada.`);
-  assert.match(hint, /bios/);
-  assert.doesNotMatch(hint, /\bmatch\b|\beach\b/i);
-  if (locale !== "es-419") assert.doesNotMatch(hint, /\sy\s/i);
-  assert.ok(buildPreviewDocument(project).includes(hint), `${locale} debe conservar la pista reparada en preview/ZIP.`);
+  assert.equal(hint, 'Use the detail "match" y "each" in the prompt to rule out options.', `${locale} debe conservar literalmente la pista para que la auditoría de Gemini decida si requiere corrección.`);
+  assert.match(buildPreviewDocument(project), /Use the detail/, `${locale} debe conservar la pista editorial en preview/ZIP.`);
 }
 const mixedLanguageInstruction = "Reconnect the Earth family metaphors by linking images and natural elements with their appropriate kinship titles. Responde con una sola palabra.";
-const localizedInstructionExpectations = {
-  "en-US": "Answer with one word.",
-  "en-GB": "Answer with one word.",
-  "fr-FR": "Réponds avec un seul mot.",
-  "pt-BR": "Responda com uma única palavra."
-};
-for (const [locale, expectedInstruction] of Object.entries(localizedInstructionExpectations)) {
+for (const locale of ["en-US", "en-GB", "fr-FR", "pt-BR"]) {
   const localizedProject = normalizeEscapeRoomProject({
     idioma: locale,
     misiones: [{ preguntas: [{
@@ -160,9 +164,8 @@ for (const [locale, expectedInstruction] of Object.entries(localizedInstructionE
     }] }]
   });
   const localizedChallenge = localizedProject.misiones[0].preguntas[0].reto;
-  assert.ok(localizedChallenge.endsWith(expectedInstruction), `${locale} debe relocalizar la instrucción automática.`);
-  assert.doesNotMatch(localizedChallenge, /Responde con una sola palabra/i);
-  assert.doesNotMatch(buildPreviewDocument(localizedProject), /Responde con una sola palabra/i);
+  assert.equal(localizedChallenge, mixedLanguageInstruction, `${locale} no debe provocar una reescritura local del reto.`);
+  assert.match(buildPreviewDocument(localizedProject), /Responde con una sola palabra/i);
 }
 const originalLocaleProject = normalizeEscapeRoomProject({
   idioma: "es-419",
@@ -170,9 +173,7 @@ const originalLocaleProject = normalizeEscapeRoomProject({
 });
 const originalChallenge = originalLocaleProject.misiones[0].preguntas[0].reto;
 const changedLocaleProject = normalizeEscapeRoomProject({ ...originalLocaleProject, idioma: "en-US" });
-assert.notEqual(changedLocaleProject.misiones[0].preguntas[0].reto, originalChallenge, "Cambiar el locale debe relocalizar la instrucción automática.");
-assert.match(changedLocaleProject.misiones[0].preguntas[0].reto, /Answer with one word\.$/);
-assert.match(changedLocaleProject.misiones[0].preguntas[0].reto, /^Identifica el concepto\./, "El contenido pedagógico original debe conservarse.");
+assert.equal(changedLocaleProject.misiones[0].preguntas[0].reto, originalChallenge, "Cambiar el locale no debe reescribir el contenido pedagógico.");
 
 const creatorSource = await readFile(new URL("../public/js/PigPenCreator.js", import.meta.url), "utf8");
 assert.match(creatorSource, /idioma:\s*formData\.idioma\s*\|\|\s*"es-419"/);

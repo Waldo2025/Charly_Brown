@@ -9,12 +9,14 @@ const storageRules = readFileSync(new URL("../storage.rules", import.meta.url), 
 
 assert.match(html, /id="btnAddTopic"[\s\S]*data-er-tooltip="Crear tema"/, "El Brief debe ofrecer el botón para crear temas.");
 assert.match(html, /data-er-inspector-tab="topics"[\s\S]*id="erTopicList"/, "El inspector debe incluir el panel Temas.");
-assert.match(html, /<input type="number" id="erNewTopicNumber" min="1" step="1"/, "El diálogo debe aceptar enteros positivos sin máximo fijo.");
+assert.match(html, /<select id="erNewTopicNumber" required/, "El diálogo debe seleccionar el tema o chapter desde una lista.");
 
 assert.match(js, /const TOPICS_SUBCOLLECTION = "topics";/, "PigPen debe usar la subcolección topics.");
 assert.match(js, /async function migrateLegacySessionTopic\([\s\S]*createTopicDocument/, "Las sesiones legacy deben migrarse al primer tema.");
 assert.match(js, /function buildInheritedTopicFormState\([\s\S]*inherited\.temaInput = "";[\s\S]*inherited\.objetivoInput = "";/, "Un tema nuevo no debe heredar tema curricular ni objetivo final.");
-assert.match(js, /state\.topics\.some\(\(topic\) => topic\.academicNumber === academicNumber\)/, "No deben permitirse números de tema duplicados.");
+assert.doesNotMatch(js, /state\.topics\.some\(\(topic\) => topic\.academicNumber === academicNumber\)/, "La identidad es el ID, no el número de tema.");
+assert.match(js, /function syncNewTopicNumberOptions\([\s\S]*option\.disabled = false/, "El selector permite repetir temas sin sobrescribirlos.");
+assert.match(js, /materiaSelect\?\.value[\s\S]*=== "Inglés" \? "Chapter" : "Tema"/, "El selector debe usar Chapter para Inglés y Tema para las demás materias.");
 assert.match(js, /Mueve la sesión a Borrador antes de crear un tema nuevo/, "Crear temas debe bloquearse en sesiones publicadas.");
 assert.match(js, /await flushPendingTopicSave\(\);[\s\S]*await loadTopicIntoEditor\(topic/, "Cambiar de tema debe guardar antes de hidratar el siguiente.");
 assert.match(js, /invalidTopics = state\.topics\.filter[\s\S]*temaInput[\s\S]*objetivoInput[\s\S]*validateProjectSetup/, "La publicación debe validar todos los temas.");

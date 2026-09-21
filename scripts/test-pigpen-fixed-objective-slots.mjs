@@ -1,0 +1,57 @@
+import {experience} from '../public/js/escape-room-experience.mjs';
+import {experienceContractSchema} from '../public/js/escape-room-experience-authoring.mjs';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const source = fs.readFileSync('public/js/PigPenCreator.js', 'utf8');
+function extract(name) {
+  const start = source.search(new RegExp(`^(?:async )?function ${name}\\(`, 'm'));
+  assert.ok(start >= 0, name);
+  const rest = source.slice(start);
+  return rest.slice(0, rest.slice(1).search(/^(?:async )?function /m) + 1);
+}
+const context = vm.createContext({experience,experienceContractSchema,objectivePlanContractIssues:()=>[]});
+vm.runInContext(['buildObjectiveRoomFillResponseSchema', 'buildFixedObjectiveFillShape', 'validateFixedObjectiveFill', 'requestFixedObjectiveRoomFill'].map(extract).join('\n'), context);
+const template = { question_plans: [1,2,3,4].map(i => ({plan_id:`r2_p${i}`})), reserve_opportunity:{plan_id:'r2_reserve'} };
+const schema = context.buildObjectiveRoomFillResponseSchema(template);
+assert.deepEqual(Array.from(schema.required), ['r2_p1','r2_p2','r2_p3','r2_p4','r2_reserve']);
+assert.ok(!schema.properties.question_plans);
+assert.ok(!schema.properties.r2_p1.properties.interaction);
+assert.ok(!schema.properties.r2_p1.properties.plan_id);
+const shape = context.buildFixedObjectiveFillShape(schema);
+assert.equal(context.validateFixedObjectiveFill(shape, schema).length, 0);
+const incomplete = structuredClone(shape);
+delete incomplete.r2_p2.knowledge;
+assert.ok(context.validateFixedObjectiveFill(incomplete, schema).some(issue=>issue.includes('r2_p2.knowledge')));
+let calls = 0;
+context.requestQualityJson = async (prompt, data, temperature, options) => {
+  calls++;
+  if (calls === 1) return incomplete;
+  assert.deepEqual(Array.from(options.responseJsonSchema.required), ['r2_p2']);
+  return { r2_p2: shape.r2_p2, r2_p1: { knowledge: 'unrequested overwrite' } };
+};
+const result = await context.requestFixedObjectiveRoomFill('fixed prompt', {}, template);
+assert.equal(calls, 2);
+assert.equal(result.r2_p1, incomplete.r2_p1);
+assert.equal(Object.keys(result).length, 5);
+calls = 0;
+context.requestQualityJson = async () => { calls++; return Object.fromEntries(Object.entries(shape).reverse()); };
+assert.equal(Object.keys(await context.requestFixedObjectiveRoomFill('fixed', {}, template)).length, 5);
+assert.equal(calls, 1);
+context.requestQualityJson = async () => ({ question_plans: [] });
+await assert.rejects(context.requestFixedObjectiveRoomFill('fixed', {}, template), /campos fijos/);
+assert.match(source, /template.question_plans.map\(\(slot\) => \([\s\S]*?filled\[slot.plan_id\]/);
+const challenging={question_plans:[{plan_id:'hard',difficulty:'desafiante',difficulty_policy_version:2,pedagogical_role:'synthesis',interaction:'opcion_multiple'}]};
+const hardSchema=context.buildObjectiveRoomFillResponseSchema(challenging);
+const hardShape=context.buildFixedObjectiveFillShape(hardSchema);
+assert.ok(context.validateFixedObjectiveFill(hardShape,hardSchema).length,'Empty reasoning is rejected');
+hardShape.hard.reasoning_steps=['Compare evidence A and B','Apply the exclusion constraint','Combine both results'];
+hardShape.hard.distractor_errors=['Ignores evidence A','Reverses the exclusion rule','Uses only the first result'];
+assert.equal(context.validateFixedObjectiveFill(hardShape,hardSchema).length,0);
+calls=0;
+context.requestQualityJson=async()=>{
+ calls++;return calls===1?{hard:{...hardShape.hard,reasoning_steps:['Copy','Copy','Copy']}}:hardShape;
+};
+await context.requestFixedObjectiveRoomFill('challenging',{},challenging);
+assert.equal(calls,2,'Repeated steps trigger a targeted retry');
+console.log('PASS fixed slots: exact keys/fields, immutable metadata excluded, missing slot recovery, no overwrites, order independent, one call on success');

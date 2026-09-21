@@ -340,9 +340,9 @@ try {
   assert.equal(restoredState.progress.completed, 1, "La recarga debe restaurar el avance compatible.");
   assert.equal(await page.locator("[data-menu-mission='actividad-dos']").isDisabled(), false);
   const storedProgress = await page.evaluate(() => Object.entries(localStorage)
-    .filter(([key]) => key.includes(".v3.menu_secciones."))
+    .filter(([key]) => key.includes(".v5.menu_secciones."))
     .map(([, value]) => JSON.parse(value)));
-  assert.ok(storedProgress.some((item) => item.version === 3 && item.mode === "menu_secciones" && item.fingerprint), "El save debe incluir versión, modo y huella.");
+  assert.ok(storedProgress.some((item) => item.version === 5 && item.mode === "menu_secciones" && item.fingerprint), "El save debe incluir versión, modo y huella.");
 
   await page.goto(`${origin}/changed`, { waitUntil: "domcontentloaded" });
   const incompatibleState = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
@@ -365,8 +365,8 @@ try {
 
   await page.locator("[data-menu-section='ending']").click();
   assert.equal(await page.locator("#masterPanelContainer").isVisible(), true, "La card final debe abrir el panel maestro.");
-  await page.locator("#masterPasscodeInput").fill("NOVA");
-  await page.locator("#btnVerifyMasterPasscode").click();
+  await page.locator("[data-editorial-autofill]").click();
+  await page.locator("[data-editorial-autofill]").click();
   await page.waitForTimeout(2200);
   assert.equal(await page.locator("#victoryContainer").isVisible(), true, "La clave correcta debe mostrar la victoria.");
   const victoryState = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
@@ -407,11 +407,11 @@ try {
   const roomsMigration = await page.evaluate(() => ({
     legacy: localStorage.getItem("escapeRoomGame.progress.salaslegacyruntime"),
     versioned: Object.entries(localStorage)
-      .filter(([key]) => key.includes("escapeRoomGame.progress.salaslegacyruntime.v3.salas."))
+      .filter(([key]) => key.includes("escapeRoomGame.progress.salaslegacyruntime.v5.salas."))
       .map(([, value]) => JSON.parse(value))
   }));
   assert.equal(roomsMigration.legacy, null, "La migración de salas debe retirar la clave legacy una vez guardado v2.");
-  assert.ok(roomsMigration.versioned.some((item) => item.version === 3 && item.mode === "salas"), "La migración debe crear un save v3 para salas.");
+  assert.ok(roomsMigration.versioned.some((item) => item.version === 5 && item.mode === "salas"), "La migración debe crear un save v5 para salas.");
 
   await page.goto(`${origin}/question-types`, { waitUntil: "domcontentloaded" });
   await page.locator("[data-game-start]").click();
@@ -487,8 +487,8 @@ try {
   assert.equal(await page.locator("[data-question-card]").count(), 4, "La actividad preparada debe conservar todas sus preguntas.");
   assert.equal(
     await page.locator("[data-question-key='actividad-tipos-editados::texto-editado'] [data-question-answer]").evaluate((input) => input.value),
-    "pensamiento",
-    "Autocompletar debe usar la clave abierta normalizada a una sola palabra."
+    "pensamiento crítico",
+    "Autocompletar debe conservar la respuesta cerrada válida de hasta dos palabras."
   );
   assert.equal(
     await page.locator("[data-question-answer].is-number").getAttribute("inputmode"),

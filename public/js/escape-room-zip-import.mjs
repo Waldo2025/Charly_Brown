@@ -88,6 +88,7 @@ export async function restorePigPenArchiveAssets(project, { manifestPath, getBin
   };
 
   await restore(restored, "backgroundImage");
+  if (restored.reward_plan) await restore(restored.reward_plan, "image");
   for (const mission of Array.isArray(restored.misiones) ? restored.misiones : []) {
     await restore(mission, "imagen");
     if (mission?.media && typeof mission.media === "object") await restore(mission.media, "url");

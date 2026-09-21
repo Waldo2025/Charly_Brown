@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import { QUESTION_AUTHORING_TEMPLATES, QUESTION_BRIEF_GROUNDING, buildQuestionAuthoringTemplate } from '../public/js/escape-room-question-policy.mjs';
+const types = ['texto', 'opcion_multiple', 'relacion_columnas', 'drag_drop', 'verdadero_falso', 'ordenar_secuencia', 'completar_espacio', 'multimedia'];
+assert.deepEqual(Object.keys(QUESTION_AUTHORING_TEMPLATES), types);
+assert.equal(new Set(types.map(buildQuestionAuthoringTemplate)).size, 8);
+assert.match(QUESTION_BRIEF_GROUNDING, /brief original → curriculum_inventory/);
+assert.match(QUESTION_BRIEF_GROUNDING, /briefing existente está bloqueado/);
+const source = fs.readFileSync('public/js/PigPenCreator.js', 'utf8');
+const start = source.indexOf('function buildRoomQuestionContracts(');
+const end = source.indexOf('\nfunction ', start + 1);
+const context = vm.createContext({ ESCAPE_ROOM_INTERACTION_CATALOG: types, buildQuestionAuthoringTemplate });
+vm.runInContext(source.slice(start, end), context);
+const plans = types.map((interaction, i) => ({ interaction, plan_id: String(i) }));
+const contracts = context.buildRoomQuestionContracts({ question_plans: plans }, [], 8);
+contracts.forEach((contract, i) => {
+  assert.equal(contract.authoring_template, QUESTION_AUTHORING_TEMPLATES[types[i]]);
+  assert.equal(contract.plan_id, String(i));
+});
+const overridden = context.buildRoomQuestionContracts({ question_plans: plans }, ['multimedia'], 1, { preferPlannedInteractions: false });
+assert.equal(overridden[0].authoring_template, QUESTION_AUTHORING_TEMPLATES.multimedia);
+assert.match(source, /PLANTILLA DE AUTORÍA DEL TIPO:[\s\S]*?buildQuestionAuthoringTemplate\(sourceQuestion.tipo_interaccion/);
+console.log('PASS eight authoring templates, curriculum grounding, plan-specific selection and regeneration wiring');

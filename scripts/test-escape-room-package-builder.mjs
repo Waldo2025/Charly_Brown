@@ -193,9 +193,9 @@ assert.match(sectionMenuCss, /@media \(max-width: 560px\)[\s\S]*\.sections-grid\
   "El menú debe usar una columna en móvil.");
 assert.match(sectionMenuCss, /@media \(prefers-reduced-motion: reduce\)/, "El CSS debe respetar movimiento reducido.");
 assert.match(sectionMenuJs, /ESCAPE_ROOM_PRESENTATION_MODE = "menu_secciones"/, "El runtime debe hidratar el modo por secciones.");
-assert.match(sectionMenuJs, /ESCAPE_ROOM_PROGRESS_VERSION = 3/, "La persistencia debe estar versionada.");
+assert.match(sectionMenuJs, /ESCAPE_ROOM_PROGRESS_VERSION = 5/, "La persistencia debe estar versionada.");
 assert.match(sectionMenuJs, /ESCAPE_ROOM_PROGRESS_FINGERPRINT = "[a-z0-9]+"/, "La persistencia debe incluir una huella estable.");
-assert.match(sectionMenuJs, /if \(!raw && !IS_MENU_MODE\)/, "Solo el modo salas debe migrar el progreso legacy.");
+assert.match(sectionMenuJs, /if \(!raw && !IS_MENU_MODE && !REVIEW_PROGRESS_ID\)/, "Solo el juego exportado en modo salas debe migrar el progreso legacy por título.");
 assert.match(sectionMenuJs, /function syncMenuUnlocksFromProgress\(/, "El menú debe reconstruir el desbloqueo secuencial.");
 assert.match(sectionMenuJs, /window\.render_game_to_text = renderGameToText/, "El runtime debe exponer una salida textual estable.");
 assert.match(sectionMenuJs, /window\.advanceTime = advanceTime/, "El runtime debe exponer control temporal determinista.");
@@ -348,13 +348,13 @@ const editedQuestionJson = JSON.parse(editedQuestionPkg.files["assets/escape-roo
 const editedQuestionPreview = buildPreviewDocument(editedQuestionProject, { editorialReview: true });
 const exportedEditedQuestion = editedQuestionJson.misiones[0].preguntas[0];
 
-assert.equal(exportedEditedQuestion.reto, "Reto actualizado desde el editor Responde con una sola palabra.", "El ZIP debe conservar el reto editado y aclarar el contrato de una palabra.");
+assert.equal(exportedEditedQuestion.reto, "Reto actualizado desde el editor", "El ZIP debe conservar literalmente el reto editado sin añadir instrucciones locales.");
 assert.equal(exportedEditedQuestion.pista, "Pista actualizada desde el editor", "El ZIP debe conservar la pista editada.");
-assert.equal(exportedEditedQuestion.respuesta_correcta, "respuesta", "El ZIP debe reducir una respuesta abierta editada a una sola palabra.");
-assert.deepEqual(exportedEditedQuestion.respuestas_aceptadas, ["respuesta", "alias"], "El ZIP debe conservar únicamente variantes abiertas de una palabra.");
+assert.equal(exportedEditedQuestion.respuesta_correcta, "respuesta nueva", "El ZIP debe conservar la respuesta correcta editada.");
+assert.deepEqual(exportedEditedQuestion.respuestas_aceptadas, ["respuestanueva", "aliasnuevo"], "El ZIP debe conservar las variantes equivalentes normalizadas para validación.");
 assert.match(editedQuestionPreview, /Reto actualizado desde el editor/, "El preview debe recibir el reto editado.");
 assert.match(editedQuestionPreview, /Pista actualizada desde el editor/, "El preview debe recibir la pista editada.");
-assert.match(editedQuestionPreview, /\"respuesta_correcta\"\s*:\s*\"respuesta\"/, "El preview debe recibir la respuesta abierta ya normalizada a una palabra.");
+assert.match(editedQuestionPreview, /\"respuesta_correcta\"\s*:\s*\"respuesta nueva\"/, "El preview debe recibir la respuesta correcta literal.");
 
 const freeResponsePackage = buildEscapeRoomPackage({
   titulo: "Frase libre exportable",

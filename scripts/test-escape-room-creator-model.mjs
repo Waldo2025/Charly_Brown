@@ -7,8 +7,6 @@ import {
   normalizeMissionTitle,
   normalizePresentationMode,
   isSingleWordAnswer,
-  extractSingleWordAnswer,
-  isOpenEndedTextPrompt,
   normalizeAcceptedAnswersForSubtype,
   resolveTextSubtypeForAnswer,
   getMissionAcceptedAnswers,
@@ -16,20 +14,119 @@ import {
   normalizePlayerAnswer,
   validateMissionAnswer,
   validateQuestionAnswer,
-  normalizeMediaValue
+  normalizeMediaValue,
+  removeQuestionAtIndex,
+  resolveOptionAnswerIndex,
+  collectFullQuestionRepairTargets
 } from "../public/js/escape-room-creator-model.mjs";
 
+const removableQuestions = [{ id: "q1" }, { id: "q2" }, { id: "q3" }];
+const removedMiddleQuestion = removeQuestionAtIndex(removableQuestions, 1);
+assert.deepEqual(removedMiddleQuestion.questions.map(({ id }) => id), ["q1", "q3"], "Debe eliminar únicamente la pregunta indicada.");
+assert.equal(removedMiddleQuestion.removedQuestion?.id, "q2", "Debe informar cuál pregunta fue eliminada.");
+assert.equal(removableQuestions.length, 3, "La operación base no debe mutar la lista original.");
+assert.equal(removeQuestionAtIndex([{ id: "q1" }], 0).removedQuestion, null, "No debe eliminar la última pregunta de una sala.");
+
+assert.equal(
+  resolveOptionAnswerIndex(["Economic", "-ism", "Political"], "-ism", ["Economic"], 0),
+  1,
+  "La respuesta corregida debe tener prioridad sobre respuestas aceptadas e índices obsoletos."
+);
+assert.equal(
+  resolveOptionAnswerIndex(["Economic", "-ism", "Political"], "ism", [], -1),
+  1,
+  "La comparación debe reconocer una opción con guion sin alterar su texto visible."
+);
+
+assert.deepEqual(
+  collectFullQuestionRepairTargets([
+    { roomIndex: 2, questionIndex: 3, field: "reto", code: "repeated_question" },
+    { roomIndex: 2, questionIndex: 3, field: "respuesta_correcta", code: "repeated_answer" },
+    { roomIndex: 2, questionIndex: 1, field: "pista", code: "unrelated_hint" },
+    { roomIndex: 1, questionIndex: null, field: "contexto", code: "briefing_too_short" }
+  ]),
+  [{ roomIndex: 2, questionIndex: 3 }],
+  "Una repetición debe regenerar una sola vez la pregunta completa, sin convertir pistas o briefings en regeneraciones totales."
+);
+
+assert.deepEqual(
+  normalizeAcceptedAnswersForSubtype(["Orion", "orion", "ORION"], "palabra"),
+  ["orion"],
+  "Las respuestas aceptadas equivalentes deben normalizarse sin duplicados."
+);
+
 assert.equal(isSingleWordAnswer("comprensión"), true, "Una palabra real debe ser válida para el subtipo palabra.");
-assert.equal(isSingleWordAnswer("pensamiento crítico"), false, "Una respuesta con espacios no debe pasar como palabra.");
+assert.equal(isSingleWordAnswer("mother-in-law"), true, "Una palabra compuesta con guiones debe ser válida.");
+assert.equal(isSingleWordAnswer("l’été"), true, "Una palabra Unicode con apóstrofo tipográfico debe ser válida.");
+assert.equal(isSingleWordAnswer("pensamiento crítico"), true, "Dos palabras sin números deben ser válidas para el subtipo palabra.");
+assert.equal(isSingleWordAnswer("word 2"), false, "Una frase que mezcla palabras y números no debe pasar como palabra.");
 assert.equal(
   isSingleWordAnswer("lacapacidaddecomprendercriticamenteexpresarideascoherentementeyargumentarconsolidez"),
   false,
   "Una frase pegada y excesivamente larga no debe pasar como palabra."
 );
-assert.equal(resolveTextSubtypeForAnswer("palabra", "pensamiento crítico"), "frase_corta", "El resolvedor genérico debe preservar compatibilidad fuera de preguntas abiertas.");
+assert.equal(resolveTextSubtypeForAnswer("palabra", "pensamiento crítico"), "palabra", "El resolvedor debe conservar hasta dos palabras sin números.");
 assert.equal(resolveTextSubtypeForAnswer("frase_corta", "pensamiento crítico"), "frase_corta", "El resolvedor genérico no debe alterar respuestas cerradas de otros tipos.");
-assert.equal(extractSingleWordAnswer("la capacidad de comprender críticamente"), "capacidad", "Debe extraer una clave legible sin concatenar frases.");
-assert.equal(isOpenEndedTextPrompt("Propón una regla y justifica su importancia"), true, "Debe detectar consignas de desarrollo libre.");
+const twoWordChallenge = "Match each Greek root with its exact meaning.";
+const duplicatedChallenge = `${twoWordChallenge} Answer using words only, without numbers. Answer using words only, without numbers.`;
+const duplicatedMissionChallenge = normalizeEscapeRoomProject({
+  idioma: "en-US",
+  misiones: [{
+    reto: duplicatedChallenge,
+    preguntas: [{ reto: "Choose the correct pair.", tipo_interaccion: "opcion_multiple", opciones: ["A", "B"] }]
+  }]
+}).misiones[0].reto;
+assert.equal(
+  duplicatedMissionChallenge,
+  duplicatedChallenge,
+  "El normalizador no debe redactar ni deduplicar el Challenge; la corrección editorial pertenece a Gemini."
+);
+const editorialInput = {
+  idioma: "en-US",
+  titulo: "The Marble Archive",
+  instrucciones: "Read the briefing, then solve the questions.",
+  clave_final: "MUSE",
+  misiones: [{
+    id: "room-1",
+    release: "ROOM 01",
+    titulo: "The Doric Gate",
+    historia: "An archivist opens the marble chamber.",
+    contexto: "The Doric order is identified by its plain capital.",
+    reto: "Restore the archive seal.",
+    pista: "Compare the capital with the description in the briefing.",
+    retroalimentacion_correcta: "The seal aligns.",
+    retroalimentacion_incorrecta: "The capital does not match.",
+    preguntas: [{
+      id: "q1",
+      release: "Q01",
+      titulo: "Identify the order",
+      reto: "Which order uses a plain capital?",
+      tipo_interaccion: "texto",
+      subtipo_respuesta: "palabra",
+      respuesta_correcta: "Doric",
+      respuestas_aceptadas: ["Doric"],
+      pista: "Look for the description of the capital.",
+      retroalimentacion_correcta: "The Doric record opens.",
+      retroalimentacion_incorrecta: "Review the capital description."
+    }]
+  }],
+  conclusion: "The archive is restored."
+};
+const normalizedEditorialOnce = normalizeEscapeRoomProject(editorialInput);
+const normalizedEditorialThrice = Array.from({ length: 2 }).reduce(
+  (projectValue) => normalizeEscapeRoomProject(projectValue),
+  normalizedEditorialOnce
+);
+for (const field of ["titulo", "instrucciones", "conclusion"]) {
+  assert.equal(normalizedEditorialThrice[field], normalizedEditorialOnce[field], `La normalización repetida debe conservar ${field}.`);
+}
+for (const field of ["release", "titulo", "historia", "contexto", "reto", "pista", "retroalimentacion_correcta", "retroalimentacion_incorrecta"]) {
+  assert.equal(normalizedEditorialThrice.misiones[0][field], normalizedEditorialOnce.misiones[0][field], `La normalización repetida debe conservar misión.${field}.`);
+}
+for (const field of ["release", "titulo", "reto", "respuesta_correcta", "pista", "retroalimentacion_correcta", "retroalimentacion_incorrecta"]) {
+  assert.equal(normalizedEditorialThrice.misiones[0].preguntas[0][field], normalizedEditorialOnce.misiones[0].preguntas[0][field], `La normalización repetida debe conservar pregunta.${field}.`);
+}
+assert.equal(Object.hasOwn(normalizedEditorialThrice.misiones[0].preguntas[0], "_coverage_anchor"), false, "El normalizador no debe reintroducir el anchor temporal después de eliminarlo.");
 assert.deepEqual(
   normalizeAcceptedAnswersForSubtype(["comprensión", "capacidad de comprender"], "palabra"),
   ["comprension"],
@@ -49,8 +146,8 @@ const malformedWordProject = normalizeEscapeRoomProject({
 assert.equal(malformedWordProject.misiones[0].preguntas[0].subtipo_respuesta, "palabra", "Una pregunta abierta debe conservar un contrato de una palabra.");
 assert.equal(
   malformedWordProject.misiones[0].preguntas[0].respuesta_correcta,
-  "capacidad",
-  "La normalización debe reducir una frase heredada a una palabra legible."
+  "la capacidad de comprender críticamente",
+  "La normalización no debe ocultar una respuesta inválida extrayendo una palabra distinta."
 );
 
 const openEndedProject = normalizeEscapeRoomProject({
@@ -67,11 +164,19 @@ const openEndedProject = normalizeEscapeRoomProject({
 });
 const repairedOpenQuestion = openEndedProject.misiones[0].preguntas[0];
 assert.equal(repairedOpenQuestion.subtipo_respuesta, "palabra", "Una respuesta abierta legacy debe migrar al subtipo palabra.");
-assert.equal(repairedOpenQuestion.respuesta_correcta, "Mantener", "Debe conservar una clave humana de una sola palabra.");
-assert.deepEqual(repairedOpenQuestion.respuestas_aceptadas, ["mantener"], "No debe conservar la frase completa como variante válida.");
-assert.match(repairedOpenQuestion.reto, /una sola palabra/i, "La consigna reparada debe explicar el formato de respuesta.");
-assert.match(repairedOpenQuestion.reto, /ordena las letras/i, "Una consigna subjetiva heredada debe convertirse en un reto cerrado y verificable.");
-assert.doesNotMatch(repairedOpenQuestion.reto, /\b(?:prop[oó]n|justifica)\b/i, "La consigna reparada ya no debe pedir producción libre.");
+assert.equal(repairedOpenQuestion.respuesta_correcta, "Mantener silencio absoluto. Esto asegura un ambiente adecuado.", "La respuesta inválida debe conservarse para que la auditoría pueda detectarla.");
+assert.deepEqual(repairedOpenQuestion.respuestas_aceptadas, [], "Una frase no debe convertirse silenciosamente en variante de palabra.");
+assert.equal(
+  repairedOpenQuestion.reto,
+  "Propón una regla escolar breve para la biblioteca y justifica su importancia en no más de 20 palabras.",
+  "La auditoría de Gemini, no el normalizador, debe decidir cómo corregir una consigna incompatible."
+);
+
+const numericWordProject = normalizeEscapeRoomProject({
+  misiones: [{ preguntas: [{ tipo_interaccion: "texto", subtipo_respuesta: "palabra", respuesta_correcta: "42", _coverage_anchor: "temporary evidence" }] }]
+});
+assert.equal(numericWordProject.misiones[0].preguntas[0].subtipo_respuesta, "numero", "Una respuesta completamente numérica debe reclasificarse como número.");
+assert.equal(numericWordProject.misiones[0].preguntas[0]._coverage_anchor, "temporary evidence", "El anchor debe sobrevivir hasta que el flujo lo elimine explícitamente después de la auditoría.");
 
 const openMultimediaProject = normalizeEscapeRoomProject({
   misiones: [{ preguntas: [{
@@ -83,8 +188,9 @@ const openMultimediaProject = normalizeEscapeRoomProject({
     media: { tipo: "imagen", url: "assets/bosque.webp", alt: "Un bosque" }
   }]}]
 });
-assert.equal(openMultimediaProject.misiones[0].preguntas[0].subtipo_respuesta, "palabra", "Una respuesta escrita sobre multimedia también debe limitarse a una palabra.");
-assert.equal(openMultimediaProject.misiones[0].preguntas[0].respuesta_correcta, "Bosque", "La respuesta multimedia abierta debe usar una única clave.");
+assert.equal(openMultimediaProject.misiones[0].preguntas[0].subtipo_respuesta, "palabra", "Una respuesta multimedia puede contener hasta dos palabras sin números.");
+assert.equal(openMultimediaProject.misiones[0].preguntas[0].respuesta_correcta, "Bosque tranquilo", "La respuesta multimedia válida debe conservarse completa.");
+assert.deepEqual(openMultimediaProject.misiones[0].preguntas[0].respuestas_aceptadas, ["bosquetranquilo"], "Las dos palabras deben normalizarse como una respuesta exacta sin inventar otra clave.");
 
 const freeResponseProject = normalizeEscapeRoomProject({
   misiones: [{ preguntas: [{
@@ -108,10 +214,10 @@ const legacyProject = normalizeEscapeRoomProject({
 });
 
 assert.equal(legacyProject.modo_presentacion, "salas", "Un proyecto legacy debe usar el modo salas.");
-assert.match(legacyProject.instrucciones, /sala/i, "Un proyecto legacy debe recibir instrucciones seguras para salas.");
-assert.equal(legacyProject.misiones[0].titulo, "Sala 1", "Debe conservar el titulo por defecto legacy.");
-assert.equal(legacyProject.misiones[0].release, "SALA 01", "Debe conservar el release por defecto legacy.");
-assert.match(legacyProject.misiones[0].historia, /sala/i, "Debe conservar el fallback narrativo legacy.");
+assert.equal(legacyProject.instrucciones, "", "El normalizador no debe inventar instrucciones para un proyecto legacy.");
+assert.equal(legacyProject.misiones[0].titulo, "", "El normalizador no debe inventar títulos editoriales.");
+assert.equal(legacyProject.misiones[0].release, "", "El normalizador no debe inventar releases editoriales.");
+assert.equal(legacyProject.misiones[0].historia, "", "El normalizador no debe inventar narrativa.");
 
 const academicPaletteProject = normalizeEscapeRoomProject({
   misiones: [{
@@ -136,7 +242,7 @@ const invalidModeProject = normalizeEscapeRoomProject({
 });
 
 assert.equal(invalidModeProject.modo_presentacion, "salas", "Un modo desconocido debe degradar a salas.");
-assert.match(invalidModeProject.instrucciones, /sala/i, "Las instrucciones vacias deben usar el fallback del modo canonico.");
+assert.equal(invalidModeProject.instrucciones, "", "Las instrucciones vacías deben permanecer vacías para que Gemini o el editor las corrijan.");
 assert.equal(normalizePresentationMode(" MENU_SECCIONES "), "menu_secciones", "Debe canonizar el modo menu.");
 assert.equal(normalizePresentationMode("otro"), "salas", "El normalizador publico debe degradar modos invalidos.");
 
@@ -187,21 +293,21 @@ const menuProject = normalizeEscapeRoomProject({
 assert.equal(menuProject.modo_presentacion, "menu_secciones", "Debe preservar el modo menu canonico.");
 assert.equal(menuProject.instrucciones, "Completa cada acertijo y vuelve al menu.", "Debe preservar y recortar instrucciones editadas.");
 assert.equal(menuProject.misiones.length, 3, "El menu debe mantener misiones como arbol comun.");
-assert.equal(menuProject.misiones[0].titulo, "Actividad 01", "Debe adaptar un titulo estructural de sala a actividad.");
-assert.equal(menuProject.misiones[0].release, "ACTIVIDAD 01", "Debe adaptar un release estructural de sala a actividad.");
-assert.equal(menuProject.misiones[1].titulo, "Actividad 2", "Debe adaptar una seccion estructural a actividad.");
-assert.equal(menuProject.misiones[1].release, "ACTIVIDAD 02", "Debe adaptar la etiqueta de seccion a actividad.");
-assert.equal(menuProject.misiones[2].titulo, "Actividad 3", "Debe usar un titulo de actividad como fallback del menu.");
+assert.equal(menuProject.misiones[0].titulo, "Sala 01", "El modo de presentación no debe reescribir un título recibido.");
+assert.equal(menuProject.misiones[0].release, "SALA 01", "El modo de presentación no debe reescribir un release recibido.");
+assert.equal(menuProject.misiones[1].titulo, "Seccion 2", "Debe preservar el título recibido sin traducción local.");
+assert.equal(menuProject.misiones[1].release, "SECCION 02", "Debe preservar la etiqueta recibida sin traducción local.");
+assert.equal(menuProject.misiones[2].titulo, "", "Debe dejar vacío un título ausente.");
 assert.equal(menuProject.misiones[2].release, "RETO LUNAR", "Debe preservar releases editoriales no genericos.");
-assert.match(menuProject.misiones[2].historia, /actividad/i, "Debe usar narrativa de actividad en el fallback del menu.");
+assert.equal(menuProject.misiones[2].historia, "", "Debe dejar vacía una narrativa ausente.");
 
 const menuFallbackContent = normalizeEscapeRoomProject({
   modo_presentacion: "menu_secciones",
   instrucciones: "",
   conclusion: ""
 });
-assert.match(menuFallbackContent.instrucciones, /actividad/i, "El fallback de instrucciones debe usar vocabulario del menu.");
-assert.doesNotMatch(menuFallbackContent.conclusion, /sala/i, "El mensaje final por defecto no debe reintroducir vocabulario de salas.");
+assert.equal(menuFallbackContent.instrucciones, "", "No debe existir fallback editorial de instrucciones.");
+assert.equal(menuFallbackContent.conclusion, "", "No debe existir fallback editorial de conclusión.");
 
 assert.equal(menuProject.backgroundImage, "data:image/png;base64,PORTADA", "Debe preservar el asset de portada.");
 assert.equal(menuProject.misiones[0].id, "actividad-estable", "Debe preservar IDs de misiones al cambiar la presentacion.");
@@ -218,18 +324,18 @@ const switchedBackToRooms = normalizeEscapeRoomProject({
   modo_presentacion: "salas"
 });
 
-assert.equal(switchedBackToRooms.misiones[0].titulo, "Sala 01", "Volver a salas debe ajustar un titulo generico de actividad.");
-assert.equal(switchedBackToRooms.misiones[0].release, "SALA 01", "Volver a salas debe ajustar un release generico de actividad.");
+assert.equal(switchedBackToRooms.misiones[0].titulo, menuProject.misiones[0].titulo, "Cambiar de modo debe conservar el título literal.");
+assert.equal(switchedBackToRooms.misiones[0].release, menuProject.misiones[0].release, "Cambiar de modo debe conservar el release literal.");
 assert.equal(switchedBackToRooms.misiones[0].id, menuProject.misiones[0].id, "Cambiar el modo no debe regenerar IDs existentes.");
 assert.deepEqual(switchedBackToRooms.misiones[0].preguntas, menuProject.misiones[0].preguntas, "Cambiar el modo no debe perder ni mutar preguntas.");
 assert.deepEqual(switchedBackToRooms.misiones[0].media, menuProject.misiones[0].media, "Cambiar el modo no debe perder media.");
 assert.equal(switchedBackToRooms.misiones[0].imagen, menuProject.misiones[0].imagen, "Cambiar el modo no debe perder imagenes.");
 
 const directMenuMission = normalizeMission({}, 4, "menu_secciones");
-assert.equal(directMenuMission.titulo, "Actividad 5", "normalizeMission debe aceptar el modo como tercer parametro.");
-assert.equal(directMenuMission.release, "ACTIVIDAD 05", "normalizeMission debe aplicar releases dependientes del modo.");
-assert.equal(normalizeMissionTitle("Mision 7", "", "menu_secciones"), "Actividad 7", "Debe exponer normalizacion de titulos dependiente del modo.");
-assert.equal(normalizeMissionRelease("SALA 07", "", "menu_secciones"), "ACTIVIDAD 07", "Debe exponer normalizacion de releases dependiente del modo.");
+assert.equal(directMenuMission.titulo, "", "normalizeMission no debe inventar un título dependiente del modo.");
+assert.equal(directMenuMission.release, "", "normalizeMission no debe inventar un release dependiente del modo.");
+assert.equal(normalizeMissionTitle("Mision 7", "", "menu_secciones"), "Mision 7", "Debe preservar títulos literalmente.");
+assert.equal(normalizeMissionRelease("SALA 07", "", "menu_secciones"), "SALA 07", "Debe preservar releases literalmente.");
 assert.equal(normalizeMissionTitle("Sala de los enigmas", "", "menu_secciones"), "Sala de los enigmas", "Cambiar de modo no debe reescribir titulos editoriales.");
 assert.equal(normalizeMissionRelease("SALA OCULTA", "", "menu_secciones"), "SALA OCULTA", "Cambiar de modo no debe reescribir releases editoriales.");
 
