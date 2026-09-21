@@ -4,8 +4,8 @@ import { downloadStyledDocx, sanitizeFilename as sanitizeWordFilename, DEFAULT_S
 // lecturas-asc-unificado.js
 // ------------------------------------------------------------
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, getDoc, updateDoc, deleteDoc, doc, deleteField } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, getDoc, updateDoc, deleteDoc, doc, deleteField, query, where } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 
@@ -1564,8 +1564,32 @@ let ascWordStyleDefinitions = normalizeStyleDefinitions(DEFAULT_STYLE_DEFINITION
 let ascWordSelectedStyleKey = "";
 let ascWordSelectedStyleGroup = "paragraph";
 
+const NIVELES_FILTRO_BASE_ASC = ["Preescolar", "Primaria", "Secundaria"];
+const GRADOS_FILTRO_BASE_ASC = ["Primero", "Segundo", "Tercero", "Cuarto", "Quinto", "Sexto", "1", "2", "3", "4", "5", "6"];
+const TRIMESTRES_FILTRO_BASE_ASC = ["1", "2", "3"];
+const UNIDADES_FILTRO_BASE_ASC = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+
+function poblarSelectAsc(selectEl, values = [], placeholder = "") {
+  if (!selectEl) return;
+  const current = String(selectEl.value || "");
+  const unique = Array.from(new Set((Array.isArray(values) ? values : [])
+    .map((v) => String(v ?? "").trim())
+    .filter((v) => v && v !== "—")))
+    .sort((a, b) => a.localeCompare(b, "es", { numeric: true, sensitivity: "base" }));
+  selectEl.innerHTML = `<option value="">${placeholder}</option>${unique.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
+  if (current && unique.includes(current)) selectEl.value = current;
+}
+
+function poblarFiltrosAsc(items = []) {
+  const rows = Array.isArray(items) ? items : [];
+  poblarSelectAsc(ascFiltroNivel, [...NIVELES_FILTRO_BASE_ASC, ...rows.map((r) => r?.nivel || "")], "Nivel");
+  poblarSelectAsc(ascFiltroGrado, [...GRADOS_FILTRO_BASE_ASC, ...rows.map((r) => r?.grado || "")], "Grado");
+  poblarSelectAsc(ascFiltroTrimestre, [...TRIMESTRES_FILTRO_BASE_ASC, ...rows.map((r) => r?.trimestre ?? "")], "Trim.");
+  poblarSelectAsc(ascFiltroUnidad, [...UNIDADES_FILTRO_BASE_ASC, ...rows.map((r) => r?.unidad ?? "")], "Unidad");
+}
+
 // INIT
-document.addEventListener("DOMContentLoaded", () => {
+function initAscModalDOM() {
   // MODAL LISTA
   ascModal       = $("#ascModal");
   ascBackdrop    = $("#ascBackdrop");
@@ -1790,9 +1814,22 @@ document.addEventListener("DOMContentLoaded", () => {
   aplicarTamanoHojaEditor(ascEditorSheetSize?.value || "carta");
   renderResumenPreguntasAsc();
   actualizarBotonesPanelesAsc();
+  poblarFiltrosAsc([]);
 
   // Auto-carga si ya visible
-  if (!ascModal.classList.contains("hidden")) boot();
+  if (ascModal && !ascModal.classList.contains("hidden")) boot();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initAscModalDOM);
+} else {
+  initAscModalDOM();
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user && ascModal && !ascModal.classList.contains("hidden")) {
+    boot().catch(console.error);
+  }
 });
 
 // API UI (lista)
@@ -3641,17 +3678,41 @@ async function boot(){ await renderTabla(); }
 
 // Render tabla
 async function renderTabla(){
-  ascTbody.innerHTML = `<tr><td colspan="7" class="px-3 py-6 text-center text-gray-500">Cargando lecturas…</td></tr>`;
-  const snap = await getDocs(collection(db, "lecturasASC"));
-  cache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (!ascTbody) ascTbody = $("#ascTbody");
+  if (!ascVacio) ascVacio = $("#ascVacio");
+  if (!ascFiltroNivel) ascFiltroNivel = $("#ascFiltroNivel");
+  if (!ascFiltroGrado) ascFiltroGrado = $("#ascFiltroGrado");
+  if (!ascFiltroTrimestre) ascFiltroTrimestre = $("#ascFiltroTrimestre");
+  if (!ascFiltroUnidad) ascFiltroUnidad = $("#ascFiltroUnidad");
+
+  poblarFiltrosAsc(cache || []);
+  if (ascTbody) {
+    ascTbody.innerHTML = `<tr><td colspan="7" class="px-3 py-6 text-center text-gray-500">Cargando lecturas…</td></tr>`;
+  }
+  try {
+    if (typeof auth?.authStateReady === "function") {
+      await auth.authStateReady();
+    }
+    const snap = await getDocs(collection(db, "lecturasASC"));
+    cache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    try {
+      const snap = await getDocs(query(collection(db, "lecturasASC"), where("publicar", "==", true)));
+      cache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (err2) {
+      console.error("Error al cargar lecturasASC:", err, err2);
+      cache = cache || [];
+    }
+  }
+  window.lecturasASC = cache;
   poblarFiltrosAsc(cache);
 
   if (!cache.length){
-    ascTbody.innerHTML = "";
-    ascVacio.classList.remove("hidden");
+    if (ascTbody) ascTbody.innerHTML = "";
+    ascVacio?.classList.remove("hidden");
     return;
   } else {
-    ascVacio.classList.add("hidden");
+    ascVacio?.classList.add("hidden");
   }
 
   let html = "";
@@ -3711,25 +3772,6 @@ async function renderTabla(){
   actualizarEstadoBotonesAscLive();
 }
 
-function poblarSelectAsc(selectEl, values = [], placeholder = "") {
-  if (!selectEl) return;
-  const current = String(selectEl.value || "");
-  const unique = Array.from(new Set((Array.isArray(values) ? values : [])
-    .map((v) => String(v ?? "").trim())
-    .filter((v) => v && v !== "—")))
-    .sort((a, b) => a.localeCompare(b, "es", { numeric: true, sensitivity: "base" }));
-  selectEl.innerHTML = `<option value="">${placeholder}</option>${unique.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
-  if (current && unique.includes(current)) selectEl.value = current;
-}
-
-function poblarFiltrosAsc(items = []) {
-  const rows = Array.isArray(items) ? items : [];
-  poblarSelectAsc(ascFiltroNivel, rows.map((r) => r?.nivel || ""), "Nivel");
-  poblarSelectAsc(ascFiltroGrado, rows.map((r) => r?.grado || ""), "Grado");
-  poblarSelectAsc(ascFiltroTrimestre, rows.map((r) => r?.trimestre ?? ""), "Trim.");
-  poblarSelectAsc(ascFiltroUnidad, rows.map((r) => r?.unidad ?? ""), "Unidad");
-}
-
 function actualizarEstadoBotonesAscLive(){
   const getter = window.cbGetLecturaGeminiLiveState;
   $$(".ascReadLive", ascTbody).forEach((btn) => {
@@ -3759,8 +3801,20 @@ function actualizarEstadoBotonesAscLive(){
   });
 }
 
+function normalizarGradoFiltroAsc(val = "") {
+  const s = String(val || "").toLowerCase().trim();
+  const map = {
+    "primero": "1", "segundo": "2", "tercero": "3",
+    "cuarto": "4", "quinto": "5", "sexto": "6",
+    "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6"
+  };
+  return map[s] || s;
+}
+
 // Filtros
 function aplicarFiltrosAsc(){
+  if (!ascTbody) ascTbody = $("#ascTbody");
+  if (!ascVacio) ascVacio = $("#ascVacio");
   const q = String(ascBuscador?.value || "").toLowerCase().trim();
   const nivel = String(ascFiltroNivel?.value || "").toLowerCase().trim();
   const grado = String(ascFiltroGrado?.value || "").toLowerCase().trim();
@@ -3777,7 +3831,7 @@ function aplicarFiltrosAsc(){
       r?.unidad
     ].some((v) => String(v ?? "").toLowerCase().includes(q));
     const coincideNivel = !nivel || String(r?.nivel || "").toLowerCase() === nivel;
-    const coincideGrado = !grado || String(r?.grado || "").toLowerCase() === grado;
+    const coincideGrado = !grado || normalizarGradoFiltroAsc(r?.grado) === normalizarGradoFiltroAsc(grado);
     const coincideTrimestre = !trimestre || String(r?.trimestre ?? "").toLowerCase() === trimestre;
     const coincideUnidad = !unidad || String(r?.unidad ?? "").toLowerCase() === unidad;
     return coincideTexto && coincideNivel && coincideGrado && coincideTrimestre && coincideUnidad;

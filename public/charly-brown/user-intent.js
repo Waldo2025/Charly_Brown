@@ -8,6 +8,9 @@ export function routeUserIntent(text = "") {
   if (/\b(busca|buscar|elige|elegir|selecciona|seleccionar|usar)\b.*\b(lectura|lecturas)\b/.test(value)) return "select-reading";
   if (/\b(secuencia|alcance|sya|sya)\b/.test(value) && /\b(revisa|revisar|carga|cargar|trae|buscar|busca|aplica|aplicar)\b/.test(value)) return "sya";
   if (/\b(genera|generar|crear|crea|haz|hacer|prepara|preparar|redacta|redactar)\b.*\b(notas|guia)\b.*\b(maestro|docente|profesor)\b/.test(value)) return "teacher-notes";
+  if (/\b(genera|generar|crear|crea|haz|hacer|prepara)\b.*\b(notas del maestro|notas del docente|notas del profesor)\b/.test(value)) return "teacher-notes";
+  if (/\bnotas del maestro\b|\bnotas del docente\b|\bnotas para el maestro\b/.test(value)) return "teacher-notes";
+  if (/\b(genera|generar|crear|crea|haz|hacer)\b\s+\bnotas\b(?!\s+(de|del|sobre)\s+lectura)/.test(value)) return "teacher-notes";
   return "chat";
 }
 

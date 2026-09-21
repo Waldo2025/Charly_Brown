@@ -1,6 +1,6 @@
 export const PRIMARY_CATEGORIES = {
   "Proyectos": ["Proyectos"],
-  "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"],
+  "Lenguaje y comunicación": ["Artes", "Ortografía", "ComprensionLectora", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
   "Ciencias experimentales": ["Naturales", "ConocimientoDelMedio", "MiLocalidad"],
   "Ciencias sociales": ["Historia", "Geografia"],
   "Formación socioemocional": ["CivicaEtica", "Socioemocional"],
@@ -42,6 +42,13 @@ export const ACTIVITY_HTML_CONTRACT = `
   </ol>
 </div>`;
 
+export const TRACING_LETTERS_HTML_CONTRACT = `
+<div class="activity">
+  <p><strong>Traza la letra siguiendo la dirección indicada.</strong> [IC T. IND]</p>
+  <div class="trace-model">[modelo de letra, sílaba, palabra o frase breve]</div>
+  <div class="answer"><span style="color:magenta;">Respuesta: [modelo exacto que se debe trazar]</span></div>
+</div>`;
+
 const IMPERATIVE_VERBS = [
   "lee", "observa", "subraya", "resuelve", "explica", "escribe", "completa", "ordena",
   "colorea", "marca", "identifica", "relaciona", "compara", "dibuja", "recorta", "pega",
@@ -56,8 +63,8 @@ export function getDifficultyPrompt(id = "normal") {
 export function getCategoriesForGrade(grade = "") {
   const safeGrade = String(grade || "").trim();
   const out = JSON.parse(JSON.stringify(PRIMARY_CATEGORIES));
-  if (!["Primero", "Segundo"].includes(safeGrade)) {
-    out["Lenguaje y comunicación"] = out["Lenguaje y comunicación"].filter((item) => item !== "TrazosDeLetras");
+  if (["Primero", "Segundo"].includes(safeGrade)) {
+    out["Lenguaje y comunicación"] = ["Artes", "Ortografía", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"];
   }
   return out;
 }
@@ -83,15 +90,30 @@ export function getProjectPhases(trimester = "") {
   return [...(PROJECT_PHASES_BY_METHODOLOGY[methodology] || PROJECT_PHASES_BY_METHODOLOGY.ABP)];
 }
 
-export function validateActivityHtml(html = "") {
+export function isTracingLettersSelection({ subtopic = "", section = "" } = {}) {
+  return normalizeKey(subtopic || section) === "trazosdeletras";
+}
+
+export function validateActivityHtml(html = "", { subtopic = "", section = "" } = {}) {
   const source = String(html || "").trim();
   const errors = [];
+  const isTracingLetters = isTracingLettersSelection({ subtopic, section });
   if (!source) errors.push("La actividad está vacía.");
   if (!/\bclass=["'][^"']*\bactivity\b/i.test(source)) errors.push("Falta el bloque .activity.");
   if (!/<strong\b/i.test(source)) errors.push("Falta instrucción principal en negritas.");
-  if (!/<ol\b[^>]*class=["'][^"']*\bsteps\b[^"']*\bsteps-numbered\b/i.test(source)) errors.push("Falta lista de subinstrucciones ol.steps.steps-numbered.");
   if (!/\bclass=["'][^"']*\banswer\b/i.test(source)) errors.push("Faltan respuestas esperadas .answer.");
-  if (!/<li\b/i.test(source)) errors.push("Faltan subinstrucciones en <li>.");
+  if (isTracingLetters) {
+    const activityCount = countClassOccurrences(source, "activity");
+    if (activityCount !== 4) errors.push("Trazos de letras requiere exactamente cuatro actividades progresivas.");
+    if (/<(?:ol|ul|li)\b/i.test(source)) errors.push("Trazos de letras no debe contener listas ni subinstrucciones internas.");
+    if (countClassOccurrences(source, "trace-model") < 4) errors.push("Cada actividad de trazos debe mostrar su modelo de escritura.");
+    if (countClassOccurrences(source, "answer") < 4) errors.push("Cada actividad de trazos debe incluir su respuesta modelo.");
+    const highlightedAnswers = source.match(/style=["'][^"']*color\s*:\s*(?:magenta|mediumvioletred)/gi)?.length || 0;
+    if (highlightedAnswers < 4) errors.push("Cada modelo de respuesta debe mostrarse en color magenta.");
+  } else {
+    if (!/<ol\b[^>]*class=["'][^"']*\bsteps\b[^"']*\bsteps-numbered\b/i.test(source)) errors.push("Falta lista de subinstrucciones ol.steps.steps-numbered.");
+    if (!/<li\b/i.test(source)) errors.push("Faltan subinstrucciones en <li>.");
+  }
   const lead = extractFirstInstructionText(source);
   if (!lead) {
     errors.push("Falta el párrafo principal de la activity.");
@@ -142,6 +164,22 @@ export function buildActivityContractPrompt({ grade = "", category = "", subtopi
   const focusedCategories = !useAllCategories && categories[category]
     ? { [category]: subtopic && subtopic !== ALL_OPTION && categories[category].includes(subtopic) ? [subtopic] : categories[category] }
     : categories;
+  const isTracingLetters = isTracingLettersSelection({ subtopic });
+  if (isTracingLetters) {
+    return [
+      "Genera exactamente cuatro actividades de Trazos de letras para alfabetización inicial.",
+      `Grado: ${grade || "Primero o Segundo"}. Dificultad: ${getDifficultyPrompt(difficulty)}`,
+      relateToReading ? "Puedes tomar palabras o frases breves de la lectura, siempre que correspondan a la letra objetivo." : "No dependas de una lectura externa para resolver los trazos.",
+      "Obtén la letra objetivo de los campos T, AE, C y P de la secuencia y alcance. No elijas una letra ajena al contenido curricular.",
+      "Orden obligatorio: 1) presenta mayúscula y minúscula y muestra la direccionalidad; 2) trabaja repetición o completado en renglón; 3) lee y traza una frase muy corta con la letra; 4) lee y traza otra frase breve del mismo nivel.",
+      "Cada ejercicio debe ser un bloque .activity independiente con una sola instrucción directa. No uses <ol>, <ul>, <li>, pasos ni subactividades internas.",
+      "Cada bloque debe incluir .trace-model con el modelo visible y .answer con exactamente la letra, sílaba, palabra o frase que el alumno debe trazar, resaltada en color magenta.",
+      "Prioriza direccionalidad, repetición útil, legibilidad, vocabulario familiar y frases muy cortas. El resultado debe sentirse como un cuaderno de trazos, no como redacción, ortografía abstracta ni comprensión lectora.",
+      "Contrato obligatorio para cada uno de los cuatro bloques:",
+      TRACING_LETTERS_HTML_CONTRACT,
+      "No expliques el contrato; devuelve únicamente los cuatro bloques HTML en el orden indicado."
+    ].join("\n\n");
+  }
   return [
     "Genera actividades de Primaria con libertad pedagógica, pero conserva estrictamente la estructura HTML indicada.",
     `Dificultad: ${getDifficultyPrompt(difficulty)}`,
@@ -161,6 +199,19 @@ export function buildActivityContractPrompt({ grade = "", category = "", subtopi
       : "Si no es proyecto, mantén formato de actividades regulares del subtema seleccionado.",
     "No expliques el contrato al usuario; devuelve bloques HTML utilizables."
   ].join("\n\n");
+}
+
+function countClassOccurrences(source = "", className = "") {
+  const pattern = new RegExp(`class=["'][^"']*\\b${className}\\b[^"']*["']`, "gi");
+  return String(source || "").match(pattern)?.length || 0;
+}
+
+function normalizeKey(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function extractFirstInstructionText(source = "") {

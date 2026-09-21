@@ -1,10 +1,11 @@
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { buildApiUrlPreferRemote } from "../js/api-client.js";
+import { buildGeminiApiUrl } from "../js/api-client.js";
 
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_MODEL_STORAGE_KEY = "marcie_gemini_model";
 
 export const GEMINI_MODEL_OPTIONS = [
+  "gemini-3.8-flash",
   "gemini-3.7-flash",
   "gemini-3.6-flash",
   "gemini-3.5-flash-lite",
@@ -19,6 +20,7 @@ export const GEMINI_MODEL_OPTIONS = [
 ];
 
 export const GEMINI_MODEL_LABELS = {
+  "gemini-3.8-flash": "Gemini 3.8 Flash",
   "gemini-3.7-flash": "Gemini 3.7 Flash",
   "gemini-3.6-flash": "Gemini 3.6 Flash",
   "gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite",
@@ -48,13 +50,13 @@ export function setConfiguredGeminiModel(model = "") {
   return value;
 }
 
-export async function generateWithGemini({ model = "", prompt = "", payload = null, signal = null, fallback = true } = {}) {
+export async function generateWithGemini({ model = "", prompt = "", payload = null, signal = null, fallback = true, thinkingLevel = "HIGH" } = {}) {
   const selectedModel = String(model || getConfiguredGeminiModel()).trim() || DEFAULT_GEMINI_MODEL;
   const models = fallback ? uniqueModels([selectedModel, ...GEMINI_MODEL_OPTIONS]) : [selectedModel];
   let lastError = null;
   for (const candidate of models) {
     try {
-      return await requestGemini({ model: candidate, prompt, payload, signal });
+      return await requestGemini({ model: candidate, prompt, payload, signal, thinkingLevel });
     } catch (error) {
       lastError = error;
       if (!isRetryableModelError(error)) break;
@@ -63,8 +65,33 @@ export async function generateWithGemini({ model = "", prompt = "", payload = nu
   throw lastError || new Error("Gemini no respondió.");
 }
 
-async function requestGemini({ model = "gemini-2.5-flash", prompt = "", payload = null, signal = null } = {}) {
-  const url = buildApiUrlPreferRemote("/api/gemini/generate");
+export async function sendCharlyChat({ sessionId = "", targetUnitId = "", text = "", model = "", signal = null } = {}) {
+  const url = buildGeminiApiUrl("/api/charly-brown/chat");
+  if (!url) throw new Error("Backend de Charly Brown no configurado.");
+  const user = getAuth().currentUser;
+  if (!user?.getIdToken) throw new Error("Inicia sesión para usar el chat.");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${await user.getIdToken()}`
+    },
+    body: JSON.stringify({ sessionId, targetUnitId, text, model }),
+    ...(signal ? { signal } : {})
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(String(data?.message || data?.error?.message || data?.error || `Charly Brown HTTP ${response.status}`));
+    error.status = response.status;
+    error.code = String(data?.error || "CHARLY_CHAT_FAILED");
+    error.retryAfterSeconds = Number(data?.retryAfterSeconds || response.headers.get("Retry-After") || 0);
+    throw error;
+  }
+  return data;
+}
+
+async function requestGemini({ model = DEFAULT_GEMINI_MODEL, prompt = "", payload = null, signal = null, thinkingLevel = "HIGH" } = {}) {
+  const url = buildGeminiApiUrl("/api/gemini/generate");
   if (!url) throw new Error("Backend Gemini no configurado.");
 
   const auth = getAuth();
@@ -74,8 +101,8 @@ async function requestGemini({ model = "gemini-2.5-flash", prompt = "", payload 
 
   const requestPayload = prepareGeminiPayloadForModel(model, payload || {
     contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-    generationConfig: { temperature: 0.72, maxOutputTokens: 8192 }
-  });
+    generationConfig: { temperature: 0.72, maxOutputTokens: 32768 }
+  }, thinkingLevel);
 
   const response = await fetch(url, {
     method: "POST",
@@ -97,7 +124,7 @@ export function extractGeminiText(data = {}) {
 }
 
 export async function listGeminiModels({ signal = null } = {}) {
-  const url = buildApiUrlPreferRemote("/api/gemini/models");
+  const url = buildGeminiApiUrl("/api/gemini/models");
   if (!url) return getStaticGeminiTextModels();
   const auth = getAuth();
   const user = auth.currentUser;
@@ -198,6 +225,7 @@ function formatGeminiModelLabel(id = "") {
 
 function modelSortRank(id = "") {
   const value = String(id || "").toLowerCase();
+  if (value === "gemini-3.8-flash") return 5;
   if (value === "gemini-2.5-flash-lite") return 10;
   if (value === "gemini-3.5-flash-lite") return 20;
   if (value === "gemini-3.1-flash-lite") return 30;
@@ -211,7 +239,7 @@ function modelSortRank(id = "") {
   return 110;
 }
 
-function prepareGeminiPayloadForModel(model = "", payload = {}) {
+function prepareGeminiPayloadForModel(model = "", payload = {}, thinkingLevel = "HIGH") {
   const id = normalizeModelId(model).toLowerCase();
   const rejectsSamplingParameters = id === "gemini-3.5-flash-lite"
     || /^gemini-3\.[6-9](?:-|$)/.test(id)
@@ -219,7 +247,10 @@ function prepareGeminiPayloadForModel(model = "", payload = {}) {
   if (!rejectsSamplingParameters || !payload?.generationConfig) return payload;
   const prepared = {
     ...payload,
-    generationConfig: { ...payload.generationConfig }
+    generationConfig: {
+      ...payload.generationConfig,
+      thinkingConfig: payload.generationConfig.thinkingConfig || { thinkingLevel }
+    }
   };
   delete prepared.generationConfig.temperature;
   delete prepared.generationConfig.topP;

@@ -1,23 +1,70 @@
 import { generateWithGemini } from "./gemini-client.js";
-import { buildActivityContractPrompt, getProjectMethodology, getProjectPhases, isProjectSelection, normalizeActivityHtml, validateActivityHtml } from "./unit-contracts.js";
+import { buildActivityContractPrompt, getProjectMethodology, getProjectPhases, isProjectSelection, isTracingLettersSelection, normalizeActivityHtml, validateActivityHtml } from "./unit-contracts.js";
 import { stripHtml } from "./ui-components.js";
 import { describeSyaSelection, getFocusedSya, getSyaGroupedByCategory, hasAllSelection } from "./sya-service.js";
 
-export function buildReadingPrompt({ meta = {}, userText = "" } = {}) {
-  return `
-Genera una lectura completa para Primaria.
+const NATURAL_EDITOR_PROMPT = `Actúa como editor de libros escolares mexicanos. Reescribe solo donde haga falta para que el texto suene a un docente con experiencia: claro, concreto, cercano y profesional.
+- Elimina introducciones genéricas, conclusiones de relleno y frases como "es importante destacar", "en el mundo actual", "sumérgete" o "exploremos juntos".
+- Evita estructuras mecánicamente simétricas, listas repetitivas y el mismo ritmo en todas las oraciones.
+- Conserva exactamente los hechos, respuestas, citas, propósito pedagógico, nivel escolar, etiquetas y estructura HTML.
+- No inventes experiencias personales, moralejas, emojis, encabezados ni falsa autoría humana.
+Devuelve únicamente el HTML final, sin comentarios ni bloques Markdown.`;
+
+export function buildActivityReadingContext(reading = null) {
+  if (!reading) return { title: "", narrative: "Sin lectura aprobada.", supportingMaterial: "Sin material complementario." };
+  const sections = reading.sections || {};
+  const narrativeSource = sections.narrativeHtml || reading.narrativeHtml || reading.text || reading.html || "";
+  const synonyms = Array.isArray(sections.synonyms)
+    ? sections.synonyms.map((item) => typeof item === "string" ? item : `${item.palabra || item.word || ""}: ${item.sinonimo || item.synonym || ""}`).filter(Boolean).join(" | ")
+    : stripHtml(sections.synonymsHtml || "");
+  const questions = Array.isArray(sections.questions || reading.questions)
+    ? (sections.questions || reading.questions).map((item) => typeof item === "string" ? item : item.texto || item.pregunta || item.prompt || item.text || "").filter(Boolean).join(" | ")
+    : stripHtml(sections.questionsHtml || "");
+  return {
+    title: String(reading.title || "Lectura de la unidad").trim(),
+    narrative: stripHtml(narrativeSource).slice(0, 18000) || "La lectura no contiene texto narrativo utilizable.",
+    supportingMaterial: [synonyms && `Sinónimos: ${synonyms}`, questions && `Preguntas de comprensión: ${questions}`].filter(Boolean).join("\n").slice(0, 5000) || "Sin material complementario."
+  };
+}
+
+export function buildReadingPrompt({ meta = {}, userText = "", readingStage = "reading", reading = null } = {}) {
+  const base = `
+Nivel: ${meta.level || "Primaria"}
 Grado: ${meta.grade || ""}
 Trimestre: ${meta.trimester || ""}
 Unidad: ${meta.unit || ""}
 Tema o petición del usuario: ${userText || "tema adecuado para la unidad"}
+`.trim();
+  if (readingStage === "synonyms") return `
+Prepara únicamente la tabla de sinónimos para la lectura siguiente.
+${base}
 
-Devuelve HTML simple con un título, párrafos completos y cierre. No cortes la lectura a media oración. Incluye 5 preguntas de comprensión con respuesta esperada.
+LECTURA:
+${stripHtml(reading?.html || reading?.text || "")}
+
+Devuelve solo HTML con una tabla de 6 a 10 palabras realmente presentes en la lectura. Usa las columnas Palabra y Sinónimo simple. No repitas la lectura ni agregues preguntas.
+`.trim();
+  if (readingStage === "comprehension") return `
+Prepara únicamente las preguntas de comprensión para la lectura siguiente.
+${base}
+
+LECTURA:
+${stripHtml(reading?.html || reading?.text || "")}
+
+Devuelve solo HTML con una lista numerada de 5 preguntas variadas y la respuesta esperada de cada una. No repitas la lectura ni la tabla de sinónimos.
+`.trim();
+  return `
+Genera únicamente la lectura narrativa para un libro escolar.
+${base}
+
+Devuelve un solo bloque HTML con título y párrafos completos. No incluyas todavía sinónimos ni preguntas de comprensión; se trabajarán en las siguientes etapas. No cortes la lectura a media oración.
 `.trim();
 }
 
 export function buildActivitiesPrompt({ session = {}, userText = "", resourceSelections = {} } = {}) {
   const meta = session.meta || {};
   const reading = session.accepted?.reading || session.reading || null;
+  const readingContext = buildActivityReadingContext(reading);
   const sya = session.accepted?.sya || session.sya || null;
   const focusedSya = getFocusedSya(meta, sya || {});
   const groupedSya = getSyaGroupedByCategory(meta, sya || {});
@@ -43,8 +90,11 @@ Datos de la unidad:
 - Subtema: ${meta.subtopic || ""}
 - Edición: ${meta.edition}
 
-Lectura:
-${reading ? `${reading.title || ""}\n${stripHtml(reading.html || reading.text || "")}` : "Sin lectura aprobada."}
+Fuente principal y obligatoria, lectura narrativa completa:
+${readingContext.title ? `${readingContext.title}\n` : ""}${readingContext.narrative}
+
+Material complementario de la lectura (solo como apoyo):
+${readingContext.supportingMaterial}
 
 Secuencia y alcance del subtema actual:
 ${buildSyaPromptBlock(meta, focusedSya, groupedSya)}
@@ -54,6 +104,7 @@ ${resourceBlock}
 
 Regla de recursos:
 - Si un recurso está activado, debes generarlo como bloque propio y visible dentro del HTML final.
+- Usa obligatoriamente estos contenedores exactos: <section class="resource-ficha" data-resource-type="ficha">, <section class="resource-anexo" data-resource-type="anexo">, <section class="resource-recortable" data-resource-type="recortable"> y <section class="resource-video" data-resource-type="video">.
 - Usa rótulos claros tipo "Ficha ${resolveUnitCode(meta)}a", "Anexo ${resolveUnitCode(meta)}a", "Recortable ${resolveUnitCode(meta)}a" y "Video ${resolveUnitCode(meta)}a" según corresponda.
 - Cada recurso debe poder aceptarse o rechazarse como parte de la propuesta.
 - No lo escondas dentro de un párrafo genérico.
@@ -63,16 +114,20 @@ Regla de recursos:
 - Si incluyes recursos, menciona el material dentro de la instrucción de la activity, por ejemplo: "Usa la Ficha 1a..." o "Apóyate en el Recortable 2b...".
 - Los anexos son recursos visuales y complementarios.
 - Las fichas son actividades complementarias; pueden relacionarse con la lectura o con la secuencia y alcance.
+- Cada Ficha debe usar internamente la misma estructura HTML de una activity: <div class="activity">, consigna imperativa dentro de <strong>, <ol class="steps steps-numbered"> con <li> y respuestas esperadas dentro de <div class="answer"><span style="color:magenta;">Respuesta: ...</span></div>. No diseñes la ficha como una tabla o como párrafos sueltos.
 - Si el recurso activado es Recortable, la activity debe invitar a usarlo de forma dinámica dentro del ejercicio, integrándolo como parte del trabajo práctico y no como una simple mención.
 - Si el recurso activado es Recortable, la activity debe dejar un espacio visible debajo para que el alumno pegue o acomode el recortable en su trabajo.
 - Incluye una indicación clara como "Pega aquí tu recortable" o equivalente, sin volver mecánica la actividad.
 - Evita ejercicios mecánicos o aislados; prioriza propuestas divertidas, educativas y aplicadas al contenido.
-- Si el recurso activado es Video, debes devolver una tabla de guión creativo del video con columnas fijas: Escena, Tiempo, Voz en off, Elemento visual, Texto en pantalla y Transición.
+- Si el recurso activado es Video, preséntalo únicamente como Video y como producto final. Incluye su contenido audiovisual en una tabla con Escena, Tiempo, Voz en off, Elemento visual, Texto en pantalla y Transición.
 - La voz en off de cada escena debe tener entre 12 y 17 palabras.
 - El elemento visual debe describir con precisión qué se ve en pantalla, de forma concreta y accionable.
 - Cada fila del guión de video debe ser una escena distinta y completa.
 
 Regla pedagógica:
+- Vuelve a leer la narración completa antes de diseñar las activities y básalas principalmente en su contenido.
+- Usa hechos, personajes, ideas, situaciones y vocabulario contextualizado de la narración para las consignas y respuestas esperadas.
+- No uses la tabla de sinónimos ni las preguntas existentes como fuente principal de la actividad.
 - Antes de diseñar las activities, analiza primero esa secuencia y alcance y asegúrate de que las actividades cubran explícitamente T, AE, C y P de la selección activa.
 - Si Categoría o Subtema está en "Todos", genera activities distribuidas por cada categoría/subtema visible en la secuencia y alcance filtrada.
 - No cambies de tema, categoría ni subtema fuera de la selección activa.
@@ -90,6 +145,7 @@ ${userText || "Genera activities útiles para esta unidad."}
 export function buildRefineActivitiesPrompt({ session = {}, currentHtml = "", difficulty = "normal", userText = "" } = {}) {
   const meta = session.meta || {};
   const reading = session.accepted?.reading || session.reading || null;
+  const readingContext = buildActivityReadingContext(reading);
   const sya = session.accepted?.sya || session.sya || null;
   const focusedSya = getFocusedSya(meta, sya || {});
   const groupedSya = getSyaGroupedByCategory(meta, sya || {});
@@ -130,8 +186,11 @@ Datos de la unidad:
 - Categoría: ${meta.category || ""}
 - Subtema: ${meta.subtopic || ""}
 
-Lectura:
-${reading ? `${reading.title || ""}\n${stripHtml(reading.html || reading.text || "")}` : "Sin lectura aprobada."}
+Fuente principal y obligatoria, lectura narrativa completa:
+${readingContext.title ? `${readingContext.title}\n` : ""}${readingContext.narrative}
+
+Material complementario de la lectura (solo como apoyo):
+${readingContext.supportingMaterial}
 
 Secuencia y alcance del subtema actual:
 ${buildSyaPromptBlock(meta, focusedSya, groupedSya)}
@@ -144,6 +203,8 @@ Instrucciones de dificultad:
 ${projectRules}
 
 Importante sobre el bloque actual:
+- Vuelve a leer la narración completa y reconstruye la actividad a partir de ella.
+- La tabla de sinónimos y las preguntas existentes son material secundario; no deben definir el enfoque de la actividad.
 - El contenido a refinar incluye ${currentActivityCount} bloque(s) .activity.
 - Debes conservar TODOS los bloques existentes y refinarlos uno por uno en el mismo orden.
 - No devuelvas solo la primera activity.
@@ -251,26 +312,37 @@ function countActivityBlocks(html = "") {
   return String(html || "").match(/class=["'][^"']*\bactivity\b[^"']*["']/gi)?.length || 0;
 }
 
-export async function generateReading({ session = {}, userText = "", model = "gemini-2.5-flash" } = {}) {
-  const prompt = buildReadingPrompt({ meta: session.meta, userText });
-  const html = await generateWithGemini({ model, prompt });
-  return { title: extractTitle(html) || "Lectura generada", html, prompt };
+export async function generateReading({ session = {}, userText = "", model = "gemini-3.8-flash", readingStage = "reading" } = {}) {
+  const reading = session.accepted?.reading || session.reading || null;
+  const prompt = buildReadingPrompt({ meta: session.meta, userText, readingStage, reading });
+  const draftHtml = await generateWithGemini({ model, prompt });
+  const html = await reviewGeneratedContent({ html: draftHtml, model });
+  const fallbackTitle = readingStage === "synonyms" ? "Tabla de sinónimos" : readingStage === "comprehension" ? "Preguntas de comprensión" : "Lectura generada";
+  return { title: extractTitle(html) || reading?.title || fallbackTitle, html, prompt, readingStage, styleReview: { applied: html !== draftHtml, voice: "docente-mexicano-natural" } };
 }
 
-export async function generateActivities({ session = {}, userText = "", model = "gemini-2.5-flash", resourceSelections = {} } = {}) {
+export async function generateActivities({ session = {}, userText = "", model = "gemini-3.8-flash", resourceSelections = {} } = {}) {
+  const activityContext = { subtopic: session.meta?.subtopic, section: session.meta?.category };
+  const isTracingLetters = isTracingLettersSelection(activityContext);
   const prompt = buildActivitiesPrompt({ session, userText, resourceSelections });
   const rawHtml = await generateWithGemini({ model, prompt });
   let html = normalizeActivityHtml(rawHtml);
-  let validation = validateActivityHtml(html);
+  let validation = validateGeneratedActivity(html, activityContext, resourceSelections);
   if (!validation.ok) {
-    const retryPrompt = `${prompt}\n\nREINTENTO OBLIGATORIO:\n- Devuelve al menos un bloque <div class="activity"> completo y válido.\n- Conserva la estructura .activity, ol.steps.steps-numbered y .answer.\n- Si además hay recursos seleccionados, inclúyelos como bloques adicionales, pero no elimines las activities.\n- No devuelvas únicamente fichas, anexos, recortables o guiones de video.`;
+    const structureReminder = isTracingLetters
+      ? "- Devuelve exactamente cuatro bloques .activity, cada uno con instrucción directa, .trace-model y .answer en magenta.\n- No uses ol, ul, li, pasos ni subinstrucciones internas."
+      : "- Devuelve al menos un bloque <div class=\"activity\"> completo y válido.\n- Conserva la estructura .activity, ol.steps.steps-numbered y .answer.";
+    const retryPrompt = `${prompt}\n\nREINTENTO OBLIGATORIO:\n${structureReminder}\n- Corrige estos incumplimientos: ${(validation.errors || []).join(" | ")}\n- Si además hay recursos seleccionados, inclúyelos como bloques adicionales, pero no elimines las activities.\n- No devuelvas únicamente fichas, anexos, recortables o videos.`;
     html = normalizeActivityHtml(await generateWithGemini({ model, prompt: retryPrompt }));
-    validation = validateActivityHtml(html);
+    validation = validateGeneratedActivity(html, activityContext, resourceSelections);
   }
+  const reviewedHtml = normalizeActivityHtml(await reviewGeneratedContent({ html, model }));
+  const reviewedValidation = validateGeneratedActivity(reviewedHtml, activityContext, resourceSelections);
   return {
-    html,
+    html: reviewedValidation.ok ? reviewedHtml : html,
     prompt,
-    validation
+    validation: reviewedValidation.ok ? reviewedValidation : validation,
+    styleReview: { applied: reviewedValidation.ok && reviewedHtml !== html, voice: "docente-mexicano-natural" }
   };
 }
 
@@ -279,7 +351,7 @@ function buildResourceBlock(resourceSelections = {}, session = {}) {
     ["fichas", "Fichas"],
     ["anexos", "Anexos"],
     ["recortables", "Recortables"],
-    ["videos", "Guión de video"]
+    ["videos", "Video"]
   ];
   const counts = buildResourceTypeCounts(session);
   const active = labels
@@ -287,6 +359,56 @@ function buildResourceBlock(resourceSelections = {}, session = {}) {
     .map(([key, label]) => `- ${label} (${buildResourceCode(session.meta || {}, key, counts[key] || 0)})`);
   if (!active.length) return "- Sin recursos adicionales seleccionados.";
   return active.join("\n");
+}
+
+function validateGeneratedActivity(html = "", activityContext = {}, resourceSelections = {}) {
+  const activityHtml = stripGeneratedResourceBlocks(html);
+  const activityValidation = validateActivityHtml(activityHtml, activityContext);
+  const generatedTypes = getGeneratedResourceTypes(html);
+  const expectedTypes = [
+    ["fichas", "ficha"],
+    ["anexos", "anexo"],
+    ["recortables", "recortable"],
+    ["videos", "video"]
+  ].filter(([key]) => Boolean(resourceSelections[key])).map(([, type]) => type);
+  const missing = expectedTypes.filter((type) => !generatedTypes.has(type));
+  const worksheetErrors = resourceSelections.fichas ? validateWorksheetResourceStructure(html) : [];
+  const errors = [...(activityValidation.errors || []), ...missing.map((type) => `Falta el recurso ${type} como bloque independiente con data-resource-type="${type}".`), ...worksheetErrors];
+  return { ...activityValidation, ok: errors.length === 0, errors, missingResources: missing };
+}
+
+function validateWorksheetResourceStructure(html = "") {
+  let source = "";
+  if (typeof DOMParser === "undefined") {
+    source = String(html || "").match(/<section\b[^>]*data-resource-type=["']ficha["'][^>]*>[\s\S]*?<\/section>/i)?.[0] || "";
+  } else {
+    const doc = new DOMParser().parseFromString(`<div>${String(html || "")}</div>`, "text/html");
+    source = doc.querySelector('[data-resource-type="ficha"], .resource-ficha')?.outerHTML || "";
+  }
+  const errors = [];
+  if (!/class=["'][^"']*\bactivity\b/i.test(source)) errors.push("La ficha debe contener un bloque .activity.");
+  if (!/<strong\b/i.test(source)) errors.push("La ficha necesita una instrucción principal en negritas.");
+  if (!/<ol\b[^>]*class=["'][^"']*\bsteps\b[^"']*\bsteps-numbered\b/i.test(source)) errors.push("La ficha debe usar ol.steps.steps-numbered.");
+  if (!/<li\b/i.test(source)) errors.push("La ficha necesita subinstrucciones en elementos li.");
+  if (!/class=["'][^"']*\banswer\b/i.test(source)) errors.push("La ficha debe incluir respuestas esperadas dentro de .answer.");
+  return errors;
+}
+
+function getGeneratedResourceTypes(html = "") {
+  if (typeof DOMParser === "undefined") {
+    return new Set(Array.from(String(html || "").matchAll(/data-resource-type=["'](ficha|anexo|recortable|video)["']/gi), (match) => match[1].toLowerCase()));
+  }
+  const doc = new DOMParser().parseFromString(`<div>${String(html || "")}</div>`, "text/html");
+  return new Set(Array.from(doc.querySelectorAll("[data-resource-type]")).map((node) => normalizeResourceType(node.getAttribute("data-resource-type") || "")).filter(Boolean));
+}
+
+function stripGeneratedResourceBlocks(html = "") {
+  if (typeof DOMParser === "undefined") {
+    return String(html || "").replace(/<section\b[^>]*data-resource-type=["'](?:ficha|anexo|recortable|video)["'][^>]*>[\s\S]*?<\/section>/gi, "");
+  }
+  const doc = new DOMParser().parseFromString(`<div>${String(html || "")}</div>`, "text/html");
+  doc.querySelectorAll("[data-resource-type], [data-resource-section='true'], .resource-ficha, .resource-anexo, .resource-recortable, .resource-video, .guion-video").forEach((node) => node.remove());
+  return doc.body.innerHTML.replace(/^<div>|<\/div>$/g, "");
 }
 
 function buildResourceTypeCounts(session = {}) {
@@ -324,7 +446,7 @@ function normalizeResourceType(value = "") {
   return "";
 }
 
-export async function refineActivities({ session = {}, currentHtml = "", difficulty = "normal", userText = "", model = "gemini-2.5-flash" } = {}) {
+export async function refineActivities({ session = {}, currentHtml = "", difficulty = "normal", userText = "", model = "gemini-3.8-flash" } = {}) {
   const prompt = buildRefineActivitiesPrompt({ session, currentHtml, difficulty, userText });
   const rawHtml = await generateWithGemini({ model, prompt });
   let html = normalizeActivityHtml(rawHtml);
@@ -334,14 +456,29 @@ export async function refineActivities({ session = {}, currentHtml = "", difficu
     const retryPrompt = `${prompt}\n\nREINTENTO OBLIGATORIO:\n- El HTML devuelto debe conservar exactamente ${originalCount} bloques .activity.\n- Reescribe todos los bloques existentes y no omitas ninguno.\n- Si hace falta, reproduce cada fase con su propia instrucción y respuestas esperadas.\n- No regreses una sola activity parcial.`;
     html = normalizeActivityHtml(await generateWithGemini({ model, prompt: retryPrompt }));
   }
+  const reviewedHtml = normalizeActivityHtml(await reviewGeneratedContent({ html, model }));
+  const activityContext = { subtopic: session.meta?.subtopic, section: session.meta?.category };
+  const reviewedValidation = validateActivityHtml(reviewedHtml, activityContext);
   return {
-    html,
+    html: reviewedValidation.ok ? reviewedHtml : html,
     prompt,
-    validation: validateActivityHtml(html)
+    validation: reviewedValidation.ok ? reviewedValidation : validateActivityHtml(html, activityContext),
+    styleReview: { applied: reviewedValidation.ok && reviewedHtml !== html, voice: "docente-mexicano-natural" }
   };
 }
 
-export async function generateChatReply({ session = {}, userText = "", model = "gemini-2.5-flash" } = {}) {
+export async function reviewGeneratedContent({ html = "", model = "gemini-3.8-flash" } = {}) {
+  const source = String(html || "").trim();
+  if (!source) return source;
+  try {
+    const reviewed = await generateWithGemini({ model, prompt: `${NATURAL_EDITOR_PROMPT}\n\nHTML A REVISAR:\n${source}`, thinkingLevel: "MEDIUM" });
+    return String(reviewed || "").replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim() || source;
+  } catch (_) {
+    return source;
+  }
+}
+
+export async function generateChatReply({ session = {}, userText = "", model = "gemini-3.8-flash" } = {}) {
   const prompt = buildChatPrompt({ session, userText });
   const text = await generateWithGemini({ model, prompt });
   return { text, prompt };

@@ -7,8 +7,7 @@ import {
   setDoc,
   deleteDoc,
   query,
-  where,
-  orderBy
+  where
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getDefaultFirebaseApp } from "../js/firebase-default-app.js";
 import { createEmptySession, normalizeSession } from "./state.js";
@@ -27,13 +26,7 @@ export async function listSessions() {
   const uid = await getCurrentUserId();
   if (!uid) return [];
   const baseQuery = query(collection(db, COLLECTION), where("ownerUid", "==", uid));
-  let snap;
-  try {
-    snap = await getDocs(query(collection(db, COLLECTION), where("ownerUid", "==", uid), orderBy("updatedAt", "desc")));
-  } catch (error) {
-    console.warn("[charly-brown] listSessions orderBy fallback", error);
-    snap = await getDocs(baseQuery);
-  }
+  const snap = await getDocs(baseQuery);
   return snap.docs
     .map((item) => normalizeSession({ id: item.id, ...(item.data() || {}) }))
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));

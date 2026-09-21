@@ -18,7 +18,7 @@ export const READING_COLLECTIONS = [
   { id: "lecturasASC", type: "asc", label: "Lecturas ASC", allowGlobal: true }
 ];
 
-export async function listReadingsForUnit({ meta = {}, limit = 80 } = {}) {
+export async function listReadingsForUnit({ meta = {}, limit = 80, includeAll = false } = {}) {
   const settled = await Promise.allSettled(
     READING_COLLECTIONS.map(async (source) => {
       const docs = await getScopedDocs(source.id, { allowGlobal: source.allowGlobal });
@@ -26,7 +26,8 @@ export async function listReadingsForUnit({ meta = {}, limit = 80 } = {}) {
     })
   );
   const rows = settled.flatMap((item) => item.status === "fulfilled" ? item.value : []);
-  return rankAndDedupeReadings(filterReadingsForMeta(rows, meta), meta).slice(0, limit);
+  const ranked = rankAndDedupeReadings(includeAll ? rows : filterReadingsForMeta(rows, meta), meta);
+  return Number(limit) > 0 ? ranked.slice(0, Number(limit)) : ranked;
 }
 
 export async function saveGeneratedReading({ reading = {}, session = {} } = {}) {
@@ -63,7 +64,7 @@ export function normalizeReadingDoc(docSnap, source = {}) {
 
 export function normalizeReading(row = {}, collectionName = "", type = "") {
   const html = row.contenidoHTML || row.textoLectura || row.lecturaHTML || row.htmlLectura || row.lectura || row.contenido || row.texto || "";
-  const title = row.titulo || row.tema || row.nombre || "Lectura sin título";
+  const title = resolveReadingTitle(row, html);
   const questions = normalizeQuestions(row);
   const sections = splitReadingSections(row, html, questions);
   return {
@@ -87,6 +88,49 @@ export function normalizeReading(row = {}, collectionName = "", type = "") {
     },
     raw: row
   };
+}
+
+function resolveReadingTitle(row = {}, html = "") {
+  const candidates = [
+    row.titulo,
+    row.title,
+    row.tituloLectura,
+    row.nombreLectura,
+    row.encabezado,
+    row.meta?.titulo,
+    row.metadata?.titulo,
+    row.metadatos?.titulo,
+    row.campos?.titulo,
+    row.rawData?.titulo,
+    row.rawData?.title,
+    row.rawData?.campos?.titulo,
+    row.tema,
+    row.nombre
+  ];
+  const stored = candidates.map((value) => String(value || "").trim()).find(Boolean);
+  if (stored) return stored;
+  const embedded = extractReadingTitleFromHtml(html);
+  return embedded || inferReadingTitleFromText(html) || "Lectura sin título";
+}
+
+function extractReadingTitleFromHtml(html = "") {
+  const source = String(html || "").trim();
+  if (!source) return "";
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
+    return String(doc.querySelector("h1, h2, h3, [data-reading-title]")?.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  const match = source.match(/<(?:h1|h2|h3)\b[^>]*>([\s\S]*?)<\/(?:h1|h2|h3)>/i);
+  return match ? stripHtml(match[1]).replace(/\s+/g, " ").trim() : "";
+}
+
+function inferReadingTitleFromText(html = "") {
+  const text = stripHtml(String(html || "")).replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const sentence = String(text.match(/^.{8,90}?[.!?](?:\s|$)/)?.[0] || "").replace(/[.!?]+$/, "").trim();
+  if (sentence) return sentence;
+  const words = text.split(" ").filter(Boolean).slice(0, 8).join(" ");
+  return words.length > 72 ? `${words.slice(0, 69).trim()}...` : words;
 }
 
 async function getScopedDocs(collectionName, { allowGlobal = false } = {}) {
@@ -154,6 +198,7 @@ function rankAndDedupeReadings(rows = [], meta = {}) {
     .sort((a, b) => b.score - a.score || String(a.title).localeCompare(String(b.title), "es"))
     .filter((item) => {
       const key = [
+        normalizeKey(item.collection),
         normalizeKey(item.title),
         normalizeKey(item.meta?.grado),
         normalizeKey(item.meta?.trimestre),

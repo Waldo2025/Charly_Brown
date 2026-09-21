@@ -1,4 +1,4 @@
-import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getDefaultFirebaseApp } from "../js/firebase-default-app.js";
 import { ALL_OPTION, getCategoriesForGrade } from "./unit-contracts.js";
 
@@ -6,7 +6,7 @@ const app = getDefaultFirebaseApp();
 const db = getFirestore(app);
 
 export async function loadSyaForMeta(meta = {}) {
-  const docs = await loadSyaDocs();
+  const docs = await loadSyaDocs(meta);
   if (!docs.length) return buildFallbackSya(meta);
   const matches = docs
     .map((doc) => ({ ...doc, score: scoreSyaDoc(doc, meta) }))
@@ -59,6 +59,27 @@ export function getSyaGroupedByCategory(meta = {}, sya = {}) {
   const selectedSubtopic = String(meta.subtopic || "").trim();
   const hasSpecificSelection = !hasAllSelection(selectedCategory) || !hasAllSelection(selectedSubtopic);
   return hasSpecificSelection ? [] : buildFallbackGroupedSya(meta, sya);
+}
+
+export function getCompleteSyaGroupedByCategory(meta = {}, sya = {}) {
+  const categories = filterCategoriesBySelection(meta, getCategoriesForGrade(meta.grade));
+  const fallback = buildFallbackSya(meta);
+  return Object.entries(categories).map(([category, subtopics]) => ({
+    category,
+    items: subtopics.map((subtopic) => {
+      const fields = buildSubtopicSyaFields(sya, subtopic);
+      const fallbackFields = buildSubtopicSyaFields(fallback, subtopic);
+      return {
+        subtopic,
+        fields: {
+          T: fields.T || fallbackFields.T,
+          AE: fields.AE || fallbackFields.AE,
+          C: fields.C || fallbackFields.C,
+          P: fields.P || fallbackFields.P
+        }
+      };
+    })
+  })).filter((group) => group.items.length);
 }
 
 export function getFocusedSya(meta = {}, sya = {}) {
@@ -203,7 +224,17 @@ function buildFallbackGroupedSya(meta = {}, sya = {}) {
     .filter((group) => group.items.some((item) => Object.values(item.fields).some(Boolean)));
 }
 
-async function loadSyaDocs() {
+async function loadSyaDocs(meta = {}) {
+  const fields = ["level", "grade", "trimester", "unit"];
+  const firestoreFields = { level: "nivel", grade: "grado", trimester: "trimestre", unit: "unidad" };
+  const filters = fields
+    .map((key) => [firestoreFields[key], String(meta[key] || "").trim()])
+    .filter(([, value]) => value);
+  if (filters.length === fields.length) {
+    const exactQuery = query(collection(db, "secuenciaAlcance"), ...filters.map(([key, value]) => where(key, "==", value)));
+    const exactSnap = await getDocs(exactQuery);
+    if (!exactSnap.empty) return exactSnap.docs.map((docSnap) => ({ id: docSnap.id, data: docSnap.data() || {} }));
+  }
   const snap = await getDocs(collection(db, "secuenciaAlcance"));
   return snap.docs.map((docSnap) => ({ id: docSnap.id, data: docSnap.data() || {} }));
 }

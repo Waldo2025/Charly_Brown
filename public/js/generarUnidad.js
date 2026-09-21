@@ -667,30 +667,55 @@ async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = 
     "Content-Type": "application/json"
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const liveTokenUrl = buildApiUrl("/api/gemini/live-token");
-  if (!liveTokenUrl) {
-    throw new Error("API_UNAVAILABLE");
+  const candidateUrls = [];
+  const primaryUrl = buildApiUrl("/api/gemini/live-token");
+  if (primaryUrl) candidateUrls.push(primaryUrl);
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+  if (isLocalHost) {
+    if (!candidateUrls.includes("http://127.0.0.1:8787/api/gemini/live-token")) {
+      candidateUrls.unshift("http://127.0.0.1:8787/api/gemini/live-token");
+    }
+    if (!candidateUrls.includes("http://localhost:8787/api/gemini/live-token")) {
+      candidateUrls.push("http://localhost:8787/api/gemini/live-token");
+    }
   }
+
   let response = null;
-  try {
-    response = await fetch(liveTokenUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: normalizeGeminiModel(modelLive || GEMINI_LIVE_MODEL_DEFAULT),
-        systemInstruction: String(systemInstruction || "").trim(),
-        voiceName: String(charlyTtsVoiceName || "Aoede").trim() || "Aoede"
-      })
-    });
-  } catch (err) {
+  let lastError = null;
+  const bodyPayload = JSON.stringify({
+    model: normalizeGeminiModel(modelLive || GEMINI_LIVE_MODEL_DEFAULT),
+    systemInstruction: String(systemInstruction || "").trim(),
+    voiceName: String(charlyTtsVoiceName || "Aoede").trim() || "Aoede"
+  });
+
+  for (const url of candidateUrls) {
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: bodyPayload
+      });
+      if (response.ok) break;
+      if (response.status === 405 || response.status === 404) {
+        continue;
+      }
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (!response && lastError) {
     markGeminiBackendUnavailable("live_token_unreachable");
-    const msg = String(err?.message || "").toLowerCase();
-    const host = String(window.location.hostname || "").toLowerCase();
-    const isLocalHost = host === "127.0.0.1" || host === "localhost";
+    const msg = String(lastError?.message || "").toLowerCase();
     if (isLocalHost && (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("err_connection_refused"))) {
       throw new Error("BACKEND_GEMINI_OFFLINE");
     }
-    throw err;
+    throw lastError;
+  }
+  if (!response) {
+    throw new Error("API_UNAVAILABLE");
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -717,6 +742,15 @@ function _createGeminiLiveProxyAdapter(tokenJson = {}) {
         const socket = new WebSocket(target.toString());
         let opened = false;
         let ready = false;
+        let readyTimeout = setTimeout(() => {
+          if (!ready) {
+            const err = new Error("Timeout esperando confirmación del proxy Live.");
+            callbacks.onerror?.(err);
+            reject(err);
+            try { socket.close(); } catch (_) {}
+          }
+        }, 15000);
+
         const session = {
           sendClientContent(payload = {}) {
             if (socket.readyState !== WebSocket.OPEN) throw new Error("LIVE_SOCKET_CLOSED");
@@ -737,25 +771,41 @@ function _createGeminiLiveProxyAdapter(tokenJson = {}) {
         };
         socket.addEventListener("open", () => {
           opened = true;
-          resolve(session);
         });
         socket.addEventListener("message", (event) => {
           let envelope = null;
           try { envelope = JSON.parse(String(event.data || "{}")); } catch (_) { return; }
           if (envelope?.type === "ready") {
-            if (!ready) callbacks.onopen?.();
-            ready = true;
+            if (!ready) {
+              ready = true;
+              clearTimeout(readyTimeout);
+              try { callbacks.onopen?.(); } catch (_) {}
+              resolve(session);
+            }
             return;
           }
           if (envelope?.type === "serverContent") callbacks.onmessage?.(envelope.message || {});
-          if (envelope?.type === "error") callbacks.onerror?.(new Error(String(envelope.message || envelope.code || "Live proxy error")));
+          if (envelope?.type === "error") {
+            const err = new Error(String(envelope.message || envelope.code || "Live proxy error"));
+            callbacks.onerror?.(err);
+            if (!ready) {
+              clearTimeout(readyTimeout);
+              reject(err);
+            }
+          }
         });
         socket.addEventListener("error", () => {
           const error = new Error("No se pudo conectar con Gemini Live proxy.");
           callbacks.onerror?.(error);
-          if (!opened) reject(error);
+          if (!ready) {
+            clearTimeout(readyTimeout);
+            reject(error);
+          }
         });
-        socket.addEventListener("close", (event) => callbacks.onclose?.(event));
+        socket.addEventListener("close", (event) => {
+          clearTimeout(readyTimeout);
+          callbacks.onclose?.(event);
+        });
       })
     }
   };
@@ -4451,6 +4501,17 @@ function abrirSeccionAcopladaUnidad(targetModalId = "") {
   acoplarModalesSeccionEnUnidad();
   mostrarModalAcopladoById(targetModalId);
   guardarSeccionActiva(targetModalId);
+  if (targetModalId === "ascModal") {
+    try { window.cbAgentLecturaAsc?.openLista?.(); } catch (_) {}
+  } else if (targetModalId === "modalLecturasNuevas") {
+    try {
+      window.__cbOpeningSectionModalLecturasNuevas = true;
+      window.cbAgentLecturaNueva?.openList?.({ dock: false });
+    } catch (_) {
+    } finally {
+      window.__cbOpeningSectionModalLecturasNuevas = false;
+    }
+  }
   return true;
 }
 
@@ -13130,7 +13191,9 @@ function _lecturasAgentRenderCurrentSlide() {
     refs.imageWrap.innerHTML = `<div class="lecturas-asc-agent-image-state"><span class="lecturas-asc-agent-spinner"></span><p>${loadingLabel}</p></div>`;
   }
   const disabled = status === "loading" ? "disabled" : "";
-  const autoReadActive = lecturasAgentViewerState.autoReadActive === true;
+  const liveState = _lecturasAgentGetLiveStateForCurrent();
+  const liveReading = liveState === "playing" || liveState === "starting";
+  const autoReadActive = lecturasAgentViewerState.autoReadActive === true || liveReading;
   const fullscreenActive = _lecturasAgentIsFullscreenActive();
   const fullscreenSupported = document.fullscreenEnabled && typeof refs?.panel?.requestFullscreen === "function";
   const menuExpanded = lecturasAgentViewerState.menuOpen === true;
@@ -13163,7 +13226,7 @@ function _lecturasAgentRenderCurrentSlide() {
     </div>
   ` : "";
   refs.imageActions.innerHTML = `
-    <button type="button" class="lecturas-asc-agent-read ${autoReadActive ? "is-active" : ""}" data-action="auto-read" aria-label="${autoReadActive ? "Pausar lectura automática" : "Leer automáticamente"}">
+    <button type="button" class="lecturas-asc-agent-read ${autoReadActive ? "is-active" : ""}" data-action="auto-read" aria-label="${autoReadActive ? "Pausar lectura con Gemini Live" : "Leer con Gemini Live"}">
       <i class="fas ${autoReadActive ? "fa-pause" : "fa-play"}" aria-hidden="true"></i>
     </button>
     <span class="lecturas-asc-agent-regenerate-wrap" style="position:relative; display:inline-flex;">
@@ -13268,6 +13331,13 @@ function _lecturasAgentStopAutoRead(options = {}) {
   _resetAgentSpeechPlaybackCallbacks();
   try {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  } catch (_) {}
+  try {
+    const controller = window.cbControlLecturaGeminiLive;
+    const payload = lecturasAgentViewerState.payload;
+    if (typeof controller === "function" && payload?.id && payload?.sourceCollection) {
+      controller({ id: payload.id, coleccion: payload.sourceCollection }, { stop: true }).catch(() => {});
+    }
   } catch (_) {}
   if (!silent) _lecturasAgentRenderCurrentSlide();
 }
@@ -13595,7 +13665,40 @@ function _lecturasAgentSpeakCurrentSlide(options = {}) {
   }
 }
 
-function _lecturasAgentToggleAutoRead() {
+function _lecturasAgentGetLiveStateForCurrent() {
+  const getter = window.cbGetLecturaGeminiLiveState;
+  const payload = lecturasAgentViewerState.payload;
+  if (typeof getter !== "function" || !payload?.id || !payload?.sourceCollection) return "idle";
+  try {
+    return String(getter({ id: payload.id, coleccion: payload.sourceCollection })?.state || "idle");
+  } catch (_) {
+    return "idle";
+  }
+}
+
+async function _lecturasAgentToggleAutoRead() {
+  const controller = window.cbControlLecturaGeminiLive;
+  const payload = lecturasAgentViewerState.payload;
+  if (typeof controller === "function" && payload?.id && payload?.sourceCollection) {
+    const liveState = _lecturasAgentGetLiveStateForCurrent();
+    try {
+      if (liveState === "playing" || liveState === "starting") {
+        await controller({ id: payload.id, coleccion: payload.sourceCollection }, { stop: true });
+        lecturasAgentViewerState.autoReadActive = false;
+        _lecturasAgentRenderCurrentSlide();
+        return;
+      }
+      const result = await controller({ id: payload.id, coleccion: payload.sourceCollection });
+      lecturasAgentViewerState.autoReadActive = !!result?.ok && (result?.state === "playing" || result?.state === "starting");
+      _lecturasAgentRenderCurrentSlide();
+      return;
+    } catch (_) {
+      alert("No se pudo iniciar la lectura con Gemini Flash Live.");
+      return;
+    }
+  }
+
+  // Fallback a lectura automática local si no hay controlador Live
   if (lecturasAgentViewerState.autoReadActive) {
     _lecturasAgentStopAutoRead();
     return;
@@ -14110,6 +14213,19 @@ function _lecturasAgentEnsureModal() {
       if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
     };
     document.addEventListener("fullscreenchange", lecturasAgentViewerState.fullscreenHandler);
+  }
+  if (!lecturasAgentViewerState.liveStateHandler) {
+    lecturasAgentViewerState.liveStateHandler = (event) => {
+      if (!_lecturasAgentViewerIsOpen()) return;
+      const payload = lecturasAgentViewerState.payload;
+      const evRef = event?.detail?.ref;
+      if (evRef?.id && payload?.id && evRef.id === payload.id) {
+        const liveState = String(event?.detail?.state || "idle");
+        lecturasAgentViewerState.autoReadActive = liveState === "playing" || liveState === "starting";
+        _lecturasAgentRenderCurrentSlide();
+      }
+    };
+    window.addEventListener("cb:lectura-live-state", lecturasAgentViewerState.liveStateHandler);
   }
   lecturasAgentViewerState.refs = refs;
   return refs;
@@ -17454,14 +17570,6 @@ async function iniciarGeminiLiveUnidad(options = {}) {
 
     let liveConnection = null;
     try {
-      if (!_debeIntentarTokenEfimeroUnidad()) {
-        geminiLiveDisableEphemeralToken = true;
-        try { sessionStorage.setItem("cb_disable_gemini_ephemeral_token", "1"); } catch (_) {}
-        throw new Error("LIVE_TOKEN_ENDPOINT_NOT_FOUND");
-      }
-      if (geminiLiveDisableEphemeralToken) {
-        throw new Error("LIVE_TOKEN_ENDPOINT_NOT_FOUND");
-      }
       const tokenJson = await requestGeminiLiveTokenViaApi(
         modelLive,
         _buildLiveSystemInstructionActual()

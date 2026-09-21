@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <script src="js/cache-version-loader.js"></script>
+  <meta charset="UTF-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Charly MCP Editor</title>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="vendor/trumbowyg/trumbowyg.min.css">
+  <link rel="stylesheet" data-cache-href="sidebar.css">
+  <link rel="stylesheet" data-cache-href="header.css">
+  <link rel="stylesheet" data-cache-href="charly-brown/charly-brown.css">
+</head>
+<body data-page="charlyMCPeditor.html" class="cb-unit-body">
+  <div class="main-header">
+    <div class="header-content"><!-- header-content loaded from chromeLayout.js --></div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sidebar-menu"><!-- sidebar-menu loaded from chromeLayout.js --></div>
+  </div>
+
+  <main class="cb-unit-shell" aria-label="Charly MCP Editor">
+    <header class="cb-chat-header">
+      <div class="cb-chat-title-block">
+        <i class="fas fa-file-lines cb-chat-title-icon" aria-hidden="true"></i>
+        <h2 id="cbActiveSessionTitle">Nueva unidad</h2>
+      </div>
+      <div class="cb-chat-actions" aria-label="Acciones rápidas">
+        <button type="button" id="cbAutomateUnitBtn" class="cb-automation-button" title="Crear unidad automatizada" aria-label="Crear unidad automatizada">
+          <i class="fas fa-bolt" aria-hidden="true"></i>
+          <span>Unidad automática</span>
+        </button>
+        <div class="cb-chat-actions-divider" aria-hidden="true"></div>
+        <button type="button" id="cbToggleAcceptedBtn" class="cb-icon-btn" aria-pressed="false" title="Ocultar panel listo para usar" aria-label="Ocultar panel listo para usar">
+          <i class="fas fa-table-columns" aria-hidden="true"></i>
+        </button>
+        <button type="button" id="cbSettingsBtn" class="cb-icon-btn" title="Configuración" aria-label="Configuración">
+          <i class="fas fa-gear" aria-hidden="true"></i>
+        </button>
+      </div>
+    </header>
+
+    <aside class="cb-unit-sessions" aria-label="Sesiones">
+      <div id="cbSessionsResizeHandle" class="cb-sessions-resize-handle" aria-hidden="true"></div>
+      <header class="cb-panel-head cb-panel-head--sessions">
+        <button type="button" id="cbNewSessionBtn" class="cb-text-button">
+          <i class="fas fa-book" aria-hidden="true"></i>
+          <span>Libro nuevo</span>
+        </button>
+        <button type="button" id="cbSessionFilterBtn" class="cb-icon-button" aria-label="Filtrar libros por datos académicos" title="Filtrar libros" aria-pressed="false">
+          <i class="fas fa-filter" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div id="cbSessionStatus" class="cb-small-status">0 libros</div>
+      <div id="cbSessionList" class="cb-session-list"></div>
+    </aside>
+
+    <section class="cb-unit-chat" aria-label="Conversación de generación">
+      <div id="cbMessages" class="cb-messages" aria-live="polite"></div>
+    </section>
+
+    <aside class="cb-accepted-panel" aria-label="Listo para usar">
+      <div id="cbAcceptedResizeHandle" class="cb-accepted-resize-handle" aria-hidden="true"></div>
+      <header class="cb-panel-head">
+        <p class="cb-panel-kicker">Actividades aprobadas</p>
+        <div class="cb-panel-head-actions">
+          <button type="button" id="cbNewUnitBtn" class="cb-icon-button cb-new-unit-button" aria-label="Añadir nueva unidad" title="Añadir nueva unidad">
+            <i class="fas fa-plus" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbEditAcademicDataBtn" class="cb-icon-button" aria-label="Editar datos académicos de la sesión" title="Datos académicos">
+            <i class="fas fa-graduation-cap" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbOpenReadingsBtn" class="cb-icon-button" aria-label="Abrir lecturas" title="Abrir lecturas">
+            <i class="fas fa-book-open" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbOpenSyaBtn" class="cb-icon-button" aria-label="Abrir secuencia y alcance" title="Abrir secuencia y alcance">
+            <i class="fas fa-list-check" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="cbGenerateGlobalNotesBtn" class="cb-text-button" title="Crear notas del maestro con el agente MCP" aria-label="Crear notas del maestro">
+            <i class="fas fa-pen-nib" aria-hidden="true"></i>
+            <span>NM</span>
+          </button>
+        </div>
+      </header>
+      <div id="cbAcceptedPanel" class="cb-accepted-list"></div>
+      <footer class="cb-accepted-footer">
+        <button type="button" id="cbOpenExportBtn" class="cb-export-open-button">
+          <i class="fas fa-file-export" aria-hidden="true"></i>
+          <span>Exportar contenido</span>
+        </button>
+      </footer>
+  </aside>
+  </main>
+
+  <footer class="cb-composer-footer" aria-label="Escritura del chat">
+    <form id="cbComposer" class="cb-composer" autocomplete="off">
+      <div class="cb-composer-input-shell">
+        <button type="button" id="cbComposerResizeHandle" class="cb-composer-resize-handle" aria-label="Redimensionar área de escritura" title="Redimensionar área de escritura">
+          <i class="fas fa-expand-alt" aria-hidden="true"></i>
+        </button>
+        <textarea id="cbComposerInput" rows="2" placeholder="Escribe lo que necesitas cambiar, generar o corregir..."></textarea>
+        <footer class="cb-composer-input-footer">
+          <button type="button" id="cbComposerModelBtn" class="cb-composer-model-button" aria-label="Cambiar modelo de Gemini" title="Cambiar modelo de Gemini" aria-haspopup="menu" aria-expanded="false">
+            <i class="fas fa-brain" aria-hidden="true"></i>
+            <span id="cbComposerModelLabel">Gemini 3.8 Flash</span>
+            <i class="fas fa-chevron-up cb-composer-model-chevron" aria-hidden="true"></i>
+          </button>
+          <button type="submit" class="cb-send-button" aria-label="Enviar mensaje" title="Enviar mensaje">
+            <i class="fas fa-paper-plane" aria-hidden="true"></i>
+          </button>
+        </footer>
+      </div>
+      <div id="cbComposerModelMenu" class="cb-composer-model-menu" role="menu" aria-label="Modelos de Gemini" hidden></div>
+    </form>
+  </footer>
+
+  <div id="cbSyaModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="sya"></div>
+    <section class="cb-modal-panel cb-modal-panel--wide" role="dialog" aria-modal="true" aria-labelledby="cbSyaModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <h2 id="cbSyaModalTitle">Secuencia y alcance</h2>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="sya" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div id="cbSyaModalEditor" class="cb-sya-editor" aria-label="Editor de secuencia y alcance"></div>
+      </div>
+      <footer class="cb-modal-footer cb-modal-footer--spread">
+        <button type="button" class="cb-chip-action" id="cbSyaSectionCreate">
+          <i class="fas fa-plus" aria-hidden="true"></i>
+          Nuevo subtema
+        </button>
+        <div>
+          <button type="button" class="cb-text-button" data-modal-close="sya">Cancelar</button>
+          <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbSyaModalSave">Guardar cambios</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbSyaSectionModal" class="cb-modal cb-modal--nested" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="sya-section"></div>
+    <section class="cb-modal-panel cb-modal-panel--compact" role="dialog" aria-modal="true" aria-labelledby="cbSyaSectionModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p id="cbSyaSectionModalKicker" class="cb-panel-kicker">Secuencia y alcance</p>
+          <h2 id="cbSyaSectionModalTitle">Editar sección</h2>
+          <p class="cb-modal-subtitle">Modifica únicamente los campos curriculares de esta sección.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="sya-section" aria-label="Cerrar">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <form id="cbSyaSectionForm" class="cb-modal-form cb-modal-form--two-columns">
+          <label class="cb-field-group">
+            <span>Nombre del subtema</span>
+            <input id="cbSyaSectionName" type="text" maxlength="120" required autocomplete="off" placeholder="Ej. Cuidado del agua">
+          </label>
+          <label class="cb-field-group">
+            <span>Sección relacionada</span>
+            <select id="cbSyaSectionCategory" required aria-label="Sección relacionada"></select>
+          </label>
+          <label class="cb-field-group">
+            <span>Tema (T)</span>
+            <textarea data-sya-section-field="T" rows="2"></textarea>
+          </label>
+          <label class="cb-field-group">
+            <span>Aprendizaje esperado (AE)</span>
+            <textarea data-sya-section-field="AE" rows="2"></textarea>
+          </label>
+          <label class="cb-field-group">
+            <span>Contenido (C)</span>
+            <textarea data-sya-section-field="C" rows="2"></textarea>
+          </label>
+          <label class="cb-field-group">
+            <span>Proceso o práctica (P)</span>
+            <textarea data-sya-section-field="P" rows="2"></textarea>
+          </label>
+        </form>
+      </div>
+      <footer class="cb-modal-footer cb-modal-footer--spread">
+        <button type="button" class="cb-text-button" id="cbSyaSectionRestore"><i class="fas fa-undo" aria-hidden="true"></i> Restablecer</button>
+        <div>
+          <button type="button" class="cb-text-button" data-modal-close="sya-section">Cancelar</button>
+          <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbSyaSectionSave">Guardar sección</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbResourcesModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="resources"></div>
+    <section class="cb-modal-panel cb-modal-panel--compact" role="dialog" aria-modal="true" aria-labelledby="cbResourcesModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Recursos</p>
+          <h2 id="cbResourcesModalTitle">Recursos para la actividad</h2>
+          <p class="cb-modal-subtitle">Elige uno o varios recursos, o continúa sin recurso. Si eliges alguno, la actividad indicará claramente cuándo y cómo utilizarlo.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="resources" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div class="cb-resource-grid" role="group" aria-label="Seleccionar recursos">
+          <button type="button" class="cb-resource-option" data-resource-toggle="fichas" aria-pressed="false">
+            <strong>Fichas</strong>
+            <span>Actividades imprimibles y guiadas.</span>
+          </button>
+          <button type="button" class="cb-resource-option" data-resource-toggle="anexos" aria-pressed="false">
+            <strong>Anexos</strong>
+            <span>Apoyos visuales, tablas o láminas.</span>
+          </button>
+          <button type="button" class="cb-resource-option" data-resource-toggle="recortables" aria-pressed="false">
+            <strong>Recortables</strong>
+            <span>Piezas manipulables para armar o clasificar.</span>
+          </button>
+          <button type="button" class="cb-resource-option" data-resource-toggle="videos" aria-pressed="false">
+            <strong>Video</strong>
+            <span>Escena breve para modelado o explicación.</span>
+          </button>
+        </div>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" data-modal-close="resources">Cancelar</button>
+        <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbResourcesModalContinue">Continuar</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbUnitDataModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="unit-data"></div>
+    <section class="cb-modal-panel" role="dialog" aria-modal="true" aria-labelledby="cbUnitDataModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Sesión</p>
+          <h2 id="cbUnitDataModalTitle">Datos académicos</h2>
+          <p class="cb-modal-subtitle">Configura los datos académicos que se usarán en esta sesión.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="unit-data" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div id="cbUnitDataModalEditor" class="cb-sya-editor"></div>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" id="cbUnitDataModalCancel" data-modal-close="unit-data">Cancelar</button>
+        <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbUnitDataModalSave">Guardar datos</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbReadingsModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="readings"></div>
+    <section class="cb-modal-panel cb-modal-panel--wide" role="dialog" aria-modal="true" aria-labelledby="cbReadingsModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Lecturas</p>
+          <h2 id="cbReadingsModalTitle">Elegir lectura</h2>
+          <p class="cb-modal-subtitle">Filtra y selecciona una lectura para esta unidad.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="readings" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <input id="cbReadingSearchModal" class="cb-reading-search" type="search" value="" placeholder="Filtrar por título, grado, unidad o texto..." aria-label="Filtrar lecturas">
+        <div id="cbReadingModalList" class="cb-reading-panel-list"></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="cbActivitySectionsModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="activity-sections"></div>
+    <section class="cb-modal-panel cb-modal-panel--wide" role="dialog" aria-modal="true" aria-labelledby="cbActivitySectionsModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Actividades</p>
+          <h2 id="cbActivitySectionsModalTitle">Elegir secciones</h2>
+          <p class="cb-modal-subtitle">Selecciona cada sección y elige sus recursos. Se generarán todos sus subtemas.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="activity-sections" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div id="cbActivitySectionsBrowse">
+          <div class="cb-activity-sections-toolbar">
+            <span id="cbActivitySectionsStatus" class="cb-small-status" aria-live="polite"></span>
+            <button type="button" class="cb-chip-action" id="cbActivitySectionCreate">
+              <i class="fas fa-plus" aria-hidden="true"></i>
+              Nueva sección
+            </button>
+          </div>
+          <div id="cbActivitySectionsList" class="cb-activity-section-grid"></div>
+        </div>
+        <form id="cbActivitySectionForm" class="cb-activity-section-form cb-modal-form" hidden>
+          <div class="cb-activity-section-form-head">
+            <button type="button" class="cb-icon-btn" id="cbActivitySectionFormBack" aria-label="Volver a las secciones" title="Volver">
+              <i class="fas fa-arrow-left" aria-hidden="true"></i>
+            </button>
+            <div>
+              <p class="cb-panel-kicker" id="cbActivitySectionFormKicker">Nueva sección</p>
+              <h3 id="cbActivitySectionFormTitle">Configurar sección</h3>
+            </div>
+          </div>
+          <input type="hidden" id="cbActivitySectionId" value="">
+          <div class="cb-activity-section-form-grid">
+            <label class="cb-field-group">
+              <span>Nombre</span>
+              <input id="cbActivitySectionName" type="text" maxlength="120" required autocomplete="off" placeholder="Ej. Tecnología y diseño">
+            </label>
+            <label class="cb-field-group cb-field-group--summary">
+              <span>Descripción breve</span>
+              <textarea id="cbActivitySectionDescription" maxlength="600" required rows="2" placeholder="Qué tipo de aprendizaje reúne esta sección"></textarea>
+            </label>
+            <label class="cb-field-group cb-field-group--summary">
+              <span>Propósito pedagógico</span>
+              <textarea id="cbActivitySectionObjective" maxlength="1200" required rows="3" placeholder="Qué debe lograr el alumno"></textarea>
+            </label>
+            <label class="cb-field-group cb-field-group--prompt">
+              <span>Indicaciones para el agente</span>
+              <textarea id="cbActivitySectionInstructions" maxlength="3000" required rows="4" placeholder="Criterios que debe seguir al crear actividades"></textarea>
+            </label>
+            <label class="cb-field-group">
+              <span>Niveles compatibles</span>
+              <input id="cbActivitySectionLevels" type="text" maxlength="300" autocomplete="off" placeholder="Todos o separados por coma">
+            </label>
+            <label class="cb-field-group">
+              <span>Grados compatibles</span>
+              <input id="cbActivitySectionGrades" type="text" maxlength="300" autocomplete="off" placeholder="Todos o separados por coma">
+            </label>
+          </div>
+          <fieldset class="cb-activity-section-scope">
+            <legend>Guardar esta sección</legend>
+            <label><input type="radio" name="cbActivitySectionScope" value="personal" checked><span>Solo para mí</span></label>
+            <label><input type="radio" name="cbActivitySectionScope" value="global"><span>Para todos</span></label>
+          </fieldset>
+          <div class="cb-activity-section-form-actions">
+            <button type="button" class="cb-text-button cb-text-button--danger" id="cbActivitySectionRestore" hidden>
+              <i class="fas fa-undo" aria-hidden="true"></i>
+              Restablecer original
+            </button>
+            <span></span>
+            <button type="button" class="cb-text-button" id="cbActivitySectionFormCancel">Cancelar</button>
+            <button type="submit" class="cb-chip-action cb-chip-action--primary" id="cbActivitySectionSave">Guardar sección</button>
+          </div>
+        </form>
+      </div>
+      <footer class="cb-modal-footer" id="cbActivitySectionsFooter">
+        <button type="button" class="cb-text-button" data-modal-close="activity-sections">Cancelar</button>
+        <button type="button" class="cb-chip-action cb-chip-action--primary" id="cbActivitySectionsContinue">Guardar selección</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbSettingsModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="settings"></div>
+    <section class="cb-modal-panel cb-modal-panel--wide cb-settings-panel" role="dialog" aria-modal="true" aria-labelledby="cbSettingsModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Configuración</p>
+          <h2 id="cbSettingsModalTitle">Ajustes del editor</h2>
+          <p class="cb-modal-subtitle">Configura las instrucciones editoriales de cada sección.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="settings" aria-label="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body cb-settings-body">
+        <section class="cb-settings-block">
+          <div class="cb-settings-block-head">
+            <div><h3>Secciones y prompts</h3><p>Edita el propósito y las instrucciones que recibe el agente.</p></div>
+            <button type="button" class="cb-chip-action" id="cbSettingsSectionCreate"><i class="fas fa-plus" aria-hidden="true"></i><span>Nueva sección</span></button>
+          </div>
+          <div id="cbSettingsSectionsStatus" class="cb-small-status" aria-live="polite"></div>
+          <div id="cbSettingsSectionsList" class="cb-settings-sections-list"></div>
+        </section>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-chip-action cb-chip-action--primary" data-modal-close="settings">Cerrar</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbSessionFilterModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-modal-close="session-filter"></div>
+    <section class="cb-modal-panel cb-modal-panel--compact" role="dialog" aria-modal="true" aria-labelledby="cbSessionFilterModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Libros</p>
+          <h2 id="cbSessionFilterModalTitle">Filtrar por datos académicos</h2>
+          <p class="cb-modal-subtitle">Muestra únicamente las sesiones que coincidan con los criterios seleccionados.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-modal-close="session-filter" aria-label="Cerrar">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div class="cb-session-filter-grid">
+          <div class="cb-field-group">
+            <label for="cbSessionFilterLevel">Nivel</label>
+            <select id="cbSessionFilterLevel" data-session-filter="level"></select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbSessionFilterGrade">Grado</label>
+            <select id="cbSessionFilterGrade" data-session-filter="grade"></select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbSessionFilterTrimester">Trimestre</label>
+            <select id="cbSessionFilterTrimester" data-session-filter="trimester"></select>
+          </div>
+          <div class="cb-field-group">
+            <label for="cbSessionFilterCategory">Área o sección</label>
+            <select id="cbSessionFilterCategory" data-session-filter="category"></select>
+          </div>
+        </div>
+      </div>
+      <footer class="cb-modal-footer cb-modal-footer--split">
+        <button type="button" id="cbSessionFilterClear" class="cb-text-button">Restablecer</button>
+        <button type="button" id="cbSessionFilterApply" class="cb-chip-action cb-chip-action--primary">Aplicar filtros</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbSpecificationsModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-specifications-close></div>
+    <section class="cb-modal-panel cb-modal-panel--compact cb-specifications-panel" role="dialog" aria-modal="true" aria-labelledby="cbSpecificationsModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Respuesta del agente</p>
+          <h2 id="cbSpecificationsModalTitle">Especificaciones</h2>
+          <p class="cb-modal-subtitle">Detalle pedagógico y técnico de la propuesta.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-specifications-close aria-label="Cerrar especificaciones">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div id="cbSpecificationsModalBody" class="cb-modal-body cb-specifications-content"></div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-chip-action cb-chip-action--primary" data-specifications-close>Cerrar</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cbExportModal" class="cb-modal" aria-hidden="true" hidden>
+    <div class="cb-modal-backdrop" data-export-close></div>
+    <section class="cb-modal-panel cb-modal-panel--export" role="dialog" aria-modal="true" aria-labelledby="cbExportModalTitle">
+      <header class="cb-modal-header">
+        <div>
+          <p class="cb-panel-kicker">Contenido aprobado</p>
+          <h2 id="cbExportModalTitle">Descargar libro</h2>
+          <p class="cb-modal-subtitle">Elige el formato de salida. Solo se incluirá el contenido aprobado.</p>
+        </div>
+        <button type="button" class="cb-modal-close" data-export-close aria-label="Cerrar exportación">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="cb-modal-body">
+        <div class="cb-export-format-grid" role="radiogroup" aria-label="Formato de descarga">
+          <button type="button" class="cb-export-format-card is-selected" data-export-format="docx" role="radio" aria-checked="true">
+            <span class="cb-export-format-icon cb-export-format-icon--word"><i class="fas fa-file-word" aria-hidden="true"></i></span>
+            <span class="cb-export-format-copy"><strong>Microsoft Word</strong><small>Documento editable con estilos, listas y tablas.</small></span>
+            <span class="cb-export-format-extension">DOCX</span>
+          </button>
+          <button type="button" class="cb-export-format-card" data-export-format="pdf" role="radio" aria-checked="false">
+            <span class="cb-export-format-icon cb-export-format-icon--pdf"><i class="fas fa-file-pdf" aria-hidden="true"></i></span>
+            <span class="cb-export-format-copy"><strong>Adobe PDF</strong><small>Archivo listo para revisar, compartir o imprimir.</small></span>
+            <span class="cb-export-format-extension">PDF</span>
+          </button>
+          <button type="button" class="cb-export-format-card" data-export-format="idml" role="radio" aria-checked="false">
+            <span class="cb-export-format-icon cb-export-format-icon--idml"><i class="fas fa-layer-group" aria-hidden="true"></i></span>
+            <span class="cb-export-format-copy"><strong>Adobe InDesign</strong><small>Paquete editorial con estilos de párrafo y carácter.</small></span>
+            <span class="cb-export-format-extension">IDML</span>
+          </button>
+        </div>
+        <div class="cb-export-separate-note">
+          <i class="fas fa-file-circle-check" aria-hidden="true"></i>
+          <span>El contenido y las notas del maestro se descargarán como archivos separados.</span>
+        </div>
+        <p id="cbExportStatus" class="cb-export-status" role="status" aria-live="polite"></p>
+      </div>
+      <footer class="cb-modal-footer">
+        <button type="button" class="cb-text-button" data-export-close>Cancelar</button>
+        <button type="button" id="cbExportDownloadBtn" class="cb-chip-action cb-chip-action--primary">
+          <i class="fas fa-download" aria-hidden="true"></i>
+          <span>Descargar archivos DOCX</span>
+        </button>
+      </footer>
+    </section>
+  </div>
+
+  <script src="vendor/jquery/jquery.min.js"></script>
+  <script src="vendor/trumbowyg/trumbowyg.min.js"></script>
+  <script src="vendor/trumbowyg/plugins/trumbowyg.cleanpaste.min.js"></script>
+  <script type="module" data-cache-src="js/chromeLayout.js"></script>
+  <script type="module" data-cache-src="js/sidebar.js"></script>
+  <script type="module" data-cache-src="charly-brown/main.js"></script>
+</body>
+</html>

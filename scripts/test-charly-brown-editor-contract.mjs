@@ -6,11 +6,11 @@ import { pathToFileURL } from "node:url";
 const root = "/Users/waldolopez/Documents/CharlyBrown";
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
-test("charly-brown.html is wired as a first-class page", () => {
-  const html = read("public/charly-brown.html");
+test("charlyMCPeditor.html is wired as a first-class page", () => {
+  const html = read("public/charlyMCPeditor.html");
   const chrome = read("public/js/chromeLayout.js");
 
-  assert.match(html, /<body[^>]*data-page="charly-brown\.html"/i);
+  assert.match(html, /<body[^>]*data-page="charlyMCPeditor\.html"/i);
   assert.match(html, /charly-brown\/charly-brown\.css/);
   assert.match(html, /charly-brown\/main\.js/);
   assert.match(html, /js\/chromeLayout\.js/);
@@ -32,8 +32,8 @@ test("charly-brown.html is wired as a first-class page", () => {
   assert.doesNotMatch(html, />Generar lectura</);
   assert.doesNotMatch(html, />Elegir lectura</);
   assert.doesNotMatch(html, />Revisar secuencia</);
-  assert.match(chrome, /'charly-brown\.html':\s*\{\s*title:\s*'Charly Brown'/);
-  assert.match(chrome, /href:\s*'charly-brown\.html'[\s\S]*label:\s*'Charly Brown'/);
+  assert.match(chrome, /'charlymcpeditor\.html':\s*\{\s*title:\s*'Charly MCP Editor'/);
+  assert.match(chrome, /href:\s*'charlyMCPeditor\.html'[\s\S]*label:\s*'Charly MCP Editor'/);
 });
 
 test("charly brown implementation is split into focused modules", () => {
@@ -80,7 +80,7 @@ test("charly brown implementation is split into focused modules", () => {
 
 test("reading service reuses existing lectura collections", () => {
   const source = read("public/charly-brown/reading-service.js");
-  const html = read("public/charly-brown.html");
+  const html = read("public/charlyMCPeditor.html");
   const main = read("public/charly-brown/main.js");
   const panel = read("public/charly-brown/accepted-panel.js");
   const sya = read("public/charly-brown/sya-service.js");
@@ -270,6 +270,8 @@ test("difficulty refinement keeps the same topic and raises challenge intentiona
   assert.match(source, /distractores plausibles/i);
   assert.match(source, /opciones múltiples/i);
   assert.match(source, /Secuencia y alcance del subtema actual/);
+  assert.match(source, /Fuente principal y obligatoria, lectura narrativa completa/);
+  assert.match(source, /tabla de sinónimos.*fuente principal/i);
   assert.match(main, /handleRefineProposal/);
   assert.match(main, /m[aá]s difícil sin cambiar el tema/i);
 });

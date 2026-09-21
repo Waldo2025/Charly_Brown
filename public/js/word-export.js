@@ -709,42 +709,59 @@ function roundRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-async function buildThumbnailBlob({ title = "Documento", subtitle = "" } = {}) {
+async function buildThumbnailBlob({ title = "Documento", subtitle = "", appTitle = "" } = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, "#f8fbff");
-  gradient.addColorStop(1, "#e8eefb");
+  gradient.addColorStop(0, "#f8fafc");
+  gradient.addColorStop(1, "#f1f5f9");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 512, 512);
+
+  // Document sheet card
   ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#d8e1f2";
-  ctx.lineWidth = 3;
-  roundRect(ctx, 42, 36, 428, 440, 28);
+  ctx.strokeStyle = "#0891b2";
+  ctx.lineWidth = 3.5;
+  roundRect(ctx, 36, 32, 440, 448, 20);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#2b3a67";
-  ctx.font = "700 20px Georgia";
-  ctx.fillText("Charly Brown", 72, 88);
-  ctx.fillStyle = "#1f2937";
-  ctx.font = "700 30px Arial";
-  wrapText(ctx, title, 360).slice(0, 5).forEach((line, i) => ctx.fillText(line, 72, 156 + i * 38));
+
+  // Top header brand strip
+  ctx.fillStyle = "#0891b2";
+  roundRect(ctx, 36, 32, 440, 64, 16);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 20px Arial, sans-serif";
+  ctx.fillText(appTitle || "Marcie Blog Editor", 64, 72);
+
+  // Document title
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "bold 26px Arial, sans-serif";
+  wrapText(ctx, title, 380).slice(0, 4).forEach((line, i) => ctx.fillText(line, 64, 142 + i * 34));
+
+  // Subtitle / metadata
   if (subtitle) {
-    ctx.fillStyle = "#5b6475";
-    ctx.font = "500 18px Arial";
-    wrapText(ctx, subtitle, 360).slice(0, 3).forEach((line, i) => ctx.fillText(line, 72, 352 + i * 28));
+    ctx.fillStyle = "#64748b";
+    ctx.font = "500 16px Arial, sans-serif";
+    wrapText(ctx, subtitle, 380).slice(0, 3).forEach((line, i) => ctx.fillText(line, 64, 298 + i * 24));
   }
-  ctx.fillStyle = "#7c8db5";
-  ctx.fillRect(72, 392, 120, 8);
-  ctx.fillRect(72, 416, 220, 8);
-  ctx.fillRect(72, 440, 176, 8);
-  return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || null), "image/jpeg", 0.92));
+
+  // Visual layout mock bars
+  ctx.fillStyle = "#06b6d4";
+  ctx.fillRect(64, 388, 140, 8);
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillRect(64, 408, 340, 6);
+  ctx.fillRect(64, 422, 280, 6);
+  ctx.fillRect(64, 436, 310, 6);
+
+  return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || null), "image/jpeg", 0.95));
 }
 
-export async function buildStyledDocxBlob({ html = "", title = "", subtitle = "", styleDefinitions = null } = {}) {
+export async function buildStyledDocxBlob({ html = "", title = "", subtitle = "", appTitle = "", styleDefinitions = null } = {}) {
   const JSZipCtor = pickZipCtor();
   if (!JSZipCtor) throw new Error("JSZip no está disponible.");
   const zip = new JSZipCtor();
@@ -756,15 +773,15 @@ export async function buildStyledDocxBlob({ html = "", title = "", subtitle = ""
   word.file("styles.xml", buildStylesXml(styleDefinitions));
   word.file("numbering.xml", buildNumberingXml());
   word.folder("_rels").file("document.xml.rels", buildDocumentRels());
-  const thumb = await buildThumbnailBlob({ title, subtitle });
+  const thumb = await buildThumbnailBlob({ title, subtitle, appTitle });
   if (thumb) {
     zip.folder("docProps").file("thumbnail.jpeg", await thumb.arrayBuffer(), { binary: true });
   }
   return await zipToBlob(zip);
 }
 
-export async function downloadStyledDocx({ html = "", title = "", subtitle = "", filename = "documento.docx", styleDefinitions = null } = {}) {
-  const blob = await buildStyledDocxBlob({ html, title, subtitle, styleDefinitions });
+export async function downloadStyledDocx({ html = "", title = "", subtitle = "", appTitle = "", filename = "documento.docx", styleDefinitions = null } = {}) {
+  const blob = await buildStyledDocxBlob({ html, title, subtitle, appTitle, styleDefinitions });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;

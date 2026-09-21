@@ -5,7 +5,7 @@ import {
   getFirestore, doc, getDoc, updateDoc, collection, addDoc,
   query, where, getDocs, deleteDoc, orderBy, onSnapshot, limit
 } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
-import { getAuth } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { getStorage } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import { buildApiUrl } from './api-client.js';
 import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
@@ -1834,7 +1834,7 @@ Condiciones:
 }
 
 // ---------------------- DOM principal ----------------------
-document.addEventListener('DOMContentLoaded', () => {
+function initLecturaNuevaDOM() {
   // LISTA
   const modalLecturasNuevas          = $('#modalLecturasNuevas');
   const cerrarModalLecturasNuevas    = $('#cerrarModalLecturasNuevas');
@@ -2589,7 +2589,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Abrir/Cerrar modales
   btnSugerenciasLectura?.addEventListener('click', async () => {
-    window.cbUnidadDock?.openSection?.('modalLecturasNuevas');
+    try {
+      window.__cbOpeningSectionModalLecturasNuevas = true;
+      window.cbUnidadDock?.openSection?.('modalLecturasNuevas');
+    } finally {
+      window.__cbOpeningSectionModalLecturasNuevas = false;
+    }
     show(modalLecturasNuevas);
     await cargarLecturasNuevas({ realtime: true });
     cargarTranscripcionesAudio().catch(console.error);
@@ -2628,6 +2633,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // LISTA
   async function cargarLecturasNuevas(opts = { realtime: false }) {
     if (!contenedorLecturasNuevas) return;
+
+    if (typeof auth?.authStateReady === 'function') {
+      try { await auth.authStateReady(); } catch (_) {}
+    }
 
     const qLect = query(collection(db, 'lecturasNuevas'), orderBy('timestamp', 'desc'));
 
@@ -2671,6 +2680,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const handle = (snap) => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       cacheLecturas = deduplicarLecturasNuevas(docs);
+      window.lecturasNuevas = cacheLecturas;
       poblarFiltrosLecturasNuevas(cacheLecturas);
       renderLista(cacheLecturas);
     };
@@ -2679,13 +2689,28 @@ document.addEventListener('DOMContentLoaded', () => {
       if (lecturasUnsub) return; // ya activo
       contenedorLecturasNuevas.innerHTML = '<p>Cargando…</p>';
       lecturasUnsub = onSnapshot(qLect, handle, (err) => {
-        console.error('onSnapshot lecturasNuevas', err);
-        contenedorLecturasNuevas.innerHTML = '<p>Error al cargar lecturas.</p>';
+        console.warn('onSnapshot lecturasNuevas fallback to public:', err);
+        const qPublic = query(collection(db, 'lecturasNuevas'), where('publicar', '==', true));
+        lecturasUnsub = onSnapshot(qPublic, handle, (err2) => {
+          console.error('onSnapshot lecturasNuevas public failed:', err2);
+          contenedorLecturasNuevas.innerHTML = '<p>Error al cargar lecturas.</p>';
+        });
       });
     } else {
       contenedorLecturasNuevas.innerHTML = '<p>Cargando…</p>';
-      const snap = await getDocs(qLect);
-      handle(snap);
+      try {
+        const snap = await getDocs(qLect);
+        handle(snap);
+      } catch (err) {
+        try {
+          const qPublic = query(collection(db, 'lecturasNuevas'), where('publicar', '==', true));
+          const snap = await getDocs(qPublic);
+          handle(snap);
+        } catch (err2) {
+          console.error('getDocs lecturasNuevas failed:', err, err2);
+          contenedorLecturasNuevas.innerHTML = '<p>Error al cargar lecturas.</p>';
+        }
+      }
     }
   }
 
@@ -2852,12 +2877,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (current && unique.includes(current)) selectEl.value = current;
   }
 
+  const NIVELES_FILTRO_BASE_NUEVAS = ["Preescolar", "Primaria", "Secundaria"];
+  const GRADOS_FILTRO_BASE_NUEVAS = ["Primero", "Segundo", "Tercero", "Cuarto", "Quinto", "Sexto", "1", "2", "3", "4", "5", "6"];
+  const TRIMESTRES_FILTRO_BASE_NUEVAS = ["1", "2", "3"];
+  const UNIDADES_FILTRO_BASE_NUEVAS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+
   function poblarFiltrosLecturasNuevas(items = []) {
     const rows = Array.isArray(items) ? items : [];
-    poblarSelectSimple(filtroNivelLecturasNuevas, rows.map((it) => it?.nivel || ''), 'Nivel');
-    poblarSelectSimple(filtroGradoLecturasNuevas, rows.map((it) => it?.grado || ''), 'Grado');
-    poblarSelectSimple(filtroTrimestreLecturasNuevas, rows.map((it) => it?.trimestre || ''), 'Trimestre');
-    poblarSelectSimple(filtroUnidadLecturasNuevas, rows.map((it) => resolverUnidadLectura(it)), 'Unidad');
+    poblarSelectSimple(filtroNivelLecturasNuevas, [...NIVELES_FILTRO_BASE_NUEVAS, ...rows.map((it) => it?.nivel || '')], 'Nivel');
+    poblarSelectSimple(filtroGradoLecturasNuevas, [...GRADOS_FILTRO_BASE_NUEVAS, ...rows.map((it) => it?.grado || '')], 'Grado');
+    poblarSelectSimple(filtroTrimestreLecturasNuevas, [...TRIMESTRES_FILTRO_BASE_NUEVAS, ...rows.map((it) => it?.trimestre || '')], 'Trimestre');
+    poblarSelectSimple(filtroUnidadLecturasNuevas, [...UNIDADES_FILTRO_BASE_NUEVAS, ...rows.map((it) => resolverUnidadLectura(it))], 'Unidad');
+  }
+
+  function normalizarGradoFiltroNuevas(val = '') {
+    const s = String(val || '').toLowerCase().trim();
+    const map = {
+      'primero': '1', 'segundo': '2', 'tercero': '3',
+      'cuarto': '4', 'quinto': '5', 'sexto': '6',
+      '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', '6': '6'
+    };
+    return map[s] || s;
   }
 
   function aplicarFiltrosLecturasNuevas() {
@@ -2877,7 +2917,7 @@ document.addEventListener('DOMContentLoaded', () => {
         unidadTexto
       ].some((v) => String(v || '').toLowerCase().includes(texto));
       const coincideNivel = !nivel || String(it?.nivel || '').toLowerCase() === nivel;
-      const coincideGrado = !grado || String(it?.grado || '').toLowerCase() === grado;
+      const coincideGrado = !grado || normalizarGradoFiltroNuevas(it?.grado) === normalizarGradoFiltroNuevas(grado);
       const coincideTrimestre = !trimestre || String(it?.trimestre || '').toLowerCase() === trimestre;
       const coincideUnidad = !unidad || unidadTexto === unidad;
       return coincideTexto && coincideNivel && coincideGrado && coincideTrimestre && coincideUnidad;
@@ -2922,6 +2962,7 @@ document.addEventListener('DOMContentLoaded', () => {
   filtroGradoLecturasNuevas?.addEventListener('change', aplicarFiltrosLecturasNuevas);
   filtroTrimestreLecturasNuevas?.addEventListener('change', aplicarFiltrosLecturasNuevas);
   filtroUnidadLecturasNuevas?.addEventListener('change', aplicarFiltrosLecturasNuevas);
+  poblarFiltrosLecturasNuevas([]);
 
   // VER
   async function onVerLectura(e) {
@@ -3990,8 +4031,15 @@ Devuelve únicamente HTML, sin bloques Markdown ni comentarios fuera del conteni
   });
 
   window.cbAgentLecturaNueva = {
-    openList() {
-      window.cbUnidadDock?.openSection?.('modalLecturasNuevas');
+    openList({ dock = true } = {}) {
+      if (dock && typeof window.cbUnidadDock?.openSection === 'function' && !window.__cbOpeningSectionModalLecturasNuevas) {
+        window.__cbOpeningSectionModalLecturasNuevas = true;
+        try {
+          window.cbUnidadDock.openSection('modalLecturasNuevas');
+        } finally {
+          window.__cbOpeningSectionModalLecturasNuevas = false;
+        }
+      }
       show(modalLecturasNuevas);
       cargarLecturasNuevas({ realtime: true }).catch(console.error);
       cargarTranscripcionesAudio().catch(console.error);
@@ -4092,4 +4140,19 @@ Devuelve únicamente HTML, sin bloques Markdown ni comentarios fuera del conteni
     }
   };
 
-});
+  onAuthStateChanged(auth, (user) => {
+    if (user && modalLecturasNuevas && (modalLecturasNuevas.style.display === 'block' || !modalLecturasNuevas.classList.contains('hidden'))) {
+      cargarLecturasNuevas({ realtime: true }).catch(console.error);
+    }
+  });
+
+  if (modalLecturasNuevas && (modalLecturasNuevas.style.display === 'block' || !modalLecturasNuevas.classList.contains('hidden'))) {
+    cargarLecturasNuevas({ realtime: true }).catch(console.error);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLecturaNuevaDOM);
+} else {
+  initLecturaNuevaDOM();
+}
