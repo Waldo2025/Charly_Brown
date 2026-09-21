@@ -20,7 +20,7 @@ import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-sce
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
 import { createPodcasterAcademicMetadataApi } from "../podcaster/podcaster-academic-metadata.js?v=2026-1.0.10.717";
-import { buildPreviewDocument } from "./escape-room-package-builder.mjs";
+import { buildPreviewDocument } from "./escape-room-package-builder.mjs?v=20260912-jigsaw-v106";
 import "../podcaster/podcaster-scene-media-render-spec.js";
 import { createVideoPlayerReviewManager } from "./video-player-review-manager.js";
 import { setScenePanelSectionVisibility, bindNewProposalToggleButtons } from "./video-player-panel-ui.js";
@@ -3382,6 +3382,7 @@ async function mutateDashboardProposalSession(activeRowId = "", mutator = null) 
     const now = new Date().toISOString();
     const writeOps = [];
     let rowIndex = -1;
+    let updatedSession = null;
 
     if (sessionSnap.exists()) {
       const sDoc = sessionSnap.data() || {};
@@ -3419,6 +3420,19 @@ async function mutateDashboardProposalSession(activeRowId = "", mutator = null) 
             if (sSession.rowReferenceModeByRowId) {
               payload["session.rowReferenceModeByRowId"] = sSession.rowReferenceModeByRowId;
             }
+            updatedSession = buildDashboardSessionFromPodcasterDoc({
+              ...sDoc,
+              session: {
+                ...sSession,
+                script: {
+                  ...(sSession.script && typeof sSession.script === "object" ? sSession.script : {}),
+                  rows: proposalRows
+                },
+                updatedAt: now
+              },
+              sessionUpdatedAt: now,
+              updatedAt: now
+            }, sessionId, currentMultimediaSession);
             writeOps.push(updateDoc(sessionRef, payload));
           }
         }
@@ -3427,9 +3441,10 @@ async function mutateDashboardProposalSession(activeRowId = "", mutator = null) 
 
     if (writeOps.length > 0) {
       await Promise.all(writeOps);
+      if (updatedSession) currentMultimediaSession = updatedSession;
     }
 
-    return { ok: writeOps.length > 0, rowIndex, session: currentMultimediaSession };
+    return { ok: writeOps.length > 0, rowIndex, session: updatedSession || currentMultimediaSession };
   } catch (err) {
     console.error("[Dashboard] Error crítico en mutateDashboardProposalSession:", err);
     return { ok: false, rowIndex: -1, session: currentMultimediaSession };

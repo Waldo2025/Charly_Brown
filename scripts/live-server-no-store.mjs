@@ -11,10 +11,12 @@ function shouldDisableBrowserCache(url = "") {
   const cleanUrl = String(url || "").split("?")[0] || "";
   return cleanUrl === "/"
     || cleanUrl.endsWith(".html")
+    || cleanUrl.endsWith(".css")
+    || cleanUrl.endsWith(".js")
+    || cleanUrl.endsWith(".mjs")
+    || cleanUrl.endsWith(".json")
     || cleanUrl.endsWith("/version.json")
-    || cleanUrl.endsWith("/js/cache-version-loader.js")
-    || cleanUrl.startsWith("/podcaster/")
-    || cleanUrl.startsWith("/js/api-client");
+    || cleanUrl.startsWith("/podcaster/");
 }
 
 liveServer.start({
@@ -25,6 +27,10 @@ liveServer.start({
   noBrowser: true,
   middleware: [
     (req, res, next) => {
+      const pathname = String(req.url || "").split("?")[0];
+      // Older static-server MIME tables do not recognize ES module extensions.
+      if (pathname.endsWith(".mjs")) res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      if (pathname.endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
       if (shouldDisableBrowserCache(req.url)) {
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         res.setHeader("Pragma", "no-cache");

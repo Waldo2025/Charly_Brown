@@ -1,5 +1,5 @@
 (function () { // IIFE starts here
-  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.10.858';
+  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.10.859';
 
   function normalizePageId(pageId, fallback = 'index.html') {
     const normalized = String(pageId || '').trim().toLowerCase();
@@ -19,10 +19,11 @@
     'contenidounidad.html': { title: 'Contenido', header: 'filters' },
     'contenidounidad-.html': { title: 'Contenido', header: 'filters' },
     'generarlectura.html': { title: 'Charly Studio', header: 'simple' },
-    'charly-brown.html': { title: 'Charly Brown', header: 'simple' },
+    'charlymcpeditor.html': { title: 'Charly MCP Editor', header: 'simple' },
     'peppermintpattyanalizer.html': { title: 'Peppermint Patty Analizer', header: 'simple' },
     'pigpencreator.html': { title: 'PigPen Escape Room Creator', header: 'simple' },
-    'podcaster.html': { title: 'Podcaster Studio', header: 'simple' },
+    'mindmapcreator.html': { title: 'Mindmap Creator', header: 'simple' },
+    'podcaster.html': { title: 'Snoopy Editor', header: 'simple' },
     'imagecreator.html': { title: 'Image Creator', header: 'simple' },
     'lecturasgame.html': { title: 'Lecturas Game', header: 'simple' },
     'moodlecourse.html': { title: 'Charly Brown Gestion de cursos Aprende', header: 'simple' },
@@ -283,8 +284,9 @@
         links: [
           { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Análisis editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
           { href: '/MarcieBlogEditor.html', icon: 'fas fa-pen', label: 'Marcie Blog Editor', id: 'marcieBlogEditorLink', requiresAuth: true },
-          { href: 'charly-brown.html', icon: 'fas fa-wand-magic-sparkles', label: 'Charly Brown', id: 'charlyBrownLink', roleVisibility: 'admin,author,editor,developer' },
+          { href: 'charlyMCPeditor.html', icon: 'fas fa-wand-magic-sparkles', label: 'Charly MCP Editor', id: 'charlyBrownLink', roleVisibility: 'admin,author,editor,developer' },
           { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear cursos de Moodle' },
+          { href: 'SallyBrownEditor.html', icon: 'fas fa-laptop-code', label: 'Sally Brown Editor', id: 'sallyBrownEditorLink', requiresApproval: true },
           { href: 'PeppermintPattyAnalizer.html', icon: 'fas fa-file-pdf', label: 'Peppermint Patty Analizer' },
           { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
         ]
@@ -294,9 +296,10 @@
         label: 'Multimedia',
         icon: 'fas fa-photo-film',
         links: [
-          { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
+          { href: 'podcaster.html', icon: 'fas fa-film', label: 'Snoopy Editor' },
           { href: 'scienceActivities.html', icon: 'fas fa-flask', label: 'Actividades de ciencias' },
           { href: 'PigPenCreator.html', icon: 'fas fa-door-closed', label: 'PigPen Escape Rooms' },
+          { href: 'MindmapCreator.html', icon: 'fas fa-brain', label: 'Mindmap Creator' },
           { href: 'experienciaMenu.html', icon: 'fas fa-layer-group', label: 'Experiencias' },
           { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' }
         ]
@@ -354,6 +357,7 @@
       }
       if (link.roleVisibility) classes.push('d-none');
       if (link.requiresAuth) classes.push('d-none');
+      if (link.requiresApproval) classes.push('d-none');
       const attrs = [
         `href="${resolvedHref}"`,
         `class="${classes.join(' ')}"`,
@@ -363,6 +367,7 @@
       if (link.id) attrs.push(`id="${link.id}"`);
       if (link.roleVisibility) attrs.push(`data-role-visibility="${link.roleVisibility}"`, 'hidden', 'aria-hidden="true"', 'tabindex="-1"');
       if (link.requiresAuth) attrs.push('data-auth-required="true"', 'hidden', 'aria-hidden="true"', 'tabindex="-1"');
+      if (link.requiresApproval) attrs.push('data-approval-required="true"', 'hidden', 'aria-hidden="true"', 'tabindex="-1"');
       const badgeHtml = link.id === 'chatLink'
         ? '<em id="chat-notification-badge" class="sidebar-badge" hidden aria-live="polite">0</em>'
         : '';

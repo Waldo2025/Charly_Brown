@@ -1780,28 +1780,7 @@
         .main-content,
         .container,
         .container-fluid
-      ) :where(h1, h2, h3, h4, h5, h6, span, p, label, li, td, th) {
-        color: var(--app-text-color) !important;
-      }
-
-      /* Uniformidad de iconos en paginas con tema dinamico */
-      :where(
-        main,
-        #sessionSidebar,
-        #sessionFeed,
-        #sidebar2,
-        #sidebarTemas,
-        #panel-chat,
-        #panel-texto-formatos,
-        #panel-izquierdo,
-        .panel-analisis,
-        .panel-medio,
-        .panel-derecho,
-        #contenidoEditor,
-        .main-content,
-        .container,
-        .container-fluid
-      ) :where(i, [class^="fa-"], [class*=" fa-"]) {
+      ) :where(h1, h2, h3, h4, h5, h6, span, p, label, li, td, th):not(button, button *, [role="button"], [role="button"] *) {
         color: var(--app-text-color) !important;
       }
 
@@ -2096,34 +2075,30 @@
         .modal-galeria-contenido,
         .modal-lecturas-contenido,
         .panelLecturasGuardadas
-      ) :where(input, textarea, select, [contenteditable="true"], .form-control, .form-select) {
+      ) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select, [contenteditable="true"], .form-control, .form-select) {
         background-color: var(--app-form-bg) !important;
         color: var(--app-form-text) !important;
         border-color: var(--app-form-border) !important;
       }
 
-      :where(input, textarea, select, .form-control, .form-select) {
+      :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select, .form-control, .form-select) {
         background-color: var(--app-form-bg) !important;
         color: var(--app-form-text) !important;
         border-color: var(--app-form-border) !important;
         caret-color: var(--app-form-text) !important;
       }
 
-      :where(input, textarea, select, .form-control, .form-select)::placeholder {
+      :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select, .form-control, .form-select)::placeholder {
         color: var(--app-form-placeholder) !important;
       }
 
-      :where(input, textarea, select, .form-control, .form-select):focus {
+      :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select, .form-control, .form-select):focus {
         border-color: var(--app-form-focus) !important;
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-form-focus) 24%, transparent) !important;
         outline: none !important;
       }
 
       :where(
-        button,
-        .btn,
-        .theme-btn,
-        .theme-icon-btn,
         .theme-settings-card,
         .theme-settings-section,
         .content-card,
@@ -2139,7 +2114,7 @@
         .unidad-panel,
         .unidad-editor-table-wrap,
         .tabla-secuencia-wrap,
-        input,
+        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
         select,
         textarea
       ) {
@@ -2169,18 +2144,6 @@
 
       :where(table tbody tr:hover td) {
         background: var(--app-table-row-hover);
-      }
-
-      :where(
-        .modal-content,
-        .modal-contenido,
-        .modal-contenidoHome,
-        .modal-normal-content,
-        .modal-galeria-contenido,
-        .modal-lecturas-contenido,
-        .panelLecturasGuardadas
-      ) :where(button, .btn, .btn-secondary, .btn-primary, .btn-analisis) {
-        border-color: rgba(148, 163, 184, 0.35) !important;
       }
 
       /* Modales Tailwind/custom (aplica en otras paginas tambien) */

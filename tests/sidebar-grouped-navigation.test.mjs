@@ -16,7 +16,7 @@ test("agrupa los accesos solicitados sin perder sus guards de rol", () => {
 
   for (const label of [
     "Análisis editorial",
-    "Charly Brown",
+    "Charly MCP Editor",
     "Crear cursos de Moodle",
     "Peppermint Patty Analizer",
     "Voice Transcribe",

@@ -166,7 +166,7 @@ function applySidebarRoleVisibility(role = "") {
 
 function applySidebarAuthVisibility(user = null) {
   const hasSession = Boolean(user);
-  const authLinks = document.querySelectorAll("#sidebar .sidebar-link[data-auth-required]");
+  const authLinks = document.querySelectorAll("#sidebar .sidebar-link[data-auth-required]:not([data-approval-required])");
   authLinks.forEach((link) => {
     link.classList.toggle("d-none", !hasSession);
     link.hidden = !hasSession;
@@ -177,6 +177,36 @@ function applySidebarAuthVisibility(user = null) {
       link.setAttribute("aria-hidden", "false");
       link.removeAttribute("tabindex");
     }
+  });
+  updateSidebarGroupAvailability();
+}
+
+async function applySidebarApprovalVisibility(user, role) {
+  const links = document.querySelectorAll("#sidebar .sidebar-link[data-approval-required]");
+  let allowed = false;
+  if (user && canonicalRole(role) && canonicalRole(role) !== "pending") {
+    try {
+      const { canonicalApprovalStatus, resolveApprovedUserProfile } = await import("./user-approval.js");
+      const tokenResult = await user.getIdTokenResult().catch(() => null);
+      let profile = {};
+      const { getFirestore, collection, query, where, getDocs, doc, getDoc, limit } = await loadSidebarFirestore();
+      const db = getFirestore(app);
+      const direct = await getDoc(doc(db, "users", user.uid)).catch(() => null);
+      if (direct?.exists()) profile = direct.data() || {};
+      else {
+        const snapshot = await getDocs(query(collection(db, "users"), where("uid", "==", user.uid), limit(1))).catch(() => null);
+        if (snapshot && !snapshot.empty) profile = snapshot.docs[0].data() || {};
+      }
+      const explicitStatus = canonicalApprovalStatus(profile.approvalStatus || profile.status || profile.estado || profile.estadoAprobacion || profile.aprobado);
+      allowed = !["pending", "rejected"].includes(explicitStatus) &&
+        (resolveApprovedUserProfile(profile).approved || resolveApprovedUserProfile(tokenResult?.claims || {}).approved) &&
+        canonicalRole(role) !== "pending";
+    } catch (_) { allowed = false; }
+  }
+  links.forEach((link) => {
+    link.classList.toggle("d-none", !allowed); link.hidden = !allowed;
+    link.setAttribute("aria-hidden", allowed ? "false" : "true");
+    if (allowed) link.removeAttribute("tabindex"); else link.setAttribute("tabindex", "-1");
   });
   updateSidebarGroupAvailability();
 }
@@ -453,6 +483,7 @@ async function initializeSidebarAuth() {
         try { role = await resolveUserRole(user); } catch (_) { role = null; }
       }
       applySidebarRoleVisibility(role);
+      await applySidebarApprovalVisibility(user, role);
       const analisisLink = document.getElementById("analisisEditorialLink");
       if (analisisLink && !analisisLink.dataset.roleVisibility) {
         const permitidos = ["admin","author","editor","developer"];
@@ -497,33 +528,12 @@ function initSidebar() {
   sidebar.classList.remove("show");
   document.body.classList.add("sidebar-collapsed");
 
-  // Navegación SPA con fallback offline
+  // Navegación completa para obtener siempre el HTML y los assets publicados.
   document.querySelectorAll(".sidebar-link[data-page]").forEach(link => {
-    link.addEventListener("click", async (e) => {
+    link.addEventListener("click", (e) => {
       e.preventDefault();
       const page = link.dataset.page;
-
-      try {
-        const res = await fetch(page);
-        const html = await res.text();
-
-        // Guarda en localStorage para navegación offline
-        localStorage.setItem(`page:${page}`, html);
-
-        // Si quieres cargar lógica JS específica:
-        if (page === "unidadHome.html") {
-          import("./unidadHome.js");
-        } else if (page === "home.html") {
-          import("./home.js");
-        }
-
-      } catch (error) {
-        // Cargar desde cache si está disponible
-        const cached = localStorage.getItem(`page:${page}`);
-        if (cached) {
-          document.getElementById("app").innerHTML = cached;
-        }
-      }
+      if (page) window.location.assign(page);
     });
   });
 

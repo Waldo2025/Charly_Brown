@@ -49,6 +49,7 @@ const runtimeConfigSource = read("public/js/runtime-config.js");
 const apiClientSource = read("public/js/api-client.js");
 const mediaRuntimeSource = read("public/podcaster/podcaster-media-runtime.js");
 const playbackControllerSource = read("public/podcaster/podcaster-playback-controller.js");
+const authorizedAssetResolverSource = read("public/podcaster/podcaster-authorized-asset-resolver.js");
 const runtimeConfigLoaderSource = read("public/js/runtime-config-loader.js");
 const montageExportSource = read("public/podcaster/podcaster-montage-export.js");
 const montageExportV2Source = read("public/podcaster/podcaster-montage-export-v2.js");
@@ -66,21 +67,22 @@ assert.doesNotMatch(podcasterSource, /apiKey:\s*liveApiKey|loadGoogleGenAiLiveMo
 assert.match(runtimeConfigSource, /const __charlyGoogleApiBase = "https:\/\/charly-brown\.web\.app\/api"/);
 assert.doesNotMatch(runtimeConfigSource, /__charlyIsLocalRuntime\s*\?\s*"http:\/\/127\.0\.0\.1/);
 assert.match(apiClientSource, /return DEFAULT_GOOGLE_API_BASE/);
-assert.match(playbackControllerSource, /!this\.hasFirebaseDirectAccessToken\(finalUrl\)/);
+assert.doesNotMatch(playbackControllerSource, /hasFirebaseDirectAccessToken/);
+assert.match(playbackControllerSource, /isDirectFirebaseUrl && !finalUrl\.includes\('\/api\/assets\/proxy-'\)/);
 assert.match(playbackControllerSource, /resolveAuthorizedAssetUrl/);
 assert.match(playbackControllerSource, /requiresAuthorizedAssetResolution/);
-assert.match(playbackControllerSource, /async resolveStageImageSource\(src = ""\)/);
+assert.match(playbackControllerSource, /async resolveStageImageSource\(src = "", options = \{\}\)/);
 assert.match(
   playbackControllerSource,
-  /preloadImageSrc\(src = ""\)[\s\S]*resolveStageImageSource\(cleanSrc\)[\s\S]*probe\.src = resolvedSrc/,
+  /preloadImageSrc\(src = ""\)[\s\S]*resolveStageImageSource\(cleanSrc\)[\s\S]*loadResolvedImage\(resolvedSrc\)/,
   "Las imágenes privadas deben resolverse a una URL firmada antes de precargarse."
 );
 assert.match(
   playbackControllerSource,
-  /ensureStageImageReady\(imageEl, resolvedSrc, \{ sourceKey: cleanSrc \}\)/,
+  /ensureStageImageReady\(targetImage, resolvedSrc, \{\s*sourceKey: cleanSrc,\s*sourceGeneration\s*\}\)/,
   "El stage debe cargar la URL firmada conservando la fuente lógica de la escena."
 );
-assert.match(podcasterSource, /\/api\/assets\/signed-url\?storagePath=/);
+assert.match(authorizedAssetResolverSource, /\/api\/assets\/signed-url\?storagePath=/);
 assert.match(runtimeConfigLoaderSource, /window\.__CHARLY_RUNTIME_CONFIG_READY__ = \(async \(\) =>/);
 assert.match(podcasterSource, /await window\.__CHARLY_RUNTIME_CONFIG_READY__/);
 assert.match(
@@ -102,9 +104,9 @@ const mediaRuntime = mediaRuntimeModule.createPodcasterMediaRuntimeApi({
   buildApiUrl: (route) => `https://charly-brown.web.app${route}`
 });
 const tokenizedMedia = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/podcaster%2Fsessions%2Fsession-1%2Fvideo.mp4?alt=media&token=token-1";
-assert.equal(mediaRuntime.resolveStaleAwareProxyMediaUrl(tokenizedMedia, "", "media"), tokenizedMedia);
+assert.match(mediaRuntime.resolveStaleAwareProxyMediaUrl(tokenizedMedia, "", "media"), /^https:\/\/charly-brown\.web\.app\/api\/assets\/proxy-media\?storagePath=/);
 const legacyProxy = `http://127.0.0.1:5010/api/assets/proxy-media?url=${encodeURIComponent(tokenizedMedia)}`;
-assert.equal(mediaRuntime.resolveStaleAwareProxyMediaUrl(legacyProxy, "", "media"), tokenizedMedia);
+assert.match(mediaRuntime.resolveStaleAwareProxyMediaUrl(legacyProxy, "", "media"), /^https:\/\/charly-brown\.web\.app\/api\/assets\/proxy-media\?storagePath=/);
 const protectedMedia = "https://firebasestorage.googleapis.com/v0/b/charly-brown.firebasestorage.app/o/podcaster%2Fsessions%2Fsession-1%2Fprivate.mp4?alt=media";
 const protectedResolved = mediaRuntime.resolveStaleAwareProxyMediaUrl(protectedMedia, "", "media");
 assert.match(protectedResolved, /^https:\/\/charly-brown\.web\.app\/api\/assets\/proxy-media\?storagePath=/);

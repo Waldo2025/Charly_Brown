@@ -2,7 +2,7 @@
   --cb-header-height: 64px;
   --cb-header-mobile-height: 56px;
   --cb-chrome-bg: #3f4d98;
-  --cb-header-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  --cb-header-shadow: none;
 }
 
 .main-header {

@@ -457,7 +457,8 @@ export async function authFetchJson(url, options = {}) {
     const isMontageQueueUnavailable = response.status === 503 && data && (data.error === 'montage_export_queue_unavailable' || data.code === 'montage_export_queue_unavailable');
     const isMontageBusyWithExport = response.status === 429 && data && (data.error === 'backend_busy_with_export' || data.code === 'backend_busy_with_export');
     const isBackendBusy = response.status === 503 && data && (data.error === 'backend_busy' || data.code === 'backend_busy');
-    if (!isMontageQueueUnavailable && !isMontageBusyWithExport && !isBackendBusy) {
+    const isGeminiQuotaExhausted = response.status === 429 && data && (data.error === 'gemini_quota_exhausted' || data.code === 'gemini_quota_exhausted');
+    if (!isMontageQueueUnavailable && !isMontageBusyWithExport && !isBackendBusy && !isGeminiQuotaExhausted) {
       try {
         console.error("[api-client] request failed", {
           url: finalUrl,

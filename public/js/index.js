@@ -313,7 +313,8 @@ async function routeAuthenticatedUser(user, { showAlerts = true } = {}) {
     }
   }
 
-  window.location.href = "home.html";
+  window.location.href = new URLSearchParams(window.location.search).get("next") === "SallyBrownEditor.html"
+    ? "SallyBrownEditor.html" : "home.html";
   return true;
 }
 
