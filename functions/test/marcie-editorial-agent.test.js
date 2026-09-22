@@ -46,6 +46,9 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /data-agent-audio title="Activar respuestas por voz"/);
   assert.match(panelSource, /let panelAudioEnabled = false/);
   assert.match(panelSource, /if \(speak && \(guide \|\| panelAudioEnabled\)\) voice\.speak/);
+  assert.match(panelSource, /role="status" aria-live="polite"/);
+  assert.match(panelSource, /Marcie está analizando el artículo/);
+  assert.match(panelSource, /Marcie está preparando una corrección/);
   assert.match(panelSource, /Hablando con Marcie/);
   assert.doesNotMatch(panelSource, /Gemini está revisando/);
   assert.doesNotMatch(panelSource, /Conectando con Gemini/);

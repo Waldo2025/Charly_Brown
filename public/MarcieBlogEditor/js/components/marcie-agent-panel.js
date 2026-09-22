@@ -32,6 +32,19 @@ function optionButton(option) {
   return `<button type="button" class="marcie-agent-option" data-option-id="${escapeHtml(option.id)}" data-option-action="${escapeHtml(option.action || "")}" data-option-value="${escapeHtml(option.value || option.label || "")}">${escapeHtml(option.label || option.value || option.id)}</button>`;
 }
 
+function activityLabel(input = {}) {
+  const action = String(input.action || "");
+  if (action === "apply_change") return "Marcie está aplicando los cambios";
+  if (action === "discard_change") return "Marcie está descartando la vista previa";
+  const text = String(input.text || input.value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (/corrige|corregir|reescribe|reescribir|modifica|editar|cambia el tono|acorta|amplia/.test(text)) return "Marcie está preparando una corrección";
+  if (/analiza|analizar|evalua|evaluar|revisa el articulo|revision del articulo/.test(text)) return "Marcie está analizando el artículo";
+  if (/verifica|verificar|comprueba|comprobar|afirmacion|referencia/.test(text)) return "Marcie está verificando las afirmaciones";
+  if (/busca|buscar|investiga|investigar|mas fuentes|bibliografia/.test(text)) return "Marcie está buscando fuentes";
+  if (/wordpress|borrador/.test(text)) return "Marcie está revisando el borrador";
+  return "Marcie está pensando en tu solicitud";
+}
+
 export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewSessionRequest, onNotify } = {}) {
   const host = document.getElementById("marcie-agent-chat-host");
   if (!host) return { startGuidedSession() {} };
@@ -41,6 +54,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let busy = false;
   let guide = null;
   let panelAudioEnabled = false;
+  let panelActivity = "";
   const messages = [];
 
   host.innerHTML = `
@@ -126,9 +140,13 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   });
 
   function renderPanelMessages() {
-    panel.messageList.innerHTML = messages.length
+    const conversation = messages.length
       ? messages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}">${escapeHtml(message.text)}</div>`).join("")
       : `<div class="marcie-agent__empty"><i data-lucide="wand-sparkles"></i><p>Puedo revisar, verificar y mejorar los artículos creados.</p></div>`;
+    const activity = panelActivity
+      ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(panelActivity)}</span></div>`
+      : "";
+    panel.messageList.innerHTML = conversation + activity;
     panel.messageList.scrollTop = panel.messageList.scrollHeight;
     window.lucide?.createIcons?.();
   }
@@ -299,6 +317,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     const surface = activeSurface();
     const userText = inputPayload.text || inputPayload.value || "";
     if (userText) messages.push({ role: "user", text: userText });
+    if (!guide) panelActivity = activityLabel(inputPayload);
     busy = true;
     setStatus("processing");
     setSurfaceBusy(surface, true);
@@ -309,11 +328,14 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       const contextualInput = activeSession
         ? { ...inputPayload, audience: activeSession.audience || activeSession.article?.audience || activeSession.selectedAudiences?.[0] || "" }
         : inputPayload;
-      showResponse(await sendAgentTurn(runId, contextualInput, {
+      const response = await sendAgentTurn(runId, contextualInput, {
         mode: guide ? "configuration" : "assistant",
         sessionId: activeSession?.id || ""
-      }));
+      });
+      panelActivity = "";
+      showResponse(response);
     } catch (error) {
+      panelActivity = "";
       messages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
       if (guide) guide.question.textContent = `No pude continuar: ${error.message}`;
       if (responseState) renderOptions(responseState);
@@ -324,6 +346,10 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       const current = activeSurface();
       setSurfaceBusy(current, false);
       setStatus("idle");
+      if (panelActivity) {
+        panelActivity = "";
+        renderPanelMessages();
+      }
     }
   }
 

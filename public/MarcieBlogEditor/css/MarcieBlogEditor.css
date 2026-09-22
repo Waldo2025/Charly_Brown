@@ -4725,6 +4725,12 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-agent-message { max-width: 88%; padding: 0.55rem 0.65rem; border-radius: 8px; font-size: 0.74rem; line-height: 1.5; white-space: pre-wrap; }
 .marcie-agent-message--assistant { align-self: flex-start; color: #334155; background: #f1f5f9; }
 .marcie-agent-message--user { align-self: flex-end; color: #fff; background: #0f766e; }
+.marcie-agent-activity { min-height: 30px; display: inline-flex; align-self: flex-start; align-items: center; gap: 0.5rem; padding: 0.2rem 0.15rem; color: var(--marcie-ui-text-muted, #64748b); font-size: 0.7rem; line-height: 1.35; }
+.marcie-agent-activity__dots { display: inline-flex; align-items: center; gap: 3px; }
+.marcie-agent-activity__dots span { width: 5px; height: 5px; border-radius: 50%; background: #0f766e; animation: marcie-agent-thinking 1.15s ease-in-out infinite; }
+.marcie-agent-activity__dots span:nth-child(2) { animation-delay: 140ms; }
+.marcie-agent-activity__dots span:nth-child(3) { animation-delay: 280ms; }
+@keyframes marcie-agent-thinking { 0%, 60%, 100% { opacity: 0.28; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
 .marcie-agent__options { max-height: 190px; padding: 0 0.75rem 0.65rem; overflow-y: auto; }
 .marcie-agent-option-list { display: grid; gap: 0.4rem; }
 .marcie-agent-option { min-height: 44px; padding: 0.55rem 0.7rem; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #334155; text-align: left; font-size: 0.72rem; line-height: 1.35; }
@@ -4785,6 +4791,10 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 [data-agent-state="listening"] .marcie-agent__tool[data-agent-mic] { color: #dc2626; animation: marcie-agent-pulse 1.2s ease-in-out infinite; }
 [data-agent-state="processing"] .marcie-agent__mark { animation: marcie-agent-pulse 1.2s ease-in-out infinite; }
 @keyframes marcie-agent-pulse { 50% { opacity: 0.58; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .marcie-agent-activity__dots span { animation: none; opacity: 0.72; }
+}
 
 html[data-marcie-ui-theme="dark"] :is(.marcie-agent-option, .marcie-agent-message--assistant) { color: var(--marcie-ui-text, #f1f5f9); background: var(--marcie-panel-card, #252b34); border-color: var(--marcie-ui-border, #3f4752); }
 html[data-marcie-ui-theme="dark"] .marcie-agent-summary dd { color: var(--marcie-ui-text, #f1f5f9); }
