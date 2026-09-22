@@ -3,15 +3,6 @@ import { getCurrentUser } from "./marcie-firebase.js";
 
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-function preferredSpanishVoice() {
-  const voices = window.speechSynthesis?.getVoices?.() || [];
-  return voices.find((voice) => /^es-MX$/i.test(voice.lang) && /female|mujer|paulina|dalia|sabina/i.test(voice.name))
-    || voices.find((voice) => /^es(?:-|$)/i.test(voice.lang) && /female|mujer|paulina|dalia|sabina/i.test(voice.name))
-    || voices.find((voice) => /^es-MX$/i.test(voice.lang))
-    || voices.find((voice) => /^es(?:-|$)/i.test(voice.lang))
-    || null;
-}
-
 export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } = {}) {
   let recognition = null;
   let listening = false;
@@ -58,7 +49,6 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
 
   function cancelOutput() {
     speechEpoch += 1;
-    window.speechSynthesis?.cancel?.();
     if (liveConnection) {
       const connection = liveConnection;
       liveConnection = null;
@@ -90,23 +80,6 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     };
     recognition.onend = () => { listening = false; setState("idle"); };
     recognition.start();
-    return true;
-  }
-
-  function speakWithBrowser(text, epoch) {
-    const content = String(text || "").trim();
-    if (!content || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return false;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(content);
-    utterance.lang = "es-MX";
-    utterance.rate = 0.92;
-    utterance.pitch = 1.04;
-    const voice = preferredSpanishVoice();
-    if (voice) utterance.voice = voice;
-    utterance.onstart = () => { if (epoch === speechEpoch) setState("speaking"); };
-    utterance.onend = () => { if (epoch === speechEpoch) setState("idle"); };
-    utterance.onerror = () => { if (epoch === speechEpoch) setState("idle"); };
-    window.speechSynthesis.speak(utterance);
     return true;
   }
 
@@ -241,7 +214,10 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     cancelOutput();
     const epoch = speechEpoch;
     void speakWithGeminiLive(content, epoch).catch(() => {
-      if (epoch === speechEpoch) speakWithBrowser(content, epoch);
+      if (epoch === speechEpoch) {
+        setState("idle");
+        onError?.(new Error("No pude reproducir la voz de Marcie Live. Puedes continuar por escrito."));
+      }
     });
     return true;
   }

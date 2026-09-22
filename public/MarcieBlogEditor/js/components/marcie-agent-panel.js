@@ -1,5 +1,5 @@
-import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r1";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r4";
+import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r2";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r5";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
@@ -32,7 +32,7 @@ function optionButton(option) {
   return `<button type="button" class="marcie-agent-option" data-option-id="${escapeHtml(option.id)}" data-option-action="${escapeHtml(option.action || "")}" data-option-value="${escapeHtml(option.value || option.label || "")}">${escapeHtml(option.label || option.value || option.id)}</button>`;
 }
 
-export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onNotify } = {}) {
+export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewSessionRequest, onNotify } = {}) {
   const host = document.getElementById("marcie-agent-chat-host");
   if (!host) return { startGuidedSession() {} };
 
@@ -54,7 +54,6 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
         <form class="marcie-agent__composer" data-agent-form>
           <textarea rows="3" maxlength="4000" placeholder="Escribe una instrucción para Marcie" aria-label="Mensaje para el agente" data-agent-input></textarea>
           <div class="marcie-agent__composer-actions">
-            <button type="button" class="marcie-agent__mic" data-agent-mic title="Pulsar para hablar" aria-label="Pulsar para hablar"><i data-lucide="mic"></i></button>
             <button type="submit" class="marcie-agent__send" data-agent-send title="Enviar" aria-label="Enviar mensaje"><i data-lucide="send"></i></button>
           </div>
         </form>
@@ -211,7 +210,7 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
       if (surface.transcript) surface.transcript.textContent = "Tu respuesta aparecerá aquí antes de enviarse.";
       submit({ text });
     });
-    surface.mic.addEventListener("click", () => {
+    surface.mic?.addEventListener("click", () => {
       if (voice.listening) voice.stop();
       else voice.listen();
     });
@@ -278,7 +277,15 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
     setSurfaceBusy(surface, true);
     renderPanelMessages();
     try {
-      showResponse(await sendAgentTurn(runId, inputPayload));
+      const activeSession = guide ? null : getActiveSession?.();
+      if (!guide && !activeSession?.id) throw new Error("Selecciona una sesión con un artículo para trabajar con Marcie.");
+      const contextualInput = activeSession
+        ? { ...inputPayload, audience: activeSession.audience || activeSession.article?.audience || activeSession.selectedAudiences?.[0] || "" }
+        : inputPayload;
+      showResponse(await sendAgentTurn(runId, contextualInput, {
+        mode: guide ? "configuration" : "assistant",
+        sessionId: activeSession?.id || ""
+      }));
     } catch (error) {
       messages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
       if (guide) guide.question.textContent = `No pude continuar: ${error.message}`;
@@ -300,7 +307,7 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
     renderPanelMessages();
     renderGuideQuestion(response);
     renderOptions(response);
-    if (speak) voice.speak(response.speechText || response.message);
+    if (speak && guide) voice.speak(response.speechText || response.message);
   }
 
   async function executeRun() {
@@ -325,7 +332,6 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
       document.getElementById("right-resizer")?.classList.remove("hidden");
       closeGuide({ cancelSpeech: false });
       renderPanelMessages();
-      voice.speak("Los artículos están listos. Puedo ayudarte a revisarlos, verificarlos o preparar cambios.");
     } catch (error) {
       await updateAgentRun(runId, "failed", { error: error.message }).catch(() => {});
       messages.push({ role: "assistant", text: `La creación se detuvo: ${error.message}` });

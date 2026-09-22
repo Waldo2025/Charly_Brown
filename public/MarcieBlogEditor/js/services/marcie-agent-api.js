@@ -27,8 +27,8 @@ export function startAgentConversation() {
   return postAgent("/api/marcie/agent/chat", { input: {} });
 }
 
-export function sendAgentTurn(runId, input) {
-  return postAgent("/api/marcie/agent/chat", { runId, input });
+export function sendAgentTurn(runId, input, { mode = "configuration", sessionId = "" } = {}) {
+  return postAgent("/api/marcie/agent/chat", { runId, input, mode, sessionId });
 }
 
 export function analyzeYoutubeVideos(urls, objective = "") {

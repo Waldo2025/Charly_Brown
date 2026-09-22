@@ -4772,13 +4772,11 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-agent__composer textarea { box-sizing: border-box; width: 100%; min-height: 112px; max-height: 220px; resize: vertical; padding: 1rem; border: 0; border-radius: 0; background: transparent; color: var(--marcie-ui-text, #1e293b); font-size: 0.82rem; line-height: 1.5; }
 .marcie-agent__composer textarea:focus { border: 0; box-shadow: none; outline: none; }
 .marcie-agent__composer textarea::placeholder { color: var(--marcie-ui-text-muted, #667085); opacity: 1; }
-.marcie-agent__composer-actions { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 0.35rem; margin: 0 0.75rem; border-top: 1px solid var(--marcie-ui-border, #e2e8f0); }
-.marcie-agent__mic, .marcie-agent__send { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--marcie-ui-text-soft, #475467); transition: color 140ms ease, background-color 140ms ease; }
-.marcie-agent__mic:hover, .marcie-agent__send:hover { background: var(--marcie-ui-surface-hover, #f2f4f7); color: var(--marcie-ui-text, #101828); }
-.marcie-agent__mic:focus-visible, .marcie-agent__send:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
-.marcie-agent__send { color: #0f766e; }
-.marcie-agent__mic svg, .marcie-agent__send svg { width: 18px; height: 18px; }
-[data-agent-state="listening"] .marcie-agent__mic { color: #dc2626; background: transparent; animation: marcie-agent-pulse 1.2s ease-in-out infinite; }
+.marcie-agent__composer-actions { display: flex; min-height: 54px; align-items: center; justify-content: flex-end; gap: 0.35rem; margin: 0 0.75rem; border-top: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-agent__send { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #0f766e; transition: color 140ms ease, background-color 140ms ease; }
+.marcie-agent__send:hover { background: var(--marcie-ui-surface-hover, #f2f4f7); color: var(--marcie-ui-text, #101828); }
+.marcie-agent__send:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
+.marcie-agent__send svg { width: 18px; height: 18px; }
 [data-agent-state="processing"] .marcie-agent__mark { animation: marcie-agent-pulse 1.2s ease-in-out infinite; }
 @keyframes marcie-agent-pulse { 50% { opacity: 0.58; } }
 

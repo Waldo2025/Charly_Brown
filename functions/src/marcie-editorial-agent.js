@@ -229,6 +229,15 @@ function initialRun({ uid, displayName = "" } = {}) {
   };
 }
 
+function initialAssistantRun({ uid, displayName = "", sessionId } = {}) {
+  return {
+    ...initialRun({ uid, displayName }),
+    sessionId: clean(sessionId, 120),
+    status: "reviewing",
+    phase: "reviewing"
+  };
+}
+
 function promptResponse(run, message, uiPrompt, extras = {}) {
   const name = run.displayName ? `, ${run.displayName}` : "";
   const speechText = extras.speechText || `${message}${uiPrompt?.options?.length ? ` Por favor${name}, elige una opción.` : ""}`;
@@ -671,16 +680,57 @@ async function readRun(context, runId) {
 
 async function reviewWithGemini({ article, instruction, generateText }) {
   if (typeof generateText !== "function") return { article, findings: ["El servicio de revisión no está disponible."] };
-  const prompt = `Revisa el artículo educativo según esta instrucción: ${instruction || "claridad, rigor, evidencia y adecuación al público"}. No inventes fuentes. Devuelve SOLO JSON con {"article":{...},"findings":[""]}. ARTÍCULO: ${JSON.stringify(article).slice(0, 80000)}`;
+  const prompt = `Revisa el artículo educativo según esta instrucción: ${instruction || "claridad, rigor, evidencia y adecuación al público"}. No inventes fuentes. Devuelve SOLO JSON con {"article":{...},"findings":[""],"summary":"explicación útil y concreta para el usuario"}. ARTÍCULO: ${JSON.stringify(article).slice(0, 80000)}`;
   return parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), { article, findings: [] });
+}
+
+async function planPostProductionTurn({ text, requestedAudience, session, generateText }) {
+  const availableAudiences = Object.keys(session.articlesByAudience || {}).filter(Boolean);
+  if (session.article && session.audience && !availableAudiences.includes(session.audience)) availableAudiences.push(session.audience);
+  if (typeof generateText !== "function") {
+    return { intent: "analyze", audience: requestedAudience || availableAudiences[0] || "educators", instruction: text };
+  }
+  const prompt = `Eres Marcie, agente editorial de una sesión que ya contiene artículos. Interpreta libremente la petición del usuario; NO inicies ni continúes el cuestionario de creación. Decide qué capacidad necesita y qué público menciona.
+INTENCIONES PERMITIDAS:
+- analyze: evaluar o analizar el artículo sin cambiarlo.
+- revise: corregir, reescribir, acortar, ampliar o cambiar el artículo; debe producir vista previa.
+- verify: comprobar afirmaciones, referencias o evidencia.
+- research: buscar más fuentes.
+- wordpress: comprobar si puede prepararse como borrador.
+- chat: responder preguntas, explicar el artículo o asesorar sin modificarlo.
+PÚBLICOS DISPONIBLES: ${JSON.stringify(availableAudiences)}. Equivalencias: educators=docentes, students=estudiantes, parents=padres y familias, coordinators=coordinadores.
+PÚBLICO ACTIVO: ${clean(requestedAudience, 80)}
+SESIÓN: ${JSON.stringify(publicSession(session)).slice(0, 12000)}
+PETICIÓN: ${clean(text, 4000)}
+Devuelve SOLO JSON: {"intent":"analyze|revise|verify|research|wordpress|chat","audience":"id disponible","instruction":"instrucción completa","answer":"respuesta directa solo si intent es chat"}`;
+  const parsed = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
+  const allowedIntents = new Set(["analyze", "revise", "verify", "research", "wordpress", "chat"]);
+  const audience = availableAudiences.includes(parsed.audience) ? parsed.audience : (availableAudiences.includes(requestedAudience) ? requestedAudience : availableAudiences[0]);
+  return {
+    intent: allowedIntents.has(parsed.intent) ? parsed.intent : "chat",
+    audience: audience || requestedAudience || "educators",
+    instruction: clean(parsed.instruction || text, 4000),
+    answer: clean(parsed.answer, 4000)
+  };
+}
+
+async function answerFromArticle({ text, session, audience, article, generateText, plannedAnswer = "" }) {
+  if (plannedAnswer) return plannedAnswer;
+  if (typeof generateText !== "function") return "Puedo analizar el artículo, verificar sus afirmaciones, buscar fuentes o preparar una revisión cuando el servicio editorial esté disponible.";
+  const prompt = `Eres Marcie, una asistente editorial útil y conversacional. Responde en español de México a la petición del usuario usando la sesión y el artículo activos. No conduzcas un formulario, no hagas preguntas de configuración y no inventes datos ni fuentes. Si falta información, dilo claramente. Responde de forma natural y concreta.
+PETICIÓN: ${clean(text, 4000)}
+PÚBLICO: ${clean(audience, 80)}
+SESIÓN: ${JSON.stringify(publicSession(session)).slice(0, 12000)}
+ARTÍCULO: ${JSON.stringify(article || {}).slice(0, 70000)}
+Devuelve SOLO JSON: {"answer":"respuesta para el usuario"}`;
+  const parsed = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
+  return clean(parsed.answer, 5000) || "No pude elaborar una respuesta útil sobre el artículo en este momento.";
 }
 
 async function handlePostProductionTurn(run, input, context) {
   const text = clean(input.text || input.value, 4000);
   const action = String(input.action || "");
   const { ref, session } = await loadOwnedSession(context.db, context.uid, run.sessionId);
-  const audience = clean(input.audience || session.audience || session.selectedAudiences?.[0] || "educators", 80);
-  const article = session.articlesByAudience?.[audience] || session.article;
   const handlers = createToolHandlers(context);
 
   if (action === "discard_change") {
@@ -710,7 +760,12 @@ async function handlePostProductionTurn(run, input, context) {
     return promptResponse(run, "Apliqué los cambios y conservé una nueva revisión para no sobrescribir ediciones recientes.", { type: "text", options: [] });
   }
 
-  if (/wordpress|borrador/i.test(text)) {
+  const requestedAudience = clean(input.audience || session.audience || session.selectedAudiences?.[0] || "educators", 80);
+  const plan = await planPostProductionTurn({ text, requestedAudience, session, generateText: context.generateText });
+  const audience = plan.audience;
+  const article = session.articlesByAudience?.[audience] || (session.audience === audience ? session.article : null) || session.article;
+
+  if (plan.intent === "wordpress") {
     const readiness = await handlers.prepare_wordpress_draft({ sessionId: run.sessionId, audience });
     const message = readiness.ready
       ? "El artículo está listo para preparar un borrador de WordPress. La publicación seguirá requiriendo tu confirmación."
@@ -718,7 +773,7 @@ async function handlePostProductionTurn(run, input, context) {
     return promptResponse(run, message, { type: "text", options: [] }, { wordpressReadiness: readiness });
   }
 
-  if (/verific|afirmaci[oó]n|referencia/i.test(text)) {
+  if (plan.intent === "verify") {
     const verification = await handlers.verify_article_claims({ article, topic: session.topic || session.title, additionalSearches: 1 });
     run.lastVerification = {
       status: clean(verification?.status || verification?.verification?.status, 80),
@@ -730,7 +785,7 @@ async function handlePostProductionTurn(run, input, context) {
     return promptResponse(run, message, { type: "text", options: [] }, { verification: run.lastVerification });
   }
 
-  if (/m[aá]s fuentes|buscar fuentes|investiga/i.test(text)) {
+  if (plan.intent === "research") {
     const research = await handlers.research_sources({ topic: session.topic || session.title, audience, minimumSources: 5, region: session.researchRegion || "MX", period: session.researchPeriod || "6m", videoEvidence: session.videoResearch || null });
     const sourceCount = Number(research?.documentSourceCount ?? (Array.isArray(research?.sources) ? research.sources.filter((source) => source?.sourceType !== "youtube_video").length : 0));
     run.lastResearch = { sourceCount, researchedAt: new Date().toISOString() };
@@ -738,8 +793,18 @@ async function handlePostProductionTurn(run, input, context) {
   }
 
   if (!article) return promptResponse(run, "No encuentro un artículo activo para revisar.", { type: "text", options: [] });
+  if (plan.intent === "chat") {
+    const answer = await answerFromArticle({ text, session, audience, article, generateText: context.generateText, plannedAnswer: plan.answer });
+    return promptResponse(run, answer, { type: "text", options: [] }, { audience });
+  }
+  if (plan.intent === "analyze") {
+    const review = await handlers.review_article({ article, instruction: plan.instruction || "Analiza claridad, estructura, tono, rigor, evidencia y adecuación al público sin modificar el artículo." });
+    const findings = Array.isArray(review.findings) ? review.findings.map((item) => clean(item, 800)).filter(Boolean).slice(0, 12) : [];
+    const message = clean(review.summary, 4000) || (findings.length ? `Análisis del artículo para ${AUDIENCES.find((item) => item.id === audience)?.label || audience}:\n${findings.map((item) => `• ${item}`).join("\n")}` : "Revisé el artículo y no encontré observaciones concretas que reportar.");
+    return promptResponse(run, message, { type: "text", options: [] }, { audience, review: { findings } });
+  }
   const baseRevision = Number(article.revision || 0);
-  const revision = await handlers.revise_article({ sessionId: run.sessionId, audience, baseRevision, instruction: text || "Revisa claridad, tono, rigor y adecuación al público." });
+  const revision = await handlers.revise_article({ sessionId: run.sessionId, audience, baseRevision, instruction: plan.instruction || text || "Revisa claridad, tono, rigor y adecuación al público." });
   run.pendingChange = { audience, baseRevision, preview: revision.preview, findings: revision.findings || [], createdAt: new Date().toISOString() };
   const findingCount = run.pendingChange.findings.length;
   return promptResponse(run, findingCount
@@ -887,9 +952,19 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
 
   app.post("/api/marcie/agent/chat", asyncRoute(async (req, res) => {
     const context = await contextFor(req);
+    const assistantMode = req.body?.mode === "assistant";
+    const requestedSessionId = clean(req.body?.sessionId, 120);
     let run = await readRun(context, req.body?.runId);
-    if (!run) run = initialRun({ uid: context.uid, displayName: context.displayName });
-    const input = req.body?.input && typeof req.body.input === "object" ? req.body.input : {};
+    if (assistantMode) {
+      if (!requestedSessionId) throw Object.assign(new Error("marcie_session_id_required"), { status: 400 });
+      await loadOwnedSession(context.db, context.uid, requestedSessionId);
+      if (!run || run.sessionId !== requestedSessionId || !["completed", "reviewing"].includes(String(run.status || run.phase))) {
+        run = initialAssistantRun({ uid: context.uid, displayName: context.displayName, sessionId: requestedSessionId });
+      }
+    } else if (!run) {
+      run = initialRun({ uid: context.uid, displayName: context.displayName });
+    }
+    const input = req.body?.input && typeof req.body.input === "object" ? { ...req.body.input } : {};
     const response = clean(input.text || input.value) || input.action || input.selectedValues?.length || input.urls?.length
       ? await processAgentTurn(run, input, context)
       : phasePrompt(run);
@@ -950,6 +1025,7 @@ module.exports = {
   createMarcieEditorialMcpServer,
   createToolHandlers,
   fallbackProposals,
+  initialAssistantRun,
   initialRun,
   missingFields,
   normalizeKey,

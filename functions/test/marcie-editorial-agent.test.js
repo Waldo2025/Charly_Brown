@@ -8,6 +8,7 @@ const {
   advanceRun,
   createMarcieEditorialMcpServer,
   createToolHandlers,
+  initialAssistantRun,
   initialRun,
   missingFields,
   normalizeKey,
@@ -25,15 +26,30 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /Marcie te guía por voz/);
   assert.match(panelSource, /Pulsar para hablar/);
   assert.match(panelSource, /Escribe una instrucción para Marcie/);
+  assert.doesNotMatch(panelSource, /class="marcie-agent__mic"/);
+  assert.match(panelSource, /if \(speak && guide\) voice\.speak/);
   assert.match(panelSource, /Hablando con Marcie/);
   assert.doesNotMatch(panelSource, /Gemini está revisando/);
   assert.doesNotMatch(panelSource, /Conectando con Gemini/);
   assert.match(voiceSource, /speakWithGeminiLive/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
+  assert.doesNotMatch(voiceSource, /speechSynthesis|SpeechSynthesisUtterance|speakWithBrowser/);
   assert.match(voiceSource, /cancelOutput\(\);/);
   assert.match(voiceSource, /socket\.readyState === WebSocket\.CONNECTING/);
   assert.doesNotMatch(voiceSource, /liveSocket\?\.close/);
   assert.match(panelSource, /if \(responseState\) renderOptions\(responseState\)/);
+});
+
+test("el chat permanente se asocia a la sesión activa sin iniciar el cuestionario", () => {
+  const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
+  const apiSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-agent-api.js"), "utf8");
+  const run = initialAssistantRun({ uid: "user-1", sessionId: "session-1" });
+  assert.equal(run.phase, "reviewing");
+  assert.equal(run.status, "reviewing");
+  assert.equal(run.sessionId, "session-1");
+  assert.match(panelSource, /mode: guide \? "configuration" : "assistant"/);
+  assert.match(panelSource, /sessionId: activeSession\?\.id/);
+  assert.match(apiSource, /\{ runId, input, mode, sessionId \}/);
 });
 
 test("avanza por los recursos de cada público sin quedar detenido", async () => {
@@ -255,8 +271,14 @@ test("la revisión posterior requiere vista previa y detecta la revisión base",
   };
   const db = { collection(name) { assert.equal(name, "MarcieBlogEditor"); return { doc() { return ref; } }; } };
   const run = { ...initialRun({ uid: "user-1" }), sessionId: "session-1", phase: "completed", status: "completed" };
+  let generationCall = 0;
+  const generateText = async () => {
+    generationCall += 1;
+    if (generationCall === 1) return JSON.stringify({ intent: "revise", audience: "educators", instruction: "Corrige la claridad del artículo" });
+    return JSON.stringify({ article: { ...stored.article, title: "Tema revisado" }, findings: ["Se aclaró la introducción."], summary: "Preparé una versión más clara." });
+  };
 
-  let response = await advanceRun(run, { text: "Corrige la claridad del artículo" }, { db, uid: "user-1" });
+  let response = await advanceRun(run, { text: "Corrige la claridad del artículo" }, { db, uid: "user-1", generateText });
   assert.equal(response.uiPrompt.type, "change_preview");
   assert.equal(run.pendingChange.baseRevision, 0);
   assert.equal(stored.articlesByAudience.educators.revision, 0);
@@ -265,6 +287,36 @@ test("la revisión posterior requiere vista previa y detecta la revisión base",
   assert.match(response.message, /Apliqué los cambios/);
   assert.equal(stored.articlesByAudience.educators.revision, 1);
   assert.deepEqual(stored.approvedAudiences, []);
+});
+
+test("analiza el artículo solicitado sin volver al flujo de configuración", async () => {
+  const stored = {
+    ownerId: "user-1",
+    title: "Evaluación formativa",
+    topic: "Evaluación formativa",
+    audience: "parents",
+    article: { title: "Versión familiar", blocks: [{ type: "paragraph", text: "Familias" }], revision: 0 },
+    articlesByAudience: {
+      parents: { title: "Versión familiar", blocks: [{ type: "paragraph", text: "Familias" }], revision: 0 },
+      educators: { title: "Versión docente", blocks: [{ type: "paragraph", text: "Docentes" }], revision: 2 }
+    }
+  };
+  const ref = { async get() { return { exists: true, id: "session-1", data: () => stored }; } };
+  const db = { collection() { return { doc() { return ref; } }; } };
+  const prompts = [];
+  const generateText = async ({ prompt }) => {
+    prompts.push(prompt);
+    if (prompts.length === 1) return JSON.stringify({ intent: "analyze", audience: "educators", instruction: "Analiza claridad, rigor y adecuación para docentes." });
+    return JSON.stringify({ article: stored.articlesByAudience.educators, findings: ["La estructura es clara.", "Falta respaldar una afirmación."], summary: "El artículo docente es claro, pero necesita reforzar una afirmación con evidencia." });
+  };
+  const run = initialAssistantRun({ uid: "user-1", sessionId: "session-1" });
+  const response = await processAgentTurn(run, { text: "Analiza el artículo de docentes", audience: "parents" }, { db, uid: "user-1", generateText });
+  assert.equal(response.phase, "reviewing");
+  assert.equal(response.uiPrompt.type, "text");
+  assert.equal(response.audience, "educators");
+  assert.match(response.message, /artículo docente es claro/i);
+  assert.doesNotMatch(response.message, /públicos|tono|extensión/i);
+  assert.match(prompts[0], /NO inicies ni continúes el cuestionario/);
 });
 
 test("el redactor MCP incluye solo videos utilizados en la bibliografía del artículo", async () => {
