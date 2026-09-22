@@ -10,13 +10,29 @@ const {
   createToolHandlers,
   initialAssistantRun,
   initialRun,
+  isTransientModelError,
   missingFields,
   normalizeKey,
   phasePrompt,
   processAgentTurn,
   sessionRequestFromRun,
-  uniqueStrings
+  uniqueStrings,
+  withModelRetry
 } = require("../src/marcie-editorial-agent.js");
+
+test("Marcie reintenta errores internos transitorios del modelo", async () => {
+  let attempts = 0;
+  const waits = [];
+  const result = await withModelRetry(async () => {
+    attempts += 1;
+    if (attempts < 3) throw new Error('{"error":{"code":500,"message":"Internal error encountered.","status":"INTERNAL"}}');
+    return "ok";
+  }, { baseDelayMs: 5, sleep: async (ms) => waits.push(ms) });
+  assert.equal(result, "ok");
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits, [5, 10]);
+  assert.equal(isTransientModelError(new Error('{"error":{"code":500,"status":"INTERNAL"}}')), true);
+});
 
 test("la creación usa la guía de voz y mantiene el chat MCP visible en el panel", () => {
   const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
@@ -319,6 +335,30 @@ test("analiza el artículo solicitado sin volver al flujo de configuración", as
   assert.match(response.message, /artículo docente es claro/i);
   assert.doesNotMatch(response.message, /públicos|tono|extensión/i);
   assert.match(prompts[0], /NO inicies ni continúes el cuestionario/);
+});
+
+test("un error interno del modelo no rompe el análisis ni reinicia el cuestionario", async () => {
+  const stored = {
+    ownerId: "user-1",
+    audience: "educators",
+    article: { title: "Evaluación formativa", subtitle: "Guía docente", blocks: [{ type: "paragraph", text: "Contenido breve para docentes." }], sources: [], revision: 0 },
+    articlesByAudience: {
+      educators: { title: "Evaluación formativa", subtitle: "Guía docente", blocks: [{ type: "paragraph", text: "Contenido breve para docentes." }], sources: [], revision: 0 }
+    }
+  };
+  const ref = { async get() { return { exists: true, id: "session-1", data: () => stored }; } };
+  const db = { collection() { return { doc() { return ref; } }; } };
+  const internalError = new Error('{"error":{"code":500,"message":"Internal error encountered.","status":"INTERNAL"}}');
+  const run = initialAssistantRun({ uid: "user-1", sessionId: "session-1" });
+  const response = await processAgentTurn(run, { text: "Analiza el artículo de docentes" }, {
+    db,
+    uid: "user-1",
+    generateText: async () => { throw internalError; }
+  });
+  assert.equal(response.phase, "reviewing");
+  assert.equal(response.audience, "educators");
+  assert.match(response.message, /comprobación estructural/i);
+  assert.doesNotMatch(response.message, /tema|tono|extensión/i);
 });
 
 test("el redactor MCP incluye solo videos utilizados en la bibliografía del artículo", async () => {

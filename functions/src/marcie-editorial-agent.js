@@ -77,6 +77,44 @@ function parseJson(value = "", fallback = {}) {
   }
 }
 
+function modelErrorDetails(error) {
+  return [error?.status, error?.code, error?.message, error?.response?.data, error?.cause?.message]
+    .filter(Boolean)
+    .map((value) => typeof value === "string" ? value : JSON.stringify(value))
+    .join(" ");
+}
+
+function isTransientModelError(error) {
+  const details = modelErrorDetails(error);
+  const status = Number(error?.status || error?.code || error?.response?.status || details.match(/"code"\s*:\s*(\d{3})/)?.[1] || 0);
+  return [429, 500, 502, 503, 504].includes(status)
+    || /INTERNAL|RESOURCE_EXHAUSTED|UNAVAILABLE|overloaded|high demand|temporar|rate.?limit|quota/i.test(details);
+}
+
+async function withModelRetry(operation, { maxAttempts = 3, baseDelayMs = 500, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientModelError(error) || attempt >= maxAttempts) throw error;
+      await sleep(baseDelayMs * (2 ** (attempt - 1)));
+    }
+  }
+  throw lastError;
+}
+
+function logModelFallback(operation, error) {
+  console.warn(JSON.stringify({
+    severity: "WARNING",
+    event: "marcie_model_fallback",
+    operation,
+    transient: isTransientModelError(error),
+    code: clean(error?.code || error?.status || error?.message, 240)
+  }));
+}
+
 function publicSession(session = {}) {
   return {
     id: clean(session.id, 120),
@@ -678,10 +716,52 @@ async function readRun(context, runId) {
   return run;
 }
 
+function fallbackArticleReview(article = {}) {
+  const blocks = Array.isArray(article.blocks) ? article.blocks : [];
+  const sources = Array.isArray(article.sources) ? article.sources : (Array.isArray(article.researchSources) ? article.researchSources : []);
+  const body = blocks.map((block) => clean(block?.text || block?.content || block?.html, 20000)).join(" ");
+  const wordCount = body ? body.split(/\s+/).filter(Boolean).length : 0;
+  const findings = [];
+  if (!clean(article.title, 300)) findings.push("El artículo no tiene un título definido.");
+  if (!blocks.length || wordCount < 120) findings.push("El contenido es demasiado breve para evaluar con suficiente profundidad.");
+  if (!sources.length) findings.push("No hay fuentes vinculadas al artículo para comprobar sus afirmaciones.");
+  if (!clean(article.subtitle, 500)) findings.push("Conviene añadir un subtítulo que precise el enfoque editorial.");
+  if (!findings.length) findings.push(`La estructura contiene ${blocks.length} bloques, aproximadamente ${wordCount} palabras y ${sources.length} fuentes vinculadas.`);
+  return {
+    article,
+    findings,
+    summary: `Marcie no pudo completar el análisis profundo en este momento, pero la comprobación estructural encontró lo siguiente:\n${findings.map((item) => `• ${item}`).join("\n")}\nPuedes volver a intentarlo sin perder el artículo.`,
+    modelUnavailable: true
+  };
+}
+
 async function reviewWithGemini({ article, instruction, generateText }) {
   if (typeof generateText !== "function") return { article, findings: ["El servicio de revisión no está disponible."] };
   const prompt = `Revisa el artículo educativo según esta instrucción: ${instruction || "claridad, rigor, evidencia y adecuación al público"}. No inventes fuentes. Devuelve SOLO JSON con {"article":{...},"findings":[""],"summary":"explicación útil y concreta para el usuario"}. ARTÍCULO: ${JSON.stringify(article).slice(0, 80000)}`;
-  return parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), { article, findings: [] });
+  try {
+    return parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), { article, findings: [] });
+  } catch (error) {
+    logModelFallback("review_article", error);
+    return fallbackArticleReview(article);
+  }
+}
+
+function fallbackPostProductionPlan({ text, requestedAudience, availableAudiences }) {
+  const normalized = normalizeKey(text);
+  const audienceAliases = [
+    ["educators", /\b(docente|docentes|maestro|maestros|profesor|profesores)\b/],
+    ["students", /\b(estudiante|estudiantes|alumno|alumnos)\b/],
+    ["parents", /\b(padre|padres|madre|madres|familia|familias)\b/],
+    ["coordinators", /\b(coordinador|coordinadores|directivo|directivos)\b/]
+  ];
+  const mentionedAudience = audienceAliases.find(([id, pattern]) => availableAudiences.includes(id) && pattern.test(normalized))?.[0];
+  let intent = "chat";
+  if (/\b(corrige|corregir|reescribe|reescribir|cambia|cambiar|acorta|amplia|modifica|editar)\b/.test(normalized)) intent = "revise";
+  else if (/\b(analiza|analizar|evalua|evaluar|revision|revisar)\b/.test(normalized)) intent = "analyze";
+  else if (/\b(verifica|verificar|comprueba|comprobar|afirmaciones|referencias)\b/.test(normalized)) intent = "verify";
+  else if (/\b(investiga|investigar|fuentes|bibliografia)\b/.test(normalized)) intent = "research";
+  else if (/\b(wordpress|borrador)\b/.test(normalized)) intent = "wordpress";
+  return { intent, audience: mentionedAudience || (availableAudiences.includes(requestedAudience) ? requestedAudience : availableAudiences[0]) || "educators", instruction: text };
 }
 
 async function planPostProductionTurn({ text, requestedAudience, session, generateText }) {
@@ -703,7 +783,13 @@ PÚBLICO ACTIVO: ${clean(requestedAudience, 80)}
 SESIÓN: ${JSON.stringify(publicSession(session)).slice(0, 12000)}
 PETICIÓN: ${clean(text, 4000)}
 Devuelve SOLO JSON: {"intent":"analyze|revise|verify|research|wordpress|chat","audience":"id disponible","instruction":"instrucción completa","answer":"respuesta directa solo si intent es chat"}`;
-  const parsed = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
+  let parsed;
+  try {
+    parsed = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
+  } catch (error) {
+    logModelFallback("plan_postproduction", error);
+    return fallbackPostProductionPlan({ text, requestedAudience, availableAudiences });
+  }
   const allowedIntents = new Set(["analyze", "revise", "verify", "research", "wordpress", "chat"]);
   const audience = availableAudiences.includes(parsed.audience) ? parsed.audience : (availableAudiences.includes(requestedAudience) ? requestedAudience : availableAudiences[0]);
   return {
@@ -723,8 +809,13 @@ PÚBLICO: ${clean(audience, 80)}
 SESIÓN: ${JSON.stringify(publicSession(session)).slice(0, 12000)}
 ARTÍCULO: ${JSON.stringify(article || {}).slice(0, 70000)}
 Devuelve SOLO JSON: {"answer":"respuesta para el usuario"}`;
-  const parsed = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
-  return clean(parsed.answer, 5000) || "No pude elaborar una respuesta útil sobre el artículo en este momento.";
+  try {
+    const parsed = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
+    return clean(parsed.answer, 5000) || "No pude elaborar una respuesta útil sobre el artículo en este momento.";
+  } catch (error) {
+    logModelFallback("answer_from_article", error);
+    return "Marcie no pudo consultar el análisis profundo en este momento. El artículo y tus cambios siguen intactos; puedes volver a enviar la instrucción.";
+  }
 }
 
 async function handlePostProductionTurn(run, input, context) {
@@ -805,6 +896,9 @@ async function handlePostProductionTurn(run, input, context) {
   }
   const baseRevision = Number(article.revision || 0);
   const revision = await handlers.revise_article({ sessionId: run.sessionId, audience, baseRevision, instruction: plan.instruction || text || "Revisa claridad, tono, rigor y adecuación al público." });
+  if (revision.modelUnavailable) {
+    return promptResponse(run, "Marcie no pudo preparar una revisión fiable en este momento. El artículo original sigue intacto; vuelve a intentarlo en unos instantes.", { type: "text", options: [] }, { audience });
+  }
   run.pendingChange = { audience, baseRevision, preview: revision.preview, findings: revision.findings || [], createdAt: new Date().toISOString() };
   const findingCount = run.pendingChange.findings.length;
   return promptResponse(run, findingCount
@@ -874,7 +968,7 @@ function createToolHandlers(context) {
       if (!article) throw Object.assign(new Error("marcie_article_missing"), { status: 404 });
       if (Number(article.revision || 0) !== Number(baseRevision || 0)) throw Object.assign(new Error("marcie_article_revision_conflict"), { status: 409 });
       const revised = await reviewWithGemini({ article, instruction, generateText: context.generateText });
-      return { preview: revised.article, findings: revised.findings || [], baseRevision: Number(baseRevision || 0), requiresConfirmation: true };
+      return { preview: revised.article, findings: revised.findings || [], baseRevision: Number(baseRevision || 0), requiresConfirmation: true, modelUnavailable: revised.modelUnavailable === true };
     },
     async manage_vocabulary({ current = [], add = [], remove = [] }) {
       const removeKeys = new Set(uniqueStrings(remove, 250).map(normalizeKey));
@@ -933,7 +1027,9 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
       db,
       uid: auth.uid,
       displayName: clean(profile.displayName || profile.nombre || auth.token?.name || auth.email?.split("@")[0], 120),
-      generateText: dependencies.generateText,
+      generateText: typeof dependencies.generateText === "function"
+        ? (args) => withModelRetry(() => dependencies.generateText(args))
+        : undefined,
       client: dependencies.client,
       analyzeYoutubeVideos: async (args) => {
         const startedAt = Date.now();
@@ -1027,6 +1123,7 @@ module.exports = {
   fallbackProposals,
   initialAssistantRun,
   initialRun,
+  isTransientModelError,
   missingFields,
   normalizeKey,
   phasePrompt,
@@ -1034,5 +1131,6 @@ module.exports = {
   registerMarcieEditorialAgentRoutes,
   sessionRequestFromRun,
   specificationList,
-  uniqueStrings
+  uniqueStrings,
+  withModelRetry
 };
