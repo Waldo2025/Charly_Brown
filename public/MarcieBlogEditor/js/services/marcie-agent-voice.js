@@ -18,9 +18,22 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
   let liveSocket = null;
   let audioContext = null;
   let nextAudioAt = 0;
+  let speechEpoch = 0;
+  const activeSources = new Set();
 
   function setState(state) {
     onStateChange?.(state);
+  }
+
+  function prime() {
+    if (!(window.AudioContext || window.webkitAudioContext)) return false;
+    try {
+      audioContext ||= new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+      void audioContext.resume?.();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   function stop() {
@@ -28,12 +41,22 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     try { recognition.stop(); } catch (_) {}
   }
 
+  function cancelOutput() {
+    speechEpoch += 1;
+    window.speechSynthesis?.cancel?.();
+    try { liveSocket?.close(); } catch (_) {}
+    liveSocket = null;
+    activeSources.forEach((source) => { try { source.stop(); } catch (_) {} });
+    activeSources.clear();
+    nextAudioAt = audioContext?.currentTime || 0;
+  }
+
   function listen() {
     if (!Recognition) {
       onError?.(new Error("El reconocimiento de voz no está disponible en este navegador."));
       return false;
     }
-    window.speechSynthesis?.cancel?.();
+    cancelOutput();
     recognition = new Recognition();
     recognition.lang = "es-MX";
     recognition.interimResults = true;
@@ -81,6 +104,8 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     const source = audioContext.createBufferSource();
     source.buffer = buffer;
     source.connect(audioContext.destination);
+    activeSources.add(source);
+    source.onended = () => activeSources.delete(source);
     nextAudioAt = Math.max(nextAudioAt, audioContext.currentTime + 0.02);
     source.start(nextAudioAt);
     nextAudioAt += buffer.duration;
@@ -152,21 +177,21 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
   function speak(text) {
     const content = String(text || "").trim();
     if (!content) return false;
-    void speakWithGeminiLive(content).catch(() => speakWithBrowser(content));
+    cancelOutput();
+    const epoch = speechEpoch;
+    void speakWithGeminiLive(content).catch(() => {
+      if (epoch === speechEpoch) speakWithBrowser(content);
+    });
     return true;
   }
 
   return {
     get available() { return Boolean(Recognition); },
     get listening() { return listening; },
+    prime,
     listen,
     stop,
     speak,
-    cancelSpeech: () => {
-      window.speechSynthesis?.cancel?.();
-      try { liveSocket?.close(); } catch (_) {}
-      liveSocket = null;
-      nextAudioAt = 0;
-    }
+    cancelSpeech: cancelOutput
   };
 }

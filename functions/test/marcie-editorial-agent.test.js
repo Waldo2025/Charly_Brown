@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
 const {
@@ -13,6 +15,18 @@ const {
   sessionRequestFromRun,
   uniqueStrings
 } = require("../src/marcie-editorial-agent.js");
+
+test("la creación usa primero una guía de voz y reserva el chat para el resultado", () => {
+  const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
+  const voiceSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-agent-voice.js"), "utf8");
+  assert.match(panelSource, /host\.hidden = true;[\s\S]*openVoiceGuide\(\);/);
+  assert.match(panelSource, /Marcie te guía por voz/);
+  assert.match(panelSource, /Pulsar para hablar/);
+  assert.match(panelSource, /host\.hidden = false;/);
+  assert.match(voiceSource, /speakWithGeminiLive/);
+  assert.match(voiceSource, /voiceName: "Aoede"/);
+  assert.match(voiceSource, /cancelOutput\(\);/);
+});
 
 test("publica las herramientas MCP editoriales de Marcie", async () => {
   const server = createMarcieEditorialMcpServer({ db: {}, uid: "user-1" });
