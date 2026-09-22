@@ -49,11 +49,29 @@
     const value = id ? "https://doi.org/" + id : clean(source.url || source.finalUrl);
     try { return /^https?:$/.test(new URL(value).protocol) ? value : ""; } catch (_) { return ""; }
   }
+  function youtubeDate(source = {}) {
+    const raw = clean(source.publishedAt || source.datePublished);
+    const match = raw.match(/^(\d{4})(?:-(\d{2})-(\d{2}))?/);
+    if (!match) return "s. f.";
+    if (!match[2] || !match[3]) return match[1];
+    const months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+    return match[1] + ", " + Number(match[3]) + " de " + months[Number(match[2]) - 1];
+  }
   function parts(source, html = false) {
     const rich = html === true;
     const markdown = html === "markdown";
     const t = rich ? esc : clean;
     const italic = value => rich ? "<em>" + t(value) + "</em>" : markdown ? "*" + t(value) + "*" : t(value);
+    if (clean(source.sourceType).toLowerCase() === "youtube_video") {
+      const rawCreator = sourceAuthors(source)[0];
+      const creator = clean(source.channel)
+        || clean(rawCreator && typeof rawCreator === "object" ? rawCreator.name : rawCreator)
+        || "[Canal no identificado]";
+      const title = clean(source.title) || "[Video sin título]";
+      const url = link(source);
+      const linked = rich && url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(url) + "</a>" : url;
+      return t(creator) + ". (" + youtubeDate(source) + "). " + italic(title) + " [Video]. YouTube. " + linked;
+    }
     const name = authors(source);
     const title = clean(source.title) || "[Documento sin título]";
     const journal = clean(source.journal || source.journalTitle);

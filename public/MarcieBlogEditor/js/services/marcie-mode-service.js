@@ -1,4 +1,4 @@
-import "../contracts/marcie-research-policy.js?v=20260908r9";
+import "../contracts/marcie-research-policy.js?v=20260922r1";
 import { listMarciePromptProfiles } from "./marcie-prompt-settings.js";
 import { buildEditorialVocabularyInstruction, normalizeEditorialVocabulary } from "./marcie-vocabulary.js";
 import {
@@ -20,7 +20,7 @@ import {
   generateProposalsWithGemini,
   refineBlogTopicWithGemini,
   reviewArticleWithGemini
-} from "./marcie-gemini-service.js?v=20260908r9";
+} from "./marcie-gemini-service.js?v=20260922r1";
 import {
   AIDA_LEGACY_BRAND_LINE,
   draftAidaArticleWithGemini,
@@ -28,7 +28,7 @@ import {
   refineAidaTopicWithGemini,
   researchAidaTopicWithGemini,
   reviewAidaArticleWithGemini
-} from "./marcie-aida-service.js?v=20260908r9";
+} from "./marcie-aida-service.js?v=20260922r1";
 
 export function normalizeLegacyAidaClosing(session = {}, article = session.article || {}) {
   const configuredBrandLine = String(session.editorialProfileSnapshot?.brandLine || "").trim();
@@ -110,7 +110,8 @@ export async function researchTopicForMode({ session = {}, topic = "", region = 
       period,
       minimumSources: researchPolicy.target(session),
       researchInstructions,
-      searchPlatforms: session.searchPlatforms ?? session.sessionConfiguration?.searchPlatforms
+      searchPlatforms: session.searchPlatforms ?? session.sessionConfiguration?.searchPlatforms,
+      videoEvidence: session.videoResearch || session.sessionConfiguration?.videoResearch || null
     });
   }
   return researchArticleEvidence({
@@ -121,7 +122,8 @@ export async function researchTopicForMode({ session = {}, topic = "", region = 
     searchPlatforms: session.searchPlatforms ?? session.sessionConfiguration?.searchPlatforms,
     minimumSources: researchPolicy.target(session),
     region: region || country || "MX",
-    period
+    period,
+    videoEvidence: session.videoResearch || session.sessionConfiguration?.videoResearch || null
   });
 }
 
@@ -222,7 +224,7 @@ async function ensureAudienceResearchForDraft({ session = {}, title = "", topic 
     cached = getResearchDossierFromCache(title || topic, normalizedAudience)
       || getResearchDossierFromCache(topic, normalizedAudience);
   }
-  const hasVerifiedSources = Array.isArray(cached?.sources) && cached.sources.length > 0;
+  const hasVerifiedSources = Array.isArray(cached?.sources) && cached.sources.some((source) => source?.verificationStatus === "verified" && source?.sourceType !== "youtube_video");
   if (cached && (hasVerifiedSources || cached.verificationStatus === "verified")) {
     session.researchByAudience = { ...existingMap, [normalizedAudience]: cached };
     saveResearchDossierToCache(title || topic, normalizedAudience, cached);
@@ -311,7 +313,7 @@ export async function generateProposalsForMode({ session = {}, topic = "", signa
       || getResearchDossierFromCache(audienceTopic, audience)
       || getResearchDossierFromCache(topic, audience);
 
-    const hasCachedSources = Array.isArray(dossier?.sources) && dossier.sources.length > 0;
+    const hasCachedSources = Array.isArray(dossier?.sources) && dossier.sources.some((source) => source?.verificationStatus === "verified" && source?.sourceType !== "youtube_video");
     if (!hasCachedSources) {
       try {
         dossier = await researchTopicForMode({

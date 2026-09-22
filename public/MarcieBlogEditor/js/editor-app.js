@@ -10,7 +10,7 @@ import {
   deleteMarcieSession,
   seedInitialSessionIfEmpty,
   MARCIE_COLLECTION
-} from "./services/marcie-session-store.js?v=20260908r9";
+} from "./services/marcie-session-store.js?v=20260922r1";
 import {
   ensureApprovedUserAccess,
   logOutUser,
@@ -24,15 +24,15 @@ import { makeArticleEditable } from "./components/inline-editor.js?v=20260908r9"
 import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260908r9";
 import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260908r9";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
-import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260921r1";
-import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260908r9";
-import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260908r9";
+import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r1";
+import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r1";
+import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260922r1";
 import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260908r9";
 import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextModels, listGeminiModels, setConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
 import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260908r9";
 import { cancelScheduledPublication, createWordPressDraft, getWordPressStatus, publishWordPressArticle, testWordPressConnection } from "./services/marcie-wordpress-service.js";
 import { buildStageVisualHtml, startStageOrbitalAnimation, stopStageOrbitalAnimation, transitionToStageVisuals } from "./components/automation-visuals.js";
-import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260921r3";
+import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260922r1";
 
 const MARCIE_UI_THEME_STORAGE_KEY = "marcie_ui_theme_v1";
 const MARCIE_UI_THEMES = [
@@ -5107,7 +5107,7 @@ async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSe
   const sessionPayload = {
     title,
     topic,
-    sessionConfiguration: request,
+    sessionConfiguration: { ...request, videoResearch: undefined },
     titleProposals: request.titleProposals || null,
     researchRegion: request.researchRegion || "MX",
     researchPeriod: request.researchPeriod || "6m",
@@ -5116,6 +5116,8 @@ async function createEditorialSessionFromModal({ defaultValue = "", allowBlankSe
     article: initialArticle,
     specifications: request.specifications,
     preferredVocabulary: request.preferredVocabulary || [],
+    sourceInputs: request.sourceInputs || { youtube: [] },
+    videoResearch: request.videoResearch || null,
     editorialMode: request.editorialMode || "marcie",
     editorialProfileId: request.editorialProfileId || request.editorialMode || "marcie",
     editorialProfileVersion: request.editorialProfileVersion || 1,
@@ -5308,6 +5310,7 @@ async function reconfigureSession(session) {
       _provisional: true,
       sessionConfiguration: {
         ...request,
+        videoResearch: undefined,
         titleProposals: request.titleProposals || session.titleProposals || null
       },
       configurationRevision: Number(session.configurationRevision || 0) + 1,

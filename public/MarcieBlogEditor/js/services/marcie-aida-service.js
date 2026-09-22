@@ -6,7 +6,7 @@ import {
   researchArticleEvidence,
   sanitizeTrustedSources,
   verifyArticleEvidence
-} from "./marcie-gemini-service.js?v=20260908r9";
+} from "./marcie-gemini-service.js?v=20260922r1";
 
 export const AIDA_SERVICE_VERSION = "2.0";
 export const AIDA_LEGACY_BRAND_LINE = "Aprender no es esforzarse más. Es aprender como el cerebro estaba hecho para aprender.";
@@ -98,7 +98,8 @@ export async function researchAidaTopicWithGemini({
   audience = "parents",
   region = "MX",
   period = "6m",
-  minimumSources = 8
+  minimumSources = 8,
+  videoEvidence = null
 } = {}) {
   const dossier = await researchArticleEvidence({
     searchPlatforms,
@@ -108,7 +109,8 @@ export async function researchAidaTopicWithGemini({
     mode: "aida",
     minimumSources: globalThis.MarcieResearchPolicy.target({ editorialMode: "aida", editorialProfileSnapshot: { minimumSources } }),
     region,
-    period
+    period,
+    videoEvidence
   });
   return {
     ...dossier,
@@ -221,6 +223,7 @@ Aplica estrictamente la guía editorial Aida:
 8. Cierre memorable, específico para este artículo y sin CTA comercial.${brandLine ? " Termina exactamente con la frase de marca configurada." : " No repitas una firma, eslogan o frase fija usada en otros artículos."}
 
 Desarrolla el tema completo usando únicamente datos del dossier. Los hechos científicos y la historia enriquecen el argumento: no sustituyen el tema principal. Integra 2 a 4 hitos como antes → avance intermedio → conocimiento vigente solo si ayudan a explicar el hecho o tema y están respaldados. No inventes testimonios, fechas, científicos, estudios ni descubrimientos.
+Las fuentes youtube_video solo respaldan lo que atribuyas explícitamente al autor o al video; no las uses como verificación de hechos externos. Conserva sourceIds y locator para cualquier hallazgo o cita de video. Una cita de video debe coincidir con un fact marcado isDirectQuote y conservar su marca de tiempo.
 Integra entre 2 y 3 referencias atribuidas verificadas del campo attributedReferences cuando existan. Combina citas textuales breves y paráfrasis naturales del tipo "Según X". Una cita directa debe reproducir exactamente el texto verificado y cada bloque factual debe declarar sourceIds con IDs del dossier. Si no hay una frase directa verificada, usa una paráfrasis; nunca inventes una cita.
 Respeta la ventana de actualidad del dossier: las fuentes current solo pueden describirse como noticias, señales o datos actuales si están dentro de dateWindow. Las fuentes historical sirven únicamente como antecedentes explícitos y deben presentarse con su fecha real; nunca las redactes como si fueran del periodo actual.
 Si el brief contiene un hallazgo factual sin respaldo, elimínalo o reescríbelo sin convertirlo en otro dato factual. No repitas ni parafrasees una afirmación marcada como no respaldada. La fase de explicación no obliga a incluir neurociencia cuando el dossier no contiene evidencia neurocientífica pertinente.
@@ -231,7 +234,7 @@ Marca las citas en línea como [sourceId], usando el ID exacto del documento del
 Dossier completo analizado: ${JSON.stringify(dossierForPrompt(dossier))}
 
 Devuelve SOLO JSON válido:
-{"schemaVersion":"1.0","title":"titular","subtitle":"promesa clara","excerpt":"resumen","audience":"${audience}","category":"Neuroeducación","readingTimeMinutes":8,"publishedDateText":"fecha actual en español","tags":["Neuroeducación"],"blocks":[{"id":"aida-problem","type":"paragraph","phase":"problem","text":"escena"},{"id":"aida-deepen","type":"paragraph","phase":"deepen","text":"profundización"},{"id":"aida-agitate","type":"paragraph","phase":"agitate","text":"costo"},{"id":"aida-turn","type":"paragraph","phase":"turn","text":"giro"},{"id":"aida-why","type":"paragraph","phase":"why","text":"explicación científica"},{"id":"aida-change","type":"paragraph","phase":"change","text":"transformación"},{"id":"aida-close","type":"paragraph","phase":"close","text":"cierre y frase de marca"}],"seo":{"title":"título SEO","description":"máximo 155 caracteres","keywords":["palabra clave"],"slug":"slug"}}`.trim();
+{"schemaVersion":"1.0","title":"titular","subtitle":"promesa clara","excerpt":"resumen","audience":"${audience}","category":"Neuroeducación","readingTimeMinutes":8,"publishedDateText":"fecha actual en español","tags":["Neuroeducación"],"blocks":[{"id":"aida-problem","type":"paragraph","phase":"problem","text":"escena","sourceIds":[],"locator":""},{"id":"aida-deepen","type":"paragraph","phase":"deepen","text":"profundización","sourceIds":[],"locator":""},{"id":"aida-agitate","type":"paragraph","phase":"agitate","text":"costo","sourceIds":[],"locator":""},{"id":"aida-turn","type":"paragraph","phase":"turn","text":"giro","sourceIds":[],"locator":""},{"id":"aida-why","type":"paragraph","phase":"why","text":"explicación científica","sourceIds":[],"locator":""},{"id":"aida-change","type":"paragraph","phase":"change","text":"transformación","sourceIds":[],"locator":""},{"id":"aida-close","type":"paragraph","phase":"close","text":"cierre y frase de marca","sourceIds":[],"locator":""}],"seo":{"title":"título SEO","description":"máximo 155 caracteres","keywords":["palabra clave"],"slug":"slug"}}`.trim();
   const { parsed } = await generateGroundedJson({ prompt, useResearchTools: false });
   const article = applyVerifiedAttributions({
     ...parsed,
@@ -265,7 +268,8 @@ Devuelve SOLO JSON válido:
       dateWindow: dossier.dateWindow || null,
       currentSourceCount: dossier.currentSourceCount || 0,
       historicalSourceCount: dossier.historicalSourceCount || 0,
-      verifiedSourceCount: dossier.verifiedSourceCount || sources.length,
+      verifiedSourceCount: dossier.verifiedSourceCount ?? sources.filter((source) => source.verificationStatus === "verified" && source.sourceType !== "youtube_video").length,
+      totalSourceCount: dossier.totalSourceCount ?? sources.length,
       institutionCount: dossier.institutionCount || uniqueInstitutions(sources).size,
       researchedAt: dossier.researchedAt
     },
@@ -273,8 +277,9 @@ Devuelve SOLO JSON válido:
     generationTelemetry: {
       modeUsed: "aida",
       serviceVersion: AIDA_SERVICE_VERSION,
-      retrievedUrls: sources.map((source) => source.url),
-      verifiedSourceCount: dossier.verifiedSourceCount || sources.length,
+      retrievedUrls: sources.filter((source) => source.sourceType !== "youtube_video").map((source) => source.url),
+      videoCount: sources.filter((source) => source.sourceType === "youtube_video").length,
+      verifiedSourceCount: dossier.verifiedSourceCount ?? sources.filter((source) => source.verificationStatus === "verified" && source.sourceType !== "youtube_video").length,
       institutionCount: dossier.institutionCount || uniqueInstitutions(sources).size
     }
   }, dossier);

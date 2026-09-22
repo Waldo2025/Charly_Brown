@@ -56,7 +56,7 @@ test("publica las herramientas MCP editoriales de Marcie", async () => {
   const names = tools.tools.map((tool) => tool.name);
   [
     "get_session_context", "get_trending_topics", "create_editorial_session",
-    "generate_audience_proposals", "research_sources", "draft_articles",
+    "generate_audience_proposals", "analyze_youtube_videos", "research_sources", "draft_articles",
     "verify_article_claims", "format_bibliography_apa7", "review_article",
     "revise_article", "manage_vocabulary", "prepare_wordpress_draft"
   ].forEach((name) => assert.ok(names.includes(name), `falta ${name}`));
@@ -64,20 +64,22 @@ test("publica las herramientas MCP editoriales de Marcie", async () => {
   await server.close();
 });
 
-test("inicia la conversación con tema y nombre del usuario", () => {
+test("inicia la conversación eligiendo tema o YouTube y usa el nombre del usuario", () => {
   const run = initialRun({ uid: "user-1", displayName: "Waldo" });
   const response = phasePrompt(run);
-  assert.equal(response.phase, "topic");
+  assert.equal(response.phase, "creation_source");
   assert.match(response.speechText, /Hola, Waldo/);
-  assert.equal(response.uiPrompt.options[0].action, "recommend_trend");
-  assert.deepEqual(response.missingFields, ["topic", "selectedAudiences", "tone", "resources"]);
+  assert.deepEqual(response.uiPrompt.options.map((option) => option.id), ["topic", "youtube"]);
+  assert.deepEqual(response.missingFields, ["creationSource", "topic", "selectedAudiences", "tone", "resources"]);
 });
 
 test("completa la configuración guiada y exige confirmación", async () => {
   const run = initialRun({ uid: "user-1", displayName: "Waldo" });
   const context = { db: {}, generateText: null };
 
-  let response = await advanceRun(run, { text: "Aprendizaje basado en proyectos" }, context);
+  let response = await advanceRun(run, { value: "topic" }, context);
+  assert.equal(response.phase, "topic");
+  response = await advanceRun(run, { text: "Aprendizaje basado en proyectos" }, context);
   assert.equal(response.phase, "audiences");
   assert.equal(response.configurationPatch.topic, "Aprendizaje basado en proyectos");
 
@@ -119,6 +121,32 @@ test("completa la configuración guiada y exige confirmación", async () => {
   assert.ok(request.specifications.some((item) => item.startsWith("#tono[all]")));
   assert.ok(request.specifications.some((item) => item.startsWith("#extension[educators]")));
   assert.ok(request.specifications.some((item) => item.startsWith("#concepto[parents]")));
+});
+
+test("analiza YouTube antes de proponer el tema y conserva el expediente", async () => {
+  const run = initialRun({ uid: "user-1", displayName: "Waldo" });
+  const videoResearch = {
+    analysisVersion: 1,
+    videos: [{ videoId: "dQw4w9WgXcQ", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", title: "Aprender mejor" }],
+    proposedTopics: ["Cómo aprende el cerebro"],
+    evidenceItems: [],
+    bibliographySources: []
+  };
+  const context = { db: {}, analyzeYoutubeVideos: async () => videoResearch };
+
+  let response = await advanceRun(run, { value: "youtube" }, context);
+  assert.equal(response.phase, "youtube_urls");
+  assert.equal(response.uiPrompt.type, "url_list");
+
+  response = await advanceRun(run, { urls: ["https://youtu.be/dQw4w9WgXcQ"] }, context);
+  assert.equal(response.phase, "video_topic");
+  assert.equal(response.videoResearch.videos[0].videoId, "dQw4w9WgXcQ");
+  assert.deepEqual(run.configuration.sourceInputs.youtube, [{ videoId: "dQw4w9WgXcQ", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }]);
+
+  response = await advanceRun(run, { value: "video-topic-1" }, context);
+  assert.equal(response.phase, "audiences");
+  assert.equal(run.configuration.topic, "Cómo aprende el cerebro");
+  assert.equal(sessionRequestFromRun(run).videoResearch.analysisVersion, 1);
 });
 
 test("permite volver a editar un apartado desde el resumen", async () => {
@@ -166,4 +194,25 @@ test("la revisión posterior requiere vista previa y detecta la revisión base",
   assert.match(response.message, /Apliqué los cambios/);
   assert.equal(stored.articlesByAudience.educators.revision, 1);
   assert.deepEqual(stored.approvedAudiences, []);
+});
+
+test("el redactor MCP incluye solo videos utilizados en la bibliografía del artículo", async () => {
+  const documentSource = { id: "doc-1", sourceType: "web", title: "Documento", url: "https://example.org/doc" };
+  const usedVideo = { id: "youtube-dQw4w9WgXcQ", sourceType: "youtube_video", title: "Video usado", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+  const unusedVideo = { id: "youtube-9bZkp7q19f0", sourceType: "youtube_video", title: "Video no usado", url: "https://www.youtube.com/watch?v=9bZkp7q19f0" };
+  const handlers = createToolHandlers({ generateText: async () => JSON.stringify({ title: "Artículo", blocks: [{ id: "b1", text: "La autora explica...", sourceIds: [usedVideo.id], locator: "02:14" }], seo: {} }) });
+  const result = await handlers.draft_articles({ topic: "Tema", audiences: ["educators"], evidenceByAudience: { educators: { sources: [documentSource, usedVideo, unusedVideo] } } });
+  assert.deepEqual(result.articles.educators.sources.map((source) => source.id), ["doc-1", usedVideo.id]);
+  assert.deepEqual(result.articles.educators.researchSources.map((source) => source.id), ["doc-1", usedVideo.id, unusedVideo.id]);
+});
+
+test("la interfaz ofrece YouTube en agente y configuración manual", () => {
+  const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
+  const modalSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/modals.js"), "utf8");
+  assert.match(panelSource, /prompt\.type === "url_list"/);
+  assert.match(panelSource, /data-analyze-youtube/);
+  assert.match(panelSource, /data-video-progress/);
+  assert.match(modalSource, /new-session-youtube-toggle/);
+  assert.match(modalSource, /new-session-youtube-analyze/);
+  assert.match(modalSource, /Analiza los videos antes de crear la sesión/);
 });

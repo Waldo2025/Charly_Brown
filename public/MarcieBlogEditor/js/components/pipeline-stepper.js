@@ -3,18 +3,18 @@
  * Conectado con la API de Gemini / Vertex AI
  */
 
-import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260908r9";
+import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
 import { showModal, closeActiveModal, showToast } from "./modals.js";
 import {
   sanitizeTrustedSources
-} from "../services/marcie-gemini-service.js?v=20260908r9";
+} from "../services/marcie-gemini-service.js?v=20260922r1";
 import {
   draftArticleForMode,
   generateProposalsForMode,
   researchTopicForMode,
   reviewArticleForMode,
   sessionUsesAida
-} from "../services/marcie-mode-service.js?v=20260908r9";
+} from "../services/marcie-mode-service.js?v=20260922r1";
 import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 
 function normalizeSourceText(value = "") {

@@ -3,7 +3,7 @@
  */
 
 import { showModal, showNewSessionModal, closeActiveModal, showToast } from "./modals.js";
-import { createMarcieSession } from "../services/marcie-session-store.js?v=20260908r9";
+import { createMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
 
 function escapeHtml(value = "") {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({

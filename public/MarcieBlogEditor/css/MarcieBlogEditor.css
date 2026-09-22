@@ -4600,6 +4600,41 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-agent-option-list { display: grid; gap: 0.4rem; }
 .marcie-agent-option { min-height: 44px; padding: 0.55rem 0.7rem; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #334155; text-align: left; font-size: 0.72rem; line-height: 1.35; }
 .marcie-agent-option:hover, .marcie-agent-option:focus-visible, .marcie-agent-option.is-selected { border-color: #0f766e; background: #f0fdfa; color: #115e59; outline: none; }
+.marcie-agent-youtube { display: grid; gap: 0.75rem; }
+.marcie-agent-youtube__rows { display: grid; gap: 0.5rem; }
+.marcie-agent-youtube__rows label { display: grid; grid-template-columns: 72px minmax(0, 1fr) 44px; align-items: center; gap: 0.5rem; color: #475569; font-size: 0.72rem; font-weight: 700; }
+.marcie-agent-youtube__rows input { min-height: 46px; width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; padding: 0 0.75rem; color: #0f172a; font-size: 0.8rem; }
+.marcie-agent-youtube__rows button, .marcie-agent-youtube__actions button { min-height: 44px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #475569; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0 0.75rem; font-size: 0.74rem; font-weight: 700; }
+.marcie-agent-youtube__rows button svg, .marcie-agent-youtube__actions button svg { width: 16px; height: 16px; }
+.marcie-agent-youtube__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
+.marcie-agent-youtube__actions .marcie-agent-youtube__analyze { border-color: #0f766e; background: #0f766e; color: #fff; }
+.marcie-agent-youtube > p { color: #64748b; font-size: 0.7rem; line-height: 1.45; }
+.marcie-agent-video-result { display: grid; gap: 0.55rem; margin-bottom: 0.75rem; text-align: left; }
+.marcie-agent-video-result__heading { display: flex; align-items: center; gap: 0.4rem; color: #0f766e; font-size: 0.76rem; }
+.marcie-agent-video-result__heading svg { width: 17px; height: 17px; }
+.marcie-agent-video-result article { border-left: 3px solid #14b8a6; padding: 0.25rem 0 0.25rem 0.65rem; }
+.marcie-agent-video-result article strong, .marcie-agent-video-result article span { display: block; }
+.marcie-agent-video-result article strong { color: #0f172a; font-size: 0.76rem; }
+.marcie-agent-video-result article span { color: #64748b; font-size: 0.67rem; }
+.marcie-agent-video-result article p, .marcie-agent-video-result__warning { margin-top: 0.25rem; color: #475569; font-size: 0.7rem; line-height: 1.45; }
+.marcie-agent-video-result__warning { color: #92400e; }
+.marcie-youtube-source { display: grid; gap: 0.65rem; }
+.marcie-youtube-source__toggle { min-height: 44px; display: flex; align-items: center; gap: 0.65rem; color: #334155; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+.marcie-youtube-source__toggle input { width: 20px; height: 20px; accent-color: #0f766e; }
+.marcie-youtube-source__editor, .marcie-youtube-source__rows { display: grid; gap: 0.55rem; }
+.marcie-youtube-source__rows label { display: grid; grid-template-columns: 72px minmax(0, 1fr) 44px; align-items: center; gap: 0.45rem; color: #64748b; font-size: 0.68rem; font-weight: 700; }
+.marcie-youtube-source__rows input { width: 100%; min-height: 44px; padding: 0 0.7rem; border: 1px solid #cbd5e1; border-radius: 7px; color: #0f172a; background: #fff; font-size: 0.76rem; }
+.marcie-youtube-source__rows input:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12); outline: none; }
+.marcie-youtube-source__rows button { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid #cbd5e1; border-radius: 7px; color: #64748b; background: #fff; }
+.marcie-youtube-source__rows button svg { width: 16px; height: 16px; }
+.marcie-youtube-source__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
+.marcie-youtube-source__actions button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0 0.75rem; border: 1px solid #cbd5e1; border-radius: 7px; color: #334155; background: #fff; font-size: 0.72rem; font-weight: 700; }
+.marcie-youtube-source__actions button:last-child { border-color: #0f766e; color: #fff; background: #0f766e; }
+.marcie-youtube-source__actions button svg { width: 16px; height: 16px; }
+.marcie-youtube-source__editor > p { color: #64748b; font-size: 0.7rem; line-height: 1.45; }
+.marcie-youtube-source__editor > p[data-state="ready"] { color: #047857; }
+.marcie-youtube-source__editor > p[data-state="error"] { color: #b91c1c; }
+.marcie-youtube-source__editor > p[data-state="processing"] { color: #0f766e; }
 .marcie-agent-continue { width: 100%; min-height: 44px; margin-top: 0.5rem; border-radius: 7px; color: #fff; background: #0f766e; font-size: 0.75rem; font-weight: 600; }
 .marcie-agent-continue:disabled { opacity: 0.45; }
 .marcie-agent-summary { display: grid; gap: 0.4rem; margin-bottom: 0.65rem; }

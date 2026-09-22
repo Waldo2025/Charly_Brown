@@ -16,6 +16,7 @@ import {
   readEditorialVocabulary,
   saveEditorialVocabulary
 } from "../services/marcie-vocabulary.js";
+import { analyzeYoutubeVideos } from "../services/marcie-agent-api.js?v=20260922r1";
 
 const MARCIE_OVERLAY_Z_INDEX = "2147483000";
 const MARCIE_AUTOMATED_BRIEF_STORAGE_KEY = "marcie_automated_brief_v1";
@@ -706,6 +707,17 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
                   </select>
                   <div data-spec-badge-container="fuentes" class="spec-card-badges flex flex-wrap gap-1 min-h-[1.25rem]"></div>
                 </div>
+                <div class="marcie-youtube-source pt-2 border-t border-amber-100/60">
+                  <label class="marcie-youtube-source__toggle"><input id="new-session-youtube-toggle" type="checkbox"><span>Usar videos de YouTube como fuente base</span></label>
+                  <div id="new-session-youtube-editor" class="marcie-youtube-source__editor hidden">
+                    <div id="new-session-youtube-rows" class="marcie-youtube-source__rows"></div>
+                    <div class="marcie-youtube-source__actions">
+                      <button id="new-session-youtube-add" type="button"><i data-lucide="plus"></i><span>Agregar video</span></button>
+                      <button id="new-session-youtube-analyze" type="button"><i data-lucide="scan-search"></i><span>Analizar videos</span></button>
+                    </div>
+                    <p id="new-session-youtube-status" aria-live="polite">Solo videos públicos. Máximo cinco.</p>
+                  </div>
+                </div>
               </div>
 
               <!-- Card 4: Recursos Editoriales -->
@@ -865,6 +877,68 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
 
     const platformSelect = modal.element.querySelector("[data-session-platform-select]");
     const platformBadgeContainer = modal.element.querySelector("[data-platform-badge-container]");
+    const youtubeToggle = modal.element.querySelector("#new-session-youtube-toggle");
+    const youtubeEditor = modal.element.querySelector("#new-session-youtube-editor");
+    const youtubeRows = modal.element.querySelector("#new-session-youtube-rows");
+    const youtubeAdd = modal.element.querySelector("#new-session-youtube-add");
+    const youtubeAnalyze = modal.element.querySelector("#new-session-youtube-analyze");
+    const youtubeStatus = modal.element.querySelector("#new-session-youtube-status");
+    let manualVideoResearch = initialConfiguration?.videoResearch || initialConfiguration?.sessionConfiguration?.videoResearch || null;
+
+    const youtubeUrls = () => [...(youtubeRows?.querySelectorAll("input") || [])].map((field) => field.value.trim()).filter(Boolean);
+    const setYoutubeStatus = (message, state = "idle") => {
+      if (!youtubeStatus) return;
+      youtubeStatus.textContent = message;
+      youtubeStatus.dataset.state = state;
+    };
+    const addYoutubeRow = (value = "") => {
+      if (!youtubeRows || youtubeRows.children.length >= 5) return;
+      const row = document.createElement("label");
+      row.innerHTML = `<span data-video-progress>URL ${youtubeRows.children.length + 1}</span><input type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=..." value="${escapeModalHtml(value)}"><button type="button" title="Quitar video" aria-label="Quitar video"><i data-lucide="trash-2"></i></button>`;
+      row.querySelector("input")?.addEventListener("input", () => { manualVideoResearch = null; setYoutubeStatus("Los enlaces cambiaron. Analízalos antes de crear la sesión.", "pending"); });
+      row.querySelector("button")?.addEventListener("click", () => {
+        row.remove();
+        manualVideoResearch = null;
+        if (!youtubeRows.children.length) addYoutubeRow();
+        setYoutubeStatus("Los enlaces cambiaron. Analízalos antes de crear la sesión.", "pending");
+      });
+      youtubeRows.appendChild(row);
+      window.lucide?.createIcons?.();
+    };
+    const renderYoutubeInputs = (items = []) => {
+      youtubeRows?.replaceChildren();
+      (items.length ? items : [{ url: "" }]).slice(0, 5).forEach((item) => addYoutubeRow(item?.url || item));
+    };
+    const initialYoutubeInputs = initialConfiguration?.sourceInputs?.youtube || initialConfiguration?.sessionConfiguration?.sourceInputs?.youtube || [];
+    if (initialYoutubeInputs.length || manualVideoResearch?.videos?.length) {
+      youtubeToggle.checked = true;
+      youtubeEditor?.classList.remove("hidden");
+    }
+    renderYoutubeInputs(initialYoutubeInputs);
+    if (manualVideoResearch?.videos?.length) setYoutubeStatus(`${manualVideoResearch.videos.length} video(s) analizados y listos.`, "ready");
+    youtubeToggle?.addEventListener("change", () => {
+      youtubeEditor?.classList.toggle("hidden", !youtubeToggle.checked);
+      if (!youtubeToggle.checked) manualVideoResearch = null;
+    });
+    youtubeAdd?.addEventListener("click", () => addYoutubeRow());
+    youtubeAnalyze?.addEventListener("click", async () => {
+      const urls = youtubeUrls();
+      if (!urls.length) return setYoutubeStatus("Agrega al menos una URL pública de YouTube.", "error");
+      youtubeAnalyze.disabled = true;
+      youtubeRows?.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Analizando"; });
+      setYoutubeStatus(`Analizando ${urls.length} ${urls.length === 1 ? "video" : "videos"} con Gemini…`, "processing");
+      try {
+        manualVideoResearch = await analyzeYoutubeVideos(urls, String(input?.value || centralTopic || "").trim());
+        youtubeRows?.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Revisado"; });
+        setYoutubeStatus(`${manualVideoResearch.videos?.length || 0} video(s) analizados. ${manualVideoResearch.warnings?.length ? `${manualVideoResearch.warnings.length} advertencia(s).` : "Listos para usar."}`, "ready");
+      } catch (error) {
+        manualVideoResearch = null;
+        youtubeRows?.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Error"; });
+        setYoutubeStatus(error.message || "No fue posible analizar los videos.", "error");
+      } finally {
+        youtubeAnalyze.disabled = false;
+      }
+    });
 
     const initialProposals = initialConfiguration?.titleProposals
       || initialConfiguration?.sessionConfiguration?.titleProposals
@@ -1095,6 +1169,14 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
         p.searchPlatforms.forEach(sp => selectedPlatforms.add(sp));
         renderPlatformBadges();
       }
+      const presetYoutube = Array.isArray(p.sourceInputs?.youtube) ? p.sourceInputs.youtube : [];
+      if (youtubeToggle) youtubeToggle.checked = presetYoutube.length > 0;
+      youtubeEditor?.classList.toggle("hidden", presetYoutube.length === 0);
+      renderYoutubeInputs(presetYoutube);
+      manualVideoResearch = null;
+      setYoutubeStatus(presetYoutube.length
+        ? "Analiza nuevamente estos videos antes de crear la sesión."
+        : "Solo videos públicos. Máximo cinco.", presetYoutube.length ? "pending" : "idle");
       if (Array.isArray(p.specifications)) {
         const titleSpecs = specifications.filter(s => {
           const parsed = parseSpecItem(s);
@@ -1170,6 +1252,11 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
           topicAssignmentMode,
           audiences: Array.from(selectedAudiences),
           searchPlatforms: Array.from(selectedPlatforms),
+          sourceInputs: {
+            youtube: youtubeToggle?.checked
+              ? youtubeUrls().slice(0, 5).map((url) => ({ url }))
+              : []
+          },
           specifications: specifications.filter(s => {
             const p = parseSpecItem(s);
             return p.category !== "titulo" && p.category !== "title" && p.category !== "tema";
@@ -1736,6 +1823,12 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
         : { name: "Marcie" };
       return {
         searchPlatforms: Array.from(selectedPlatforms),
+        sourceInputs: {
+          youtube: youtubeToggle?.checked
+            ? (manualVideoResearch?.videos || []).map((video) => ({ videoId: video.videoId, url: video.url }))
+            : []
+        },
+        videoResearch: youtubeToggle?.checked ? manualVideoResearch : null,
         researchRegion: modal.element.querySelector("#new-session-region")?.value.trim() || "MX",
         researchPeriod: modal.element.querySelector("#new-session-period")?.value || "6m",
         editorialMode,
@@ -1777,6 +1870,7 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
           tones,
           extension: extensionItem?.value || "Estándar (1200–1600 palabras)",
           sources,
+          youtubeVideoCount: editorial.sourceInputs.youtube.length,
           resources
         };
       });
@@ -1816,6 +1910,7 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
                 <div><strong class="text-slate-700">Tono:</strong> ${art.tones.length ? escapeModalHtml(art.tones.join(", ")) : "Estándar"}</div>
                 <div><strong class="text-slate-700">Extensión:</strong> ${escapeModalHtml(art.extension)}</div>
                 <div><strong class="text-slate-700">Fuentes:</strong> ${art.sources.length ? escapeModalHtml(art.sources.join(", ")) : "Fiables verificables"}</div>
+                ${art.youtubeVideoCount ? `<div><strong class="text-slate-700">YouTube:</strong> ${art.youtubeVideoCount} ${art.youtubeVideoCount === 1 ? "video analizado" : "videos analizados"}</div>` : ""}
                 <div><strong class="text-slate-700">Recursos:</strong> ${art.resources.length ? escapeModalHtml(art.resources.join(", ")) : "APA 7, sin clichés"}</div>
               </div>
             </div>
@@ -1893,6 +1988,19 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
 
     const submit = () => {
       const value = syncState();
+      if (youtubeToggle?.checked) {
+        const urls = youtubeUrls();
+        if (!urls.length) {
+          setYoutubeStatus("Agrega al menos una URL pública de YouTube.", "error");
+          youtubeEditor?.classList.remove("hidden");
+          return;
+        }
+        if (!manualVideoResearch?.videos?.length) {
+          setYoutubeStatus("Analiza los videos antes de crear la sesión.", "error");
+          youtubeEditor?.classList.remove("hidden");
+          return;
+        }
+      }
       if (selectedPlatforms.size === 0) {
         if (refineStatus) refineStatus.textContent = "Selecciona al menos una plataforma de investigación.";
         return;

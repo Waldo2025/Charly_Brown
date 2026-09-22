@@ -31,6 +31,10 @@ export function sendAgentTurn(runId, input) {
   return postAgent("/api/marcie/agent/chat", { runId, input });
 }
 
+export function analyzeYoutubeVideos(urls, objective = "") {
+  return postAgent("/api/marcie/videos/analyze", { urls, objective });
+}
+
 export function startAgentRun(runId) {
   return postAgent("/api/marcie/agent/run", { runId, event: "started" });
 }
@@ -38,4 +42,3 @@ export function startAgentRun(runId) {
 export function updateAgentRun(runId, event, { sessionId = "", error = "" } = {}) {
   return postAgent("/api/marcie/agent/run", { runId, event, sessionId, error });
 }
-

@@ -9,6 +9,7 @@ const {
   verifyArticleEvidenceServer
 } = require("./marcie-editorial-research.js");
 const { DEFAULT_TEXT_MODEL } = require("./vertex.js");
+const { analyzeYoutubeVideos } = require("./marcie-youtube-agent.js");
 
 const RUNS_COLLECTION = "MarcieEditorialAgentRuns";
 const SESSIONS_COLLECTION = "MarcieBlogEditor";
@@ -86,6 +87,12 @@ function publicSession(session = {}) {
     selectedAudiences: Array.isArray(session.selectedAudiences) ? session.selectedAudiences.map(String) : [],
     specifications: Array.isArray(session.specifications) ? session.specifications.map(String) : [],
     preferredVocabulary: Array.isArray(session.preferredVocabulary) ? session.preferredVocabulary.map(String) : [],
+    sourceInputs: { youtube: (session.sourceInputs?.youtube || []).slice(0, 5).map((item) => ({ videoId: clean(item?.videoId, 24), url: clean(item?.url, 3000) })) },
+    videoResearch: session.videoResearch ? {
+      analysisVersion: Number(session.videoResearch.analysisVersion || 0),
+      videos: (session.videoResearch.videos || []).slice(0, 5).map((video) => ({ videoId: clean(video?.videoId, 24), title: clean(video?.title, 300), channel: clean(video?.channel, 200) })),
+      warnings: (session.videoResearch.warnings || []).slice(0, 20).map((warning) => clean(warning, 500))
+    } : null,
     revision: Number(session.storageRevision || session.configurationRevision || 0),
     articlesByAudience: Object.fromEntries(Object.entries(session.articlesByAudience || {}).map(([audience, article]) => [audience, {
       title: clean(article?.title, 300),
@@ -164,8 +171,9 @@ function initialRun({ uid, displayName = "" } = {}) {
     ownerId: uid,
     displayName: clean(displayName, 120),
     status: "configuring",
-    phase: "topic",
+    phase: "creation_source",
     configuration: {
+      creationSource: "",
       topic: "",
       selectedAudiences: [],
       proposalsByAudience: {},
@@ -175,6 +183,8 @@ function initialRun({ uid, displayName = "" } = {}) {
       extensionsByAudience: {},
       sourceMode: "all",
       specialSources: [],
+      sourceInputs: { youtube: [] },
+      videoResearch: null,
       resourceMode: "same",
       resources: [],
       resourcesByAudience: {},
@@ -206,6 +216,8 @@ function promptResponse(run, message, uiPrompt, extras = {}) {
 
 function missingFields(configuration = {}) {
   const fields = [];
+  if (!configuration.creationSource) fields.push("creationSource");
+  if (configuration.creationSource === "youtube" && !configuration.videoResearch?.videos?.length) fields.push("videoResearch");
   if (!configuration.topic) fields.push("topic");
   if (!configuration.selectedAudiences?.length) fields.push("selectedAudiences");
   if (configuration.selectedAudiences?.some((audience) => !configuration.proposalsByAudience?.[audience])) fields.push("proposalsByAudience");
@@ -217,11 +229,22 @@ function missingFields(configuration = {}) {
 
 function phasePrompt(run, configurationPatch = {}) {
   const configuration = run.configuration;
+  if (run.phase === "creation_source") {
+    return promptResponse(run, "¿Cómo quieres comenzar el artículo?", {
+      type: "single_choice",
+      options: [{ id: "topic", label: "Escribir sobre un tema" }, { id: "youtube", label: "Crear desde videos de YouTube" }]
+    }, { configurationPatch, speechText: `Hola${run.displayName ? `, ${run.displayName}` : ""}. Vamos a preparar tus artículos. ¿Quieres escribir sobre un tema o crear el contenido desde videos de YouTube?` });
+  }
   if (run.phase === "topic") {
     return promptResponse(run, "¿Sobre qué tema quieres crear los artículos?", {
       type: "text",
       options: [{ id: "recommend_trend", label: "Recomiéndame una tendencia", action: "recommend_trend" }]
     }, { configurationPatch, speechText: `Hola${run.displayName ? `, ${run.displayName}` : ""}. Vamos a preparar tus artículos. ¿Sobre qué tema quieres escribir?` });
+  }
+  if (run.phase === "youtube_urls") return promptResponse(run, "Pega entre una y cinco URLs públicas de YouTube para analizarlas.", { type: "url_list", options: [] }, { configurationPatch, speechText: "Pega las direcciones de los videos de YouTube. Puedes agregar hasta cinco y después pulsa Analizar videos." });
+  if (run.phase === "video_topic") {
+    const options = (configuration.videoResearch?.proposedTopics || []).slice(0, 3).map((value, index) => ({ id: `video-topic-${index + 1}`, label: value, value }));
+    return promptResponse(run, "Ya analicé los videos. Elige un tema propuesto o escribe uno diferente.", { type: "single_choice", options }, { configurationPatch, videoResearch: configuration.videoResearch });
   }
   if (run.phase === "audiences") return promptResponse(run, "¿Para qué públicos prepararemos versiones del artículo?", { type: "multi_choice", options: AUDIENCES }, { configurationPatch });
   if (run.phase === "proposals") {
@@ -249,6 +272,7 @@ function phasePrompt(run, configurationPatch = {}) {
   if (run.phase === "vocabulary") return promptResponse(run, "¿Deseas añadir palabras al vocabulario editorial?", { type: "single_choice", options: [{ id: "no", label: "No, continuar" }, { id: "yes", label: "Sí, añadir palabras" }] }, { configurationPatch });
   if (run.phase === "vocabulary_terms") return promptResponse(run, "Di o escribe las palabras separadas por comas.", { type: "text", options: [] }, { configurationPatch });
   if (run.phase === "summary") return promptResponse(run, "Revisa la configuración. Puedes corregir cualquier apartado o crear los artículos.", { type: "summary", options: [
+    ...(configuration.creationSource === "youtube" ? [{ id: "edit_videos", label: "Videos", action: "edit_videos" }] : []),
     { id: "edit_topic", label: "Tema", action: "edit_topic" },
     { id: "edit_audiences", label: "Públicos", action: "edit_audiences" },
     { id: "edit_tone", label: "Tono", action: "edit_tone" },
@@ -307,7 +331,9 @@ function sessionRequestFromRun(run) {
     editorialProfileId: "marcie",
     editorialProfileVersion: 1,
     editorialProfileSnapshot: { name: "Marcie" },
-    preferredVocabulary: configuration.preferredVocabulary
+    preferredVocabulary: configuration.preferredVocabulary,
+    sourceInputs: configuration.sourceInputs || { youtube: [] },
+    videoResearch: configuration.videoResearch || null
   };
 }
 
@@ -317,6 +343,7 @@ async function advanceRun(run, input, context) {
   if (run.phase === "summary" && /^edit_/.test(String(input.action || ""))) {
     const target = String(input.action).slice(5);
     if (target === "topic") run.phase = "topic";
+    if (target === "videos") run.phase = "youtube_urls";
     if (target === "audiences") {
       configuration.selectedAudiences = [];
       configuration.proposalsByAudience = {};
@@ -347,7 +374,30 @@ async function advanceRun(run, input, context) {
     run.updatedAt = new Date().toISOString();
     return response;
   }
-  if (run.phase === "topic") {
+  if (run.phase === "creation_source") {
+    const source = selectedValue(input, [{ id: "topic", label: "Escribir sobre un tema" }, { id: "youtube", label: "Crear desde videos de YouTube" }]);
+    if (!["topic", "youtube"].includes(source)) return phasePrompt(run);
+    configuration.creationSource = source;
+    patch.creationSource = source;
+    run.phase = source === "youtube" ? "youtube_urls" : "topic";
+  } else if (run.phase === "youtube_urls") {
+    const urls = Array.isArray(input.urls) ? input.urls : String(input.text || input.value || "").split(/[\n,;]+/);
+    const analysis = await context.analyzeYoutubeVideos({ urls, objective: configuration.topic, language: "es-MX" });
+    configuration.sourceInputs = { youtube: analysis.videos.map((video) => ({ videoId: video.videoId, url: video.url })) };
+    configuration.videoResearch = analysis;
+    patch.sourceInputs = configuration.sourceInputs;
+    patch.videoResearch = analysis;
+    run.phase = "video_topic";
+  } else if (run.phase === "video_topic") {
+    const options = (configuration.videoResearch?.proposedTopics || []).slice(0, 3).map((value, index) => ({ id: `video-topic-${index + 1}`, label: value, value }));
+    const optionId = selectedValue(input, options);
+    const option = options.find((item) => item.id === optionId);
+    const topic = clean(option?.value || input.text || input.value, 600);
+    if (!topic) return phasePrompt(run);
+    configuration.topic = topic;
+    patch.topic = topic;
+    run.phase = "audiences";
+  } else if (run.phase === "topic") {
     if (input.action === "recommend_trend" || selectedValues(input, [{ id: "recommend_trend", label: "Recomiéndame una tendencia" }]).length) {
       const trends = await listTrendingTopics(context.db, 3);
       run.lastOptions = trends.map((item) => ({ id: `trend:${item.id}`, label: item.topic, value: item.topic, description: item.summary }));
@@ -538,8 +588,8 @@ async function handlePostProductionTurn(run, input, context) {
   }
 
   if (/m[aá]s fuentes|buscar fuentes|investiga/i.test(text)) {
-    const research = await handlers.research_sources({ topic: session.topic || session.title, audience, minimumSources: 5, region: session.researchRegion || "MX", period: session.researchPeriod || "6m" });
-    const sourceCount = Array.isArray(research?.sources) ? research.sources.length : 0;
+    const research = await handlers.research_sources({ topic: session.topic || session.title, audience, minimumSources: 5, region: session.researchRegion || "MX", period: session.researchPeriod || "6m", videoEvidence: session.videoResearch || null });
+    const sourceCount = Number(research?.documentSourceCount ?? (Array.isArray(research?.sources) ? research.sources.filter((source) => source?.sourceType !== "youtube_video").length : 0));
     run.lastResearch = { sourceCount, researchedAt: new Date().toISOString() };
     return promptResponse(run, `Encontré ${sourceCount} fuentes verificadas para revisar. No las incorporé todavía al artículo.`, { type: "text", options: [] }, { researchSummary: run.lastResearch });
   }
@@ -569,25 +619,35 @@ function createToolHandlers(context) {
     async get_trending_topics({ limit }) {
       return { topics: await listTrendingTopics(context.db, limit) };
     },
-    async create_editorial_session({ topic, selectedAudiences, specifications = [], preferredVocabulary = [] }) {
+    async create_editorial_session({ topic, selectedAudiences, specifications = [], preferredVocabulary = [], sourceInputs = { youtube: [] }, videoResearch = null }) {
       const ref = context.db.collection(SESSIONS_COLLECTION).doc();
       const audience = selectedAudiences[0];
       const now = new Date().toISOString();
       const article = { schemaVersion: "1.0", title: topic, subtitle: "", audience, blocks: [], sources: [], researchSources: [], editorialMode: "marcie", seo: { title: topic, description: "", keywords: [], slug: "" } };
-      await ref.set({ title: topic, topic, ownerId: context.uid, ownerUid: context.uid, status: "new", audience, selectedAudiences, specifications, preferredVocabulary: uniqueStrings(preferredVocabulary, 250), editorialMode: "marcie", article, articlesByAudience: { [audience]: article }, createdAt: now, updatedAt: now });
+      await ref.set({ title: topic, topic, ownerId: context.uid, ownerUid: context.uid, status: "new", audience, selectedAudiences, specifications, preferredVocabulary: uniqueStrings(preferredVocabulary, 250), sourceInputs, videoResearch, editorialMode: "marcie", article, articlesByAudience: { [audience]: article }, createdAt: now, updatedAt: now });
       return { sessionId: ref.id, status: "new" };
     },
     async generate_audience_proposals({ topic, audiences }) {
       return { proposalsByAudience: await generateProposalOptions({ topic, audiences, generateText: context.generateText }) };
     },
-    async research_sources(args) {
-      return researchArticleEvidenceServer({ topic: args.topic, audience: args.audience, mode: "marcie", minimumSources: args.minimumSources, region: args.region || "MX", period: args.period || "6m", searchPlatforms: args.searchPlatforms, researchInstructions: args.researchInstructions || [], dependencies: { client: context.client } });
+    async analyze_youtube_videos(args) {
+      return context.analyzeYoutubeVideos(args);
     },
-    async draft_articles({ topic, audiences, evidenceByAudience = {}, specifications = [] }) {
+    async research_sources(args) {
+      return researchArticleEvidenceServer({ topic: args.topic, audience: args.audience, mode: "marcie", minimumSources: args.minimumSources, region: args.region || "MX", period: args.period || "6m", searchPlatforms: args.searchPlatforms, researchInstructions: args.researchInstructions || [], videoEvidence: args.videoEvidence || null, dependencies: { client: context.client } });
+    },
+    async draft_articles({ topic, audiences, evidenceByAudience = {}, specifications = [], videoEvidence = null }) {
       const articles = {};
       for (const audience of audiences) {
-        const prompt = `Redacta un artículo educativo en español para ${audience} sobre ${topic}. Usa exclusivamente la evidencia proporcionada y conserva sourceIds en cada bloque. Especificaciones: ${specifications.join("; ")}. EVIDENCIA: ${JSON.stringify(evidenceByAudience[audience] || {}).slice(0, 60000)}. Devuelve SOLO JSON de artículo con title, subtitle, audience, blocks, sources y seo.`;
-        articles[audience] = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "HIGH" }), {});
+        const evidence = evidenceByAudience[audience] || {};
+        const prompt = `Redacta un artículo educativo en español para ${audience} sobre ${topic}. Usa exclusivamente la evidencia proporcionada y conserva sourceIds y locators en cada bloque. Lo dicho en un video debe atribuirse al autor; no lo presentes como hecho externo sin una fuente documental de contraste. Especificaciones: ${specifications.join("; ")}. EVIDENCIA DOCUMENTAL: ${JSON.stringify(evidence).slice(0, 50000)}. EVIDENCIA DE VIDEO: ${JSON.stringify(videoEvidence || {}).slice(0, 30000)}. Devuelve SOLO JSON de artículo con title, subtitle, audience, blocks, sources y seo.`;
+        const article = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "HIGH" }), {});
+        const sourcePool = Array.isArray(evidence.sources) ? evidence.sources : [];
+        const usedIds = new Set((article.blocks || []).flatMap((block) => Array.isArray(block?.sourceIds) ? block.sourceIds.map(String) : []));
+        article.researchSources = sourcePool;
+        article.sources = sourcePool.filter((source) => source?.sourceType !== "youtube_video" || usedIds.has(String(source.id)));
+        article.usedSources = article.sources;
+        articles[audience] = article;
       }
       return { articles };
     },
@@ -632,10 +692,11 @@ function registerTools(server, handlers) {
   const audience = z.enum(AUDIENCES.map((item) => item.id));
   add("get_session_context", "Lee una sesión editorial propia y sus revisiones.", { sessionId: z.string().min(1) });
   add("get_trending_topics", "Consulta las tendencias verificadas más recientes del radar editorial.", { limit: z.number().int().min(1).max(6).optional() });
-  add("create_editorial_session", "Crea una sesión editorial sin publicar contenido.", { topic: z.string().min(3).max(600), selectedAudiences: z.array(audience).min(1).max(4), specifications: z.array(z.string().max(1000)).max(80).optional(), preferredVocabulary: z.array(z.string().max(100)).max(250).optional() });
+  add("create_editorial_session", "Crea una sesión editorial sin publicar contenido.", { topic: z.string().min(3).max(600), selectedAudiences: z.array(audience).min(1).max(4), specifications: z.array(z.string().max(1000)).max(80).optional(), preferredVocabulary: z.array(z.string().max(100)).max(250).optional(), sourceInputs: z.any().optional(), videoResearch: z.any().optional() });
   add("generate_audience_proposals", "Genera tres propuestas de título para cada público.", { topic: z.string().min(3).max(600), audiences: z.array(audience).min(1).max(4) });
-  add("research_sources", "Investiga y verifica documentos originales para un público.", { topic: z.string().min(3).max(2000), audience, minimumSources: z.number().int().min(1).max(20).optional(), region: z.string().max(80).optional(), period: z.enum(["1m", "3m", "6m", "12m"]).optional(), searchPlatforms: z.array(z.string()).max(30).optional(), researchInstructions: z.array(z.string().max(2000)).max(50).optional() });
-  add("draft_articles", "Redacta artículos por público usando expedientes de evidencia.", { topic: z.string().min(3).max(600), audiences: z.array(audience).min(1).max(4), evidenceByAudience: z.record(z.string(), z.any()).optional(), specifications: z.array(z.string().max(1000)).max(80).optional() });
+  add("analyze_youtube_videos", "Analiza de uno a cinco videos públicos de YouTube sin almacenar audio ni transcripciones completas.", { urls: z.array(z.string().max(3000)).min(1).max(5), objective: z.string().max(1000).optional(), language: z.enum(["es-MX"]).optional() });
+  add("research_sources", "Investiga documentos originales y contrasta evidencia de video.", { topic: z.string().min(3).max(2000), audience, minimumSources: z.number().int().min(1).max(20).optional(), region: z.string().max(80).optional(), period: z.enum(["1m", "3m", "6m", "12m"]).optional(), searchPlatforms: z.array(z.string()).max(30).optional(), researchInstructions: z.array(z.string().max(2000)).max(50).optional(), videoEvidence: z.any().optional() });
+  add("draft_articles", "Redacta artículos por público usando expedientes documentales y de video.", { topic: z.string().min(3).max(600), audiences: z.array(audience).min(1).max(4), evidenceByAudience: z.record(z.string(), z.any()).optional(), specifications: z.array(z.string().max(1000)).max(80).optional(), videoEvidence: z.any().optional() });
   add("verify_article_claims", "Verifica afirmaciones, citas y documentos de un artículo.", { article: z.any(), topic: z.string().max(1000).optional(), additionalSearches: z.number().int().min(0).max(2).optional() });
   add("format_bibliography_apa7", "Genera referencias APA 7 y reporta metadatos faltantes.", { sources: z.array(z.any()).max(100) });
   add("review_article", "Revisa un artículo sin guardarlo ni publicarlo.", { article: z.any(), instruction: z.string().max(4000).optional() });
@@ -665,7 +726,19 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
       uid: auth.uid,
       displayName: clean(profile.displayName || profile.nombre || auth.token?.name || auth.email?.split("@")[0], 120),
       generateText: dependencies.generateText,
-      client: dependencies.client
+      client: dependencies.client,
+      analyzeYoutubeVideos: async (args) => {
+        const startedAt = Date.now();
+        const requestedVideoCount = Math.min(5, Array.isArray(args?.urls) ? args.urls.length : 0);
+        try {
+          const result = await (dependencies.analyzeYoutubeVideos || analyzeYoutubeVideos)(args, { client: dependencies.client });
+          console.info(JSON.stringify({ severity: "INFO", event: "marcie_youtube_analysis", requestedVideoCount, analyzedVideoCount: result.videos.length, rejectedVideoCount: result.rejectedVideos.length, durationMs: Date.now() - startedAt }));
+          return result;
+        } catch (error) {
+          console.warn(JSON.stringify({ severity: "WARNING", event: "marcie_youtube_analysis_failed", requestedVideoCount, code: clean(error?.code || error?.message, 120), durationMs: Date.now() - startedAt }));
+          throw error;
+        }
+      }
     };
   };
 
@@ -674,7 +747,7 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
     let run = await readRun(context, req.body?.runId);
     if (!run) run = initialRun({ uid: context.uid, displayName: context.displayName });
     const input = req.body?.input && typeof req.body.input === "object" ? req.body.input : {};
-    const response = clean(input.text || input.value) || input.action || input.selectedValues?.length
+    const response = clean(input.text || input.value) || input.action || input.selectedValues?.length || input.urls?.length
       ? await advanceRun(run, input, context)
       : phasePrompt(run);
     response.configurationPatch = response.configurationPatch || {};
@@ -695,6 +768,16 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
     run.updatedAt = new Date().toISOString();
     await context.db.collection(RUNS_COLLECTION).doc(run.id).set(run, { merge: true });
     return res.status(status === "started" ? 202 : 200).json({ ok: true, runId: run.id, runStatus: run.status, sessionRequest: sessionRequestFromRun(run) });
+  }));
+
+  app.post("/api/marcie/videos/analyze", asyncRoute(async (req, res) => {
+    const context = await contextFor(req);
+    const result = await context.analyzeYoutubeVideos({
+      urls: Array.isArray(req.body?.urls) ? req.body.urls : [],
+      objective: clean(req.body?.objective, 1000),
+      language: "es-MX"
+    });
+    return res.status(200).json({ ok: true, ...result });
   }));
 
   app.all("/api/marcie/mcp", async (req, res) => {

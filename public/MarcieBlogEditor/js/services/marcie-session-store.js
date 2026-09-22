@@ -186,6 +186,8 @@ export function normalizeSessionDoc(docSnap) {
     researchPeriod: data.researchPeriod || "6m",
     configurationRevision: Number(data.configurationRevision || 0),
     sessionConfiguration: data.sessionConfiguration || null,
+    sourceInputs: data.sourceInputs && typeof data.sourceInputs === "object" ? { ...data.sourceInputs } : (data.sessionConfiguration?.sourceInputs || { youtube: [] }),
+    videoResearch: data.videoResearch && typeof data.videoResearch === "object" ? { ...data.videoResearch } : null,
     titleProposals: data.titleProposals && typeof data.titleProposals === "object" ? { ...data.titleProposals } : (data.sessionConfiguration?.titleProposals && typeof data.sessionConfiguration.titleProposals === "object" ? { ...data.sessionConfiguration.titleProposals } : null),
     selectedProposal: data.selectedProposal || null,
     auditsByAudience: data.auditsByAudience || (data.audit ? { [currentAudience]: data.audit } : {}),
@@ -323,6 +325,8 @@ export async function createMarcieSession(fields = {}) {
     title: sessionTitle,
     storageRevision: 0,
     sessionConfiguration: normalizeFirestoreJson(fields.sessionConfiguration || null, null),
+    sourceInputs: normalizeFirestoreJson(fields.sourceInputs || fields.sessionConfiguration?.sourceInputs || { youtube: [] }, { youtube: [] }),
+    videoResearch: normalizeFirestoreJson(fields.videoResearch || null, null),
     researchRegion: fields.researchRegion || "MX",
     researchPeriod: fields.researchPeriod || "6m",
     topic: fields.topic || sessionTitle,
@@ -478,6 +482,40 @@ function compactArticleForFirestore(article = {}) {
 
 export function compactMarcieSessionForFirestore(session = {}) {
   const compact = { ...session };
+  if (compact.sessionConfiguration && typeof compact.sessionConfiguration === "object") {
+    compact.sessionConfiguration = { ...compact.sessionConfiguration };
+    delete compact.sessionConfiguration.videoResearch;
+  }
+  compact.sourceInputs = {
+    youtube: (Array.isArray(compact.sourceInputs?.youtube) ? compact.sourceInputs.youtube : [])
+      .slice(0, 5)
+      .map((item) => ({ videoId: String(item?.videoId || ""), url: String(item?.url || "") }))
+      .filter((item) => item.url)
+  };
+  if (compact.videoResearch && typeof compact.videoResearch === "object") {
+    const research = compact.videoResearch;
+    compact.videoResearch = {
+      analysisVersion: Number(research.analysisVersion || 1),
+      analysisId: String(research.analysisId || ""),
+      videos: (Array.isArray(research.videos) ? research.videos : []).slice(0, 5).map((video) => ({
+        videoId: String(video?.videoId || ""), url: String(video?.url || ""), title: String(video?.title || ""),
+        channel: String(video?.channel || ""), publishedAt: String(video?.publishedAt || ""), summary: String(video?.summary || ""),
+        topics: Array.isArray(video?.topics) ? video.topics : [], concepts: Array.isArray(video?.concepts) ? video.concepts : [],
+        proposedTopics: Array.isArray(video?.proposedTopics) ? video.proposedTopics : [],
+        evidenceItems: Array.isArray(video?.evidenceItems) ? video.evidenceItems : [], shortQuotes: Array.isArray(video?.shortQuotes) ? video.shortQuotes : [],
+        warnings: Array.isArray(video?.warnings) ? video.warnings : [], bibliographySource: video?.bibliographySource || null
+      })),
+      combinedSynthesis: String(research.combinedSynthesis || ""),
+      proposedTopics: Array.isArray(research.proposedTopics) ? research.proposedTopics : [],
+      evidenceItems: Array.isArray(research.evidenceItems) ? research.evidenceItems : [],
+      bibliographySources: Array.isArray(research.bibliographySources) ? research.bibliographySources : [],
+      warnings: Array.isArray(research.warnings) ? research.warnings : [],
+      rejectedVideos: Array.isArray(research.rejectedVideos) ? research.rejectedVideos : [],
+      analyzedAt: String(research.analyzedAt || "")
+    };
+  } else {
+    delete compact.videoResearch;
+  }
   const audience = String(compact.audience || "educators");
   const articles = compact.articlesByAudience && typeof compact.articlesByAudience === "object"
     ? Object.fromEntries(Object.entries(compact.articlesByAudience).map(([key, article]) => [key, compactArticleForFirestore(article)]))
@@ -536,6 +574,8 @@ async function persistMarcieSession(session) {
     researchPeriod: session.researchPeriod || "6m",
     configurationRevision: Number(session.configurationRevision || 0),
     sessionConfiguration: normalizeFirestoreJson(session.sessionConfiguration || null, null),
+    sourceInputs: normalizeFirestoreJson(session.sourceInputs || session.sessionConfiguration?.sourceInputs || { youtube: [] }, { youtube: [] }),
+    videoResearch: normalizeFirestoreJson(session.videoResearch || null, null),
     titleProposals: normalizeFirestoreJson(session.titleProposals || session.sessionConfiguration?.titleProposals || null, null),
     expansionApprovalReport: normalizeFirestoreJson(session.expansionApprovalReport || null, null),
     selectedProposal: normalizeFirestoreJson(session.selectedProposal || null, null),

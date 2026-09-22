@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const { getAdminServices } = require("./common.js");
 const { createVertexClient, buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js");
 const { verifyCandidateSources } = require("./marcie-source-verifier.js");
+const { normalizeYoutubeUrl } = require("./marcie-youtube-agent.js");
 
 const TREND_SCHEMA_VERSION = 6;
 const DEFAULT_SETTINGS = { cadence: "weekly", region: "MX", timezone: "America/Cancun", discoveryMode: "general_education_brain" };
@@ -13,6 +14,52 @@ const EVIDENCE_VERIFY_DEADLINE_MS = 105_000;
 const RESEARCH_PERIOD_DAYS = Object.freeze({ "24h": 1, "7d": 7, "1m": 30, "3m": 90, "6m": 180, "12m": 365 });
 
 function clampText(value, max = 1000) { return String(value == null ? "" : value).trim().slice(0, max); }
+function normalizeVideoEvidence(value = {}) {
+  const sources = [];
+  const allowedIds = new Set();
+  for (const item of Array.isArray(value?.bibliographySources) ? value.bibliographySources.slice(0, 5) : []) {
+    const normalized = normalizeYoutubeUrl(item?.url);
+    if (!normalized) continue;
+    const id = `youtube-${normalized.videoId}`;
+    allowedIds.add(id);
+    sources.push({
+      id,
+      sourceType: "youtube_video",
+      title: clampText(item?.title, 500) || `Video de YouTube ${normalized.videoId}`,
+      authors: (Array.isArray(item?.authors) ? item.authors : []).map((author) => clampText(author, 300)).filter(Boolean).slice(0, 3),
+      publisher: "YouTube",
+      publishedAt: /^\d{4}(?:-\d{2}-\d{2})?/.test(clampText(item?.publishedAt, 40)) ? clampText(item.publishedAt, 40) : "",
+      url: normalized.url,
+      videoId: normalized.videoId,
+      verificationStatus: "attributed_only",
+      evidenceRole: "video",
+      supportSummary: clampText(item?.supportSummary, 1800),
+      locator: clampText(item?.locator, 24)
+    });
+  }
+  const facts = (Array.isArray(value?.evidenceItems) ? value.evidenceItems : []).slice(0, 150).map((item, index) => ({
+    id: clampText(item?.id, 120) || `video-finding-${index + 1}`,
+    claim: clampText(item?.text || item?.claim, 1000),
+    sourceIds: (Array.isArray(item?.sourceIds) ? item.sourceIds : []).map(String).filter((id) => allowedIds.has(id)),
+    locator: clampText(item?.locator, 24),
+    evidenceKind: item?.evidenceKind === "external_fact" ? "external_fact" : "video_attribution",
+    needsCorroboration: item?.evidenceKind === "external_fact" || item?.needsCorroboration === true
+  })).filter((item) => item.claim && item.sourceIds.length);
+  const quotes = (Array.isArray(value?.videos) ? value.videos : []).flatMap((video) => {
+    const normalized = normalizeYoutubeUrl(video?.url);
+    if (!normalized || !allowedIds.has(`youtube-${normalized.videoId}`)) return [];
+    return (Array.isArray(video?.shortQuotes) ? video.shortQuotes : []).slice(0, 8).map((quote, index) => ({
+      id: `youtube-${normalized.videoId}-quote-${index + 1}`,
+      claim: clampText(quote?.text, 220),
+      sourceIds: [`youtube-${normalized.videoId}`],
+      locator: clampText(quote?.locator, 24),
+      evidenceKind: "video_attribution",
+      needsCorroboration: false,
+      isDirectQuote: true
+    })).filter((quote) => quote.claim && quote.locator);
+  });
+  return { sources, facts: [...facts, ...quotes], summary: clampText(value?.combinedSynthesis, 12000), warnings: (Array.isArray(value?.warnings) ? value.warnings : []).map((item) => clampText(item, 500)).filter(Boolean).slice(0, 30) };
+}
 function stableSourceId(url) {
   let key = String(url || "").trim();
   try {
@@ -327,6 +374,7 @@ async function researchArticleEvidenceServer({
   minimumSources,
   region = "MX",
   period = "6m",
+  videoEvidence = null,
   dependencies = {}
 } = {}) {
   const client = dependencies.client || createVertexClient({ location: "global" });
@@ -475,16 +523,19 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
   let attributedReferences = [];
   try { attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages }); }
   catch (_) { recommendations.push("No se pudieron extraer citas textuales; utiliza paráfrasis de los hallazgos verificados."); }
+  const normalizedVideo = normalizeVideoEvidence(videoEvidence || {});
+  const combinedSources = [...verified.verifiedSources, ...normalizedVideo.sources];
+  const combinedFacts = [...facts, ...normalizedVideo.facts];
   return {
     schemaVersion: "2.0",
     editorialMode,
     topic: clampText(topic, 500),
-    summary: verifiedSummary || "No se recuperó evidencia documental pertinente y verificable.",
+    summary: [normalizedVideo.summary, verifiedSummary].filter(Boolean).join(" ") || "No se recuperó evidencia documental pertinente y verificable.",
     currentSignals,
-    facts,
-    sources: verified.verifiedSources,
+    facts: combinedFacts,
+    sources: combinedSources,
     analysisStatus: pendingCandidateCount ? "incomplete" : "complete",
-    analysis: { sourceIds: verified.verifiedSources.map(source => source.id), examinedCandidateCount: attempted.size, rejectedCount: verified.rejectedSources.length, pendingCandidateCount },
+    analysis: { sourceIds: combinedSources.map(source => source.id), examinedCandidateCount: attempted.size, rejectedCount: verified.rejectedSources.length, pendingCandidateCount },
     researchInstructions,
     researchRegion: region,
     researchPolicyVersion: researchPolicy.version,
@@ -502,14 +553,17 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
     attributedReferences,
     rejectedSources: verified.rejectedSources,
     verifiedSourceCount: verified.verifiedSources.length,
+    totalSourceCount: combinedSources.length,
+    documentSourceCount: verified.verifiedSources.length,
+    videoSourceCount: normalizedVideo.sources.length,
     institutionCount,
     blockers,
-    recommendations,
+    recommendations: [...recommendations, ...normalizedVideo.warnings],
     minimumSourceCount: 1,
     targetSourceCount: requestedMinimum,
     verificationStatus: blockers.length ? "blocked" : "verified",
     researchedAt: now.toISOString(),
-    telemetry: { modeUsed: editorialMode, model: DEFAULT_TEXT_MODEL, searches: generatedBatches.length, retrievedUrls: verified.verifiedSources.map((source) => source.url) }
+    telemetry: { modeUsed: editorialMode, model: DEFAULT_TEXT_MODEL, searches: generatedBatches.length, retrievedUrls: verified.verifiedSources.map((source) => source.url), videoCount: normalizedVideo.sources.length }
   };
 }
 
@@ -524,7 +578,8 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   for (const source of [...(article.researchSources || []), ...(article.sources || []), ...(article.usedSources || []), ...bibliography.sources(article)]) {
     if (source?.url && !uniqueCandidates.has(source.url)) uniqueCandidates.set(source.url, source);
   }
-  let candidates = [...uniqueCandidates.values()];
+  const videoSources = [...uniqueCandidates.values()].filter((source) => source?.sourceType === "youtube_video");
+  let candidates = [...uniqueCandidates.values()].filter((source) => source?.sourceType !== "youtube_video");
   const verified = { verifiedSources: [], rejectedSources: [], retrievedPages: [] };
   for (let offset = 0; offset < candidates.length; offset += 32) {
     const batch = await verifyCandidateSources({ candidates: candidates.slice(offset, offset + 32), maxCandidates: 32, context: text, assessSources: createSourceAssessor(client), retrieveOptions: dependencies.retrieveOptions, allowHistorical: true });
@@ -533,23 +588,30 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   const pagesById = new Map(verified.retrievedPages.map((page) => [page.id, page]));
   const usablePages = verified.verifiedSources.map((source) => ({ source, page: pagesById.get(source.id) })).filter((item) => item.page);
   let result = { claims: [], contradictions: [] };
-  if (usablePages.length) {
-    const prompt = `Extrae cada afirmación factual del artículo y comprueba si está respaldada por las páginas recuperadas. Opiniones y preguntas no son afirmaciones factuales. No supongas respaldo. Marca contradicciones.\nARTÍCULO:\n${text}\nFUENTES:\n${usablePages.map(({ source, page }) => `ID ${source.id} (${source.qualityTier}) ${source.title}\n${page.text.slice(0, 4200)}`).join("\n\n")}\nSOLO JSON: {"claims":[{"id":"claim-1","blockId":"","text":"afirmación exacta","risk":"low|medium|high","status":"supported|partially_supported|unsupported|contradicted","sourceIds":["source-1"],"supportSummary":"","locator":""}],"contradictions":[""]}`;
+  if (usablePages.length || videoSources.length) {
+    const prompt = `Extrae las afirmaciones del artículo y comprueba su respaldo. Distingue video_attribution (lo que el artículo atribuye explícitamente al autor o al video) de external_fact (hechos independientes). Una fuente de video puede respaldar solo video_attribution; nunca basta para verificar external_fact. Opiniones y preguntas no son afirmaciones. No supongas respaldo. Marca contradicciones.\nARTÍCULO:\n${text}\nDOCUMENTOS:\n${usablePages.map(({ source, page }) => `ID ${source.id} (${source.qualityTier}) ${source.title}\n${page.text.slice(0, 4200)}`).join("\n\n") || "Sin documentos recuperados"}\nVIDEOS (solo atribución):\n${videoSources.map((source) => `ID ${source.id} ${source.title} ${source.locator || ""}\n${source.supportSummary || "Sin resumen"}`).join("\n\n") || "Sin videos"}\nSOLO JSON: {"claims":[{"id":"claim-1","blockId":"","text":"afirmación exacta","evidenceKind":"video_attribution|external_fact","risk":"low|medium|high","status":"supported|partially_supported|unsupported|contradicted","sourceIds":["source-1"],"supportSummary":"","locator":""}],"contradictions":[""]}`;
     result = (await generateJson({ client, prompt })).parsed;
   }
-  const sourcesById = new Map(verified.verifiedSources.map((source) => [source.id, source]));
+  const preservedSources = [...verified.verifiedSources, ...videoSources];
+  const sourcesById = new Map(preservedSources.map((source) => [source.id, source]));
   const claims = (Array.isArray(result.claims) ? result.claims : []).map((claim, index) => {
     const historicalClaim = /\b(?:1[5-9]\d{2}|20\d{2})\b|\b(?:descubri[oó]|investigador|cient[ií]fic|hist[oó]ric|en el siglo)\b/i.test(String(claim.text || ""));
     const risk = historicalClaim ? "high" : (["low", "medium", "high"].includes(claim.risk) ? claim.risk : "medium");
-    const sourceIds = [...new Set((claim.sourceIds || []).map(String).filter((id) => sourcesById.has(id)))];
+    const evidenceKind = claim.evidenceKind === "video_attribution" ? "video_attribution" : "external_fact";
+    const sourceIds = [...new Set((claim.sourceIds || []).map(String).filter((id) => {
+      const source = sourcesById.get(id);
+      return source && (evidenceKind === "video_attribution" || source.sourceType !== "youtube_video");
+    }))];
     const independentDomains = new Set(sourceIds.map((id) => sourcesById.get(id)?.domain).filter(Boolean));
-    const strongEnough = risk !== "high" || (sourceIds.length >= 2 && independentDomains.size >= 2 && sourceIds.some((id) => Number(sourcesById.get(id)?.qualityTier) === 1));
+    const hasAttributedVideo = evidenceKind === "video_attribution" && sourceIds.some((id) => sourcesById.get(id)?.sourceType === "youtube_video");
+    const strongEnough = hasAttributedVideo || risk !== "high" || (sourceIds.length >= 2 && independentDomains.size >= 2 && sourceIds.some((id) => Number(sourcesById.get(id)?.qualityTier) === 1));
     let status = ["supported", "partially_supported", "unsupported", "contradicted"].includes(claim.status) ? claim.status : "unsupported";
     if (status === "supported" && (!sourceIds.length || !strongEnough)) status = "partially_supported";
-    return { id: clampText(claim.id, 120) || `claim-${index + 1}`, blockId: clampText(claim.blockId, 120), text: clampText(claim.text, 1200), risk, status, sourceIds, supportSummary: clampText(claim.supportSummary, 600), locator: clampText(claim.locator, 300) };
+    return { id: clampText(claim.id, 120) || `claim-${index + 1}`, blockId: clampText(claim.blockId, 120), text: clampText(claim.text, 1200), evidenceKind, risk, status, sourceIds, supportSummary: clampText(claim.supportSummary, 600), locator: clampText(claim.locator, 300) };
   }).filter((claim) => claim.text);
   const blockers = claims.filter((claim) => claim.status !== "supported").map((claim) => claim.text);
-  const missingCitations = bibliography.integrity(article).missing;
+  const articleWithPreservedVideos = { ...article, sources: preservedSources, researchSources: preservedSources };
+  const missingCitations = bibliography.integrity(articleWithPreservedVideos).missing;
   if (missingCitations.length) blockers.push("Hay citas sin documento bibliográfico asociado: " + missingCitations.join(", "));
   if (verified.rejectedSources.length) blockers.push(`${verified.rejectedSources.length} fuente(s) fueron descartadas al comprobar su contenido.`);
   const requiredSources = article.researchDossier?.targetSourceCount || (article.editorialMode === "aida" ? researchPolicy.target({ editorialMode: "aida" }) : 0);
@@ -557,16 +619,16 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   const contradictions = Array.isArray(result.contradictions) ? result.contradictions.map((value) => clampText(value, 800)).filter(Boolean) : [];
   if ((blockers.length || !claims.length) && additionalSearches > 0) {
     const supplemental = await researchArticleEvidenceServer({ searchPlatforms: article.searchPlatforms ?? article.researchDossier?.searchPlatforms, topic: `${topic || article.title}. Evidencia faltante: ${blockers.slice(0, 5).join("; ")}`, audience: article.audience || "educators", mode: article.editorialMode || "marcie", minimumSources: requiredSources || researchPolicy.target({ editorialMode: article.editorialMode }), researchInstructions: article.researchDossier?.researchInstructions || [], region: article.researchDossier?.researchRegion || "MX", period: article.researchPeriod || article.researchDossier?.researchPeriod || "6m", dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
-    const combined = [...candidates, ...supplemental.sources];
-    if (combined.length > candidates.length) return verifyArticleEvidenceServer({ article: { ...article, sources: combined, researchSources: combined }, topic, additionalSearches: additionalSearches - 1, dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
+    const combined = [...candidates, ...supplemental.sources, ...videoSources];
+    if (combined.length > candidates.length + videoSources.length) return verifyArticleEvidenceServer({ article: { ...article, sources: combined, researchSources: combined }, topic, additionalSearches: additionalSearches - 1, dependencies: { client, retrieveOptions: dependencies.retrieveOptions } });
   }
   const coverage = claims.length ? Math.round((claims.filter((claim) => claim.status === "supported").length / claims.length) * 100) : 0;
-  const contentHash = crypto.createHash("sha256").update(JSON.stringify({ title: article.title, subtitle: article.subtitle, blocks: article.blocks, sources: verified.verifiedSources, seo: article.seo })).digest("hex");
+  const contentHash = crypto.createHash("sha256").update(JSON.stringify({ title: article.title, subtitle: article.subtitle, blocks: article.blocks, sources: preservedSources, seo: article.seo })).digest("hex");
   return {
-    ...article, usedSources: article.usedSources || article.sources || [], sources: verified.verifiedSources, researchSources: verified.verifiedSources, articleClaims: claims,
+    ...article, usedSources: article.usedSources || article.sources || [], sources: preservedSources, researchSources: preservedSources, articleClaims: claims,
     evidenceLinks: claims.flatMap((claim) => claim.sourceIds.map((sourceId) => ({ claimId: claim.id, sourceId, url: sourcesById.get(sourceId)?.url || "", title: sourcesById.get(sourceId)?.title || "", supportSummary: claim.supportSummary, locator: claim.locator }))),
     sourceAudit: verified.rejectedSources,
-    verification: { status: blockers.length || contradictions.length || !claims.length ? "blocked" : "verified", coverage, blockers, contradictions, verifiedAt: new Date().toISOString(), contentHash, model: DEFAULT_TEXT_MODEL, checkedUrls: verified.verifiedSources.map((source) => source.url) }
+    verification: { status: blockers.length || contradictions.length || !claims.length ? "blocked" : "verified", coverage, blockers, contradictions, verifiedAt: new Date().toISOString(), contentHash, model: DEFAULT_TEXT_MODEL, checkedUrls: verified.verifiedSources.map((source) => source.url), videoSources: videoSources.map((source) => ({ id: source.id, url: source.url, verificationStatus: "attributed_only" })) }
   };
 }
 
@@ -597,6 +659,7 @@ function registerMarcieEditorialResearchRoutes(app, dependencies = {}) {
         minimumSources: req.body?.minimumSources,
         region: req.body?.region,
         period: req.body?.period,
+        videoEvidence: req.body?.videoEvidence || null,
         dependencies: { client: dependencies.client }
       }), RESEARCH_DEADLINE_MS, "marcie_research_timeout");
     } catch (error) {

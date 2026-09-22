@@ -165,6 +165,13 @@ test("APA 7 distinguishes books, institutional reports and journal articles with
   assert.doesNotMatch(bibliography.markdown({ title: "Artículo", sources: [book, report] }), /^\[\d+\]/m);
 });
 
+test("APA 7 formatea videos de YouTube sin inventar metadatos", () => {
+  const dated = { sourceType: "youtube_video", authors: ["Canal educativo"], publishedAt: "2026-09-22", title: "Aprender con proyectos", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+  const undated = { sourceType: "youtube_video", title: "Video sin metadatos", url: "https://www.youtube.com/watch?v=9bZkp7q19f0" };
+  assert.equal(bibliography.format(dated), "Canal educativo. (2026, 22 de septiembre). Aprender con proyectos [Video]. YouTube. https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  assert.equal(bibliography.format(undated), "[Canal no identificado]. (s. f.). Video sin metadatos [Video]. YouTube. https://www.youtube.com/watch?v=9bZkp7q19f0");
+});
+
 test("Markdown includes the same complete bibliography and formatted direct quotes", () => {
   const article={title:"Artículo",blocks:[{type:"quote",text:"El aprendizaje requiere práctica.",attribution:"García (2022)",sourceIds:["s"]}],sources:[{id:"s",authors:["García, A."],year:"2022",title:"Aprendizaje",journal:"Educación",url:"https://example.org/article"}]};
   const markdown=bibliography.markdown(article);

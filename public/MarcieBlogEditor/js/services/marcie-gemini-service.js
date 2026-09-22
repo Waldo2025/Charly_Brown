@@ -11,8 +11,8 @@ import { getDownloadURL, ref, uploadBytes } from "https://www.gstatic.com/fireba
 import { getCurrentUser, storage } from "./marcie-firebase.js";
 import { getActiveMarciePrompt } from "./marcie-prompt-settings.js?v=20260908r9";
 import { parseMarcieJson } from "./marcie-json.js";
-import "../contracts/marcie-research-policy.js?v=20260908r9";
-import "../contracts/marcie-bibliography.js?v=20260908r9";
+import "../contracts/marcie-research-policy.js?v=20260922r1";
+import "../contracts/marcie-bibliography.js?v=20260922r1";
 
 export const DEFAULT_MARCIE_MODEL = DEFAULT_GEMINI_MODEL;
 const MARCIE_IMAGE_MODEL = "gemini-2.5-flash-image";
@@ -92,9 +92,11 @@ function normalizedAttributionText(value = "") {
 }
 
 export function applyVerifiedAttributions(article = {}, dossier = {}) {
-  const validSourceIds = new Set((dossier.sources || []).filter((source) => source?.verificationStatus === "verified").map((source) => String(source.id)));
+  const validDocumentIds = new Set((dossier.sources || []).filter((source) => source?.verificationStatus === "verified").map((source) => String(source.id)));
+  const validVideoIds = new Set((dossier.sources || []).filter((source) => source?.sourceType === "youtube_video" && source?.verificationStatus === "attributed_only").map((source) => String(source.id)));
+  const validSourceIds = new Set([...validDocumentIds, ...validVideoIds]);
   const references = (Array.isArray(dossier.attributedReferences) ? dossier.attributedReferences : [])
-    .filter((reference) => reference?.verificationStatus === "verified" && validSourceIds.has(String(reference.sourceId)))
+    .filter((reference) => reference?.verificationStatus === "verified" && validDocumentIds.has(String(reference.sourceId)))
     ;
   const directQuotes = references.filter((reference) => reference.type === "direct_quote");
   const paraphrases = references.filter((reference) => reference.type === "paraphrase");
@@ -104,6 +106,8 @@ export function applyVerifiedAttributions(article = {}, dossier = {}) {
   const blocks = (Array.isArray(article.blocks) ? article.blocks : []).flatMap((block) => {
     const sourceIds = [...new Set(globalThis.MarcieBibliography.blockIds(citationContext, block).map(id => globalThis.MarcieBibliography.resolveId(citationContext, id)).filter(id => validSourceIds.has(id)))];
     if (block?.type !== "quote") return [{ ...block, sourceIds }];
+    const videoSourceIds = sourceIds.filter((id) => validVideoIds.has(id));
+    if (videoSourceIds.length && String(block.locator || "").trim()) return [{ ...block, sourceIds: videoSourceIds }];
     const normalizedText = normalizedAttributionText(block.text);
     const verifiedQuote = directQuotes.find((reference) => {
       const candidate = normalizedAttributionText(reference.text);
@@ -156,14 +160,15 @@ export async function researchArticleEvidence({
   mode = "marcie",
   minimumSources = 6,
   region = "MX",
-  period = "6m"
+  period = "6m",
+  videoEvidence = null
 } = {}) {
   const startedAt = performance.now();
   const response = await authenticatedJsonRequest("/api/marcie/evidence/research", {
-    topic: String(topic || "").trim(), audience, mode, minimumSources, region, period, searchPlatforms, researchInstructions
+    topic: String(topic || "").trim(), audience, mode, minimumSources, region, period, searchPlatforms, researchInstructions, videoEvidence
   });
   const dossier = response?.dossier || {};
-  const sources = sanitizeTrustedSources(dossier.sources || []).filter(source => source.verificationStatus === "verified");
+  const sources = sanitizeTrustedSources(dossier.sources || []).filter((source) => source.verificationStatus === "verified" || (source.sourceType === "youtube_video" && source.verificationStatus === "attributed_only"));
   return {
     schemaVersion: String(dossier.schemaVersion || "1.0"),
     searchPlatforms: dossier.searchPlatforms ?? searchPlatforms,
@@ -189,7 +194,10 @@ export async function researchArticleEvidence({
     currentSourceCount: Number(dossier.currentSourceCount || 0),
     historicalSourceCount: Number(dossier.historicalSourceCount || 0),
     rejectedSources: Array.isArray(dossier.rejectedSources) ? dossier.rejectedSources : [],
-    verifiedSourceCount: Number(dossier.verifiedSourceCount || sources.length),
+    verifiedSourceCount: Number(dossier.verifiedSourceCount ?? sources.filter((source) => source.verificationStatus === "verified" && source.sourceType !== "youtube_video").length),
+    totalSourceCount: Number(dossier.totalSourceCount || sources.length),
+    documentSourceCount: Number(dossier.documentSourceCount || sources.filter((source) => source.sourceType !== "youtube_video").length),
+    videoSourceCount: Number(dossier.videoSourceCount || sources.filter((source) => source.sourceType === "youtube_video").length),
     institutionCount: Number(dossier.institutionCount || 0),
     blockers: Array.isArray(dossier.blockers) ? dossier.blockers.map(String) : [],
     recommendations: Array.isArray(dossier.recommendations) ? dossier.recommendations.map(String) : [],
@@ -197,7 +205,7 @@ export async function researchArticleEvidence({
     targetSourceCount: Number(dossier.targetSourceCount || minimumSources),
     verificationStatus: dossier.verificationStatus || "blocked",
     researchedAt: dossier.researchedAt || new Date().toISOString(),
-    telemetry: { ...(dossier.telemetry || {}), durationMs: Math.round(performance.now() - startedAt), retrievedUrls: sources.map((source) => source.url) }
+    telemetry: { ...(dossier.telemetry || {}), durationMs: Math.round(performance.now() - startedAt), retrievedUrls: sources.filter((source) => source.sourceType !== "youtube_video").map((source) => source.url), videoCount: sources.filter((source) => source.sourceType === "youtube_video").length }
   };
 }
 
@@ -811,10 +819,10 @@ Título asignado a este artículo: ${cleanTitle}.
 Audiencia obligatoria: ${audience}.
 Instrucciones específicas del usuario: ${brief || cleanTopic}.
 
-Usa exclusivamente el dossier para afirmaciones factuales. Incluye sourceIds en cada bloque respaldado, también para paráfrasis y contexto. No inventes autores, fechas, citas ni URLs. Las citas directas deben coincidir literalmente con attributedReferences; atribuye autor y año. Sin cita textual comprobada, usa paráfrasis atribuida.
+Usa exclusivamente el dossier para afirmaciones factuales. Incluye sourceIds en cada bloque respaldado, también para paráfrasis y contexto. Las fuentes youtube_video solo respaldan lo que el artículo atribuye explícitamente al autor o al video; no las conviertas en prueba de hechos externos. Conserva locator para cualquier cita o hallazgo de video. No inventes autores, fechas, citas ni URLs. Las citas directas documentales deben coincidir literalmente con attributedReferences; las citas de video deben coincidir con un fact marcado isDirectQuote y conservar su marca de tiempo. Sin cita textual comprobada, usa paráfrasis atribuida.
 Organiza la estructura según el tema y la audiencia, sin rellenar plantillas fijas. Conserva la extensión solicitada. Devuelve solo JSON:
 Para citas en línea utiliza [sourceId] con el ID exacto del documento del dossier; la interfaz lo mostrará como autor o autores y año. No escribas [reference-1], numeraciones ni atribuciones inventadas. Cada cita debe resolver a un artículo, página o libro concreto. Si un documento cita a otro autor que no consultaste directamente, señala la atribución secundaria (como se citó en) y enlaza el documento efectivamente consultado, no inventes una referencia al original.
-{"schemaVersion":"1.0","title":"","subtitle":"","excerpt":"","audience":"${audience}","readingTimeMinutes":6,"tags":[],"blocks":[{"id":"b1","type":"paragraph|heading|quote|bulletList","text":"","level":"h2|h3","items":[],"attribution":"","sourceIds":[]}],"seo":{"title":"","description":"","keywords":[],"slug":""}}
+{"schemaVersion":"1.0","title":"","subtitle":"","excerpt":"","audience":"${audience}","readingTimeMinutes":6,"tags":[],"blocks":[{"id":"b1","type":"paragraph|heading|quote|bulletList","text":"","level":"h2|h3","items":[],"attribution":"","locator":"","sourceIds":[]}],"seo":{"title":"","description":"","keywords":[],"slug":""}}
 Dossier completo de contexto y evidencia (la bibliografía se construye desde estos registros):
 ${dossierText}
 `.trim();
@@ -839,17 +847,17 @@ ${dossierText}
     parsed.title = sanitizeTopicTitle(parsed.title);
   }
   parsed = applyVerifiedAttributions(parsed, dossier);
-  parsed.sources = sanitizeTrustedSources(dossier.sources || []).filter((source) => source.verificationStatus === "verified");
+  parsed.sources = sanitizeTrustedSources(dossier.sources || []).filter((source) => source.verificationStatus === "verified" || (source.sourceType === "youtube_video" && source.verificationStatus === "attributed_only"));
   parsed.researchSources = parsed.sources;
   parsed.searchPlatforms = dossier.searchPlatforms;
   parsed.researchRegion = dossier.researchRegion;
   parsed.usedSources = [...parsed.sources];
   parsed.usedSourceIds = parsed.sources.map(source => source.id);
   parsed.sourceCitationStyle = "apa";
-  parsed.researchDossier = { facts: dossier.facts || [], historicalMilestones: dossier.historicalMilestones || [], attributedReferences: dossier.attributedReferences || [], researchedAt: dossier.researchedAt || new Date().toISOString(), verifiedSourceCount: dossier.verifiedSourceCount || parsed.sources.length, targetSourceCount: dossier.targetSourceCount || 6, verificationStatus: dossier.verificationStatus || "blocked" };
+  parsed.researchDossier = { facts: dossier.facts || [], historicalMilestones: dossier.historicalMilestones || [], attributedReferences: dossier.attributedReferences || [], researchedAt: dossier.researchedAt || new Date().toISOString(), verifiedSourceCount: dossier.verifiedSourceCount ?? parsed.sources.filter((source) => source.verificationStatus === "verified" && source.sourceType !== "youtube_video").length, totalSourceCount: dossier.totalSourceCount ?? parsed.sources.length, targetSourceCount: dossier.targetSourceCount || 6, verificationStatus: dossier.verificationStatus || "blocked" };
   parsed.editorialMode = editorialMode;
   Object.assign(parsed.researchDossier, { analysisStatus: dossier.analysisStatus, analysis: dossier.analysis, platformResults: dossier.platformResults, researchInstructions: dossier.researchInstructions, researchRegion: dossier.researchRegion, searchPlatforms: dossier.searchPlatforms, researchPolicyVersion: dossier.researchPolicyVersion });
-  parsed.generationTelemetry = { model, durationMs: Math.round(performance.now() - startedAt), retrievedUrls: parsed.sources.map((source) => source.url), searches: dossier.telemetry?.searches || 0 };
+  parsed.generationTelemetry = { model, durationMs: Math.round(performance.now() - startedAt), retrievedUrls: parsed.sources.filter((source) => source.sourceType !== "youtube_video").map((source) => source.url), videoCount: parsed.sources.filter((source) => source.sourceType === "youtube_video").length, searches: dossier.telemetry?.searches || 0 };
   return verifyEvidence ? verifyArticleEvidence({ article: parsed, topic: cleanTopic }) : parsed;
 }
 

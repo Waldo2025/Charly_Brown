@@ -202,6 +202,22 @@ test("high-risk article claims remain blocked without two sources and one tier-1
   assert.equal(article.verification.status, "blocked");
 });
 
+test("video attribution is preserved but does not replace documentary corroboration", async () => {
+  const client = { models: { generateContent: async () => modelJson({ claims: [{ id: "c-video", text: "La autora explica una estrategia.", evidenceKind: "video_attribution", risk: "low", status: "supported", sourceIds: ["youtube-dQw4w9WgXcQ"], supportSummary: "Atribución localizada", locator: "02:14" }], contradictions: [] }) } };
+  const video = { id: "youtube-dQw4w9WgXcQ", sourceType: "youtube_video", title: "Estrategias", authors: ["Canal educativo"], url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", supportSummary: "La autora explica una estrategia.", locator: "02:14" };
+  const article = await verifyArticleEvidenceServer({
+    article: { title: "Estrategias", blocks: [{ id: "b1", text: "La autora explica una estrategia.", sourceIds: [video.id] }], sources: [video], researchSources: [video] },
+    topic: "Estrategias",
+    dependencies: { client }
+  });
+  assert.equal(article.sources[0].sourceType, "youtube_video");
+  assert.equal(article.articleClaims[0].evidenceKind, "video_attribution");
+  assert.equal(article.articleClaims[0].status, "supported");
+  assert.equal(article.verification.status, "blocked");
+  assert.match(article.verification.blockers.join(" "), /ninguna fuente verificable/i);
+  assert.equal(article.verification.videoSources[0].verificationStatus, "attributed_only");
+});
+
 test("legacy trend snapshots are replaced by signal-based topics without source verification", async () => {
   const store = trendDb({ schemaVersion: 1, verificationStatus: "verified", opportunities: [{ topic: "Vieja" }] });
   let calls = 0;

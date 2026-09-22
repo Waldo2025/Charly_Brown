@@ -4,7 +4,7 @@ import {
   readEditorialSettings, saveCalendarItem,
   seedAidaEditorialCalendar, subscribeEditorialCalendar, subscribeEditorialNotifications, subscribeTrendSnapshots
 } from "../services/marcie-editorial-store.js";
-import { refreshEditorialTrends } from "../services/marcie-gemini-service.js?v=20260908r9";
+import { refreshEditorialTrends } from "../services/marcie-gemini-service.js?v=20260922r1";
 import { cancelScheduledPublication, createWordPressDraft, reconcilePublicationStatus, schedulePublication, reschedulePublication } from "../services/marcie-wordpress-service.js";
 import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 import { isEditorialEditor } from "../services/marcie-auth-guard.js";

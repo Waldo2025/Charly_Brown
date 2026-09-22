@@ -1,4 +1,4 @@
-import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260921r3";
+import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r1";
 import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260921r3";
 
 function escapeHtml(value = "") {
@@ -10,6 +10,7 @@ function configurationHtml(configuration = {}) {
     .map(([audience, resources]) => `${audience}: ${(resources || []).join(", ")}`)
     .join(" · ");
   const rows = [
+    ["Videos", configuration.sourceInputs?.youtube?.map((item) => item.videoId).join(", ")],
     ["Tema", configuration.topic],
     ["Públicos", configuration.selectedAudiences?.join(", ")],
     ["Tono", configuration.tone],
@@ -18,7 +19,13 @@ function configurationHtml(configuration = {}) {
     ["Recursos", audienceResources || configuration.resources?.join(", ")],
     ["Vocabulario", configuration.preferredVocabulary?.join(", ") || "Sin términos nuevos"]
   ];
-  return `<dl class="marcie-agent-summary">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Pendiente")}</dd></div>`).join("")}</dl>`;
+  return `<dl class="marcie-agent-summary">${rows.filter(([label, value]) => label !== "Videos" || value).map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "Pendiente")}</dd></div>`).join("")}</dl>`;
+}
+
+function videoResearchHtml(videoResearch = {}) {
+  const videos = Array.isArray(videoResearch.videos) ? videoResearch.videos : [];
+  if (!videos.length) return "";
+  return `<section class="marcie-agent-video-result"><div class="marcie-agent-video-result__heading"><i data-lucide="youtube"></i><strong>${videos.length} ${videos.length === 1 ? "video analizado" : "videos analizados"}</strong></div>${videos.map((video) => `<article><strong>${escapeHtml(video.title)}</strong><span>${escapeHtml(video.channel || "Canal no identificado")}</span><p>${escapeHtml(video.summary || "")}</p></article>`).join("")}${videoResearch.warnings?.length ? `<p class="marcie-agent-video-result__warning">${escapeHtml(videoResearch.warnings.join(" "))}</p>` : ""}</section>`;
 }
 
 function optionButton(option) {
@@ -142,13 +149,45 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
     const surface = activeSurface();
     const prompt = response.uiPrompt || {};
     const options = Array.isArray(prompt.options) ? prompt.options : [];
-    surface.optionsHost.innerHTML = response.phase === "summary" ? configurationHtml(response.configuration) : "";
+    surface.optionsHost.innerHTML = `${response.phase === "summary" ? configurationHtml(response.configuration) : ""}${response.phase === "video_topic" ? videoResearchHtml(response.videoResearch || response.configuration?.videoResearch) : ""}`;
+    if (prompt.type === "url_list") {
+      renderYoutubeUrlList(surface, response.configuration?.sourceInputs?.youtube || []);
+      window.lucide?.createIcons?.();
+      return;
+    }
     if (!options.length) return;
     const wrapper = document.createElement("div");
     wrapper.className = `marcie-agent-option-list${guide ? " marcie-voice-guide__option-list" : ""}`;
     wrapper.innerHTML = options.map(optionButton).join("");
     surface.optionsHost.appendChild(wrapper);
     bindOptionEvents(surface, prompt, wrapper);
+  }
+
+  function renderYoutubeUrlList(surface, existing = []) {
+    const editor = document.createElement("div");
+    editor.className = "marcie-agent-youtube";
+    editor.innerHTML = `<div class="marcie-agent-youtube__rows"></div><div class="marcie-agent-youtube__actions"><button type="button" data-add-youtube><i data-lucide="plus"></i><span>Agregar video</span></button><button type="button" class="marcie-agent-youtube__analyze" data-analyze-youtube><i data-lucide="scan-search"></i><span>Analizar videos</span></button></div><p>Solo videos públicos. Marcie no guarda el audio ni una transcripción completa.</p>`;
+    const rows = editor.querySelector(".marcie-agent-youtube__rows");
+    const addRow = (value = "") => {
+      if (rows.children.length >= 5) return;
+      const row = document.createElement("label");
+      row.innerHTML = `<span data-video-progress>URL ${rows.children.length + 1}</span><input type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=..." value="${escapeHtml(value)}"><button type="button" title="Quitar video" aria-label="Quitar video"><i data-lucide="trash-2"></i></button>`;
+      row.querySelector("button").addEventListener("click", () => { row.remove(); if (!rows.children.length) addRow(); });
+      rows.appendChild(row);
+    };
+    (existing.length ? existing : [{ url: "" }]).slice(0, 5).forEach((item) => addRow(item.url || item));
+    editor.querySelector("[data-add-youtube]").addEventListener("click", () => { addRow(); window.lucide?.createIcons?.(); });
+    editor.querySelector("[data-analyze-youtube]").addEventListener("click", () => {
+      const urls = [...rows.querySelectorAll("input")].map((input) => input.value.trim()).filter(Boolean);
+      if (!urls.length) return onNotify?.("Agrega al menos una URL de YouTube.", "warning");
+      rows.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Analizando"; });
+      if (guide) {
+        guide.phase.textContent = "Analizando videos";
+        guide.question.textContent = `Gemini está revisando ${urls.length} ${urls.length === 1 ? "video" : "videos"}. Esto puede tardar un momento.`;
+      }
+      submit({ urls });
+    });
+    surface.optionsHost.appendChild(editor);
   }
 
   function setSurfaceBusy(surface, value) {

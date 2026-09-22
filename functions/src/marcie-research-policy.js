@@ -19,7 +19,9 @@
   function target(session = {}) { return Math.max(1, Math.min(30, Number(session.editorialProfileSnapshot?.minimumSources) || (session.editorialMode === "aida" ? 8 : 6))); }
   function fingerprint(session = {}, audience = "", context = {}) {
     session = { ...session, specifications: [...(session.specifications || []), { searchPlatforms: selection(session) }] };
-    return JSON.stringify({ researchPolicyVersion:version, topic:session.topic || session.title, context, audience, region:session.researchRegion || "MX", period:session.researchPeriod || "6m", mode:session.editorialMode || "marcie", profile:session.editorialProfileSnapshot || {}, specifications:session.specifications || [], revision:session.configurationRevision || 0 });
+    const youtube = (session.sourceInputs?.youtube || session.sessionConfiguration?.sourceInputs?.youtube || []).map(item => item?.videoId || item?.url).filter(Boolean);
+    const videoAnalysisVersion = Number(session.videoResearch?.analysisVersion || session.sessionConfiguration?.videoResearch?.analysisVersion || 0);
+    return JSON.stringify({ researchPolicyVersion:version, topic:session.topic || session.title, context, audience, region:session.researchRegion || "MX", period:session.researchPeriod || "6m", mode:session.editorialMode || "marcie", profile:session.editorialProfileSnapshot || {}, specifications:session.specifications || [], youtube, videoAnalysisVersion, revision:session.configurationRevision || 0 });
   }
   function selection(session = {}) {
     const ids = platforms.map(platform => platform.id).concat("supplemental");

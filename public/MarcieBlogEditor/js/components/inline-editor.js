@@ -1,4 +1,4 @@
-import { saveMarcieSession, markMarcieSessionDirty } from "../services/marcie-session-store.js?v=20260908r9";
+import { saveMarcieSession, markMarcieSessionDirty } from "../services/marcie-session-store.js?v=20260922r1";
 const pending = new Map();
 
 function inlineText(node) {
