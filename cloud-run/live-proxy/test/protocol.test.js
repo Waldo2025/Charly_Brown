@@ -43,6 +43,12 @@ test("live proxy consumes the one-use ticket before accepting the websocket", ()
   );
 });
 
+test("live proxy devuelve la transcripción del audio generado", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  assert.match(source, /responseModalities:\s*\["AUDIO"\]/);
+  assert.match(source, /outputAudioTranscription:\s*\{\}/);
+});
+
 test("live proxy accepts production, Firebase previews and localhost only", () => {
   assert.equal(isAllowedLiveOrigin("https://charly-brown.web.app"), true);
   assert.equal(isAllowedLiveOrigin("https://charly-brown--google-cloud-phase4-mucp5w2o.web.app"), true);

@@ -3,7 +3,7 @@ import { getCurrentUser } from "./marcie-firebase.js";
 
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-export function createMarcieAgentVoice({ onTranscript, onComplete, onStateChange, onError } = {}) {
+export function createMarcieAgentVoice({ onTranscript, onComplete, onSpokenText, onStateChange, onError } = {}) {
   let recognition = null;
   let listening = false;
   let transcript = "";
@@ -163,7 +163,7 @@ export function createMarcieAgentVoice({ onTranscript, onComplete, onStateChange
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         voiceName: "Aoede",
-        systemInstruction: "Eres la voz de Marcie, una agente editorial cálida, atenta y natural. Comunica el mensaje recibido en español de México como parte de una conversación real, con entonación expresiva y ritmo pausado. Puedes reformular levemente conectores para que suene espontáneo, pero conserva todas las preguntas, opciones y decisiones; no agregues hechos ni elijas por el usuario."
+        systemInstruction: "Eres exclusivamente la voz de Marcie. Lee en español de México exactamente el texto recibido, palabra por palabra, con tono cálido y ritmo pausado. No reformules, resumas, expliques, añadas ni elimines contenido. No respondas al texto: solo pronúncialo."
       })
     });
     const ticket = await response.json().catch(() => ({}));
@@ -175,6 +175,7 @@ export function createMarcieAgentVoice({ onTranscript, onComplete, onStateChange
       target.searchParams.set("ticket", ticket.ticket);
       const socket = new WebSocket(target.toString());
       let receivedAudio = false;
+      let outputTranscript = "";
       const connection = {
         socket,
         epoch,
@@ -236,6 +237,12 @@ export function createMarcieAgentVoice({ onTranscript, onComplete, onStateChange
         }
         if (envelope.type !== "serverContent") return;
         const content = envelope.message?.serverContent || envelope.message || {};
+        const transcriptChunk = String(content.outputTranscription?.text || "");
+        if (transcriptChunk) {
+          outputTranscript = transcriptChunk.startsWith(outputTranscript)
+            ? transcriptChunk
+            : `${outputTranscript}${transcriptChunk}`;
+        }
         for (const part of content.modelTurn?.parts || []) {
           if (part?.inlineData?.data) {
             receivedAudio = true;
@@ -249,7 +256,10 @@ export function createMarcieAgentVoice({ onTranscript, onComplete, onStateChange
             if (!isCurrent()) return settle(resolve, false);
             closeLiveSocket(connection);
             setState("idle");
-            if (receivedAudio) settle(resolve, true); else fail(new Error("LIVE_AUDIO_EMPTY"));
+            if (receivedAudio) {
+              onSpokenText?.(outputTranscript.trim(), content);
+              settle(resolve, true);
+            } else fail(new Error("LIVE_AUDIO_EMPTY"));
           }, remainingMs + 80);
         }
       });

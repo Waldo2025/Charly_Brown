@@ -287,12 +287,13 @@ function compactVideoContext(videoResearch = null) {
   };
 }
 
-async function generateProposalOptions({ topic, audiences, generateText, videoResearch = null }) {
+async function generateProposalOptions({ topic, audiences, generateText, videoResearch = null, editorialInstructions = [] }) {
   const fallback = fallbackProposals(topic, audiences);
   if (typeof generateText !== "function") return fallback;
   const videoContext = compactVideoContext(videoResearch);
   const prompt = `Genera exactamente tres títulos distintos para cada público de un artículo educativo. Tema elegido por el usuario: ${topic}. Públicos: ${audiences.join(", ")}.
 ${videoContext ? `El video es la base conceptual obligatoria. Cada título debe articular con fidelidad dos ejes: la idea central comprobable del video y su relación pertinente con la neuroeducación. No copies el título ni frases del video, no introduzcas un enfoque ajeno y no fuerces afirmaciones neurocientíficas sin respaldo: ${JSON.stringify(videoContext)}` : "No hay expediente de video."}
+INSTRUCCIONES EDITORIALES DEL USUARIO: ${JSON.stringify(editorialInstructions)}. Respétalas como restricciones, pero jamás las copies ni las conviertas literalmente en títulos.
 Adapta el ángulo y el vocabulario a cada público. Evita clickbait, promesas médicas y títulos genéricos. Devuelve SOLO JSON: {"proposals":{"educators":[{"title":""}]}}. Incluye únicamente las claves de públicos solicitadas.`;
   try {
     const raw = await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" });
@@ -318,6 +319,72 @@ function videoObjectiveFromInput(input = {}) {
   return raw.length >= 8 ? clean(raw, 800) : "";
 }
 
+function audiencesFromText(value = "") {
+  const text = normalizeKey(value);
+  const selected = [];
+  if (/\b(?:docente|docentes|maestro|maestros|profesor|profesores)\b/.test(text)) selected.push("educators");
+  if (/\b(?:estudiante|estudiantes|alumno|alumnos)\b/.test(text)) selected.push("students");
+  if (/\b(?:padre|padres|madre|madres|familia|familias)\b/.test(text)) selected.push("parents");
+  if (/\b(?:coordinador|coordinadores|directivo|directivos)\b/.test(text)) selected.push("coordinators");
+  return [...new Set(selected)];
+}
+
+function looksLikeVideoEditorialDirection(value = "") {
+  const text = normalizeKey(value);
+  return text.length > 150 || audiencesFromText(text).length > 0 || /\b(?:necesito|quiero|debe|deben|toma|tomar|usa|usar|utiliza|enfoca|enfocalo|evita|excluye|omite|solo los|sin contenido|como base)\b/.test(text) || /\bno\s+(?:tomar|incluy|usar|mencionar)\b/.test(text);
+}
+
+function bestVideoTopic(configuration = {}, instruction = "") {
+  const proposals = (configuration.videoResearch?.proposedTopics || []).map((item) => clean(item, 300)).filter(Boolean);
+  const normalizedInstruction = normalizeKey(instruction);
+  const avoidsReligiousContent = /\b(?:religio|religioso|religiosa|religion|biblic|propaganda|proselit)\w*/.test(normalizedInstruction);
+  const scientific = /\b(?:neuro|cerebr|plastic|aprendiz|atencion|memoria|emocion|lenguaje|autorregul|cognit|cientific)\w*/g;
+  const religious = /\b(?:religio|biblic|proverb|sapiencial|espiritual|teolog|sagrado|fe)\w*/g;
+  const ranked = proposals.map((topic, index) => {
+    const normalized = normalizeKey(topic);
+    const scienceScore = (normalized.match(scientific) || []).length * 3;
+    const exclusionPenalty = avoidsReligiousContent ? (normalized.match(religious) || []).length * 20 : 0;
+    return { topic, score: scienceScore - exclusionPenalty - index * 0.01 };
+  }).sort((a, b) => b.score - a.score);
+  if (ranked[0]?.topic) return ranked[0].topic;
+  const video = configuration.videoResearch?.videos?.[0] || {};
+  return clean(video.neuroeducationConnection || video.centralIdea || video.summary, 300);
+}
+
+async function interpretVideoTopicTurn(run, input, context) {
+  const text = clean(input.text || input.value, 4000);
+  const configuration = run.configuration || {};
+  const isDirection = looksLikeVideoEditorialDirection(text);
+  const deterministic = {
+    topic: isDirection ? bestVideoTopic(configuration, text) : text,
+    audiences: audiencesFromText(text),
+    editorialInstruction: isDirection ? text : ""
+  };
+  if (!text || typeof context.generateText !== "function") return deterministic;
+  const prompt = `Interpreta un turno del usuario después de analizar un video para crear artículos. Separa el tema editorial, los públicos y las restricciones. No conviertas una orden completa en título. Si el usuario da instrucciones pero no propone un tema breve, elige o redacta un tema de máximo 14 palabras basado estrictamente en la idea central y su relación con la neuroeducación. Devuelve los públicos solo con estos IDs: educators, students, parents, coordinators. Conserva las restricciones del usuario sin inventarlas.
+TURNO: ${text}
+EXPEDIENTE: ${JSON.stringify(compactVideoContext(configuration.videoResearch)).slice(0, 16000)}
+TEMAS PROPUESTOS: ${JSON.stringify(configuration.videoResearch?.proposedTopics || [])}
+Devuelve SOLO JSON: {"topic":"","audiences":[],"editorialInstruction":""}`;
+  try {
+    const parsed = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "LOW" }), {});
+    const topic = clean(parsed.topic, 300);
+    const audiences = (Array.isArray(parsed.audiences) ? parsed.audiences : []).map(String).filter((item) => AUDIENCES.some((audience) => audience.id === item));
+    const editorialInstruction = clean(parsed.editorialInstruction, 1200);
+    const normalizedTopic = normalizeKey(topic);
+    const excludesReligion = /\b(?:religio|religioso|religiosa|religion|biblic|propaganda|proselit)\w*/.test(normalizeKey(text));
+    const reintroducesExcludedContent = excludesReligion && /\b(?:religio|biblic|proverb|sapiencial|espiritual|teolog|sagrado|fe)\w*/.test(normalizedTopic);
+    const leakedInstruction = isDirection && (normalizeKey(topic) === normalizeKey(text) || looksLikeVideoEditorialDirection(topic) || topic.split(/\s+/).length > 18 || reintroducesExcludedContent);
+    return {
+      topic: leakedInstruction ? deterministic.topic : (topic || deterministic.topic),
+      audiences: audiences.length ? [...new Set(audiences)] : deterministic.audiences,
+      editorialInstruction: deterministic.editorialInstruction || editorialInstruction
+    };
+  } catch (_) {
+    return deterministic;
+  }
+}
+
 function initialRun({ uid, displayName = "" } = {}) {
   return {
     id: `marcie-agent-${randomUUID()}`,
@@ -341,6 +408,7 @@ function initialRun({ uid, displayName = "" } = {}) {
       resourceMode: "same",
       resources: [],
       resourcesByAudience: {},
+      editorialInstructions: [],
       preferredVocabulary: [],
       searchPlatforms: ["all"]
     },
@@ -466,6 +534,7 @@ function youtubeUrlsFromInput(input = {}) {
 
 function specificationList(configuration = {}) {
   const specifications = [];
+  for (const instruction of configuration.editorialInstructions || []) specifications.push(`#instruccion[all] ${instruction}`);
   if (configuration.tone) specifications.push(`#tono[all] ${configuration.tone}`);
   for (const audience of configuration.selectedAudiences || []) {
     if (configuration.proposalsByAudience?.[audience]) specifications.push(`#titulo[${audience}] ${configuration.proposalsByAudience[audience]}`);
@@ -524,6 +593,7 @@ function conversationContext(run = {}) {
     extensionsByAudience: configuration.extensionsByAudience,
     sourceMode: configuration.sourceMode,
     resourcesByAudience: configuration.resourcesByAudience,
+    editorialInstructions: configuration.editorialInstructions,
     video: compactVideoContext(configuration.videoResearch)
   };
 }
@@ -553,7 +623,7 @@ Devuelve SOLO JSON: {"answer":"respuesta completa que termina retomando la pregu
 
 async function personalizeAgentResponse(run, input, response, context, previousPhase) {
   if (typeof context.generateText !== "function" || response.conversationalInterruption) return response;
-  const prompt = `Eres Marcie, una agente editorial cálida, inteligente y natural en español de México. Acabas de recibir una respuesta del usuario durante la configuración de artículos. Redacta una transición breve y variada: reconoce específicamente lo que entendiste y formula la siguiente pregunta indicada. No cambies decisiones, opciones, cifras ni el estado; no respondas por el usuario. Si existe un expediente de video, menciona detalles reales solo cuando ayuden a demostrar que lo comprendiste. Evita frases repetitivas como "Perfecto" en todos los turnos.
+  const prompt = `Eres Marcie, una agente editorial cálida, inteligente y natural en español de México. Acabas de recibir una respuesta del usuario durante la configuración de artículos. Redacta una transición breve y variada: resume en no más de 12 palabras lo que entendiste y formula la siguiente pregunta indicada. Nunca repitas literalmente la instrucción completa, una URL ni una lista larga del usuario. No cambies decisiones, opciones, cifras ni el estado; no respondas por el usuario. Si existe un expediente de video, menciona detalles reales solo cuando ayuden a demostrar que lo comprendiste. Evita frases repetitivas como "Perfecto" en todos los turnos.
 FASE ANTERIOR: ${previousPhase}
 RESPUESTA DEL USUARIO: ${clean(input.text || input.value || (input.selectedValues || []).join(", "), 3000)}
 MENSAJE BASE OBLIGATORIO: ${response.message}
@@ -619,6 +689,27 @@ async function advanceRun(run, input, context) {
     run.updatedAt = new Date().toISOString();
     return response;
   }
+  if (run.phase === "proposals" && configuration.videoResearch?.videos?.length && looksLikeVideoEditorialDirection(configuration.topic)) {
+    const staleInstruction = configuration.topic;
+    const interpretation = await interpretVideoTopicTurn(run, { text: staleInstruction }, context);
+    configuration.topic = interpretation.topic || bestVideoTopic(configuration, staleInstruction);
+    configuration.editorialInstructions = uniqueStrings([...(configuration.editorialInstructions || []), staleInstruction], 20);
+    if (!configuration.selectedAudiences?.length && interpretation.audiences?.length) configuration.selectedAudiences = interpretation.audiences;
+    configuration.proposalsByAudience = {};
+    configuration.proposalOptionsByAudience = await generateProposalOptions({
+      topic: configuration.topic,
+      audiences: configuration.selectedAudiences,
+      generateText: context.generateText,
+      videoResearch: configuration.videoResearch,
+      editorialInstructions: configuration.editorialInstructions
+    });
+    Object.assign(patch, {
+      topic: configuration.topic,
+      editorialInstructions: [...configuration.editorialInstructions],
+      proposalOptionsByAudience: configuration.proposalOptionsByAudience
+    });
+    return phasePrompt(run, patch);
+  }
   if (run.phase === "creation_source") {
     const detectedUrls = youtubeUrlsFromInput(input);
     const rawValue = clean(input.text || input.value, 600);
@@ -662,13 +753,33 @@ async function advanceRun(run, input, context) {
     run.phase = "video_topic";
   } else if (run.phase === "video_topic") {
     const options = (configuration.videoResearch?.proposedTopics || []).slice(0, 3).map((value, index) => ({ id: `video-topic-${index + 1}`, label: value, value }));
-    const optionId = selectedValue(input, options);
+    const optionId = selectedValues(input, options)[0] || clean(input.value, 120);
     const option = options.find((item) => item.id === optionId);
-    const topic = clean(option?.value || input.text || input.value, 600);
+    const interpretation = option
+      ? { topic: option.value, audiences: [], editorialInstruction: "" }
+      : await interpretVideoTopicTurn(run, input, context);
+    const topic = clean(interpretation.topic, 600);
     if (!topic) return phasePrompt(run);
     configuration.topic = topic;
     patch.topic = topic;
-    run.phase = "audiences";
+    if (interpretation.editorialInstruction) {
+      configuration.editorialInstructions = uniqueStrings([...(configuration.editorialInstructions || []), interpretation.editorialInstruction], 20);
+      patch.editorialInstructions = [...configuration.editorialInstructions];
+    }
+    if (interpretation.audiences?.length) {
+      configuration.selectedAudiences = interpretation.audiences;
+      patch.selectedAudiences = [...interpretation.audiences];
+      configuration.proposalOptionsByAudience = await generateProposalOptions({
+        topic,
+        audiences: interpretation.audiences,
+        generateText: context.generateText,
+        videoResearch: configuration.videoResearch,
+        editorialInstructions: configuration.editorialInstructions
+      });
+      run.phase = "proposals";
+    } else {
+      run.phase = "audiences";
+    }
   } else if (run.phase === "topic") {
     if (input.action === "recommend_trend" || selectedValues(input, [{ id: "recommend_trend", label: "Recomiéndame una tendencia" }]).length) {
       const trends = await listTrendingTopics(context.db, 3);
@@ -683,7 +794,7 @@ async function advanceRun(run, input, context) {
     const audiences = selectedValues(input, AUDIENCES).filter((value) => AUDIENCES.some((item) => item.id === value));
     if (!audiences.length) return phasePrompt(run);
     configuration.selectedAudiences = audiences; patch.selectedAudiences = audiences;
-    configuration.proposalOptionsByAudience = await generateProposalOptions({ topic: configuration.topic, audiences, generateText: context.generateText, videoResearch: configuration.videoResearch });
+    configuration.proposalOptionsByAudience = await generateProposalOptions({ topic: configuration.topic, audiences, generateText: context.generateText, videoResearch: configuration.videoResearch, editorialInstructions: configuration.editorialInstructions });
     run.phase = "proposals";
   } else if (run.phase === "proposals") {
     const audience = configuration.selectedAudiences.find((item) => !configuration.proposalsByAudience[item]);
@@ -785,7 +896,15 @@ async function saveRun(context, run, userInput, response) {
   if (clean(userInput?.text || userInput?.value) || userInput?.selectedValues?.length || userInput?.action) {
     await messages.add({ role: "user", text: clean(userInput.text || userInput.value || userInput.action, 12000), selectedValues: Array.isArray(userInput.selectedValues) ? userInput.selectedValues.map(String) : [], createdAt: new Date().toISOString() });
   }
-  await messages.add({ role: "assistant", text: response.message, phase: response.phase, uiPrompt: response.uiPrompt, createdAt: new Date().toISOString() });
+  await messages.add({
+    role: "assistant",
+    text: response.speechText || response.message,
+    messageText: response.message,
+    speechText: response.speechText || response.message,
+    phase: response.phase,
+    uiPrompt: response.uiPrompt,
+    createdAt: new Date().toISOString()
+  });
 }
 
 async function readRun(context, runId) {

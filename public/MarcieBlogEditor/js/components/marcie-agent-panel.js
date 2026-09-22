@@ -1,5 +1,5 @@
 import { getAgentHistory, sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r3";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r6";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r7";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
@@ -89,6 +89,8 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let loadedSessionId = "";
   let historyRequestId = 0;
   let voiceSurface = null;
+  let spokenMessage = null;
+  let spokenMessageTarget = "";
   const panelMessages = [];
   const guideMessages = [];
   const queuedTurns = [];
@@ -184,6 +186,17 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       surface.input.value = String(value).trim();
       if (surface.transcript) surface.transcript.textContent = surface.input.value;
       surface.form.requestSubmit();
+    },
+    onSpokenText(value) {
+      const spoken = String(value || "").trim();
+      if (!spoken || !spokenMessage) return;
+      spokenMessage.text = spoken;
+      if (spokenMessageTarget === "guide" && guide) {
+        guide.question.textContent = spoken;
+        renderGuideMessages();
+      } else if (spokenMessageTarget === "panel") {
+        renderPanelMessages();
+      }
     },
     onStateChange: setStatus,
     onError(error) {
@@ -499,15 +512,22 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   function showResponse(response, { speak = true, target = guide ? "guide" : "panel" } = {}) {
     responseState = response;
     runId = response.runId || runId;
-    (target === "guide" ? guideMessages : panelMessages).push({ role: "assistant", text: response.message });
+    const shouldSpeak = speak && ((target === "guide" && guide) || (target === "panel" && panelAudioEnabled));
+    const visibleText = shouldSpeak ? (response.speechText || response.message) : response.message;
+    const message = { role: "assistant", text: visibleText };
+    (target === "guide" ? guideMessages : panelMessages).push(message);
     if (target === "guide") {
-      renderGuideQuestion(response);
+      renderGuideQuestion({ ...response, message: visibleText });
       renderGuideMessages();
     } else {
       renderPanelMessages();
     }
     renderOptions(response, target);
-    if (speak && ((target === "guide" && guide) || (target === "panel" && panelAudioEnabled))) voice.speak(response.speechText || response.message);
+    if (shouldSpeak) {
+      spokenMessage = message;
+      spokenMessageTarget = target;
+      voice.speak(visibleText);
+    }
   }
 
   async function executeRun() {

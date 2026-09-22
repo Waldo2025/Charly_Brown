@@ -82,6 +82,10 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(voiceSource, /scheduleAutoSubmit\(\)/);
   assert.match(voiceSource, /onComplete\?\.\(completedTranscript\)/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
+  assert.match(voiceSource, /outputTranscription/);
+  assert.match(voiceSource, /onSpokenText/);
+  assert.match(panelSource, /const visibleText = shouldSpeak \? \(response\.speechText \|\| response\.message\) : response\.message/);
+  assert.match(panelSource, /guide\.question\.textContent = spoken/);
   assert.doesNotMatch(voiceSource, /speechSynthesis|SpeechSynthesisUtterance|speakWithBrowser/);
   assert.match(voiceSource, /cancelOutput\(\);/);
   assert.match(voiceSource, /socket\.readyState === WebSocket\.CONNECTING/);
@@ -291,6 +295,61 @@ test("analiza YouTube antes de proponer el tema y conserva el expediente", async
   assert.equal(response.phase, "audiences");
   assert.equal(run.configuration.topic, "Cómo aprende el cerebro");
   assert.equal(sessionRequestFromRun(run).videoResearch.analysisVersion, 1);
+});
+
+test("separa instrucciones y públicos del tema después de analizar un video", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "video_topic";
+  run.configuration.creationSource = "youtube";
+  run.configuration.videoResearch = {
+    proposedTopics: [
+      "Bases neurobiológicas del diálogo interno y su correlación con la literatura sapiencial",
+      "El impacto del lenguaje verbal y la rumiación en la plasticidad cerebral",
+      "Convergencias entre terapia cognitivo-conductual y textos de Proverbios"
+    ],
+    videos: [{
+      centralIdea: "El diálogo interno influye en la experiencia.",
+      neuroeducationConnection: "El lenguaje se relaciona con emoción y autorregulación."
+    }]
+  };
+  const instruction = "Necesito un artículo para docentes y padres de familia; toma como base el video, usa solo los datos científicos y no incluyas contenido religioso ni propaganda.";
+  const response = await advanceRun(run, { text: instruction }, {
+    db: {},
+    generateText: async () => { throw new Error("modelo temporalmente no disponible"); }
+  });
+
+  assert.equal(response.phase, "proposals");
+  assert.equal(run.configuration.topic, "El impacto del lenguaje verbal y la rumiación en la plasticidad cerebral");
+  assert.deepEqual(run.configuration.selectedAudiences, ["educators", "parents"]);
+  assert.deepEqual(run.configuration.editorialInstructions, [instruction]);
+  assert.ok(response.uiPrompt.options.every((option) => !/necesito un artículo/i.test(option.label)));
+  assert.ok(sessionRequestFromRun(run).specifications.some((item) => item === `#instruccion[all] ${instruction}`));
+});
+
+test("repara una sesión de video que ya guardó la instrucción completa como tema", async () => {
+  const run = initialRun({ uid: "user-1" });
+  const staleInstruction = "Necesito un artículo para docentes y padres de familia; usa solo datos científicos y evita contenido religioso.";
+  run.phase = "proposals";
+  run.configuration.creationSource = "youtube";
+  run.configuration.topic = staleInstruction;
+  run.configuration.selectedAudiences = ["educators", "parents"];
+  run.configuration.videoResearch = {
+    proposedTopics: [
+      "Neurobiología y literatura sapiencial",
+      "Lenguaje, emoción y plasticidad cerebral"
+    ],
+    videos: [{ centralIdea: "El lenguaje influye en la experiencia.", neuroeducationConnection: "Se relaciona con emoción y aprendizaje." }]
+  };
+
+  const response = await advanceRun(run, { value: "educators-1", text: `${staleInstruction}: guía práctica` }, {
+    db: {},
+    generateText: async () => { throw new Error("modelo temporalmente no disponible"); }
+  });
+
+  assert.equal(response.phase, "proposals");
+  assert.equal(run.configuration.topic, "Lenguaje, emoción y plasticidad cerebral");
+  assert.deepEqual(run.configuration.proposalsByAudience, {});
+  assert.ok(response.uiPrompt.options.every((option) => !option.label.includes(staleInstruction)));
 });
 
 test("permite volver a editar un apartado desde el resumen", async () => {

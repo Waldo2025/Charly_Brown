@@ -87,6 +87,7 @@ wss.on("connection", async (socket, req) => {
       model: claim.model,
       config: {
         responseModalities: ["AUDIO"],
+        outputAudioTranscription: {},
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: claim.voiceName } } },
         ...(claim.systemInstruction ? { systemInstruction: claim.systemInstruction } : {})
       },
