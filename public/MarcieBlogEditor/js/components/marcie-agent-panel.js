@@ -52,7 +52,7 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
         <div class="marcie-agent__messages" data-agent-messages aria-live="polite"></div>
         <div class="marcie-agent__options" data-agent-options></div>
         <form class="marcie-agent__composer" data-agent-form>
-          <textarea rows="2" maxlength="4000" placeholder="Pide una revisión o un cambio" aria-label="Mensaje para el agente" data-agent-input></textarea>
+          <textarea rows="3" maxlength="4000" placeholder="Escribe una instrucción para Marcie" aria-label="Mensaje para el agente" data-agent-input></textarea>
           <div class="marcie-agent__composer-actions">
             <button type="button" class="marcie-agent__mic" data-agent-mic title="Pulsar para hablar" aria-label="Pulsar para hablar"><i data-lucide="mic"></i></button>
             <button type="submit" class="marcie-agent__send" data-agent-send title="Enviar" aria-label="Enviar mensaje"><i data-lucide="send"></i></button>

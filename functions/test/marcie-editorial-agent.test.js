@@ -24,6 +24,7 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.doesNotMatch(panelSource, /host\.hidden = true/);
   assert.match(panelSource, /Marcie te guía por voz/);
   assert.match(panelSource, /Pulsar para hablar/);
+  assert.match(panelSource, /Escribe una instrucción para Marcie/);
   assert.match(panelSource, /Hablando con Marcie/);
   assert.doesNotMatch(panelSource, /Gemini está revisando/);
   assert.doesNotMatch(panelSource, /Conectando con Gemini/);
