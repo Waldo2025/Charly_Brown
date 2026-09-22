@@ -6,10 +6,13 @@ const vm = require("node:vm");
 const {
   ANALYSIS_VERSION,
   ANALYSIS_TIMEOUT_MS,
+  YOUTUBE_ANALYSIS_CACHE_COLLECTION,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
+  compactVideoAnalysisForCache,
   normalizeYoutubeUrl,
-  normalizeYoutubeUrls
+  normalizeYoutubeUrls,
+  youtubeAnalysisCacheKey
 } = require("../src/marcie-youtube-agent.js");
 
 test("el análisis de video usa el presupuesto extendido de la función", () => {
@@ -18,6 +21,7 @@ test("el análisis de video usa el presupuesto extendido de la función", () => 
 
 test("invalida análisis previos que no separan los dos ejes editoriales", () => {
   assert.equal(ANALYSIS_VERSION, 2);
+  assert.equal(YOUTUBE_ANALYSIS_CACHE_COLLECTION, "MarcieYoutubeAnalysisCache");
 });
 
 const IDS = ["dQw4w9WgXcQ", "9bZkp7q19f0", "M7lc1UVf-VE", "aqz-KE-bpKQ", "jNQXAC9IVRw", "kJQP7kiw5Fk"];
@@ -130,6 +134,44 @@ test("continúa con videos válidos cuando existe un fallo parcial", async () =>
   assert.match(result.warnings.join(" "), /private_video/);
 });
 
+test("reutiliza desde Firebase el análisis del mismo video y objetivo", async () => {
+  const cache = new Map();
+  let analysisCalls = 0;
+  const url = `https://youtu.be/${IDS[0]}`;
+  const options = {
+    readCachedAnalysis: async ({ source, objective, language }) => cache.get(youtubeAnalysisCacheKey({ ownerId: "user-1", videoId: source.videoId, objective, language })) || null,
+    writeCachedAnalysis: async ({ source, objective, language, video }) => cache.set(youtubeAnalysisCacheKey({ ownerId: "user-1", videoId: source.videoId, objective, language }), video),
+    analyzeVideo: async (source) => {
+      analysisCalls += 1;
+      return compactVideoAnalysisForCache({
+        ...parsedVideo({ fullTranscript: "no guardar", rawAudio: "no guardar" }),
+        videoId: source.videoId,
+        url: source.url,
+        topics: ["lenguaje"],
+        concepts: ["autorregulación"],
+        warnings: [],
+        bibliographySource: { id: `youtube-${source.videoId}`, title: "Aprender mejor", authors: ["Canal educativo"], url: source.url }
+      });
+    }
+  };
+
+  const first = await analyzeYoutubeVideos({ urls: [url], objective: "Neuroeducación" }, options);
+  const second = await analyzeYoutubeVideos({ urls: [url], objective: "Neuroeducación" }, options);
+  assert.equal(analysisCalls, 1);
+  assert.deepEqual(first.cache, { hitCount: 0, missCount: 1 });
+  assert.deepEqual(second.cache, { hitCount: 1, missCount: 0 });
+  assert.equal(second.videos[0].centralIdea, parsedVideo().centralIdea);
+  assert.doesNotMatch(JSON.stringify([...cache.values()]), /fullTranscript|rawAudio|no guardar/);
+});
+
+test("separa la caché cuando cambia el objetivo editorial", () => {
+  const base = { ownerId: "user-1", videoId: IDS[0], language: "es-MX" };
+  assert.notEqual(
+    youtubeAnalysisCacheKey({ ...base, objective: "Docentes" }),
+    youtubeAnalysisCacheKey({ ...base, objective: "Familias" })
+  );
+});
+
 test("bloquea la confirmación cuando fallan todos los videos", async () => {
   await assert.rejects(
     analyzeYoutubeVideos({ urls: [`https://youtu.be/${IDS[0]}`] }, { analyzeVideo: async () => { throw new Error("inaccesible"); } }),
@@ -161,10 +203,13 @@ test("la sesión persiste el expediente permitido sin audio ni transcripción", 
   const compact = context.compactMarcieSessionForFirestore({
     sourceInputs: { youtube: [{ videoId: IDS[0], url: `https://www.youtube.com/watch?v=${IDS[0]}` }] },
     sessionConfiguration: { videoResearch: { duplicated: true }, sourceInputs: { youtube: [] } },
-    videoResearch: { analysisVersion: 1, fullTranscript: "no guardar", rawAudio: "no guardar", videos: [{ videoId: IDS[0], url: `https://www.youtube.com/watch?v=${IDS[0]}`, title: "Video", fullTranscript: "no guardar" }] }
+    videoResearch: { analysisVersion: 1, cache: { hitCount: 1, missCount: 0 }, fullTranscript: "no guardar", rawAudio: "no guardar", videos: [{ videoId: IDS[0], url: `https://www.youtube.com/watch?v=${IDS[0]}`, title: "Video", centralIdea: "Idea central", neuroeducationConnection: "Relación educativa", fullTranscript: "no guardar" }] }
   });
   const serialized = JSON.stringify(compact);
   assert.equal(compact.videoResearch.videos[0].title, "Video");
+  assert.equal(compact.videoResearch.videos[0].centralIdea, "Idea central");
+  assert.equal(compact.videoResearch.videos[0].neuroeducationConnection, "Relación educativa");
+  assert.deepEqual(JSON.parse(JSON.stringify(compact.videoResearch.cache)), { hitCount: 1, missCount: 0 });
   assert.equal(Object.hasOwn(compact.sessionConfiguration, "videoResearch"), false);
   assert.doesNotMatch(serialized, /fullTranscript|rawAudio|no guardar/);
 });

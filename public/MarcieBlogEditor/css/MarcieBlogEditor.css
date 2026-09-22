@@ -4688,8 +4688,10 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-voice-guide__options .marcie-agent-summary > div { grid-template-columns: 112px minmax(0, 1fr); padding: 0.5rem 0; font-size: 0.75rem; }
 
 .marcie-voice-guide__transcript { margin-top: 0.9rem; padding: 0.7rem 0.8rem; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
+.marcie-voice-guide__transcript[hidden] { display: none; }
 .marcie-voice-guide__transcript > span { color: #64748b; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
 .marcie-voice-guide__transcript p { min-height: 1.2rem; margin: 0.22rem 0 0; color: #334155; font-size: 0.78rem; line-height: 1.45; }
+.marcie-voice-guide__queue-item + .marcie-voice-guide__queue-item { padding-top: 0.45rem; border-top: 1px solid #e2e8f0; }
 
 .marcie-voice-guide__composer { padding: 0.9rem 1rem 1rem; display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 0.75rem; border-top: 1px solid #e2e8f0; background: #f8fafc; }
 .marcie-voice-guide__mic { min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 0.55rem; border-radius: 7px; color: #fff; background: #0f766e; font-size: 0.8rem; font-weight: 700; }

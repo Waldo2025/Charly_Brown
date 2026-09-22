@@ -6,6 +6,7 @@ const MAX_YOUTUBE_VIDEOS = 5;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const ANALYSIS_TIMEOUT_MS = 500_000;
 const INTERACTION_POLL_MS = 2_000;
+const YOUTUBE_ANALYSIS_CACHE_COLLECTION = "MarcieYoutubeAnalysisCache";
 
 function clean(value, max = 1200) {
   return String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, max);
@@ -13,6 +14,66 @@ function clean(value, max = 1200) {
 
 function list(value, max = 20, itemMax = 500) {
   return (Array.isArray(value) ? value : []).map((item) => clean(item, itemMax)).filter(Boolean).slice(0, max);
+}
+
+function youtubeAnalysisCacheKey({ ownerId = "", videoId = "", objective = "", language = "es-MX" } = {}) {
+  const fingerprint = [
+    clean(ownerId, 200),
+    `v${ANALYSIS_VERSION}`,
+    clean(language, 20).toLowerCase(),
+    clean(videoId, 20),
+    clean(objective, 1000).toLowerCase()
+  ].join("|");
+  return crypto.createHash("sha256").update(fingerprint).digest("hex");
+}
+
+function compactVideoAnalysisForCache(video = {}) {
+  const source = normalizeYoutubeUrl(video.url) || (VIDEO_ID_PATTERN.test(clean(video.videoId, 20))
+    ? { videoId: clean(video.videoId, 20), url: `https://www.youtube.com/watch?v=${clean(video.videoId, 20)}` }
+    : null);
+  if (!source) return null;
+  return {
+    videoId: source.videoId,
+    url: source.url,
+    title: clean(video.title, 500),
+    channel: clean(video.channel, 300),
+    publishedAt: clean(video.publishedAt, 40),
+    summary: clean(video.summary, 2400),
+    centralIdea: clean(video.centralIdea, 1800),
+    neuroeducationConnection: clean(video.neuroeducationConnection, 1800),
+    topics: list(video.topics, 12, 240),
+    concepts: list(video.concepts, 20, 300),
+    proposedTopics: list(video.proposedTopics, 3, 300),
+    evidenceItems: (Array.isArray(video.evidenceItems) ? video.evidenceItems : []).slice(0, 30).map((item) => ({
+      id: clean(item?.id, 120),
+      text: clean(item?.text, 1000),
+      sourceIds: list(item?.sourceIds, 5, 120),
+      locator: timestamp(item?.locator || item?.timestamp),
+      evidenceKind: item?.evidenceKind === "external_fact" ? "external_fact" : "video_attribution",
+      needsCorroboration: item?.needsCorroboration === true
+    })).filter((item) => item.text),
+    shortQuotes: (Array.isArray(video.shortQuotes) ? video.shortQuotes : []).slice(0, 8).map((item) => ({
+      text: clean(item?.text, 220).split(/\s+/).slice(0, 25).join(" "),
+      locator: timestamp(item?.locator || item?.timestamp)
+    })).filter((item) => item.text && item.locator),
+    warnings: list(video.warnings, 12, 500),
+    bibliographySource: video.bibliographySource && typeof video.bibliographySource === "object"
+      ? {
+          id: clean(video.bibliographySource.id, 120),
+          sourceType: "youtube_video",
+          title: clean(video.bibliographySource.title, 500),
+          authors: list(video.bibliographySource.authors, 10, 300),
+          publisher: "YouTube",
+          publishedAt: clean(video.bibliographySource.publishedAt, 40),
+          url: source.url,
+          videoId: source.videoId,
+          verificationStatus: "attributed_only",
+          evidenceRole: "video",
+          supportSummary: clean(video.bibliographySource.supportSummary, 1800),
+          locator: timestamp(video.bibliographySource.locator)
+        }
+      : null
+  };
 }
 
 function normalizeYoutubeUrl(value = "") {
@@ -225,12 +286,32 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
   if (!normalized.valid.length) throw Object.assign(new Error("Agrega al menos una URL pública válida de YouTube."), { status: 400, code: "youtube_urls_required" });
   const videos = [];
   const rejectedVideos = [...normalized.invalid];
+  let cacheHitCount = 0;
+  let cacheMissCount = 0;
   let cursor = 0;
   const workers = Array.from({ length: Math.min(2, normalized.valid.length) }, async () => {
     while (cursor < normalized.valid.length) {
       const source = normalized.valid[cursor++];
       try {
-        videos.push(await (options.analyzeVideo || analyzeSingleYoutubeVideo)(source, { ...options, objective, language }));
+        let video = null;
+        if (typeof options.readCachedAnalysis === "function") {
+          try {
+            const cached = await options.readCachedAnalysis({ source, objective, language, analysisVersion: ANALYSIS_VERSION });
+            video = compactVideoAnalysisForCache(cached);
+          } catch (_) {}
+        }
+        if (video?.videoId === source.videoId) {
+          cacheHitCount += 1;
+        } else {
+          cacheMissCount += 1;
+          video = await (options.analyzeVideo || analyzeSingleYoutubeVideo)(source, { ...options, objective, language });
+          if (typeof options.writeCachedAnalysis === "function") {
+            try {
+              await options.writeCachedAnalysis({ source, objective, language, analysisVersion: ANALYSIS_VERSION, video: compactVideoAnalysisForCache(video) });
+            } catch (_) {}
+          }
+        }
+        videos.push(video);
       } catch (error) {
         rejectedVideos.push({ videoId: source.videoId, url: source.url, reason: clean(error?.code || error?.message || "youtube_analysis_failed", 160) });
       }
@@ -264,6 +345,7 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
     bibliographySources: videos.map((video) => video.bibliographySource),
     warnings,
     rejectedVideos,
+    cache: { hitCount: cacheHitCount, missCount: cacheMissCount },
     analyzedAt: new Date().toISOString()
   };
 }
@@ -273,11 +355,14 @@ module.exports = {
   ANALYSIS_TIMEOUT_MS,
   INTERACTION_POLL_MS,
   MAX_YOUTUBE_VIDEOS,
+  YOUTUBE_ANALYSIS_CACHE_COLLECTION,
   analyzeWithAgenticInteraction,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
   normalizeYoutubeUrl,
   normalizeYoutubeUrls,
   normalizeVideoAnalysis,
+  compactVideoAnalysisForCache,
+  youtubeAnalysisCacheKey,
   videoPrompt
 };

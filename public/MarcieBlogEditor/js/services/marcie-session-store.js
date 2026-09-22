@@ -500,6 +500,7 @@ export function compactMarcieSessionForFirestore(session = {}) {
       videos: (Array.isArray(research.videos) ? research.videos : []).slice(0, 5).map((video) => ({
         videoId: String(video?.videoId || ""), url: String(video?.url || ""), title: String(video?.title || ""),
         channel: String(video?.channel || ""), publishedAt: String(video?.publishedAt || ""), summary: String(video?.summary || ""),
+        centralIdea: String(video?.centralIdea || ""), neuroeducationConnection: String(video?.neuroeducationConnection || ""),
         topics: Array.isArray(video?.topics) ? video.topics : [], concepts: Array.isArray(video?.concepts) ? video.concepts : [],
         proposedTopics: Array.isArray(video?.proposedTopics) ? video.proposedTopics : [],
         evidenceItems: Array.isArray(video?.evidenceItems) ? video.evidenceItems : [], shortQuotes: Array.isArray(video?.shortQuotes) ? video.shortQuotes : [],
@@ -511,6 +512,7 @@ export function compactMarcieSessionForFirestore(session = {}) {
       bibliographySources: Array.isArray(research.bibliographySources) ? research.bibliographySources : [],
       warnings: Array.isArray(research.warnings) ? research.warnings : [],
       rejectedVideos: Array.isArray(research.rejectedVideos) ? research.rejectedVideos : [],
+      cache: research.cache && typeof research.cache === "object" ? research.cache : { hitCount: 0, missCount: 0 },
       analyzedAt: String(research.analyzedAt || "")
     };
   } else {

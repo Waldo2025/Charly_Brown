@@ -62,6 +62,12 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /const queuedTurns = \[\]/);
   assert.match(panelSource, /function drainQueue\(\)/);
   assert.match(panelSource, /message\.queued = true/);
+  assert.match(panelSource, /historyMessages = guideMessages\.filter\(\(message\) => !message\.queued\)/);
+  assert.match(panelSource, /class="marcie-voice-guide__transcript" aria-live="polite" hidden/);
+  assert.match(panelSource, />Mensajes en cola</);
+  assert.match(panelSource, /pending = queuedTurns\.filter/);
+  assert.match(panelSource, /guide\.transcriptContainer\.hidden = pending\.length === 0/);
+  assert.doesNotMatch(panelSource, /Lo que entendí|data-guide-transcript/);
   assert.match(panelSource, /target === "guide" \? "configuration" : "assistant"/);
   assert.match(panelSource, /Marcie está analizando/);
   assert.match(panelSource, /tus mensajes quedarán en cola/);
@@ -82,6 +88,8 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(voiceSource, /scheduleAutoSubmit\(\)/);
   assert.match(voiceSource, /onComplete\?\.\(completedTranscript\)/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
+  assert.match(voiceSource, /tono profesional, sereno y cordial/);
+  assert.match(voiceSource, /Evita una entonación excesivamente informal/);
   assert.match(voiceSource, /outputTranscription/);
   assert.match(voiceSource, /onSpokenText/);
   assert.match(panelSource, /const visibleText = shouldSpeak \? \(response\.speechText \|\| response\.message\) : response\.message/);
@@ -208,6 +216,16 @@ test("publica las herramientas MCP editoriales de Marcie", async () => {
   ].forEach((name) => assert.ok(names.includes(name), `falta ${name}`));
   await client.close();
   await server.close();
+});
+
+test("persiste en Firebase los análisis reutilizables de YouTube", () => {
+  const agentSource = fs.readFileSync(path.join(__dirname, "../src/marcie-editorial-agent.js"), "utf8");
+  assert.match(agentSource, /MarcieYoutubeAnalysisCache|YOUTUBE_ANALYSIS_CACHE_COLLECTION/);
+  assert.match(agentSource, /readCachedAnalysis/);
+  assert.match(agentSource, /writeCachedAnalysis/);
+  assert.match(agentSource, /ownerId: auth\.uid/);
+  assert.match(agentSource, /analysisVersion: ANALYSIS_VERSION/);
+  assert.doesNotMatch(agentSource, /expiresAt:/);
 });
 
 test("inicia con una pregunta abierta y permite indicar una URL sin opción dedicada", () => {

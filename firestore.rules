@@ -621,6 +621,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Expedientes de video administrados exclusivamente por el backend de Marcie.
+    match /MarcieYoutubeAnalysisCache/{cacheId} {
+      allow read, write: if false;
+    }
+
     match /MarcieEditorialCalendar/{itemId} {
       allow read: if isApprovedUser();
       allow create, update, delete: if isEditor();

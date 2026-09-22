@@ -1,5 +1,5 @@
 import { getAgentHistory, sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r3";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r7";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r8";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
@@ -177,14 +177,12 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     onTranscript(value) {
       const surface = voiceSurface || activeSurface();
       surface.input.value = value;
-      if (guide) guide.transcript.textContent = value || "Tu respuesta aparecerá aquí antes de enviarse.";
     },
     onComplete(value) {
       const surface = voiceSurface;
       voiceSurface = null;
       if (!surface?.root?.isConnected || !String(value || "").trim()) return;
       surface.input.value = String(value).trim();
-      if (surface.transcript) surface.transcript.textContent = surface.input.value;
       surface.form.requestSubmit();
     },
     onSpokenText(value) {
@@ -224,13 +222,22 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
 
   function renderGuideMessages() {
     if (!guide?.messageList) return;
-    const visibleMessages = guideMessages.at(-1)?.role === "assistant" ? guideMessages.slice(0, -1) : guideMessages;
+    const historyMessages = guideMessages.filter((message) => !message.queued);
+    const visibleMessages = historyMessages.at(-1)?.role === "assistant" ? historyMessages.slice(0, -1) : historyMessages;
     const activity = guideActivity
       ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(guideActivity)}</span></div>`
       : "";
     guide.messageList.innerHTML = visibleMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}${message.queued ? " is-queued" : ""}">${escapeHtml(message.text)}${message.queued ? '<small>En cola</small>' : ""}</div>`).join("") + activity;
     guide.messageList.hidden = visibleMessages.length === 0 && !activity;
     guide.messageList.scrollTop = guide.messageList.scrollHeight;
+    renderGuideQueue();
+  }
+
+  function renderGuideQueue() {
+    if (!guide?.transcriptContainer || !guide?.queueList) return;
+    const pending = queuedTurns.filter((turn) => turn.target === "guide" && turn.message?.queued);
+    guide.transcriptContainer.hidden = pending.length === 0;
+    guide.queueList.innerHTML = pending.map((turn) => `<p class="marcie-voice-guide__queue-item">${escapeHtml(turn.message.text)}</p>`).join("");
   }
 
   function renderActiveMessages() {
@@ -334,7 +341,6 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       if (!text) return;
       if (allowNewSession && /nueva sesi[oó]n/i.test(text)) return onNewSessionRequest?.();
       surface.input.value = "";
-      if (surface.transcript) surface.transcript.textContent = "Tu respuesta aparecerá aquí antes de enviarse.";
       submit({ text });
     });
     if (surface.mic) {
@@ -412,7 +418,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
           <div class="marcie-voice-guide__status"><span class="marcie-voice-guide__status-dot"></span><span data-agent-status>Procesando</span></div>
           <div class="marcie-voice-guide__messages" data-guide-messages aria-label="Conversación de configuración" aria-live="polite" hidden></div>
           <div class="marcie-voice-guide__options" data-agent-options></div>
-          <div class="marcie-voice-guide__transcript" aria-live="polite"><span>Lo que entendí</span><p data-guide-transcript>Tu respuesta aparecerá aquí antes de enviarse.</p></div>
+          <div class="marcie-voice-guide__transcript" aria-live="polite" hidden><span>Mensajes en cola</span><div data-guide-queue></div></div>
         </div>
         <form class="marcie-voice-guide__composer" data-agent-form>
           <button type="button" class="marcie-voice-guide__mic" data-agent-mic><i data-lucide="mic"></i><span>Pulsar para hablar</span></button>
@@ -428,7 +434,8 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       question: root.querySelector("[data-guide-question]"),
       phase: root.querySelector("[data-guide-phase]"),
       messageList: root.querySelector("[data-guide-messages]"),
-      transcript: root.querySelector("[data-guide-transcript]"),
+      transcriptContainer: root.querySelector(".marcie-voice-guide__transcript"),
+      queueList: root.querySelector("[data-guide-queue]"),
       optionsHost: root.querySelector("[data-agent-options]"),
       form: root.querySelector("[data-agent-form]"),
       input: root.querySelector("[data-agent-input]"),

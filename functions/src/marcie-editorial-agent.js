@@ -9,7 +9,14 @@ const {
   verifyArticleEvidenceServer
 } = require("./marcie-editorial-research.js");
 const { DEFAULT_TEXT_MODEL } = require("./vertex.js");
-const { analyzeYoutubeVideos, normalizeYoutubeUrls } = require("./marcie-youtube-agent.js");
+const {
+  ANALYSIS_VERSION,
+  YOUTUBE_ANALYSIS_CACHE_COLLECTION,
+  analyzeYoutubeVideos,
+  compactVideoAnalysisForCache,
+  normalizeYoutubeUrls,
+  youtubeAnalysisCacheKey
+} = require("./marcie-youtube-agent.js");
 
 const RUNS_COLLECTION = "MarcieEditorialAgentRuns";
 const SESSIONS_COLLECTION = "MarcieBlogEditor";
@@ -602,7 +609,7 @@ async function answerConfigurationQuestion(run, input, context) {
   const currentPrompt = phasePrompt(run);
   let answer = "Claro. Puedo explicártelo sin cambiar ninguna opción de la configuración.";
   if (typeof context.generateText === "function") {
-    const prompt = `Eres Marcie, una agente editorial conversacional en español de México. El usuario interrumpió la configuración para hacer una pregunta. Respóndela de forma clara, cálida y concreta en 2 a 4 oraciones. Puedes explicar para qué sirve una opción, comparar alternativas o responder conocimiento general. No selecciones nada por el usuario, no avances el formulario y no inventes datos. Después de responder, retoma con naturalidad la pregunta pendiente.
+    const prompt = `Eres Marcie, una agente editorial conversacional en español de México. El usuario interrumpió la configuración para hacer una pregunta. Respóndela con un registro profesional, sereno, cordial y concreto en 2 a 4 oraciones. Usa español estándar; evita coloquialismos, muletillas, diminutivos, entusiasmo exagerado y expresiones como "súper", "genial", "va" o "claro que sí". Puedes explicar para qué sirve una opción, comparar alternativas o responder conocimiento general. No selecciones nada por el usuario, no avances el formulario y no inventes datos. Después de responder, retoma con naturalidad la pregunta pendiente.
 PREGUNTA DEL USUARIO: ${clean(input.text || input.value, 4000)}
 PREGUNTA PENDIENTE: ${currentPrompt.message}
 OPCIONES VISIBLES: ${JSON.stringify(currentPrompt.uiPrompt?.options || [])}
@@ -623,7 +630,7 @@ Devuelve SOLO JSON: {"answer":"respuesta completa que termina retomando la pregu
 
 async function personalizeAgentResponse(run, input, response, context, previousPhase) {
   if (typeof context.generateText !== "function" || response.conversationalInterruption) return response;
-  const prompt = `Eres Marcie, una agente editorial cálida, inteligente y natural en español de México. Acabas de recibir una respuesta del usuario durante la configuración de artículos. Redacta una transición breve y variada: resume en no más de 12 palabras lo que entendiste y formula la siguiente pregunta indicada. Nunca repitas literalmente la instrucción completa, una URL ni una lista larga del usuario. No cambies decisiones, opciones, cifras ni el estado; no respondas por el usuario. Si existe un expediente de video, menciona detalles reales solo cuando ayuden a demostrar que lo comprendiste. Evita frases repetitivas como "Perfecto" en todos los turnos.
+  const prompt = `Eres Marcie, una agente editorial profesional, serena y cordial en español de México. Acabas de recibir una respuesta del usuario durante la configuración de artículos. Redacta una transición breve y variada con español estándar: resume en no más de 12 palabras lo que entendiste y formula la siguiente pregunta indicada. Evita coloquialismos, muletillas, diminutivos, entusiasmo exagerado y expresiones como "súper", "genial", "va", "listo" o "perfecto". Nunca repitas literalmente la instrucción completa, una URL ni una lista larga del usuario. No cambies decisiones, opciones, cifras ni el estado; no respondas por el usuario. Si existe un expediente de video, menciona detalles reales solo cuando ayuden a demostrar que lo comprendiste.
 FASE ANTERIOR: ${previousPhase}
 RESPUESTA DEL USUARIO: ${clean(input.text || input.value || (input.selectedValues || []).join(", "), 3000)}
 MENSAJE BASE OBLIGATORIO: ${response.message}
@@ -1263,9 +1270,35 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
       analyzeYoutubeVideos: async (args) => {
         const startedAt = Date.now();
         const requestedVideoCount = Math.min(5, Array.isArray(args?.urls) ? args.urls.length : 0);
+        const cacheAccess = {
+          async readCachedAnalysis({ source, objective, language }) {
+            const key = youtubeAnalysisCacheKey({ ownerId: auth.uid, videoId: source.videoId, objective, language });
+            const ref = db.collection(YOUTUBE_ANALYSIS_CACHE_COLLECTION).doc(key);
+            const snapshot = await ref.get();
+            if (!snapshot.exists) return null;
+            const cached = snapshot.data() || {};
+            if (cached.ownerId !== auth.uid || Number(cached.analysisVersion) !== ANALYSIS_VERSION) return null;
+            await ref.set({ lastUsedAt: new Date() }, { merge: true }).catch(() => {});
+            return compactVideoAnalysisForCache(cached.video);
+          },
+          async writeCachedAnalysis({ source, objective, language, video }) {
+            const compact = compactVideoAnalysisForCache(video);
+            if (!compact) return;
+            const key = youtubeAnalysisCacheKey({ ownerId: auth.uid, videoId: source.videoId, objective, language });
+            await db.collection(YOUTUBE_ANALYSIS_CACHE_COLLECTION).doc(key).set({
+              ownerId: auth.uid,
+              videoId: source.videoId,
+              analysisVersion: ANALYSIS_VERSION,
+              language: clean(language, 20),
+              video: compact,
+              createdAt: new Date(),
+              lastUsedAt: new Date()
+            });
+          }
+        };
         try {
-          const result = await (dependencies.analyzeYoutubeVideos || analyzeYoutubeVideos)(args, { client: dependencies.client });
-          console.info(JSON.stringify({ severity: "INFO", event: "marcie_youtube_analysis", requestedVideoCount, analyzedVideoCount: result.videos.length, rejectedVideoCount: result.rejectedVideos.length, durationMs: Date.now() - startedAt }));
+          const result = await (dependencies.analyzeYoutubeVideos || analyzeYoutubeVideos)(args, { client: dependencies.client, ...cacheAccess });
+          console.info(JSON.stringify({ severity: "INFO", event: "marcie_youtube_analysis", requestedVideoCount, analyzedVideoCount: result.videos.length, rejectedVideoCount: result.rejectedVideos.length, cacheHitCount: Number(result.cache?.hitCount || 0), cacheMissCount: Number(result.cache?.missCount || 0), durationMs: Date.now() - startedAt }));
           return result;
         } catch (error) {
           console.warn(JSON.stringify({ severity: "WARNING", event: "marcie_youtube_analysis_failed", requestedVideoCount, code: clean(error?.code || error?.message, 120), durationMs: Date.now() - startedAt }));
