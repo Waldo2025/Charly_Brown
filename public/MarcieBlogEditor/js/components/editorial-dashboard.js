@@ -96,63 +96,6 @@ function sessionTrendInsightHtml(options = {}) {
   return `<section id="trend-insight-container" class="radar-session-insight"><header><div><span class="radar-section-kicker"><i aria-hidden="true"></i> Sesión activa</span><h3><i data-lucide="trending-up" aria-hidden="true"></i> Análisis de tendencia</h3></div><span id="trend-insight-score" class="radar-session-insight__score">${esc(trend.trendScore != null ? `${trend.trendScore}/100` : "Señal verificada")}</span></header><p id="trend-insight-summary" class="radar-session-insight__summary">${esc(trend.summary || session.selectedBrief || "Análisis generado para la propuesta.")}</p><div id="trend-bar-chart" class="radar-session-insight__chart-note">Sin serie cuantitativa: Marcie no dibuja porcentajes que las fuentes no aportan.</div><div id="trend-bar-labels" hidden></div><div id="trend-metrics" class="radar-session-insight__metrics">${metrics.map(([label, value]) => `<article><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`).join("")}</div><div class="radar-session-insight__signals"><span>Señales principales</span><ul id="trend-insight-signals">${signals.length ? signals.map((signal) => `<li>${esc(signal)}</li>`).join("") : "<li>No se identificaron señales respaldadas para esta consulta.</li>"}</ul></div></section>`;
 }
 
-function renderCompactTrendWidget(options = {}) {
-  const widget = document.getElementById("compact-trend-widget");
-  if (!widget) return;
-
-  const latest = state.trends.find((snapshot) => Array.isArray(snapshot?.opportunities));
-  const leader = latest?.opportunities?.[0];
-  if (!leader) {
-    widget.innerHTML = `<div class="compact-trend-widget__empty"><span class="compact-trend-widget__icon" aria-hidden="true"><i data-lucide="radar"></i></span><div><h3 id="compact-trend-widget-title">Radar de tendencias</h3><p>El tema con mayor oportunidad editorial aparecerá aquí.</p></div></div>`;
-  } else {
-    const signals = Array.isArray(leader.signals) ? leader.signals.filter(Boolean).slice(0, 2) : [];
-    const trendScore = Number.isFinite(Number(leader.trendScore)) ? Math.round(Number(leader.trendScore)) : null;
-    const share = Number.isFinite(Number(leader.trendingPercent)) ? Number(leader.trendingPercent).toFixed(1) : null;
-    const momentumLabels = { breakout: "Despegando", rising: "En crecimiento", emerging: "Emergente", steady: "Estable" };
-    const reportMeta = [latest.region, latest.periodKey].filter(Boolean).join(" · ") || "Último reporte";
-    widget.innerHTML = `<header class="compact-trend-widget__header"><div><span class="compact-trend-widget__eyebrow"><i data-lucide="radar" aria-hidden="true"></i> Radar de tendencias</span><span class="compact-trend-widget__status"><i aria-hidden="true"></i>${esc(momentumLabels[leader.momentum] || "Señal activa")}</span></div></header><div class="compact-trend-widget__body"><span class="compact-trend-widget__rank">Tema #1 · ${esc(reportMeta)}</span><h3 id="compact-trend-widget-title">${esc(leader.topic || leader.title || "Tendencia principal")}</h3><p>${esc(leader.summary || "Conversación educativa con oportunidad para convertirse en contenido.")}</p><div class="compact-trend-widget__metrics">${trendScore != null ? `<span><b>${esc(trendScore)}</b> TrendScore</span>` : ""}${share != null ? `<span><b>${esc(share)}%</b> share</span>` : ""}<span><b>${esc(signals.length)}</b> señales clave</span></div>${signals.length ? `<ul class="compact-trend-widget__signals">${signals.map((signal) => `<li>${esc(signal)}</li>`).join("")}</ul>` : ""}</div><footer class="compact-trend-widget__actions"><button type="button" class="compact-trend-widget__primary" data-compact-trend-current><i data-lucide="file-plus-2" aria-hidden="true"></i> Crear artículo</button><button type="button" class="compact-trend-widget__secondary" data-compact-trend-new><i data-lucide="plus" aria-hidden="true"></i> Nueva sesión</button></footer>`;
-  }
-  widget.querySelector("[data-compact-trend-current]")?.addEventListener("click", async (event) => {
-    if (!leader || event.currentTarget.disabled) return;
-    const button = event.currentTarget;
-    const originalLabel = button.innerHTML;
-    button.disabled = true;
-    button.textContent = "Añadiendo…";
-    try {
-      await useTrendInCurrentSession(leader, options);
-      showToast("Tema añadido a la sesión actual.", "success");
-    } catch (error) {
-      reportEditorialActionError(error, "No se pudo añadir el tema a la sesión actual.");
-    } finally {
-      if (button.isConnected) {
-        button.disabled = false;
-        button.innerHTML = originalLabel;
-        window.lucide?.createIcons?.();
-      }
-    }
-  });
-  widget.querySelector("[data-compact-trend-new]")?.addEventListener("click", async (event) => {
-    if (!leader || event.currentTarget.disabled) return;
-    const button = event.currentTarget;
-    const originalLabel = button.innerHTML;
-    button.disabled = true;
-    button.textContent = "Creando…";
-    try {
-      const sessionId = await createSessionFromTrend(leader, options);
-      if (!sessionId) return;
-    } catch (error) {
-      reportEditorialActionError(error, "No se pudo crear la sesión editorial.");
-    } finally {
-      if (button.isConnected) {
-        button.disabled = false;
-        button.innerHTML = originalLabel;
-        window.lucide?.createIcons?.();
-      }
-    }
-  });
-  window.lucide?.createIcons?.();
-}
-
 function eventChip(item) {
   return `<button draggable="true" data-calendar-event="${esc(item.id)}" class="calendar-event-chip" title="${esc(item.title || item.topic || "Sin título")}"><span class="calendar-event-dot" aria-hidden="true"></span><span class="calendar-event-copy"><b>${esc(item.title || item.topic || "Sin título")}</b><small>${esc(AUDIENCES[item.audience] || item.audience || "Sin público")} · ${esc(item.status || "idea")}</small></span></button>`;
 }
@@ -740,14 +683,12 @@ export async function openTrends(options = {}) {
 }
 
 export function initEditorialDashboard(options = {}) {
-  renderCompactTrendWidget(options);
   isEditorialEditor(getCurrentUser()).then((canEdit) => {
     if (canEdit) seedAidaEditorialCalendar().catch(recordEditorialAccessError);
   }).catch(recordEditorialAccessError);
   subscribeEditorialCalendar((items) => { state.items = items; state.permissionError = ""; }, recordEditorialAccessError);
   subscribeTrendSnapshots((items) => {
     state.trends = items;
-    renderCompactTrendWidget(options);
     showSavedTrendWinnerOnStart(items, options);
   }, recordEditorialAccessError);
   subscribeEditorialNotifications((items) => {

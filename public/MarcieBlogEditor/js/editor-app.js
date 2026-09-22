@@ -22,7 +22,7 @@ import { initPipelineStepper, runTrendSearchForSession } from "./components/pipe
 import { initCommandPalette, openCommandPalette } from "./components/command-palette.js?v=20260908r9";
 import { makeArticleEditable } from "./components/inline-editor.js?v=20260908r9";
 import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260922r3";
-import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260922r5";
+import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260922r6";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
 import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r3";
 import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r3";
@@ -32,7 +32,7 @@ import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextMode
 import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260908r9";
 import { cancelScheduledPublication, createWordPressDraft, getWordPressStatus, publishWordPressArticle, testWordPressConnection } from "./services/marcie-wordpress-service.js";
 import { buildStageVisualHtml, startStageOrbitalAnimation, stopStageOrbitalAnimation, transitionToStageVisuals } from "./components/automation-visuals.js";
-import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260922r4";
+import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260922r5";
 
 const MARCIE_UI_THEME_STORAGE_KEY = "marcie_ui_theme_v1";
 const MARCIE_UI_THEMES = [

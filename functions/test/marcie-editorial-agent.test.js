@@ -17,16 +17,16 @@ const {
   uniqueStrings
 } = require("../src/marcie-editorial-agent.js");
 
-test("la creación usa primero una guía de voz y reserva el chat para el resultado", () => {
+test("la creación usa la guía de voz y mantiene el chat MCP visible en el panel", () => {
   const panelSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
   const voiceSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-agent-voice.js"), "utf8");
-  assert.match(panelSource, /host\.hidden = true;[\s\S]*openVoiceGuide\(\);/);
+  assert.match(panelSource, /renderPanelMessages\(\);[\s\S]*openVoiceGuide\(\);/);
+  assert.doesNotMatch(panelSource, /host\.hidden = true/);
   assert.match(panelSource, /Marcie te guía por voz/);
   assert.match(panelSource, /Pulsar para hablar/);
   assert.match(panelSource, /Hablando con Marcie/);
   assert.doesNotMatch(panelSource, /Gemini está revisando/);
   assert.doesNotMatch(panelSource, /Conectando con Gemini/);
-  assert.match(panelSource, /host\.hidden = false;/);
   assert.match(voiceSource, /speakWithGeminiLive/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
   assert.match(voiceSource, /cancelOutput\(\);/);

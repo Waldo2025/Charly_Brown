@@ -42,7 +42,6 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
   let guide = null;
   const messages = [];
 
-  host.hidden = true;
   host.innerHTML = `
     <section class="marcie-agent" aria-label="Agente editorial MCP">
       <button class="marcie-agent__header" type="button" aria-expanded="true">
@@ -320,7 +319,6 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
       await updateAgentRun(runId, "completed", { sessionId });
       responseState = { ...(responseState || {}), runStatus: "completed", phase: "completed" };
       messages.push({ role: "assistant", text: "Los artículos están listos. Puedo ayudarte a revisarlos, verificarlos o preparar cambios." });
-      host.hidden = false;
       panel.body.hidden = false;
       panel.header.setAttribute("aria-expanded", "true");
       document.getElementById("right-panel")?.classList.remove("hidden");
@@ -342,7 +340,6 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
 
   async function startGuidedSession() {
     voice.prime();
-    host.hidden = true;
     runId = "";
     responseState = null;
     messages.length = 0;

@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "../..");
 const dashboard = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/components/editorial-dashboard.js"), "utf8");
+const agentPanel = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/components/marcie-agent-panel.js"), "utf8");
 const editorApp = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/js/editor-app.js"), "utf8");
 const editorHtml = fs.readFileSync(path.join(root, "public/MarcieBlogEditor.html"), "utf8");
 const styles = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/css/MarcieBlogEditor.css"), "utf8");
@@ -74,17 +75,15 @@ test("el header abre el radar y conserva la actualización manual", () => {
   assert.match(styles, /\.marcie-modal-panel:has\(\.trend-workspace--modern\)/);
 });
 
-test("el panel lateral resume el radar y elimina la búsqueda redundante en fuentes", () => {
-  assert.match(editorHtml, /id="compact-trend-widget"/);
+test("el panel lateral elimina el radar compacto y aloja permanentemente el chat MCP", () => {
+  assert.doesNotMatch(editorHtml, /compact-trend-widget/);
   assert.doesNotMatch(editorHtml, /Buscar en fuentes|Búsqueda por tema de sesión|data-source-action/);
   assert.doesNotMatch(editorApp, /data-source-action/);
-  assert.match(dashboard, /function renderCompactTrendWidget\(options = \{\}\)/);
-  assert.match(dashboard, /latest\?\.opportunities\?\.\[0\]/);
-  assert.doesNotMatch(dashboard, /data-compact-trend-open/);
-  assert.match(dashboard, /data-compact-trend-current/);
-  assert.match(dashboard, /data-compact-trend-new/);
-  assert.match(dashboard, /renderCompactTrendWidget\(options\)/);
-  assert.match(styles, /\.compact-trend-widget \{/);
+  assert.doesNotMatch(dashboard, /compact-trend-widget|renderCompactTrendWidget|data-compact-trend/);
+  assert.doesNotMatch(styles, /\.compact-trend-widget/);
+  assert.match(editorHtml, /id="right-panel-content"[\s\S]*id="marcie-agent-chat-host"[\s\S]*<\/aside>/);
+  assert.doesNotMatch(agentPanel, /host\.hidden = true/);
+  assert.match(styles, /#marcie-agent-chat-host \{/);
 });
 
 test("el análisis de tendencia vive en el modal y el radar está organizado por pestañas", () => {
