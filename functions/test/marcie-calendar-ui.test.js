@@ -86,7 +86,9 @@ test("el panel lateral elimina el radar compacto y aloja permanentemente el chat
   assert.match(styles, /#marcie-agent-chat-host \{/);
   assert.match(styles, /\.marcie-agent__composer \{[^}]*grid-template-columns: minmax\(0, 1fr\)/s);
   assert.match(styles, /\.marcie-agent__composer-actions \{[^}]*border-top:/s);
-  assert.match(styles, /\.marcie-agent__send \{[^}]*border: 0;[^}]*background: transparent;/s);
+  assert.match(styles, /\.marcie-agent__tool, \.marcie-agent__send \{[^}]*border: 0 !important;[^}]*background: transparent !important;/s);
+  assert.match(styles, /\.marcie-agent__tool svg, \.marcie-agent__send svg \{[^}]*width: 16px;[^}]*height: 16px;/s);
+  assert.match(styles, /\.marcie-agent\.is-collapsed \{[^}]*justify-content: flex-end;/s);
 });
 
 test("el análisis de tendencia vive en el modal y el radar está organizado por pestañas", () => {

@@ -4708,7 +4708,10 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 
 #marcie-agent-chat-host { min-height: 0; }
 .marcie-agent { display: flex; min-height: 0; height: 100%; flex-direction: column; overflow: hidden; border: 1px solid var(--marcie-ui-border, #cbd5e1); border-radius: 8px; background: var(--marcie-panel-bg, #fff); }
+.marcie-agent.is-collapsed { justify-content: flex-end; background: transparent; }
 .marcie-agent__header { width: 100%; min-height: 56px; padding: 0.65rem 0.85rem; display: flex; align-items: center; justify-content: space-between; color: var(--marcie-ui-text, #1e293b); background: var(--marcie-panel-header, #fff); }
+.marcie-agent__header > svg { transition: transform 160ms ease; }
+.marcie-agent.is-collapsed .marcie-agent__header > svg { transform: rotate(180deg); }
 .marcie-agent__identity { display: flex; align-items: center; gap: 0.65rem; text-align: left; }
 .marcie-agent__identity > span:last-child { display: grid; }
 .marcie-agent__identity strong { font-size: 0.78rem; }
@@ -4772,11 +4775,14 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-agent__composer textarea { box-sizing: border-box; width: 100%; min-height: 112px; max-height: 220px; resize: vertical; padding: 1rem; border: 0; border-radius: 0; background: transparent; color: var(--marcie-ui-text, #1e293b); font-size: 0.82rem; line-height: 1.5; }
 .marcie-agent__composer textarea:focus { border: 0; box-shadow: none; outline: none; }
 .marcie-agent__composer textarea::placeholder { color: var(--marcie-ui-text-muted, #667085); opacity: 1; }
-.marcie-agent__composer-actions { display: flex; min-height: 54px; align-items: center; justify-content: flex-end; gap: 0.35rem; margin: 0 0.75rem; border-top: 1px solid var(--marcie-ui-border, #e2e8f0); }
-.marcie-agent__send { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #0f766e; transition: color 140ms ease, background-color 140ms ease; }
-.marcie-agent__send:hover { background: var(--marcie-ui-surface-hover, #f2f4f7); color: var(--marcie-ui-text, #101828); }
-.marcie-agent__send:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
-.marcie-agent__send svg { width: 18px; height: 18px; }
+.marcie-agent__composer-actions { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 0.35rem; margin: 0 0.75rem; border-top: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-agent__composer-tools { display: flex; align-items: center; gap: 0.1rem; }
+.marcie-agent__tool, .marcie-agent__send { appearance: none; display: grid; width: 44px; height: 44px; padding: 0; place-items: center; border: 0 !important; border-radius: 0; box-shadow: none !important; background: transparent !important; color: var(--marcie-ui-text-soft, #475467); transition: color 140ms ease, opacity 140ms ease; }
+.marcie-agent__tool:hover, .marcie-agent__send:hover { color: #0f766e; }
+.marcie-agent__tool:focus-visible, .marcie-agent__send:focus-visible { outline: 2px solid #0f766e; outline-offset: -5px; }
+.marcie-agent__tool[aria-pressed="true"], .marcie-agent__send { color: #0f766e; }
+.marcie-agent__tool svg, .marcie-agent__send svg { width: 16px; height: 16px; stroke-width: 2; }
+[data-agent-state="listening"] .marcie-agent__tool[data-agent-mic] { color: #dc2626; animation: marcie-agent-pulse 1.2s ease-in-out infinite; }
 [data-agent-state="processing"] .marcie-agent__mark { animation: marcie-agent-pulse 1.2s ease-in-out infinite; }
 @keyframes marcie-agent-pulse { 50% { opacity: 0.58; } }
 

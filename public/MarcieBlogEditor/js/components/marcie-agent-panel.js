@@ -40,6 +40,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let responseState = null;
   let busy = false;
   let guide = null;
+  let panelAudioEnabled = false;
   const messages = [];
 
   host.innerHTML = `
@@ -54,6 +55,10 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
         <form class="marcie-agent__composer" data-agent-form>
           <textarea rows="3" maxlength="4000" placeholder="Escribe una instrucción para Marcie" aria-label="Mensaje para el agente" data-agent-input></textarea>
           <div class="marcie-agent__composer-actions">
+            <div class="marcie-agent__composer-tools">
+              <button type="button" class="marcie-agent__tool" data-agent-mic title="Dictar mensaje" aria-label="Dictar mensaje"><i data-lucide="mic"></i></button>
+              <button type="button" class="marcie-agent__tool" data-agent-audio title="Activar respuestas por voz" aria-label="Activar respuestas por voz" aria-pressed="false"><i data-lucide="volume-x" data-audio-off></i><i data-lucide="volume-2" data-audio-on hidden></i></button>
+            </div>
             <button type="submit" class="marcie-agent__send" data-agent-send title="Enviar" aria-label="Enviar mensaje"><i data-lucide="send"></i></button>
           </div>
         </form>
@@ -69,9 +74,19 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     form: host.querySelector("[data-agent-form]"),
     input: host.querySelector("[data-agent-input]"),
     mic: host.querySelector("[data-agent-mic]"),
+    audio: host.querySelector("[data-agent-audio]"),
     send: host.querySelector("[data-agent-send]"),
     status: host.querySelector("[data-agent-status]")
   };
+
+  function updatePanelAudioControl() {
+    panel.audio.setAttribute("aria-pressed", String(panelAudioEnabled));
+    panel.audio.setAttribute("aria-label", panelAudioEnabled ? "Desactivar respuestas por voz" : "Activar respuestas por voz");
+    panel.audio.title = panelAudioEnabled ? "Desactivar respuestas por voz" : "Activar respuestas por voz";
+    panel.audio.querySelector("[data-audio-off]").hidden = panelAudioEnabled;
+    panel.audio.querySelector("[data-audio-on]").hidden = !panelAudioEnabled;
+    window.lucide?.createIcons?.();
+  }
 
   function activeSurface() {
     return guide || panel;
@@ -100,7 +115,14 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       if (guide) guide.transcript.textContent = value || "Tu respuesta aparecerá aquí antes de enviarse.";
     },
     onStateChange: setStatus,
-    onError(error) { onNotify?.(error.message, "warning"); setStatus("idle"); }
+    onError(error) {
+      if (!guide && panelAudioEnabled) {
+        panelAudioEnabled = false;
+        updatePanelAudioControl();
+      }
+      onNotify?.(error.message, "warning");
+      setStatus("idle");
+    }
   });
 
   function renderPanelMessages() {
@@ -214,6 +236,11 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       if (voice.listening) voice.stop();
       else voice.listen();
     });
+    surface.audio?.addEventListener("click", () => {
+      panelAudioEnabled = !panelAudioEnabled;
+      if (!panelAudioEnabled) voice.cancelSpeech();
+      updatePanelAudioControl();
+    });
     surface.input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); surface.form.requestSubmit(); }
     });
@@ -307,7 +334,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     renderPanelMessages();
     renderGuideQuestion(response);
     renderOptions(response);
-    if (speak && guide) voice.speak(response.speechText || response.message);
+    if (speak && (guide || panelAudioEnabled)) voice.speak(response.speechText || response.message);
   }
 
   async function executeRun() {
@@ -365,8 +392,10 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   panel.header.addEventListener("click", () => {
     panel.body.hidden = !panel.body.hidden;
     panel.header.setAttribute("aria-expanded", String(!panel.body.hidden));
+    panel.header.closest(".marcie-agent")?.classList.toggle("is-collapsed", panel.body.hidden);
   });
   bindComposer(panel, { allowNewSession: true });
+  updatePanelAudioControl();
   renderPanelMessages();
   return { startGuidedSession };
 }
