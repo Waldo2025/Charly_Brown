@@ -46,7 +46,7 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /const guideMessages = \[\]/);
   assert.match(panelSource, /guide \? guideMessages : panelMessages/);
   assert.match(panelSource, /function renderGuideMessages\(\)/);
-  assert.match(panelSource, /const target = guide \? "guide" : "panel"/);
+  assert.match(panelSource, /const target = options\.target \|\| \(guide \? "guide" : "panel"\)/);
   assert.match(panelSource, /showResponse\(response, \{ target \}\)/);
   assert.match(panelSource, /target === "guide" \? guideMessages : panelMessages/);
   assert.match(panelSource, /function renderOptions\(response, target = guide \? "guide" : "panel"\)/);
@@ -58,6 +58,13 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /Escuchando; enviaré al pausar/);
   assert.match(panelSource, /voice\.enableAutoSubmit\(\{ silenceMs: 1800 \}\)/);
   assert.match(panelSource, /voice\.stop\(\{ submit: true \}\)/);
+  assert.match(panelSource, /voice\.cancelSpeech\(\);\s*busy = true/);
+  assert.match(panelSource, /const queuedTurns = \[\]/);
+  assert.match(panelSource, /function drainQueue\(\)/);
+  assert.match(panelSource, /message\.queued = true/);
+  assert.match(panelSource, /target === "guide" \? "configuration" : "assistant"/);
+  assert.match(panelSource, /Marcie está analizando/);
+  assert.match(panelSource, /tus mensajes quedarán en cola/);
   assert.match(panelSource, /Escribe una instrucción para Marcie/);
   assert.match(panelSource, /data-agent-mic title="Dictar mensaje"/);
   assert.match(panelSource, /data-agent-audio title="Activar respuestas por voz"/);
@@ -89,7 +96,7 @@ test("el chat permanente se asocia a la sesión activa sin iniciar el cuestionar
   assert.equal(run.phase, "reviewing");
   assert.equal(run.status, "reviewing");
   assert.equal(run.sessionId, "session-1");
-  assert.match(panelSource, /mode: guide \? "configuration" : "assistant"/);
+  assert.match(panelSource, /mode: target === "guide" \? "configuration" : "assistant"/);
   assert.match(panelSource, /sessionId: activeSession\?\.id/);
   assert.match(apiSource, /\{ runId, input, mode, sessionId \}/);
   assert.match(apiSource, /\/api\/marcie\/agent\/history\?sessionId=/);

@@ -4,7 +4,8 @@ const { buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js"
 const ANALYSIS_VERSION = 1;
 const MAX_YOUTUBE_VIDEOS = 5;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
-const ANALYSIS_TIMEOUT_MS = 420_000;
+const ANALYSIS_TIMEOUT_MS = 500_000;
+const INTERACTION_POLL_MS = 2_000;
 
 function clean(value, max = 1200) {
   return String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, max);
@@ -52,7 +53,7 @@ function normalizeYoutubeUrls(values = []) {
 }
 
 function responseText(response = {}) {
-  return String(response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("\n") || "")
+  return String(response?.output_text || response?.text || response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("\n") || "")
     .replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
 }
 
@@ -72,6 +73,72 @@ function withDeadline(work, timeoutMs = ANALYSIS_TIMEOUT_MS) {
     timer = setTimeout(() => reject(Object.assign(new Error("youtube_analysis_timeout"), { code: "youtube_analysis_timeout", status: 503 })), timeoutMs);
   });
   return Promise.race([Promise.resolve(work), deadline]).finally(() => clearTimeout(timer));
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function interactionFailure(interaction = {}) {
+  const detail = interaction.errors?.map((item) => item?.message || item?.code).filter(Boolean).join("; ")
+    || `youtube_interaction_${interaction.status || "failed"}`;
+  return Object.assign(new Error(detail), { code: "youtube_analysis_failed", status: 503 });
+}
+
+async function waitForInteraction(client, interaction, options = {}) {
+  let current = interaction;
+  const sleep = options.sleep || delay;
+  while (["queued", "in_progress"].includes(current?.status)) {
+    await sleep(options.pollMs || INTERACTION_POLL_MS);
+    current = await client.interactions.get(current.id);
+  }
+  if (current?.status && current.status !== "completed") throw interactionFailure(current);
+  return current;
+}
+
+function shouldFallbackToGenerateContent(error) {
+  const details = [error?.code, error?.status, error?.message, error?.response?.data]
+    .filter(Boolean).map((value) => typeof value === "string" ? value : JSON.stringify(value)).join(" ");
+  return /not found|unimplemented|unsupported|unknown field|invalid argument|interactions/i.test(details);
+}
+
+async function analyzeWithAgenticInteraction(client, source, options = {}) {
+  if (!client?.interactions?.create) throw Object.assign(new Error("youtube_interactions_unavailable"), { code: "youtube_interactions_unavailable" });
+  const interaction = await client.interactions.create({
+    model: options.model || DEFAULT_TEXT_MODEL,
+    background: true,
+    response_mime_type: "application/json",
+    input: [
+      { type: "video", uri: source.url, mime_type: "video/mp4", processing: "agentic", resolution: "low" },
+      { type: "text", text: videoPrompt(options) }
+    ],
+    generation_config: { max_output_tokens: 16384 }
+  });
+  const completed = await waitForInteraction(client, interaction, options);
+  if (completed?.id && client.interactions.delete && options.deleteInteraction !== false) {
+    await client.interactions.delete(completed.id).catch(() => {});
+  }
+  return completed;
+}
+
+async function analyzeWithGenerateContent(client, source, options = {}) {
+  if (!client?.models?.generateContent) throw Object.assign(new Error("youtube_analysis_client_unavailable"), { status: 503 });
+  const request = buildVertexGenerateRequest({
+    model: options.model || DEFAULT_TEXT_MODEL,
+    payload: {
+      contents: [{ role: "user", parts: [
+        { fileData: { fileUri: source.url, mimeType: "video/mp4" } },
+        { text: videoPrompt(options) }
+      ] }],
+      generationConfig: {
+        maxOutputTokens: 16384,
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: "HIGH" },
+        mediaResolution: "MEDIA_RESOLUTION_LOW"
+      }
+    }
+  });
+  return client.models.generateContent(request);
 }
 
 function timestamp(value) {
@@ -137,23 +204,13 @@ Devuelve SOLO JSON: {"title":"","channel":"","publishedAt":"YYYY-MM-DD o vacío"
 
 async function analyzeSingleYoutubeVideo(source, options = {}) {
   const client = options.client;
-  if (!client?.models?.generateContent) throw Object.assign(new Error("youtube_analysis_client_unavailable"), { status: 503 });
-  const request = buildVertexGenerateRequest({
-    model: options.model || DEFAULT_TEXT_MODEL,
-    payload: {
-      contents: [{ role: "user", parts: [
-        { fileData: { fileUri: source.url, mimeType: "video/mp4" } },
-        { text: videoPrompt(options) }
-      ] }],
-      generationConfig: {
-        maxOutputTokens: 16384,
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: "HIGH" },
-        mediaResolution: "MEDIA_RESOLUTION_LOW"
-      }
-    }
-  });
-  const response = await withDeadline(client.models.generateContent(request), options.timeoutMs);
+  let response;
+  try {
+    response = await withDeadline(analyzeWithAgenticInteraction(client, source, options), options.timeoutMs);
+  } catch (error) {
+    if (!shouldFallbackToGenerateContent(error)) throw error;
+    response = await withDeadline(analyzeWithGenerateContent(client, source, options), options.timeoutMs);
+  }
   return normalizeVideoAnalysis(parseJson(responseText(response)), source);
 }
 
@@ -211,7 +268,9 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
 module.exports = {
   ANALYSIS_VERSION,
   ANALYSIS_TIMEOUT_MS,
+  INTERACTION_POLL_MS,
   MAX_YOUTUBE_VIDEOS,
+  analyzeWithAgenticInteraction,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
   normalizeYoutubeUrl,

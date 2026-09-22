@@ -12,7 +12,7 @@ const {
 } = require("../src/marcie-youtube-agent.js");
 
 test("el análisis de video usa el presupuesto extendido de la función", () => {
-  assert.equal(ANALYSIS_TIMEOUT_MS, 420_000);
+  assert.equal(ANALYSIS_TIMEOUT_MS, 500_000);
 });
 
 const IDS = ["dQw4w9WgXcQ", "9bZkp7q19f0", "M7lc1UVf-VE", "aqz-KE-bpKQ", "jNQXAC9IVRw", "kJQP7kiw5Fk"];
@@ -58,20 +58,47 @@ test("deduplica y limita el expediente a cinco videos", () => {
   assert.equal(new Set(result.valid.map((item) => item.videoId)).size, 5);
 });
 
-test("envía el video a Vertex con fileData y no conserva la transcripción", async () => {
+test("usa Interactions con procesamiento agentivo para videos largos", async () => {
+  let request;
+  const client = { interactions: { create: async (value) => {
+    request = value;
+    return { id: "interaction-1", status: "completed", output_text: JSON.stringify(parsedVideo()) };
+  } } };
+  const source = normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`);
+  const result = await analyzeSingleYoutubeVideo(source, { client });
+  assert.equal(request.model, "gemini-3.8-flash");
+  assert.deepEqual(request.input[0], { type: "video", uri: source.url, mime_type: "video/mp4", processing: "agentic", resolution: "low" });
+  assert.equal(request.background, true);
+  assert.equal(request.response_mime_type, "application/json");
+  assert.equal(result.bibliographySource.verificationStatus, "attributed_only");
+  assert.equal(Object.hasOwn(result, "fullTranscript"), false);
+  assert.equal(JSON.stringify(result).includes("Este contenido nunca debe persistirse"), false);
+});
+
+test("espera una interacción en segundo plano hasta completarse", async () => {
+  let polls = 0;
+  const client = {
+    interactions: {
+      create: async () => ({ id: "interaction-queued", status: "queued" }),
+      get: async () => (++polls === 1
+        ? { id: "interaction-queued", status: "in_progress" }
+        : { id: "interaction-queued", status: "completed", output_text: JSON.stringify(parsedVideo()) })
+    }
+  };
+  const result = await analyzeSingleYoutubeVideo(normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`), { client, sleep: async () => {} });
+  assert.equal(polls, 2);
+  assert.equal(result.title, "Aprender mejor");
+});
+
+test("conserva generateContent como compatibilidad cuando Interactions no está disponible", async () => {
   let request;
   const client = { models: { generateContent: async (value) => {
     request = value;
     return { text: JSON.stringify(parsedVideo()) };
   } } };
   const source = normalizeYoutubeUrl(`https://youtu.be/${IDS[0]}`);
-  const result = await analyzeSingleYoutubeVideo(source, { client });
-  assert.equal(request.model, "gemini-3.8-flash");
+  await analyzeSingleYoutubeVideo(source, { client });
   assert.deepEqual(request.contents[0].parts[0].fileData, { fileUri: source.url, mimeType: "video/mp4" });
-  assert.equal(request.config.responseMimeType, "application/json");
-  assert.equal(result.bibliographySource.verificationStatus, "attributed_only");
-  assert.equal(Object.hasOwn(result, "fullTranscript"), false);
-  assert.equal(JSON.stringify(result).includes("Este contenido nunca debe persistirse"), false);
 });
 
 test("continúa con videos válidos cuando existe un fallo parcial", async () => {

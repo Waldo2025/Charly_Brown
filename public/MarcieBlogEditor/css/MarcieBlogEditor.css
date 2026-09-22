@@ -4728,6 +4728,8 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-agent-message { max-width: 88%; padding: 0.55rem 0.65rem; border-radius: 8px; font-size: 0.74rem; line-height: 1.5; white-space: pre-wrap; }
 .marcie-agent-message--assistant { align-self: flex-start; color: #334155; background: #f1f5f9; }
 .marcie-agent-message--user { align-self: flex-end; color: #fff; background: #0f766e; }
+.marcie-agent-message.is-queued { opacity: 0.72; }
+.marcie-agent-message small { display: block; margin-top: 0.25rem; color: currentColor; font-size: 0.62rem; opacity: 0.78; }
 .marcie-agent-activity { min-height: 30px; display: inline-flex; align-self: flex-start; align-items: center; gap: 0.5rem; padding: 0.2rem 0.15rem; color: var(--marcie-ui-text-muted, #64748b); font-size: 0.7rem; line-height: 1.35; }
 .marcie-agent-activity__dots { display: inline-flex; align-items: center; gap: 3px; }
 .marcie-agent-activity__dots span { width: 5px; height: 5px; border-radius: 50%; background: #0f766e; animation: marcie-agent-thinking 1.15s ease-in-out infinite; }

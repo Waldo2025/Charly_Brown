@@ -65,6 +65,8 @@ function activityLabel(input = {}) {
   if (action === "apply_change") return "Marcie está aplicando los cambios";
   if (action === "discard_change") return "Marcie está descartando la vista previa";
   const text = String(input.text || input.value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const videoCount = Array.isArray(input.urls) ? input.urls.length : ((text.match(/https:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\//g) || []).length);
+  if (videoCount) return `Marcie está analizando ${videoCount === 1 ? "el video" : `${videoCount} videos`}. Puedes seguir escribiendo; tus mensajes quedarán en cola.`;
   if (/corrige|corregir|reescribe|reescribir|modifica|editar|cambia el tono|acorta|amplia/.test(text)) return "Marcie está preparando una corrección";
   if (/analiza|analizar|evalua|evaluar|revisa el articulo|revision del articulo/.test(text)) return "Marcie está analizando el artículo";
   if (/verifica|verificar|comprueba|comprobar|afirmacion|referencia/.test(text)) return "Marcie está verificando las afirmaciones";
@@ -83,11 +85,13 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let guide = null;
   let panelAudioEnabled = false;
   let panelActivity = "";
+  let guideActivity = "";
   let loadedSessionId = "";
   let historyRequestId = 0;
   let voiceSurface = null;
   const panelMessages = [];
   const guideMessages = [];
+  const queuedTurns = [];
 
   host.innerHTML = `
     <section class="marcie-agent" aria-label="Agente editorial MCP">
@@ -195,7 +199,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
 
   function renderPanelMessages() {
     const conversation = panelMessages.length
-      ? panelMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}">${escapeHtml(message.text)}</div>`).join("")
+      ? panelMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}${message.queued ? " is-queued" : ""}">${escapeHtml(message.text)}${message.queued ? '<small>En cola</small>' : ""}</div>`).join("")
       : `<div class="marcie-agent__empty"><i data-lucide="wand-sparkles"></i><p>Puedo revisar, verificar y mejorar los artículos creados.</p></div>`;
     const activity = panelActivity
       ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(panelActivity)}</span></div>`
@@ -208,8 +212,11 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   function renderGuideMessages() {
     if (!guide?.messageList) return;
     const visibleMessages = guideMessages.at(-1)?.role === "assistant" ? guideMessages.slice(0, -1) : guideMessages;
-    guide.messageList.innerHTML = visibleMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}">${escapeHtml(message.text)}</div>`).join("");
-    guide.messageList.hidden = visibleMessages.length === 0;
+    const activity = guideActivity
+      ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(guideActivity)}</span></div>`
+      : "";
+    guide.messageList.innerHTML = visibleMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}${message.queued ? " is-queued" : ""}">${escapeHtml(message.text)}${message.queued ? '<small>En cola</small>' : ""}</div>`).join("") + activity;
+    guide.messageList.hidden = visibleMessages.length === 0 && !activity;
     guide.messageList.scrollTop = guide.messageList.scrollHeight;
   }
 
@@ -296,8 +303,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   }
 
   function setSurfaceBusy(surface, value) {
-    surface.input.disabled = value;
-    surface.send.disabled = value;
+    surface.root.dataset.requestPending = String(value);
     surface.optionsHost.querySelectorAll("button").forEach((button) => { button.disabled = value; });
   }
 
@@ -424,47 +430,69 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     guide.mic.focus();
   }
 
-  async function submit(inputPayload) {
-    if (busy) return;
-    const surface = activeSurface();
-    const target = guide ? "guide" : "panel";
+  function renderTarget(target) {
+    if (target === "guide") renderGuideMessages();
+    else renderPanelMessages();
+  }
+
+  function queueTurn(inputPayload, target, message) {
+    if (message) message.queued = true;
+    queuedTurns.push({ inputPayload, target, message });
+    renderTarget(target);
+  }
+
+  function drainQueue() {
+    if (busy || !queuedTurns.length) return;
+    const next = queuedTurns.shift();
+    void submit(next.inputPayload, { target: next.target, message: next.message, fromQueue: true });
+  }
+
+  async function submit(inputPayload, options = {}) {
+    const target = options.target || (guide ? "guide" : "panel");
+    const surface = target === "guide" ? guide : panel;
     const activeMessages = target === "guide" ? guideMessages : panelMessages;
     const userText = inputPayload.text || inputPayload.value || "";
-    if (userText) activeMessages.push({ role: "user", text: userText });
-    if (!guide) panelActivity = activityLabel(inputPayload);
+    const message = options.message || (userText ? { role: "user", text: userText } : null);
+    if (message && !options.message) activeMessages.push(message);
+    if (busy && !options.fromQueue) return queueTurn(inputPayload, target, message);
+    if (message) message.queued = false;
+    const activity = activityLabel(inputPayload);
+    if (target === "guide") guideActivity = activity;
+    else panelActivity = activity;
+    voice.cancelSpeech();
     busy = true;
     setStatus("processing");
-    setSurfaceBusy(surface, true);
-    renderActiveMessages();
+    if (surface) setSurfaceBusy(surface, true);
+    renderTarget(target);
     try {
-      const activeSession = guide ? null : getActiveSession?.();
-      if (!guide && !activeSession?.id) throw new Error("Selecciona una sesión con un artículo para trabajar con Marcie.");
+      const activeSession = target === "guide" ? null : getActiveSession?.();
+      if (target !== "guide" && !activeSession?.id) throw new Error("Selecciona una sesión con un artículo para trabajar con Marcie.");
       const contextualInput = activeSession
         ? { ...inputPayload, audience: activeSession.audience || activeSession.article?.audience || activeSession.selectedAudiences?.[0] || "" }
         : inputPayload;
       const response = await sendAgentTurn(runId, contextualInput, {
-        mode: guide ? "configuration" : "assistant",
+        mode: target === "guide" ? "configuration" : "assistant",
         sessionId: activeSession?.id || ""
       });
-      panelActivity = "";
+      if (target === "guide") guideActivity = "";
+      else panelActivity = "";
       showResponse(response, { target });
     } catch (error) {
-      panelActivity = "";
+      if (target === "guide") guideActivity = "";
+      else panelActivity = "";
       activeMessages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
-      if (guide) guide.question.textContent = `No pude continuar: ${error.message}`;
+      if (target === "guide" && guide) guide.question.textContent = `No pude continuar: ${error.message}`;
       if (responseState) renderOptions(responseState, target);
-      if (target === "guide") renderGuideMessages();
-      else renderPanelMessages();
+      renderTarget(target);
       onNotify?.(error.message, "error");
     } finally {
       busy = false;
-      const current = activeSurface();
-      setSurfaceBusy(current, false);
-      setStatus("idle");
-      if (panelActivity) {
-        panelActivity = "";
-        renderActiveMessages();
-      }
+      if (surface?.root?.isConnected) setSurfaceBusy(surface, false);
+      if (target === "guide") guideActivity = "";
+      else panelActivity = "";
+      renderTarget(target);
+      if (queuedTurns.length) drainQueue();
+      else setStatus("idle");
     }
   }
 
