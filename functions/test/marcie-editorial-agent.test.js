@@ -26,6 +26,24 @@ test("la creación usa primero una guía de voz y reserva el chat para el result
   assert.match(voiceSource, /speakWithGeminiLive/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
   assert.match(voiceSource, /cancelOutput\(\);/);
+  assert.match(voiceSource, /socket\.readyState === WebSocket\.CONNECTING/);
+  assert.doesNotMatch(voiceSource, /liveSocket\?\.close/);
+  assert.match(panelSource, /if \(responseState\) renderOptions\(responseState\)/);
+});
+
+test("avanza por los recursos de cada público sin quedar detenido", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "resources";
+  run.configuration.selectedAudiences = ["educators", "parents"];
+  run.configuration.resourceMode = "per_audience";
+
+  let response = await advanceRun(run, { selectedValues: ["apa7", "quotes"] }, { db: {} });
+  assert.equal(response.phase, "resources");
+  assert.match(response.message, /Padres y familias/);
+
+  response = await advanceRun(run, { selectedValues: ["lists", "seo"] }, { db: {} });
+  assert.equal(response.phase, "vocabulary");
+  assert.deepEqual(run.configuration.resourcesByAudience.parents, ["lists", "seo"]);
 });
 
 test("publica las herramientas MCP editoriales de Marcie", async () => {

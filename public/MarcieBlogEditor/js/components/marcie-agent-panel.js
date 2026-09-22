@@ -1,5 +1,5 @@
-import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js";
+import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260921r3";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260921r3";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
@@ -151,6 +151,12 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
     bindOptionEvents(surface, prompt, wrapper);
   }
 
+  function setSurfaceBusy(surface, value) {
+    surface.input.disabled = value;
+    surface.send.disabled = value;
+    surface.optionsHost.querySelectorAll("button").forEach((button) => { button.disabled = value; });
+  }
+
   function closeGuide({ cancelSpeech = true } = {}) {
     if (!guide) return;
     if (cancelSpeech) voice.cancelSpeech();
@@ -232,22 +238,20 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
     if (userText) messages.push({ role: "user", text: userText });
     busy = true;
     setStatus("processing");
-    surface.input.disabled = true;
-    surface.send.disabled = true;
-    surface.optionsHost.replaceChildren();
+    setSurfaceBusy(surface, true);
     renderPanelMessages();
     try {
       showResponse(await sendAgentTurn(runId, inputPayload));
     } catch (error) {
       messages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
       if (guide) guide.question.textContent = `No pude continuar: ${error.message}`;
+      if (responseState) renderOptions(responseState);
       renderPanelMessages();
       onNotify?.(error.message, "error");
     } finally {
       busy = false;
       const current = activeSurface();
-      current.input.disabled = false;
-      current.send.disabled = false;
+      setSurfaceBusy(current, false);
       setStatus("idle");
     }
   }

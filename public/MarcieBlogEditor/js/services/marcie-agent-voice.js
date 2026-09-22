@@ -15,7 +15,7 @@ function preferredSpanishVoice() {
 export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } = {}) {
   let recognition = null;
   let listening = false;
-  let liveSocket = null;
+  let liveConnection = null;
   let audioContext = null;
   let nextAudioAt = 0;
   let speechEpoch = 0;
@@ -41,11 +41,29 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     try { recognition.stop(); } catch (_) {}
   }
 
+  function closeLiveSocket(connection, reason = "finished") {
+    const socket = connection?.socket;
+    if (!socket) return;
+    const closeOpenSocket = () => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      try { socket.send(JSON.stringify({ type: "close" })); } catch (_) {}
+      try { socket.close(1000, reason); } catch (_) {}
+    };
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.addEventListener("open", closeOpenSocket, { once: true });
+      return;
+    }
+    closeOpenSocket();
+  }
+
   function cancelOutput() {
     speechEpoch += 1;
     window.speechSynthesis?.cancel?.();
-    try { liveSocket?.close(); } catch (_) {}
-    liveSocket = null;
+    if (liveConnection) {
+      const connection = liveConnection;
+      liveConnection = null;
+      connection.cancel();
+    }
     activeSources.forEach((source) => { try { source.stop(); } catch (_) {} });
     activeSources.clear();
     nextAudioAt = audioContext?.currentTime || 0;
@@ -75,7 +93,7 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     return true;
   }
 
-  function speakWithBrowser(text) {
+  function speakWithBrowser(text, epoch) {
     const content = String(text || "").trim();
     if (!content || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return false;
     window.speechSynthesis.cancel();
@@ -85,9 +103,9 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     utterance.pitch = 1.04;
     const voice = preferredSpanishVoice();
     if (voice) utterance.voice = voice;
-    utterance.onstart = () => setState("speaking");
-    utterance.onend = () => setState("idle");
-    utterance.onerror = () => setState("idle");
+    utterance.onstart = () => { if (epoch === speechEpoch) setState("speaking"); };
+    utterance.onend = () => { if (epoch === speechEpoch) setState("idle"); };
+    utterance.onerror = () => { if (epoch === speechEpoch) setState("idle"); };
     window.speechSynthesis.speak(utterance);
     return true;
   }
@@ -111,7 +129,7 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     nextAudioAt += buffer.duration;
   }
 
-  async function speakWithGeminiLive(text) {
+  async function speakWithGeminiLive(text, epoch) {
     const user = getCurrentUser();
     if (!user || typeof WebSocket === "undefined" || !(window.AudioContext || window.webkitAudioContext)) throw new Error("LIVE_UNAVAILABLE");
     const token = await user.getIdToken();
@@ -125,30 +143,70 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     });
     const ticket = await response.json().catch(() => ({}));
     if (!response.ok || !ticket.websocketUrl || !ticket.ticket) throw new Error("LIVE_TICKET_UNAVAILABLE");
+    if (epoch !== speechEpoch) return false;
 
     return new Promise((resolve, reject) => {
       const target = new URL(ticket.websocketUrl, window.location.href);
       target.searchParams.set("ticket", ticket.ticket);
       const socket = new WebSocket(target.toString());
-      liveSocket = socket;
       let receivedAudio = false;
-      const timeout = window.setTimeout(() => { try { socket.close(); } catch (_) {} reject(new Error("LIVE_TIMEOUT")); }, 15000);
+      const connection = {
+        socket,
+        epoch,
+        cancelled: false,
+        settled: false,
+        timeout: 0,
+        finishTimer: 0,
+        cancel() {
+          connection.cancelled = true;
+          clearTimeout(connection.timeout);
+          clearTimeout(connection.finishTimer);
+          closeLiveSocket(connection, "cancelled");
+          settle(resolve, false);
+        }
+      };
+      liveConnection = connection;
+
+      function isCurrent() {
+        return !connection.cancelled && connection.epoch === speechEpoch && liveConnection === connection;
+      }
+
+      function settle(callback, value) {
+        if (connection.settled) return;
+        connection.settled = true;
+        clearTimeout(connection.timeout);
+        clearTimeout(connection.finishTimer);
+        if (liveConnection === connection) liveConnection = null;
+        callback(value);
+      }
+
+      function fail(error) {
+        if (connection.cancelled || connection.epoch !== speechEpoch) {
+          settle(resolve, false);
+          return;
+        }
+        closeLiveSocket(connection, "error");
+        settle(reject, error);
+      }
+
+      connection.timeout = window.setTimeout(() => fail(new Error("LIVE_TIMEOUT")), 15000);
       socket.addEventListener("message", (event) => {
+        if (!isCurrent()) return;
         let envelope;
         try { envelope = JSON.parse(String(event.data || "{}")); } catch (_) { return; }
         if (envelope.type === "ready") {
           setState("speaking");
-          socket.send(JSON.stringify({
-            type: "clientContent",
-            turns: [{ role: "user", parts: [{ text: String(text || "").trim() }] }],
-            turnComplete: true
-          }));
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+              type: "clientContent",
+              turns: [{ role: "user", parts: [{ text: String(text || "").trim() }] }],
+              turnComplete: true
+            }));
+          }
           return;
         }
         if (envelope.type === "error") {
-          clearTimeout(timeout);
-          reject(new Error(String(envelope.message || "LIVE_ERROR")));
-          try { socket.close(); } catch (_) {}
+          fail(new Error(String(envelope.message || "LIVE_ERROR")));
           return;
         }
         if (envelope.type !== "serverContent") return;
@@ -160,17 +218,20 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
           }
         }
         if (content.turnComplete === true) {
-          clearTimeout(timeout);
+          clearTimeout(connection.timeout);
           const remainingMs = audioContext ? Math.max(0, (nextAudioAt - audioContext.currentTime) * 1000) : 0;
-          window.setTimeout(() => {
-            try { socket.send(JSON.stringify({ type: "close" })); socket.close(); } catch (_) {}
-            liveSocket = null;
+          connection.finishTimer = window.setTimeout(() => {
+            if (!isCurrent()) return settle(resolve, false);
+            closeLiveSocket(connection);
             setState("idle");
-            if (receivedAudio) resolve(true); else reject(new Error("LIVE_AUDIO_EMPTY"));
+            if (receivedAudio) settle(resolve, true); else fail(new Error("LIVE_AUDIO_EMPTY"));
           }, remainingMs + 80);
         }
       });
-      socket.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("LIVE_SOCKET_ERROR")); });
+      socket.addEventListener("error", () => fail(new Error("LIVE_SOCKET_ERROR")));
+      socket.addEventListener("close", () => {
+        if (!connection.settled && isCurrent()) fail(new Error("LIVE_SOCKET_CLOSED"));
+      });
     });
   }
 
@@ -179,8 +240,8 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
     if (!content) return false;
     cancelOutput();
     const epoch = speechEpoch;
-    void speakWithGeminiLive(content).catch(() => {
-      if (epoch === speechEpoch) speakWithBrowser(content);
+    void speakWithGeminiLive(content, epoch).catch(() => {
+      if (epoch === speechEpoch) speakWithBrowser(content, epoch);
     });
     return true;
   }
