@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const {
+  ANALYSIS_VERSION,
   ANALYSIS_TIMEOUT_MS,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
@@ -15,6 +16,10 @@ test("el análisis de video usa el presupuesto extendido de la función", () => 
   assert.equal(ANALYSIS_TIMEOUT_MS, 500_000);
 });
 
+test("invalida análisis previos que no separan los dos ejes editoriales", () => {
+  assert.equal(ANALYSIS_VERSION, 2);
+});
+
 const IDS = ["dQw4w9WgXcQ", "9bZkp7q19f0", "M7lc1UVf-VE", "aqz-KE-bpKQ", "jNQXAC9IVRw", "kJQP7kiw5Fk"];
 
 function parsedVideo(overrides = {}) {
@@ -23,6 +28,8 @@ function parsedVideo(overrides = {}) {
     channel: "Canal educativo",
     publishedAt: "2026-09-22",
     summary: "Una síntesis editorial breve.",
+    centralIdea: "La conversación interna influye en la experiencia cotidiana.",
+    neuroeducationConnection: "El lenguaje puede relacionarse con emoción, atención y autorregulación en contextos educativos.",
     proposedTopics: ["Tema propuesto"],
     evidenceItems: [{ text: "La autora presenta una estrategia.", timestamp: "02:14", evidenceKind: "video_attribution" }],
     shortQuotes: [{ text: "Una cita breve", timestamp: "02:14" }],
@@ -71,6 +78,8 @@ test("usa Interactions con procesamiento agentivo para videos largos", async () 
   assert.equal(request.background, true);
   assert.equal(request.response_mime_type, "application/json");
   assert.equal(result.bibliographySource.verificationStatus, "attributed_only");
+  assert.match(result.centralIdea, /conversación interna/);
+  assert.match(result.neuroeducationConnection, /autorregulación/);
   assert.equal(Object.hasOwn(result, "fullTranscript"), false);
   assert.equal(JSON.stringify(result).includes("Este contenido nunca debe persistirse"), false);
 });

@@ -128,6 +128,22 @@ export async function researchTopicForMode({ session = {}, topic = "", region = 
 }
 
 const draftJobs = new Map();
+
+function videoEditorialInstruction(videoResearch = null) {
+  const videos = Array.isArray(videoResearch?.videos) ? videoResearch.videos : [];
+  if (!videos.length) return "";
+  const axes = videos.slice(0, 5).map((video) => ({
+    centralIdea: String(video?.centralIdea || video?.summary || "").trim(),
+    neuroeducationConnection: String(video?.neuroeducationConnection || "").trim()
+  }));
+  return `BASE DE VIDEO OBLIGATORIA PARA LA REDACCIÓN:
+- El artículo debe desarrollar la idea central del video y su relación con la neuroeducación, adaptadas al público seleccionado.
+- El video es el punto de partida conceptual: no copies su estructura, secuencia, frases ni paráfrasis cercanas.
+- Amplía y refuerza ambos ejes con las fuentes documentales verificadas. No atribuyas al video explicaciones neurocientíficas añadidas por las fuentes.
+- Atribuye expresamente las ideas del video a su autor o canal cuando corresponda.
+Ejes analizados: ${JSON.stringify(axes)}.`;
+}
+
 export async function draftArticleForMode(options = {}) {
   const session = options.session || {};
   const audience = options.audience || session.audience || "educators";
@@ -151,7 +167,8 @@ export async function draftArticleForMode(options = {}) {
 }
 async function draftArticleForModeInternal({ session = {}, title = "", topic = "", audience = "educators", brief = "" } = {}) {
   const vocabularyInstruction = buildEditorialVocabularyInstruction(session.preferredVocabulary || session.sessionConfiguration?.preferredVocabulary || []);
-  const editorialBrief = [brief, ...(session.specifications || []), vocabularyInstruction].filter(Boolean).join("\n");
+  const videoInstruction = videoEditorialInstruction(session.videoResearch || session.sessionConfiguration?.videoResearch || null);
+  const editorialBrief = [brief, videoInstruction, ...(session.specifications || []), vocabularyInstruction].filter(Boolean).join("\n");
   const promptProfileId = session.sessionConfiguration?.promptProfileId || session.automation?.promptProfileId;
   const promptOverrides = listMarciePromptProfiles().find(profile => profile.id === promptProfileId)?.prompts || null;
   const mode = String(session.editorialMode || "marcie");

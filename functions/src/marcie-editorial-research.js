@@ -58,7 +58,11 @@ function normalizeVideoEvidence(value = {}) {
       isDirectQuote: true
     })).filter((quote) => quote.claim && quote.locator);
   });
-  return { sources, facts: [...facts, ...quotes], summary: clampText(value?.combinedSynthesis, 12000), warnings: (Array.isArray(value?.warnings) ? value.warnings : []).map((item) => clampText(item, 500)).filter(Boolean).slice(0, 30) };
+  const videoAxes = (Array.isArray(value?.videos) ? value.videos : []).map((video) => ({
+    centralIdea: clampText(video?.centralIdea || video?.summary, 1800),
+    neuroeducationConnection: clampText(video?.neuroeducationConnection, 1800)
+  })).filter((item) => item.centralIdea || item.neuroeducationConnection);
+  return { sources, facts: [...facts, ...quotes], summary: clampText(value?.combinedSynthesis, 12000), videoAxes, warnings: (Array.isArray(value?.warnings) ? value.warnings : []).map((item) => clampText(item, 500)).filter(Boolean).slice(0, 30) };
 }
 function stableSourceId(url) {
   let key = String(url || "").trim();
@@ -380,6 +384,10 @@ async function researchArticleEvidenceServer({
   const client = dependencies.client || createVertexClient({ location: "global" });
   const now = dependencies.now instanceof Date ? dependencies.now : new Date();
   const dateWindow = researchDateWindow(period, now);
+  const normalizedVideo = normalizeVideoEvidence(videoEvidence || {});
+  const videoResearchFocus = normalizedVideo.sources.length
+    ? `BASE DE VIDEO OBLIGATORIA: investiga y contrasta la idea central y su relación con la neuroeducación. Amplía esa relación con documentos verificables sin atribuir al video afirmaciones que no contiene. EJES: ${JSON.stringify(normalizedVideo.videoAxes)}. SÍNTESIS: ${normalizedVideo.summary}`
+    : "";
   const editorialMode = normalizeToken(mode) === "aida" ? "aida" : "marcie";
   const requestedMinimum = researchPolicy.target({ editorialMode, editorialProfileSnapshot: { minimumSources } });
   const platformResults = [];
@@ -397,6 +405,7 @@ async function researchArticleEvidenceServer({
 La ventana de actualidad ${dateWindow.from.slice(0, 10)} a ${dateWindow.to.slice(0, 10)} solo clasifica las señales recientes; no excluye estudios pertinentes anteriores. Los documentos anteriores o sin fecha comprobada se marcan historical y se pueden usar para explicar conocimientos y contexto, sin presentarlos como novedades.
 ENFOQUE: ${lens}
 PREFERENCIAS DE INVESTIGACIÓN: ${JSON.stringify(researchInstructions)}
+${videoResearchFocus}
 Las preferencias de tipo de fuente orientan la búsqueda; no cambian las plataformas seleccionadas ni permiten inventar evidencia. Región GLOBAL significa todas las regiones, sin restricción geográfica. Diversifica autorías y publicaciones; pueden coexistir varios documentos distintos en el mismo repositorio. Prioriza HTML o PDF accesible y sigue las referencias hacia documentos originales.
 OBJETIVO TOTAL: ${requestedMinimum} documentos verificados. En esta búsqueda encuentra hasta ${Math.max(8, Math.min(20, Math.ceil(requestedMinimum / researchLenses.length) * 2))} documentos pertinentes.
 RONDA ${round}: ${feedback}
@@ -523,7 +532,6 @@ No devuelvas portadas de buscadores ni inventes rutas, fechas, autores o frases.
   let attributedReferences = [];
   try { attributedReferences = await extractAttributedReferences({ client, verifiedSources: verified.verifiedSources, retrievedPages: verified.retrievedPages }); }
   catch (_) { recommendations.push("No se pudieron extraer citas textuales; utiliza paráfrasis de los hallazgos verificados."); }
-  const normalizedVideo = normalizeVideoEvidence(videoEvidence || {});
   const combinedSources = [...verified.verifiedSources, ...normalizedVideo.sources];
   const combinedFacts = [...facts, ...normalizedVideo.facts];
   return {

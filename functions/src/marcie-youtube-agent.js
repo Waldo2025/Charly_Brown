@@ -1,7 +1,7 @@
 const crypto = require("node:crypto");
 const { buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js");
 
-const ANALYSIS_VERSION = 1;
+const ANALYSIS_VERSION = 2;
 const MAX_YOUTUBE_VIDEOS = 5;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const ANALYSIS_TIMEOUT_MS = 500_000;
@@ -185,6 +185,8 @@ function normalizeVideoAnalysis(parsed = {}, source = {}) {
     channel,
     publishedAt,
     summary: clean(parsed.summary, 2400),
+    centralIdea: clean(parsed.centralIdea, 1800) || clean(parsed.summary, 1800),
+    neuroeducationConnection: clean(parsed.neuroeducationConnection, 1800),
     topics: list(parsed.topics, 12, 240),
     concepts: list(parsed.concepts, 20, 300),
     proposedTopics: list(parsed.proposedTopics, 3, 300),
@@ -198,8 +200,9 @@ function normalizeVideoAnalysis(parsed = {}, source = {}) {
 function videoPrompt({ objective = "", language = "es-MX" } = {}) {
   return `Analiza este video público de YouTube como fuente para un artículo educativo en ${language}. Objetivo editorial: ${clean(objective, 1000) || "identificar el tema, las ideas y la evidencia utilizable"}.
 El video es únicamente el punto de partida editorial: extrae ideas y hallazgos, pero no reproduzcas su secuencia, estructura ni redacción. No entregues una transcripción completa ni paráfrasis extensas o demasiado cercanas al original. No inventes título, canal, fecha, citas ni marcas de tiempo. Distingue lo que el autor dice o muestra (video_attribution) de afirmaciones factuales que necesitan contraste externo (external_fact). Las citas deben tener máximo 25 palabras, una marca de tiempo comprobable y usarse solo cuando sean necesarias para atribuir una idea.
+Identifica obligatoriamente dos elementos separados: (1) la idea central realmente sostenida por el video y (2) su relación pertinente con la neuroeducación. Esa relación debe explicar implicaciones para aprendizaje, atención, memoria, emoción, lenguaje, autorregulación o práctica educativa solo cuando el contenido lo permita; señala como advertencia cualquier inferencia que requiera respaldo documental externo. No fuerces una relación neurocientífica que el video no sustente.
 ${clean(objective, 1000) ? "El objetivo indicado por el usuario es obligatorio: la síntesis y los temas propuestos deben responder directamente a él. No propongas títulos o ángulos que se aparten de esa intención, aunque el video trate otros asuntos secundarios." : "Propón temas que representen con precisión las ideas centrales del video, no temas educativos genéricos."}
-Devuelve SOLO JSON: {"title":"","channel":"","publishedAt":"YYYY-MM-DD o vacío","summary":"","topics":[""],"concepts":[""],"proposedTopics":[""],"evidenceItems":[{"id":"","text":"","timestamp":"MM:SS","evidenceKind":"video_attribution|external_fact","needsCorroboration":true}],"shortQuotes":[{"text":"","timestamp":"MM:SS"}],"warnings":[""]}.`;
+Devuelve SOLO JSON: {"title":"","channel":"","publishedAt":"YYYY-MM-DD o vacío","summary":"","centralIdea":"","neuroeducationConnection":"","topics":[""],"concepts":[""],"proposedTopics":[""],"evidenceItems":[{"id":"","text":"","timestamp":"MM:SS","evidenceKind":"video_attribution|external_fact","needsCorroboration":true}],"shortQuotes":[{"text":"","timestamp":"MM:SS"}],"warnings":[""]}.`;
 }
 
 async function analyzeSingleYoutubeVideo(source, options = {}) {
@@ -255,7 +258,7 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
     analysisVersion: ANALYSIS_VERSION,
     analysisId: `youtube-analysis-${crypto.randomUUID()}`,
     videos,
-    combinedSynthesis: videos.map((video) => `${video.title}: ${video.summary}`).join("\n\n").slice(0, 12000),
+    combinedSynthesis: videos.map((video) => `${video.title}\nIdea central: ${video.centralIdea || video.summary}\nRelación con la neuroeducación: ${video.neuroeducationConnection || "Pendiente de contraste documental"}`).join("\n\n").slice(0, 12000),
     proposedTopics,
     evidenceItems: videos.flatMap((video) => video.evidenceItems),
     bibliographySources: videos.map((video) => video.bibliographySource),

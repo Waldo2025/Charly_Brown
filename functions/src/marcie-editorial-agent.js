@@ -274,6 +274,8 @@ function compactVideoContext(videoResearch = null) {
       title: clean(video?.title, 300),
       channel: clean(video?.channel, 200),
       summary: clean(video?.summary, 1800),
+      centralIdea: clean(video?.centralIdea, 1800),
+      neuroeducationConnection: clean(video?.neuroeducationConnection, 1800),
       topics: (video?.topics || []).slice(0, 10).map((item) => clean(item, 200)),
       concepts: (video?.concepts || []).slice(0, 12).map((item) => clean(item, 240))
     })),
@@ -290,7 +292,7 @@ async function generateProposalOptions({ topic, audiences, generateText, videoRe
   if (typeof generateText !== "function") return fallback;
   const videoContext = compactVideoContext(videoResearch);
   const prompt = `Genera exactamente tres títulos distintos para cada público de un artículo educativo. Tema elegido por el usuario: ${topic}. Públicos: ${audiences.join(", ")}.
-${videoContext ? `El video es la base conceptual obligatoria. Cada título debe reflejar con fidelidad el tema elegido y al menos una idea central comprobable de este expediente, sin copiar el título ni frases del video y sin introducir un enfoque ajeno: ${JSON.stringify(videoContext)}` : "No hay expediente de video."}
+${videoContext ? `El video es la base conceptual obligatoria. Cada título debe articular con fidelidad dos ejes: la idea central comprobable del video y su relación pertinente con la neuroeducación. No copies el título ni frases del video, no introduzcas un enfoque ajeno y no fuerces afirmaciones neurocientíficas sin respaldo: ${JSON.stringify(videoContext)}` : "No hay expediente de video."}
 Adapta el ángulo y el vocabulario a cada público. Evita clickbait, promesas médicas y títulos genéricos. Devuelve SOLO JSON: {"proposals":{"educators":[{"title":""}]}}. Incluye únicamente las claves de públicos solicitadas.`;
   try {
     const raw = await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" });
@@ -1050,7 +1052,7 @@ function createToolHandlers(context) {
       const articles = {};
       for (const audience of audiences) {
         const evidence = evidenceByAudience[audience] || {};
-        const prompt = `Redacta un artículo educativo original en español para ${audience} sobre ${topic}. El video aporta la idea inicial, no una plantilla ni texto para copiar: crea una estructura, argumentación y redacción nuevas, adaptadas específicamente a este público. No reproduzcas la secuencia, frases ni paráfrasis cercanas del video. Amplía, contrasta y fortalece la idea con las fuentes documentales verificadas. Usa exclusivamente la evidencia proporcionada para afirmaciones factuales y conserva sourceIds y locators en cada bloque. Toda idea, opinión o explicación procedente del video debe atribuirse explícitamente a su autor, persona o canal; no la presentes como un hecho externo sin una fuente documental de contraste. Una cita directa de video solo puede usarse si es necesaria, tiene máximo 25 palabras, coincide con shortQuotes y conserva su marca de tiempo. Especificaciones: ${specifications.join("; ")}. EVIDENCIA DOCUMENTAL: ${JSON.stringify(evidence).slice(0, 50000)}. EVIDENCIA DE VIDEO: ${JSON.stringify(videoEvidence || {}).slice(0, 30000)}. Devuelve SOLO JSON de artículo con title, subtitle, audience, blocks, sources y seo.`;
+        const prompt = `Redacta un artículo educativo original en español para ${audience} sobre ${topic}. Si existe evidencia de video, construye obligatoriamente el artículo alrededor de dos ejes: (1) la idea central del video y (2) su relación con la neuroeducación, adaptada al público seleccionado. El video aporta la base conceptual, no una plantilla ni texto para copiar: crea una estructura, argumentación y redacción nuevas. No reproduzcas la secuencia, frases ni paráfrasis cercanas del video. Amplía, contrasta y fortalece ambos ejes con las fuentes documentales verificadas. No atribuyas al video una relación neurocientífica que no sostenga; toda ampliación debe proceder de las fuentes documentales. Usa exclusivamente la evidencia proporcionada para afirmaciones factuales y conserva sourceIds y locators en cada bloque. Toda idea, opinión o explicación procedente del video debe atribuirse explícitamente a su autor, persona o canal; no la presentes como un hecho externo sin una fuente documental de contraste. Una cita directa de video solo puede usarse si es necesaria, tiene máximo 25 palabras, coincide con shortQuotes y conserva su marca de tiempo. Especificaciones: ${specifications.join("; ")}. EVIDENCIA DOCUMENTAL: ${JSON.stringify(evidence).slice(0, 50000)}. EVIDENCIA DE VIDEO: ${JSON.stringify(videoEvidence || {}).slice(0, 30000)}. Devuelve SOLO JSON de artículo con title, subtitle, audience, blocks, sources y seo.`;
         const article = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "HIGH" }), {});
         const sourcePool = Array.isArray(evidence.sources) ? evidence.sources : [];
         const usedIds = new Set((article.blocks || []).flatMap((block) => Array.isArray(block?.sourceIds) ? block.sourceIds.map(String) : []));

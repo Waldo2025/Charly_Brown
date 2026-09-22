@@ -532,11 +532,38 @@ test("las propuestas por público reciben la síntesis y los conceptos del video
   const result = await handlers.generate_audience_proposals({
     topic: "Evaluación formativa",
     audiences: ["educators"],
-    videoEvidence: { objective: "Explicar evaluación formativa", combinedSynthesis: "La retroalimentación orienta el siguiente paso.", videos: [{ title: "Evaluar para aprender", summary: "La autora diferencia calificar de retroalimentar.", concepts: ["retroalimentación"] }] }
+    videoEvidence: { objective: "Explicar evaluación formativa", combinedSynthesis: "La retroalimentación orienta el siguiente paso.", videos: [{ title: "Evaluar para aprender", summary: "La autora diferencia calificar de retroalimentar.", centralIdea: "Evaluar debe orientar el aprendizaje.", neuroeducationConnection: "La retroalimentación favorece metacognición y autorregulación.", concepts: ["retroalimentación"] }] }
   });
   assert.match(receivedPrompt, /base conceptual obligatoria/i);
+  assert.match(receivedPrompt, /idea central comprobable del video y su relación pertinente con la neuroeducación/i);
+  assert.match(receivedPrompt, /metacognición y autorregulación/);
   assert.match(receivedPrompt, /La autora diferencia calificar de retroalimentar/);
   assert.equal(result.proposalsByAudience.educators.length, 3);
+});
+
+test("el redactor MCP exige idea central y relación con neuroeducación", async () => {
+  let receivedPrompt = "";
+  const handlers = createToolHandlers({ generateText: async ({ prompt }) => {
+    receivedPrompt = prompt;
+    return JSON.stringify({ title: "Artículo", blocks: [], seo: {} });
+  } });
+  await handlers.draft_articles({
+    topic: "Lenguaje y aprendizaje",
+    audiences: ["educators"],
+    videoEvidence: { videos: [{ centralIdea: "Las palabras influyen en la experiencia.", neuroeducationConnection: "Relación con emoción y autorregulación." }] }
+  });
+  assert.match(receivedPrompt, /dos ejes/i);
+  assert.match(receivedPrompt, /idea central del video/i);
+  assert.match(receivedPrompt, /relación con la neuroeducación/i);
+  assert.match(receivedPrompt, /No atribuyas al video una relación neurocientífica que no sostenga/i);
+});
+
+test("el flujo automático del editor conserva los dos ejes del video", () => {
+  const modeSource = fs.readFileSync(path.join(__dirname, "../../public/MarcieBlogEditor/js/services/marcie-mode-service.js"), "utf8");
+  assert.match(modeSource, /BASE DE VIDEO OBLIGATORIA PARA LA REDACCIÓN/);
+  assert.match(modeSource, /idea central del video y su relación con la neuroeducación/);
+  assert.match(modeSource, /videoEditorialInstruction\(session\.videoResearch/);
+  assert.match(modeSource, /No atribuyas al video explicaciones neurocientíficas añadidas por las fuentes/);
 });
 
 test("la interfaz ofrece YouTube en agente y configuración manual", () => {
