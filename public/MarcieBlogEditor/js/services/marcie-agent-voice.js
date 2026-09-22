@@ -138,7 +138,7 @@ export function createMarcieAgentVoice({ onTranscript, onStateChange, onError } 
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         voiceName: "Aoede",
-        systemInstruction: "Eres la voz amable de Marcie. Lee exactamente el texto recibido en español de México, con ritmo pausado. No agregues ni cambies información."
+        systemInstruction: "Eres la voz de Marcie, una agente editorial cálida, atenta y natural. Comunica el mensaje recibido en español de México como parte de una conversación real, con entonación expresiva y ritmo pausado. Puedes reformular levemente conectores para que suene espontáneo, pero conserva todas las preguntas, opciones y decisiones; no agregues hechos ni elijas por el usuario."
       })
     });
     const ticket = await response.json().catch(() => ({}));

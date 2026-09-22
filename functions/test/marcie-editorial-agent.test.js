@@ -12,6 +12,7 @@ const {
   missingFields,
   normalizeKey,
   phasePrompt,
+  processAgentTurn,
   sessionRequestFromRun,
   uniqueStrings
 } = require("../src/marcie-editorial-agent.js");
@@ -62,6 +63,55 @@ test("reconoce una URL de YouTube escrita al iniciar y analiza el video", async 
   assert.equal(response.phase, "video_topic");
   assert.equal(run.configuration.creationSource, "youtube");
   assert.deepEqual(run.configuration.sourceInputs.youtube, [{ videoId: "dQw4w9WgXcQ", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }]);
+});
+
+test("conserva la intención escrita junto al video como objetivo obligatorio", async () => {
+  const run = initialRun({ uid: "user-1" });
+  let receivedObjective = "";
+  await advanceRun(run, { text: "Usa este video como base para explicar la evaluación formativa https://youtu.be/dQw4w9WgXcQ" }, {
+    db: {},
+    analyzeYoutubeVideos: async ({ urls, objective }) => {
+      receivedObjective = objective;
+      return { videos: [{ videoId: "dQw4w9WgXcQ", url: urls[0], title: "Evaluación" }], proposedTopics: ["Evaluación formativa"], warnings: [] };
+    }
+  });
+  assert.match(receivedObjective, /evaluación formativa/i);
+  assert.equal(run.configuration.videoObjective, receivedObjective);
+  assert.equal(run.configuration.videoResearch.objective, receivedObjective);
+});
+
+test("responde preguntas durante la configuración sin avanzar ni seleccionar opciones", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "resources";
+  run.configuration.topic = "Evaluación formativa";
+  run.configuration.selectedAudiences = ["educators"];
+  run.configuration.resourceMode = "same";
+  const before = structuredClone(run.configuration);
+  const response = await processAgentTurn(run, { text: "¿Para qué funciona la bibliografía APA 7?" }, {
+    generateText: async () => JSON.stringify({
+      answer: "APA 7 organiza las referencias y permite identificar de dónde proviene la información. Cuando quieras, selecciona los recursos editoriales.",
+      speechText: "APA 7 ayuda a reconocer claramente las fuentes. Ahora puedes elegir los recursos que prefieras."
+    })
+  });
+  assert.equal(run.phase, "resources");
+  assert.deepEqual(run.configuration, before);
+  assert.equal(response.conversationalInterruption, true);
+  assert.match(response.message, /organiza las referencias/i);
+  assert.equal(response.uiPrompt.type, "multi_choice");
+});
+
+test("personaliza la transición oral sin alterar el estado determinista", async () => {
+  const run = initialRun({ uid: "user-1" });
+  run.phase = "tone";
+  run.configuration.topic = "Evaluación formativa";
+  run.configuration.selectedAudiences = ["educators"];
+  const response = await processAgentTurn(run, { value: "warm", text: "Cálido y cercano" }, {
+    generateText: async () => JSON.stringify({ message: "Un tono cálido ayudará a acercar el tema a docentes. ¿Todos los artículos tendrán la misma extensión?", speechText: "Bien, lo contaremos con cercanía. ¿Quieres la misma extensión para todos?" })
+  });
+  assert.equal(run.configuration.tone, "Cálido y cercano");
+  assert.equal(run.phase, "length_mode");
+  assert.match(response.message, /acercar el tema/i);
+  assert.match(response.speechText, /misma extensión/i);
 });
 
 test("publica las herramientas MCP editoriales de Marcie", async () => {
@@ -224,6 +274,22 @@ test("el redactor MCP incluye solo videos utilizados en la bibliografía del art
   const result = await handlers.draft_articles({ topic: "Tema", audiences: ["educators"], evidenceByAudience: { educators: { sources: [documentSource, usedVideo, unusedVideo] } } });
   assert.deepEqual(result.articles.educators.sources.map((source) => source.id), ["doc-1", usedVideo.id]);
   assert.deepEqual(result.articles.educators.researchSources.map((source) => source.id), ["doc-1", usedVideo.id, unusedVideo.id]);
+});
+
+test("las propuestas por público reciben la síntesis y los conceptos del video", async () => {
+  let receivedPrompt = "";
+  const handlers = createToolHandlers({ generateText: async ({ prompt }) => {
+    receivedPrompt = prompt;
+    return JSON.stringify({ proposals: { educators: [{ title: "Retroalimentar para aprender" }, { title: "Evaluación que orienta" }, { title: "Evidencia para ajustar la enseñanza" }] } });
+  } });
+  const result = await handlers.generate_audience_proposals({
+    topic: "Evaluación formativa",
+    audiences: ["educators"],
+    videoEvidence: { objective: "Explicar evaluación formativa", combinedSynthesis: "La retroalimentación orienta el siguiente paso.", videos: [{ title: "Evaluar para aprender", summary: "La autora diferencia calificar de retroalimentar.", concepts: ["retroalimentación"] }] }
+  });
+  assert.match(receivedPrompt, /base conceptual obligatoria/i);
+  assert.match(receivedPrompt, /La autora diferencia calificar de retroalimentar/);
+  assert.equal(result.proposalsByAudience.educators.length, 3);
 });
 
 test("la interfaz ofrece YouTube en agente y configuración manual", () => {

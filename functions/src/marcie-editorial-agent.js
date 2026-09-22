@@ -146,10 +146,34 @@ function fallbackProposals(topic, audiences) {
   ]]));
 }
 
-async function generateProposalOptions({ topic, audiences, generateText }) {
+function compactVideoContext(videoResearch = null) {
+  if (!videoResearch?.videos?.length) return null;
+  return {
+    objective: clean(videoResearch.objective, 800),
+    combinedSynthesis: clean(videoResearch.combinedSynthesis, 5000),
+    proposedTopics: (videoResearch.proposedTopics || []).slice(0, 3).map((item) => clean(item, 300)),
+    videos: videoResearch.videos.slice(0, 5).map((video) => ({
+      title: clean(video?.title, 300),
+      channel: clean(video?.channel, 200),
+      summary: clean(video?.summary, 1800),
+      topics: (video?.topics || []).slice(0, 10).map((item) => clean(item, 200)),
+      concepts: (video?.concepts || []).slice(0, 12).map((item) => clean(item, 240))
+    })),
+    evidenceItems: (videoResearch.evidenceItems || []).slice(0, 20).map((item) => ({
+      text: clean(item?.text, 500),
+      locator: clean(item?.locator || item?.timestamp, 40),
+      evidenceKind: clean(item?.evidenceKind, 40)
+    }))
+  };
+}
+
+async function generateProposalOptions({ topic, audiences, generateText, videoResearch = null }) {
   const fallback = fallbackProposals(topic, audiences);
   if (typeof generateText !== "function") return fallback;
-  const prompt = `Genera exactamente tres títulos distintos para cada público de un artículo educativo. Tema: ${topic}. Públicos: ${audiences.join(", ")}. Evita clickbait, promesas médicas y títulos genéricos. Devuelve SOLO JSON: {"proposals":{"educators":[{"title":""}]}}. Incluye únicamente las claves de públicos solicitadas.`;
+  const videoContext = compactVideoContext(videoResearch);
+  const prompt = `Genera exactamente tres títulos distintos para cada público de un artículo educativo. Tema elegido por el usuario: ${topic}. Públicos: ${audiences.join(", ")}.
+${videoContext ? `El video es la base conceptual obligatoria. Cada título debe reflejar con fidelidad el tema elegido y al menos una idea central comprobable de este expediente, sin copiar el título ni frases del video y sin introducir un enfoque ajeno: ${JSON.stringify(videoContext)}` : "No hay expediente de video."}
+Adapta el ángulo y el vocabulario a cada público. Evita clickbait, promesas médicas y títulos genéricos. Devuelve SOLO JSON: {"proposals":{"educators":[{"title":""}]}}. Incluye únicamente las claves de públicos solicitadas.`;
   try {
     const raw = await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" });
     const parsed = parseJson(raw, {});
@@ -163,6 +187,15 @@ async function generateProposalOptions({ topic, audiences, generateText }) {
   } catch (_) {
     return fallback;
   }
+}
+
+function videoObjectiveFromInput(input = {}) {
+  const raw = String(input.text || input.value || "")
+    .replace(/https:\/\/[^\s,;]+/gi, " ")
+    .replace(/\b(?:por favor|quiero que|quiero|usa|utiliza|toma|tomando|emplea|este|el|un|video|youtube|como base|de base|para crear|crea|haz|art[ií]culos?)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return raw.length >= 8 ? clean(raw, 800) : "";
 }
 
 function initialRun({ uid, displayName = "" } = {}) {
@@ -343,6 +376,83 @@ function sessionRequestFromRun(run) {
   };
 }
 
+function isConfigurationQuestion(run, input = {}) {
+  if (input.action || input.selectedValues?.length || input.urls?.length) return false;
+  const text = clean(input.text || input.value, 4000);
+  if (!text) return false;
+  const explicitHelp = /\b(?:para qu[eé] (?:sirve|funciona)|qu[eé] significa|qu[eé] es|puedes explicar|me explicas|no entiendo|cu[aá]l es la diferencia|c[oó]mo funciona)\b/i.test(text);
+  const choicePhase = ["audiences", "proposals", "tone", "length_mode", "extension", "sources", "resource_mode", "resources", "vocabulary", "summary"].includes(run.phase);
+  return explicitHelp || (choicePhase && /\?|^(?:qu[eé]|c[oó]mo|cu[aá]l|por qu[eé]|d[oó]nde|qui[eé]n)\b/i.test(text));
+}
+
+function conversationContext(run = {}) {
+  const configuration = run.configuration || {};
+  return {
+    phase: run.phase,
+    topic: configuration.topic,
+    audiences: configuration.selectedAudiences,
+    tone: configuration.tone,
+    extensionsByAudience: configuration.extensionsByAudience,
+    sourceMode: configuration.sourceMode,
+    resourcesByAudience: configuration.resourcesByAudience,
+    video: compactVideoContext(configuration.videoResearch)
+  };
+}
+
+async function answerConfigurationQuestion(run, input, context) {
+  const currentPrompt = phasePrompt(run);
+  let answer = "Claro. Puedo explicártelo sin cambiar ninguna opción de la configuración.";
+  if (typeof context.generateText === "function") {
+    const prompt = `Eres Marcie, una agente editorial conversacional en español de México. El usuario interrumpió la configuración para hacer una pregunta. Respóndela de forma clara, cálida y concreta en 2 a 4 oraciones. Puedes explicar para qué sirve una opción, comparar alternativas o responder conocimiento general. No selecciones nada por el usuario, no avances el formulario y no inventes datos. Después de responder, retoma con naturalidad la pregunta pendiente.
+PREGUNTA DEL USUARIO: ${clean(input.text || input.value, 4000)}
+PREGUNTA PENDIENTE: ${currentPrompt.message}
+OPCIONES VISIBLES: ${JSON.stringify(currentPrompt.uiPrompt?.options || [])}
+CONTEXTO EDITORIAL: ${JSON.stringify(conversationContext(run)).slice(0, 16000)}
+Devuelve SOLO JSON: {"answer":"respuesta completa que termina retomando la pregunta pendiente","speechText":"versión natural para decir en voz alta"}`;
+    try {
+      const parsed = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), {});
+      answer = clean(parsed.answer, 2400) || answer;
+      return promptResponse(run, answer, currentPrompt.uiPrompt, {
+        speechText: clean(parsed.speechText, 2400) || answer,
+        conversationalInterruption: true
+      });
+    } catch (_) {}
+  }
+  const message = `${answer} ${currentPrompt.message}`;
+  return promptResponse(run, message, currentPrompt.uiPrompt, { speechText: message, conversationalInterruption: true });
+}
+
+async function personalizeAgentResponse(run, input, response, context, previousPhase) {
+  if (typeof context.generateText !== "function" || response.conversationalInterruption) return response;
+  const prompt = `Eres Marcie, una agente editorial cálida, inteligente y natural en español de México. Acabas de recibir una respuesta del usuario durante la configuración de artículos. Redacta una transición breve y variada: reconoce específicamente lo que entendiste y formula la siguiente pregunta indicada. No cambies decisiones, opciones, cifras ni el estado; no respondas por el usuario. Si existe un expediente de video, menciona detalles reales solo cuando ayuden a demostrar que lo comprendiste. Evita frases repetitivas como "Perfecto" en todos los turnos.
+FASE ANTERIOR: ${previousPhase}
+RESPUESTA DEL USUARIO: ${clean(input.text || input.value || (input.selectedValues || []).join(", "), 3000)}
+MENSAJE BASE OBLIGATORIO: ${response.message}
+OPCIONES VISIBLES: ${JSON.stringify(response.uiPrompt?.options || [])}
+CONTEXTO EDITORIAL: ${JSON.stringify(conversationContext(run)).slice(0, 16000)}
+Devuelve SOLO JSON: {"message":"texto visible","speechText":"versión conversacional para voz"}`;
+  try {
+    const parsed = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "LOW" }), {});
+    const message = clean(parsed.message, 2400);
+    const speechText = clean(parsed.speechText, 2400);
+    return message ? { ...response, message, speechText: speechText || message } : response;
+  } catch (_) {
+    return response;
+  }
+}
+
+async function processAgentTurn(run, input, context) {
+  if (run.status === "configuring" && isConfigurationQuestion(run, input)) {
+    return answerConfigurationQuestion(run, input, context);
+  }
+  const previousPhase = run.phase;
+  const response = await advanceRun(run, input, context);
+  if (["configuring", "ready"].includes(run.status)) {
+    return personalizeAgentResponse(run, input, response, context, previousPhase);
+  }
+  return response;
+}
+
 async function advanceRun(run, input, context) {
   const configuration = run.configuration;
   const patch = {};
@@ -389,21 +499,33 @@ async function advanceRun(run, input, context) {
     configuration.creationSource = resolvedSource;
     patch.creationSource = resolvedSource;
     run.phase = resolvedSource === "youtube" ? "youtube_urls" : (rawValue === "topic" ? "topic" : "audiences");
+    if (resolvedSource === "youtube") {
+      const videoObjective = videoObjectiveFromInput(input);
+      if (videoObjective) {
+        configuration.videoObjective = videoObjective;
+        patch.videoObjective = videoObjective;
+      }
+    }
     if (resolvedSource === "topic" && rawValue !== "topic") {
       configuration.topic = rawValue;
       patch.topic = rawValue;
     }
     if (detectedUrls.length) {
-      const analysis = await context.analyzeYoutubeVideos({ urls: detectedUrls, objective: configuration.topic, language: "es-MX" });
+      const videoObjective = videoObjectiveFromInput(input);
+      const analysis = await context.analyzeYoutubeVideos({ urls: detectedUrls, objective: videoObjective || configuration.topic, language: "es-MX" });
+      analysis.objective = videoObjective || configuration.topic || "";
+      configuration.videoObjective = analysis.objective;
       configuration.sourceInputs = { youtube: analysis.videos.map((video) => ({ videoId: video.videoId, url: video.url })) };
       configuration.videoResearch = analysis;
+      patch.videoObjective = configuration.videoObjective;
       patch.sourceInputs = configuration.sourceInputs;
       patch.videoResearch = analysis;
       run.phase = "video_topic";
     }
   } else if (run.phase === "youtube_urls") {
     const urls = Array.isArray(input.urls) ? input.urls : String(input.text || input.value || "").split(/[\n,;]+/);
-    const analysis = await context.analyzeYoutubeVideos({ urls, objective: configuration.topic, language: "es-MX" });
+    const analysis = await context.analyzeYoutubeVideos({ urls, objective: configuration.videoObjective || configuration.topic, language: "es-MX" });
+    analysis.objective = configuration.videoObjective || configuration.topic || "";
     configuration.sourceInputs = { youtube: analysis.videos.map((video) => ({ videoId: video.videoId, url: video.url })) };
     configuration.videoResearch = analysis;
     patch.sourceInputs = configuration.sourceInputs;
@@ -432,7 +554,7 @@ async function advanceRun(run, input, context) {
     const audiences = selectedValues(input, AUDIENCES).filter((value) => AUDIENCES.some((item) => item.id === value));
     if (!audiences.length) return phasePrompt(run);
     configuration.selectedAudiences = audiences; patch.selectedAudiences = audiences;
-    configuration.proposalOptionsByAudience = await generateProposalOptions({ topic: configuration.topic, audiences, generateText: context.generateText });
+    configuration.proposalOptionsByAudience = await generateProposalOptions({ topic: configuration.topic, audiences, generateText: context.generateText, videoResearch: configuration.videoResearch });
     run.phase = "proposals";
   } else if (run.phase === "proposals") {
     const audience = configuration.selectedAudiences.find((item) => !configuration.proposalsByAudience[item]);
@@ -648,8 +770,8 @@ function createToolHandlers(context) {
       await ref.set({ title: topic, topic, ownerId: context.uid, ownerUid: context.uid, status: "new", audience, selectedAudiences, specifications, preferredVocabulary: uniqueStrings(preferredVocabulary, 250), sourceInputs, videoResearch, editorialMode: "marcie", article, articlesByAudience: { [audience]: article }, createdAt: now, updatedAt: now });
       return { sessionId: ref.id, status: "new" };
     },
-    async generate_audience_proposals({ topic, audiences }) {
-      return { proposalsByAudience: await generateProposalOptions({ topic, audiences, generateText: context.generateText }) };
+    async generate_audience_proposals({ topic, audiences, videoEvidence = null }) {
+      return { proposalsByAudience: await generateProposalOptions({ topic, audiences, generateText: context.generateText, videoResearch: videoEvidence }) };
     },
     async analyze_youtube_videos(args) {
       return context.analyzeYoutubeVideos(args);
@@ -714,7 +836,7 @@ function registerTools(server, handlers) {
   add("get_session_context", "Lee una sesión editorial propia y sus revisiones.", { sessionId: z.string().min(1) });
   add("get_trending_topics", "Consulta las tendencias verificadas más recientes del radar editorial.", { limit: z.number().int().min(1).max(6).optional() });
   add("create_editorial_session", "Crea una sesión editorial sin publicar contenido.", { topic: z.string().min(3).max(600), selectedAudiences: z.array(audience).min(1).max(4), specifications: z.array(z.string().max(1000)).max(80).optional(), preferredVocabulary: z.array(z.string().max(100)).max(250).optional(), sourceInputs: z.any().optional(), videoResearch: z.any().optional() });
-  add("generate_audience_proposals", "Genera tres propuestas de título para cada público.", { topic: z.string().min(3).max(600), audiences: z.array(audience).min(1).max(4) });
+  add("generate_audience_proposals", "Genera tres propuestas de título para cada público usando el expediente de video cuando exista.", { topic: z.string().min(3).max(600), audiences: z.array(audience).min(1).max(4), videoEvidence: z.any().optional() });
   add("analyze_youtube_videos", "Analiza de uno a cinco videos públicos de YouTube sin almacenar audio ni transcripciones completas.", { urls: z.array(z.string().max(3000)).min(1).max(5), objective: z.string().max(1000).optional(), language: z.enum(["es-MX"]).optional() });
   add("research_sources", "Investiga documentos originales y contrasta evidencia de video.", { topic: z.string().min(3).max(2000), audience, minimumSources: z.number().int().min(1).max(20).optional(), region: z.string().max(80).optional(), period: z.enum(["1m", "3m", "6m", "12m"]).optional(), searchPlatforms: z.array(z.string()).max(30).optional(), researchInstructions: z.array(z.string().max(2000)).max(50).optional(), videoEvidence: z.any().optional() });
   add("draft_articles", "Redacta artículos por público usando expedientes documentales y de video.", { topic: z.string().min(3).max(600), audiences: z.array(audience).min(1).max(4), evidenceByAudience: z.record(z.string(), z.any()).optional(), specifications: z.array(z.string().max(1000)).max(80).optional(), videoEvidence: z.any().optional() });
@@ -769,7 +891,7 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
     if (!run) run = initialRun({ uid: context.uid, displayName: context.displayName });
     const input = req.body?.input && typeof req.body.input === "object" ? req.body.input : {};
     const response = clean(input.text || input.value) || input.action || input.selectedValues?.length || input.urls?.length
-      ? await advanceRun(run, input, context)
+      ? await processAgentTurn(run, input, context)
       : phasePrompt(run);
     response.configurationPatch = response.configurationPatch || {};
     await saveRun(context, run, input, response);
@@ -832,6 +954,7 @@ module.exports = {
   missingFields,
   normalizeKey,
   phasePrompt,
+  processAgentTurn,
   registerMarcieEditorialAgentRoutes,
   sessionRequestFromRun,
   specificationList,

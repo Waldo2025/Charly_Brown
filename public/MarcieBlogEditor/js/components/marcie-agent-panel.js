@@ -1,5 +1,5 @@
 import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r1";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260921r3";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r4";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
