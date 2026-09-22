@@ -1,4 +1,4 @@
-import { sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r2";
+import { getAgentHistory, sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r3";
 import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r5";
 
 function escapeHtml(value = "") {
@@ -28,6 +28,34 @@ function videoResearchHtml(videoResearch = {}) {
   return `<section class="marcie-agent-video-result"><div class="marcie-agent-video-result__heading"><i data-lucide="youtube"></i><strong>${videos.length} ${videos.length === 1 ? "video analizado" : "videos analizados"}</strong></div>${videos.map((video) => `<article><strong>${escapeHtml(video.title)}</strong><span>${escapeHtml(video.channel || "Canal no identificado")}</span><p>${escapeHtml(video.summary || "")}</p></article>`).join("")}${videoResearch.warnings?.length ? `<p class="marcie-agent-video-result__warning">${escapeHtml(videoResearch.warnings.join(" "))}</p>` : ""}</section>`;
 }
 
+function articlePreviewHtml(article = {}) {
+  const blocks = Array.isArray(article.blocks) ? article.blocks : [];
+  return `<article class="marcie-change-preview__article">
+    <h4>${escapeHtml(article.title || "Artículo sin título")}</h4>
+    ${article.subtitle ? `<p class="marcie-change-preview__subtitle">${escapeHtml(article.subtitle)}</p>` : ""}
+    <div class="marcie-change-preview__content">${blocks.length ? blocks.map((block) => {
+      const heading = block.title ? `<strong>${escapeHtml(block.title)}</strong>` : "";
+      const text = block.text ? `<p>${escapeHtml(block.text)}</p>` : "";
+      const items = block.items?.length ? `<ul>${block.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
+      return `<section>${heading}${text}${items}</section>`;
+    }).join("") : "<p>La propuesta no contiene bloques visibles.</p>"}</div>
+    <footer>${Number(article.sourceCount || 0)} fuentes · Revisión ${Number(article.revision || 0)}</footer>
+  </article>`;
+}
+
+function changePreviewHtml(changePreview = {}) {
+  if (!changePreview.preview) return "";
+  const findings = Array.isArray(changePreview.findings) ? changePreview.findings : [];
+  const changes = Array.isArray(changePreview.changes) ? changePreview.changes : [];
+  return `<section class="marcie-change-preview" aria-label="Vista previa de cambios">
+    <header><span>Vista previa</span><strong>Sin aplicar</strong></header>
+    ${findings.length ? `<ul class="marcie-change-preview__findings">${findings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+    ${changes.length ? `<div class="marcie-change-preview__changes"><h4>${changes.length} ${changes.length === 1 ? "cambio propuesto" : "cambios propuestos"}</h4>${changes.map((change, index) => `<article><header><strong>${escapeHtml(change.label || `Cambio ${index + 1}`)}</strong>${change.rationale ? `<span>${escapeHtml(change.rationale)}</span>` : ""}</header><div><span>Antes</span><p>${escapeHtml(change.before || "Sin contenido")}</p></div><div><span>Después</span><p>${escapeHtml(change.after || "Sin contenido")}</p></div></article>`).join("")}</div>` : ""}
+    <details open><summary>Versión propuesta</summary>${articlePreviewHtml(changePreview.preview)}</details>
+    ${changePreview.original ? `<details><summary>Comparar con la versión actual</summary>${articlePreviewHtml(changePreview.original)}</details>` : ""}
+  </section>`;
+}
+
 function optionButton(option) {
   return `<button type="button" class="marcie-agent-option" data-option-id="${escapeHtml(option.id)}" data-option-action="${escapeHtml(option.action || "")}" data-option-value="${escapeHtml(option.value || option.label || "")}">${escapeHtml(option.label || option.value || option.id)}</button>`;
 }
@@ -55,6 +83,8 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let guide = null;
   let panelAudioEnabled = false;
   let panelActivity = "";
+  let loadedSessionId = "";
+  let historyRequestId = 0;
   const messages = [];
 
   host.innerHTML = `
@@ -187,7 +217,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     const surface = activeSurface();
     const prompt = response.uiPrompt || {};
     const options = Array.isArray(prompt.options) ? prompt.options : [];
-    surface.optionsHost.innerHTML = `${response.phase === "summary" ? configurationHtml(response.configuration) : ""}${response.phase === "video_topic" ? videoResearchHtml(response.videoResearch || response.configuration?.videoResearch) : ""}`;
+    surface.optionsHost.innerHTML = `${response.phase === "summary" ? configurationHtml(response.configuration) : ""}${response.phase === "video_topic" ? videoResearchHtml(response.videoResearch || response.configuration?.videoResearch) : ""}${prompt.type === "change_preview" ? changePreviewHtml(response.changePreview) : ""}`;
     if (prompt.type === "url_list") {
       renderYoutubeUrlList(surface, response.configuration?.sourceInputs?.youtube || []);
       window.lucide?.createIcons?.();
@@ -400,6 +430,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   async function startGuidedSession() {
     voice.prime();
     runId = "";
+    loadedSessionId = "";
     responseState = null;
     messages.length = 0;
     renderPanelMessages();
@@ -415,6 +446,52 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     }
   }
 
+  async function loadSession(session, { force = false } = {}) {
+    const sessionId = String(session?.id || "").trim();
+    if (!sessionId || guide || busy || (!force && loadedSessionId === sessionId)) return;
+    loadedSessionId = sessionId;
+    const requestId = ++historyRequestId;
+    panelActivity = "Marcie está recuperando la conversación";
+    setStatus("processing");
+    renderPanelMessages();
+    try {
+      const history = await getAgentHistory(sessionId);
+      if (requestId !== historyRequestId || loadedSessionId !== sessionId) return;
+      runId = history.runId || "";
+      responseState = null;
+      messages.length = 0;
+      (history.messages || []).forEach((message) => {
+        if ((message.role === "user" || message.role === "assistant") && message.text) messages.push({ role: message.role, text: message.text });
+      });
+      if (history.pendingChange) {
+        responseState = {
+          phase: "reviewing",
+          changePreview: history.pendingChange,
+          uiPrompt: {
+            type: "change_preview",
+            options: [
+              { id: "discard_change", label: "Descartar", action: "discard_change" },
+              { id: "apply_change", label: "Aplicar cambios", action: "apply_change" }
+            ]
+          }
+        };
+      }
+      panel.optionsHost.replaceChildren();
+      if (responseState) renderOptions(responseState);
+    } catch (error) {
+      if (requestId === historyRequestId) {
+        loadedSessionId = "";
+        onNotify?.(`No pude recuperar el historial: ${error.message}`, "warning");
+      }
+    } finally {
+      if (requestId === historyRequestId) {
+        panelActivity = "";
+        setStatus("idle");
+        renderPanelMessages();
+      }
+    }
+  }
+
   panel.header.addEventListener("click", () => {
     panel.body.hidden = !panel.body.hidden;
     panel.header.setAttribute("aria-expanded", String(!panel.body.hidden));
@@ -423,5 +500,5 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   bindComposer(panel, { allowNewSession: true });
   updatePanelAudioControl();
   renderPanelMessages();
-  return { startGuidedSession };
+  return { loadSession, startGuidedSession };
 }

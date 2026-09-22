@@ -4735,6 +4735,33 @@ html[data-marcie-ui-theme="dark"] .editorial-action-tile__desc {
 .marcie-agent-option-list { display: grid; gap: 0.4rem; }
 .marcie-agent-option { min-height: 44px; padding: 0.55rem 0.7rem; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #334155; text-align: left; font-size: 0.72rem; line-height: 1.35; }
 .marcie-agent-option:hover, .marcie-agent-option:focus-visible, .marcie-agent-option.is-selected { border-color: #0f766e; background: #f0fdfa; color: #115e59; outline: none; }
+.marcie-change-preview { margin-bottom: 0.65rem; border: 1px solid var(--marcie-ui-border, #cbd5e1); border-radius: 8px; overflow: hidden; color: var(--marcie-ui-text, #1e293b); background: var(--marcie-ui-surface, #fff); }
+.marcie-change-preview > header { min-height: 42px; padding: 0.6rem 0.7rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border-bottom: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-change-preview > header span { font-size: 0.75rem; font-weight: 750; }
+.marcie-change-preview > header strong { color: #b45309; font-size: 0.65rem; text-transform: uppercase; }
+.marcie-change-preview__findings { margin: 0; padding: 0.65rem 0.75rem 0.65rem 1.75rem; border-bottom: 1px solid var(--marcie-ui-border, #e2e8f0); color: var(--marcie-ui-text-soft, #475569); font-size: 0.7rem; line-height: 1.45; }
+.marcie-change-preview__changes { padding: 0.7rem; border-bottom: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-change-preview__changes > h4 { margin: 0 0 0.5rem; color: #0f766e; font-size: 0.7rem; }
+.marcie-change-preview__changes > article { padding: 0.6rem 0; border-top: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-change-preview__changes > article:first-of-type { border-top: 0; }
+.marcie-change-preview__changes article > header { display: grid; gap: 0.15rem; margin-bottom: 0.45rem; }
+.marcie-change-preview__changes article > header strong { font-size: 0.72rem; }
+.marcie-change-preview__changes article > header span { color: var(--marcie-ui-text-muted, #64748b); font-size: 0.66rem; line-height: 1.4; }
+.marcie-change-preview__changes article > div { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 0.45rem; padding: 0.35rem 0; }
+.marcie-change-preview__changes article > div > span { color: var(--marcie-ui-text-muted, #64748b); font-size: 0.62rem; font-weight: 750; text-transform: uppercase; }
+.marcie-change-preview__changes article > div > p { margin: 0; overflow-wrap: anywhere; font-size: 0.69rem; line-height: 1.45; white-space: pre-wrap; }
+.marcie-change-preview__changes article > div:last-child > p { color: #0f766e; }
+.marcie-change-preview details { border-bottom: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-change-preview details:last-child { border-bottom: 0; }
+.marcie-change-preview summary { min-height: 42px; padding: 0.65rem 0.7rem; cursor: pointer; color: var(--marcie-ui-text-soft, #475569); font-size: 0.7rem; font-weight: 700; }
+.marcie-change-preview__article { max-height: 280px; padding: 0 0.75rem 0.75rem; overflow-y: auto; }
+.marcie-change-preview__article h4 { margin: 0 0 0.35rem; font-size: 0.84rem; line-height: 1.35; }
+.marcie-change-preview__subtitle { margin: 0 0 0.65rem; color: var(--marcie-ui-text-muted, #64748b); font-size: 0.7rem; line-height: 1.4; }
+.marcie-change-preview__content section { padding: 0.45rem 0; border-top: 1px solid var(--marcie-ui-border, #e2e8f0); }
+.marcie-change-preview__content strong, .marcie-change-preview__content p, .marcie-change-preview__content li { font-size: 0.69rem; line-height: 1.5; }
+.marcie-change-preview__content p { margin: 0.25rem 0 0; white-space: pre-wrap; }
+.marcie-change-preview__content ul { margin: 0.3rem 0 0; padding-left: 1.15rem; }
+.marcie-change-preview__article footer { margin-top: 0.55rem; color: var(--marcie-ui-text-muted, #64748b); font-size: 0.62rem; }
 .marcie-agent-youtube { display: grid; gap: 0.75rem; }
 .marcie-agent-youtube__rows { display: grid; gap: 0.5rem; }
 .marcie-agent-youtube__rows label { display: grid; grid-template-columns: 72px minmax(0, 1fr) 44px; align-items: center; gap: 0.5rem; color: #475569; font-size: 0.72rem; font-weight: 700; }

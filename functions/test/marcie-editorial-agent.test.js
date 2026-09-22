@@ -15,6 +15,7 @@ const {
   normalizeKey,
   phasePrompt,
   processAgentTurn,
+  readSessionHistory,
   sessionRequestFromRun,
   uniqueStrings,
   withModelRetry
@@ -71,6 +72,14 @@ test("el chat permanente se asocia a la sesión activa sin iniciar el cuestionar
   assert.match(panelSource, /mode: guide \? "configuration" : "assistant"/);
   assert.match(panelSource, /sessionId: activeSession\?\.id/);
   assert.match(apiSource, /\{ runId, input, mode, sessionId \}/);
+  assert.match(apiSource, /\/api\/marcie\/agent\/history\?sessionId=/);
+  assert.match(panelSource, /async function loadSession\(session/);
+  assert.match(panelSource, /history\.messages/);
+  assert.match(panelSource, /return \{ loadSession, startGuidedSession \}/);
+  assert.match(panelSource, /Vista previa de cambios/);
+  assert.match(panelSource, />Antes</);
+  assert.match(panelSource, />Después</);
+  assert.match(panelSource, /Sin aplicar/);
 });
 
 test("avanza por los recursos de cada público sin quedar detenido", async () => {
@@ -303,11 +312,124 @@ test("la revisión posterior requiere vista previa y detecta la revisión base",
   assert.equal(response.uiPrompt.type, "change_preview");
   assert.equal(run.pendingChange.baseRevision, 0);
   assert.equal(stored.articlesByAudience.educators.revision, 0);
+  assert.equal(response.changePreview.original.title, "Tema");
+  assert.equal(response.changePreview.preview.title, "Tema revisado");
+  assert.deepEqual(response.changePreview.changes[0], {
+    scope: "title",
+    label: "Título",
+    before: "Tema",
+    after: "Tema revisado",
+    rationale: ""
+  });
 
   response = await advanceRun(run, { action: "apply_change" }, { db, uid: "user-1" });
   assert.match(response.message, /Apliqué los cambios/);
   assert.equal(stored.articlesByAudience.educators.revision, 1);
   assert.deepEqual(stored.approvedAudiences, []);
+});
+
+test("Marcie puede proponer la edición de un solo fragmento sin tocar el resto", async () => {
+  let stored = {
+    ownerId: "user-1",
+    title: "Tema",
+    topic: "Tema",
+    audience: "educators",
+    article: {
+      title: "Tema",
+      blocks: [
+        { type: "paragraph", text: "Primer párrafo intacto." },
+        { type: "paragraph", text: "Segundo párrafo por mejorar." }
+      ],
+      revision: 3
+    },
+    articlesByAudience: {}
+  };
+  stored.articlesByAudience.educators = stored.article;
+  const ref = {
+    async get() { return { exists: true, id: "session-1", data: () => stored }; },
+    async set(value) { stored = { ...stored, ...value }; }
+  };
+  const db = { collection() { return { doc() { return ref; } }; } };
+  const run = { ...initialRun({ uid: "user-1" }), sessionId: "session-1", phase: "completed", status: "completed" };
+  let generationCall = 0;
+  const generateText = async () => {
+    generationCall += 1;
+    if (generationCall === 1) return JSON.stringify({ intent: "revise", audience: "educators", instruction: "Haz más claro el segundo párrafo" });
+    return JSON.stringify({
+      article: {
+        ...stored.article,
+        blocks: [
+          stored.article.blocks[0],
+          { type: "paragraph", text: "Segundo párrafo explicado con mayor claridad." }
+        ]
+      },
+      findings: ["El segundo párrafo podía ser más directo."],
+      summary: "Preparé una mejora puntual.",
+      changes: [{ scope: "paragraph", blockIndex: 1, label: "Segundo párrafo", before: "texto incorrecto del modelo", after: "otro texto", rationale: "Mejora la claridad." }]
+    });
+  };
+
+  const response = await advanceRun(run, { text: "Haz más claro el segundo párrafo" }, { db, uid: "user-1", generateText });
+  assert.equal(response.uiPrompt.type, "change_preview");
+  assert.equal(response.changePreview.changes.length, 1);
+  assert.deepEqual(response.changePreview.changes[0], {
+    scope: "paragraph",
+    label: "Segundo párrafo",
+    before: "Segundo párrafo por mejorar.",
+    after: "Segundo párrafo explicado con mayor claridad.",
+    rationale: "Mejora la claridad."
+  });
+  assert.equal(response.changePreview.preview.blocks[0].text, "Primer párrafo intacto.");
+  assert.equal(stored.articlesByAudience.educators.revision, 3);
+});
+
+test("restaura el historial de la sesión y conserva una propuesta pendiente", async () => {
+  const session = {
+    ownerId: "user-1",
+    audience: "educators",
+    article: { title: "Actual", blocks: [{ type: "paragraph", text: "Texto actual" }], revision: 4 },
+    articlesByAudience: { educators: { title: "Actual", blocks: [{ type: "paragraph", text: "Texto actual" }], revision: 4 } }
+  };
+  const runs = [
+    { id: "run-old", ownerId: "user-1", sessionId: "session-1", updatedAt: "2026-09-21T10:00:00.000Z" },
+    {
+      id: "run-new",
+      ownerId: "user-1",
+      sessionId: "session-1",
+      updatedAt: "2026-09-22T10:00:00.000Z",
+      pendingChange: {
+        audience: "educators",
+        baseRevision: 4,
+        preview: { title: "Propuesta", blocks: [{ type: "paragraph", text: "Texto propuesto" }], revision: 4 },
+        findings: ["Puede ser más claro."]
+      }
+    }
+  ];
+  const messages = [
+    { id: "m2", role: "assistant", text: "Aquí está la propuesta.", createdAt: "2026-09-22T10:00:02.000Z" },
+    { id: "m1", role: "user", text: "Mejora la introducción.", createdAt: "2026-09-22T10:00:01.000Z" }
+  ];
+  const messageSnapshot = { forEach(callback) { messages.forEach((item) => callback({ id: item.id, data: () => item })); } };
+  const db = {
+    collection(name) {
+      if (name === "MarcieBlogEditor") return { doc() { return { async get() { return { exists: true, id: "session-1", data: () => session }; } }; } };
+      if (name === "MarcieEditorialAgentRuns") return {
+        where() { return { async get() { return { forEach(callback) { runs.forEach((item) => callback({ id: item.id, data: () => item })); } }; } }; },
+        doc(id) {
+          assert.equal(id, "run-new");
+          return { collection() { return { orderBy() { return { limit() { return { async get() { return messageSnapshot; } }; } }; } }; } };
+        }
+      };
+      throw new Error(`Colección inesperada: ${name}`);
+    }
+  };
+
+  const history = await readSessionHistory({ db, uid: "user-1" }, "session-1");
+  assert.equal(history.runId, "run-new");
+  assert.deepEqual(history.messages.map((item) => item.text), ["Mejora la introducción.", "Aquí está la propuesta."]);
+  assert.equal(history.pendingChange.original.title, "Actual");
+  assert.equal(history.pendingChange.preview.title, "Propuesta");
+  assert.ok(history.pendingChange.changes.some((change) => change.before === "Texto actual" && change.after === "Texto propuesto"));
 });
 
 test("analiza el artículo solicitado sin volver al flujo de configuración", async () => {

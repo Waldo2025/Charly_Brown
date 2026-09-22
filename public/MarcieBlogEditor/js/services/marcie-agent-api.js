@@ -23,12 +23,33 @@ async function postAgent(path, payload = {}) {
   return result;
 }
 
+async function getAgent(path) {
+  const user = getCurrentUser();
+  if (!user) throw new Error("Inicia sesión para usar el agente editorial.");
+  const token = await user.getIdToken();
+  const response = await fetch(buildMarcieApiUrl(path), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.message || result.error || `Error del agente (${response.status})`);
+    error.status = response.status;
+    error.detail = result;
+    throw error;
+  }
+  return result;
+}
+
 export function startAgentConversation() {
   return postAgent("/api/marcie/agent/chat", { input: {} });
 }
 
 export function sendAgentTurn(runId, input, { mode = "configuration", sessionId = "" } = {}) {
   return postAgent("/api/marcie/agent/chat", { runId, input, mode, sessionId });
+}
+
+export function getAgentHistory(sessionId) {
+  return getAgent(`/api/marcie/agent/history?sessionId=${encodeURIComponent(sessionId)}`);
 }
 
 export function analyzeYoutubeVideos(urls, objective = "") {

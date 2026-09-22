@@ -11,6 +11,15 @@ const editorHtml = fs.readFileSync(path.join(root, "public/MarcieBlogEditor.html
 const styles = fs.readFileSync(path.join(root, "public/MarcieBlogEditor/css/MarcieBlogEditor.css"), "utf8");
 const firebaseConfig = fs.readFileSync(path.join(root, "firebase.json"), "utf8");
 
+test("la revisión del agente muestra una comparación visible antes de aplicar", () => {
+  assert.match(styles, /\.marcie-change-preview/);
+  assert.match(styles, /\.marcie-change-preview__changes/);
+  assert.match(agentPanel, /Versión propuesta/);
+  assert.match(agentPanel, /Comparar con la versión actual/);
+  assert.match(agentPanel, /Aplicar cambios/);
+  assert.match(editorApp, /marcieAgentPanel\?\.loadSession\(session\)/);
+});
+
 test("Lucide usa un CDN permitido por la política CSP", () => {
   assert.match(editorHtml, /https:\/\/cdn\.jsdelivr\.net\/npm\/lucide@1\.33\.0\/dist\/umd\/lucide\.min\.js/);
   assert.doesNotMatch(editorHtml, /https:\/\/unpkg\.com\/lucide/);

@@ -141,6 +141,86 @@ function publicSession(session = {}) {
   };
 }
 
+function articlePreviewForUi(article = {}) {
+  return {
+    title: clean(article.title, 300),
+    subtitle: clean(article.subtitle, 600),
+    audience: clean(article.audience, 80),
+    blocks: (Array.isArray(article.blocks) ? article.blocks : []).slice(0, 80).map((block) => ({
+      type: clean(block?.type, 80),
+      title: clean(block?.title || block?.heading, 300),
+      text: clean(block?.text || block?.content || block?.quote || block?.html, 12000),
+      items: (Array.isArray(block?.items) ? block.items : []).slice(0, 30).map((item) => clean(typeof item === "string" ? item : item?.text || item?.content, 1000)).filter(Boolean)
+    })),
+    sourceCount: Array.isArray(article.sources) ? article.sources.length : 0,
+    revision: Number(article.revision || 0)
+  };
+}
+
+function pendingChangeForUi(pending = null, currentArticle = {}) {
+  if (!pending?.preview) return null;
+  const verifiedChanges = deriveArticleChanges(currentArticle, pending.preview, pending.changes || []);
+  return {
+    audience: clean(pending.audience, 80),
+    baseRevision: Number(pending.baseRevision || 0),
+    findings: (pending.findings || []).slice(0, 20).map((item) => clean(item, 1000)).filter(Boolean),
+    changes: verifiedChanges.slice(0, 40).map((change) => ({
+      scope: clean(change?.scope, 80),
+      label: clean(change?.label, 300),
+      before: clean(change?.before, 12000),
+      after: clean(change?.after, 12000),
+      rationale: clean(change?.rationale, 1000)
+    })).filter((change) => change.before !== change.after),
+    original: articlePreviewForUi(currentArticle),
+    preview: articlePreviewForUi(pending.preview),
+    createdAt: clean(pending.createdAt, 80)
+  };
+}
+
+function blockComparisonText(block = {}) {
+  return clean([
+    block?.title || block?.heading,
+    block?.text || block?.content || block?.quote || block?.html,
+    ...(Array.isArray(block?.items) ? block.items.map((item) => typeof item === "string" ? item : item?.text || item?.content) : [])
+  ].filter(Boolean).join("\n"), 12000);
+}
+
+function deriveArticleChanges(original = {}, revised = {}, reported = []) {
+  const changes = [];
+  const add = (change) => {
+    const before = clean(change.before, 12000);
+    const after = clean(change.after, 12000);
+    if (before === after) return;
+    changes.push({
+      scope: clean(change.scope || "content", 80),
+      label: clean(change.label || `Cambio ${changes.length + 1}`, 300),
+      before,
+      after,
+      rationale: clean(change.rationale, 1000),
+      ...(Number.isInteger(change.blockIndex) ? { blockIndex: change.blockIndex } : {})
+    });
+  };
+  if (clean(original.title, 300) !== clean(revised.title, 300)) add({ scope: "title", label: "Título", before: original.title, after: revised.title });
+  if (clean(original.subtitle, 600) !== clean(revised.subtitle, 600)) add({ scope: "subtitle", label: "Subtítulo", before: original.subtitle, after: revised.subtitle });
+  const originalBlocks = Array.isArray(original.blocks) ? original.blocks : [];
+  const revisedBlocks = Array.isArray(revised.blocks) ? revised.blocks : [];
+  const length = Math.max(originalBlocks.length, revisedBlocks.length);
+  for (let index = 0; index < length; index += 1) {
+    const before = blockComparisonText(originalBlocks[index]);
+    const after = blockComparisonText(revisedBlocks[index]);
+    const modelChange = (reported || []).find((change) => Number(change?.blockIndex) === index);
+    add({
+      scope: clean(modelChange?.scope || originalBlocks[index]?.type || revisedBlocks[index]?.type || "block", 80),
+      label: clean(modelChange?.label || `Bloque ${index + 1}`, 300),
+      before,
+      after,
+      rationale: modelChange?.rationale,
+      blockIndex: index
+    });
+  }
+  return changes.slice(0, 40);
+}
+
 async function loadOwnedSession(db, uid, sessionId) {
   const id = clean(sessionId, 120);
   if (!id) throw Object.assign(new Error("marcie_session_id_required"), { status: 400 });
@@ -716,6 +796,31 @@ async function readRun(context, runId) {
   return run;
 }
 
+async function readSessionHistory(context, sessionId) {
+  const { session } = await loadOwnedSession(context.db, context.uid, sessionId);
+  const snapshot = await context.db.collection(RUNS_COLLECTION).where("sessionId", "==", clean(sessionId, 120)).get();
+  const runs = [];
+  snapshot.forEach((doc) => {
+    const data = doc.data() || {};
+    if (String(data.ownerId || "") === context.uid) runs.push({ id: doc.id, ...data });
+  });
+  runs.sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  const run = runs[0];
+  if (!run) return { runId: "", messages: [], pendingChange: null };
+  const messageSnapshot = await context.db.collection(RUNS_COLLECTION).doc(run.id).collection("messages").orderBy("createdAt", "desc").limit(100).get();
+  const messages = [];
+  messageSnapshot.forEach((doc) => {
+    const data = doc.data() || {};
+    const role = data.role === "user" ? "user" : "assistant";
+    const text = clean(data.text, 12000);
+    if (text) messages.push({ id: doc.id, role, text, createdAt: clean(data.createdAt, 80) });
+  });
+  messages.reverse();
+  const audience = clean(run.pendingChange?.audience || session.audience || session.selectedAudiences?.[0], 80);
+  const currentArticle = session.articlesByAudience?.[audience] || session.article || {};
+  return { runId: run.id, messages, pendingChange: pendingChangeForUi(run.pendingChange, currentArticle) };
+}
+
 function fallbackArticleReview(article = {}) {
   const blocks = Array.isArray(article.blocks) ? article.blocks : [];
   const sources = Array.isArray(article.sources) ? article.sources : (Array.isArray(article.researchSources) ? article.researchSources : []);
@@ -737,9 +842,12 @@ function fallbackArticleReview(article = {}) {
 
 async function reviewWithGemini({ article, instruction, generateText }) {
   if (typeof generateText !== "function") return { article, findings: ["El servicio de revisión no está disponible."] };
-  const prompt = `Revisa el artículo educativo según esta instrucción: ${instruction || "claridad, rigor, evidencia y adecuación al público"}. No inventes fuentes. Devuelve SOLO JSON con {"article":{...},"findings":[""],"summary":"explicación útil y concreta para el usuario"}. ARTÍCULO: ${JSON.stringify(article).slice(0, 80000)}`;
+  const prompt = `Revisa el artículo educativo según esta instrucción: ${instruction || "claridad, rigor, evidencia y adecuación al público"}. Decide por el significado de la petición si debes modificar una parte concreta, varios bloques o el artículo completo. Si la petición señala un párrafo, sección o fragmento, conserva sin cambios todos los demás bloques. No inventes fuentes ni afirmaciones. Devuelve el artículo completo revisado y describe cada cambio propuesto con el índice real del bloque, el texto anterior y el nuevo; estos cambios requerirán consentimiento humano y todavía no se aplicarán. Devuelve SOLO JSON con {"article":{...},"findings":[""],"summary":"explicación útil y concreta para el usuario","changes":[{"scope":"paragraph|section|title|full_article","blockIndex":0,"label":"descripción concreta","before":"texto exacto anterior","after":"texto exacto propuesto","rationale":"motivo"}]}. ARTÍCULO: ${JSON.stringify(article).slice(0, 80000)}`;
   try {
-    return parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), { article, findings: [] });
+    const result = parseJson(await generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "MEDIUM" }), { article, findings: [] });
+    result.article = result.article && typeof result.article === "object" ? result.article : article;
+    result.changes = deriveArticleChanges(article, result.article, Array.isArray(result.changes) ? result.changes : []);
+    return result;
   } catch (error) {
     logModelFallback("review_article", error);
     return fallbackArticleReview(article);
@@ -899,7 +1007,7 @@ async function handlePostProductionTurn(run, input, context) {
   if (revision.modelUnavailable) {
     return promptResponse(run, "Marcie no pudo preparar una revisión fiable en este momento. El artículo original sigue intacto; vuelve a intentarlo en unos instantes.", { type: "text", options: [] }, { audience });
   }
-  run.pendingChange = { audience, baseRevision, preview: revision.preview, findings: revision.findings || [], createdAt: new Date().toISOString() };
+  run.pendingChange = { audience, baseRevision, preview: revision.preview, findings: revision.findings || [], changes: revision.changes || [], createdAt: new Date().toISOString() };
   const findingCount = run.pendingChange.findings.length;
   return promptResponse(run, findingCount
     ? `Preparé una vista previa con ${findingCount} observaciones. Revísala antes de aplicar los cambios.`
@@ -909,7 +1017,7 @@ async function handlePostProductionTurn(run, input, context) {
       { id: "discard_change", label: "Descartar", action: "discard_change" },
       { id: "apply_change", label: "Aplicar cambios", action: "apply_change" }
     ]
-  }, { changePreview: { audience, baseRevision, title: clean(revision.preview?.title, 300), findings: run.pendingChange.findings } });
+  }, { changePreview: pendingChangeForUi(run.pendingChange, article) });
 }
 
 function createToolHandlers(context) {
@@ -968,7 +1076,7 @@ function createToolHandlers(context) {
       if (!article) throw Object.assign(new Error("marcie_article_missing"), { status: 404 });
       if (Number(article.revision || 0) !== Number(baseRevision || 0)) throw Object.assign(new Error("marcie_article_revision_conflict"), { status: 409 });
       const revised = await reviewWithGemini({ article, instruction, generateText: context.generateText });
-      return { preview: revised.article, findings: revised.findings || [], baseRevision: Number(baseRevision || 0), requiresConfirmation: true, modelUnavailable: revised.modelUnavailable === true };
+      return { preview: revised.article, findings: revised.findings || [], changes: revised.changes || [], baseRevision: Number(baseRevision || 0), requiresConfirmation: true, modelUnavailable: revised.modelUnavailable === true };
     },
     async manage_vocabulary({ current = [], add = [], remove = [] }) {
       const removeKeys = new Set(uniqueStrings(remove, 250).map(normalizeKey));
@@ -1045,6 +1153,13 @@ function registerMarcieEditorialAgentRoutes(app, dependencies = {}) {
       }
     };
   };
+
+  app.get("/api/marcie/agent/history", asyncRoute(async (req, res) => {
+    const context = await contextFor(req);
+    const sessionId = clean(req.query?.sessionId, 120);
+    if (!sessionId) throw Object.assign(new Error("marcie_session_id_required"), { status: 400 });
+    return res.status(200).json({ ok: true, ...(await readSessionHistory(context, sessionId)) });
+  }));
 
   app.post("/api/marcie/agent/chat", asyncRoute(async (req, res) => {
     const context = await contextFor(req);
@@ -1128,6 +1243,7 @@ module.exports = {
   normalizeKey,
   phasePrompt,
   processAgentTurn,
+  readSessionHistory,
   registerMarcieEditorialAgentRoutes,
   sessionRequestFromRun,
   specificationList,
