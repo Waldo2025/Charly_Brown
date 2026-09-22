@@ -81,6 +81,21 @@ function trendOpportunityCard(trend = {}, index = 0) {
   return `<article class="radar-rank-row radar-trend-card ${index === 0 ? "is-first" : ""}" style="--trend-share:${Math.max(0, Math.min(100, Number(trend.trendingPercent || 0)))}%"><div class="radar-rank-position"><span>${String(trend.rank || index + 1).padStart(2, "0")}</span></div><div class="radar-rank-main"><div class="radar-rank-meta"><span class="radar-confidence is-high"><i aria-hidden="true">↗</i>${esc(momentumLabels[trend.momentum] || "Tendencia detectada")}</span><span>${esc(freshnessLabels[trend.freshness] || "Reciente")}</span><span>TrendScore ${esc(trend.trendScore || 0)}</span></div><h3>${esc(trend.topic || trend.title || "Tendencia sin título")}</h3><p>${esc(trend.summary || "Sin resumen disponible.")}</p>${trend.whyNow ? `<p class="radar-why-now"><b>Por qué ahora:</b> ${esc(trend.whyNow)}</p>` : ""}<div class="radar-factor-list">${factorItems.map(([label, value]) => `<span><small>${esc(label)}</small><b>${esc(Math.round(Number(value)))}</b></span>`).join("")}</div></div><div class="radar-rank-share"><span class="radar-share-label">Trending share</span><strong>${esc(Number(trend.trendingPercent || 0).toFixed(1))}%</strong><small>cuota comparativa</small><div class="radar-share-track" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, Number(trend.trendingPercent || 0)))}%"></span></div><div class="radar-topic-actions"><button type="button" data-trend-current-session="${index}" aria-label="Crear un artículo sobre este tema en la sesión actual"><i aria-hidden="true">✎</i><span>Crear artículo aquí</span></button><button type="button" data-trend-new-session="${index}" aria-label="Crear un artículo sobre este tema en una sesión nueva"><i aria-hidden="true">＋</i><span>Crear en nueva sesión</span></button></div></div><details class="radar-rank-evidence"><summary><span>Señales que impulsan este tema</span><small>${signals.length} señales</small><i aria-hidden="true">⌄</i></summary><div class="radar-signal-panel"><ul class="radar-signal-list">${signals.map((signal) => `<li>${esc(signal)}</li>`).join("") || "<li>Sin señales detalladas.</li>"}</ul></div></details></article>`;
 }
 
+function sessionTrendInsightHtml(options = {}) {
+  const session = typeof options.getActiveSession === "function" ? options.getActiveSession() : null;
+  const trend = session?.trends?.[0];
+  if (!trend) {
+    return `<section id="trend-insight-container" class="radar-session-insight radar-session-insight--empty"><span class="radar-session-insight__icon"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i></span><h3>Análisis de tendencia</h3><p>La sesión activa todavía no tiene un análisis. Selecciona una oportunidad del Radar o ejecuta la investigación de la sesión.</p></section>`;
+  }
+  const signals = Array.isArray(trend.signals) ? trend.signals.filter(Boolean) : [];
+  const metrics = [
+    ["TrendScore", trend.trendScore != null ? `${trend.trendScore}/100` : "–"],
+    ["Fuentes", String((trend.sources || []).length)],
+    ["Ventana", trend.period || session.researchPeriod || "Declarada"]
+  ];
+  return `<section id="trend-insight-container" class="radar-session-insight"><header><div><span class="radar-section-kicker"><i aria-hidden="true"></i> Sesión activa</span><h3><i data-lucide="trending-up" aria-hidden="true"></i> Análisis de tendencia</h3></div><span id="trend-insight-score" class="radar-session-insight__score">${esc(trend.trendScore != null ? `${trend.trendScore}/100` : "Señal verificada")}</span></header><p id="trend-insight-summary" class="radar-session-insight__summary">${esc(trend.summary || session.selectedBrief || "Análisis generado para la propuesta.")}</p><div id="trend-bar-chart" class="radar-session-insight__chart-note">Sin serie cuantitativa: Marcie no dibuja porcentajes que las fuentes no aportan.</div><div id="trend-bar-labels" hidden></div><div id="trend-metrics" class="radar-session-insight__metrics">${metrics.map(([label, value]) => `<article><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`).join("")}</div><div class="radar-session-insight__signals"><span>Señales principales</span><ul id="trend-insight-signals">${signals.length ? signals.map((signal) => `<li>${esc(signal)}</li>`).join("") : "<li>No se identificaron señales respaldadas para esta consulta.</li>"}</ul></div></section>`;
+}
+
 function renderCompactTrendWidget(options = {}) {
   const widget = document.getElementById("compact-trend-widget");
   if (!widget) return;
@@ -88,19 +103,15 @@ function renderCompactTrendWidget(options = {}) {
   const latest = state.trends.find((snapshot) => Array.isArray(snapshot?.opportunities));
   const leader = latest?.opportunities?.[0];
   if (!leader) {
-    widget.innerHTML = `<div class="compact-trend-widget__empty"><span class="compact-trend-widget__icon" aria-hidden="true"><i data-lucide="radar"></i></span><div><h3 id="compact-trend-widget-title">Radar de tendencias</h3><p>Explora conversaciones educativas y convierte la mejor señal en un artículo.</p></div></div><button type="button" class="compact-trend-widget__open" data-compact-trend-open>Abrir radar <i data-lucide="arrow-up-right" aria-hidden="true"></i></button>`;
+    widget.innerHTML = `<div class="compact-trend-widget__empty"><span class="compact-trend-widget__icon" aria-hidden="true"><i data-lucide="radar"></i></span><div><h3 id="compact-trend-widget-title">Radar de tendencias</h3><p>El tema con mayor oportunidad editorial aparecerá aquí.</p></div></div>`;
   } else {
     const signals = Array.isArray(leader.signals) ? leader.signals.filter(Boolean).slice(0, 2) : [];
     const trendScore = Number.isFinite(Number(leader.trendScore)) ? Math.round(Number(leader.trendScore)) : null;
     const share = Number.isFinite(Number(leader.trendingPercent)) ? Number(leader.trendingPercent).toFixed(1) : null;
     const momentumLabels = { breakout: "Despegando", rising: "En crecimiento", emerging: "Emergente", steady: "Estable" };
     const reportMeta = [latest.region, latest.periodKey].filter(Boolean).join(" · ") || "Último reporte";
-    widget.innerHTML = `<header class="compact-trend-widget__header"><div><span class="compact-trend-widget__eyebrow"><i data-lucide="radar" aria-hidden="true"></i> Radar de tendencias</span><span class="compact-trend-widget__status"><i aria-hidden="true"></i>${esc(momentumLabels[leader.momentum] || "Señal activa")}</span></div><button type="button" class="compact-trend-widget__open" data-compact-trend-open>Ver radar <i data-lucide="arrow-up-right" aria-hidden="true"></i></button></header><div class="compact-trend-widget__body"><span class="compact-trend-widget__rank">Tema #1 · ${esc(reportMeta)}</span><h3 id="compact-trend-widget-title">${esc(leader.topic || leader.title || "Tendencia principal")}</h3><p>${esc(leader.summary || "Conversación educativa con oportunidad para convertirse en contenido.")}</p><div class="compact-trend-widget__metrics">${trendScore != null ? `<span><b>${esc(trendScore)}</b> TrendScore</span>` : ""}${share != null ? `<span><b>${esc(share)}%</b> share</span>` : ""}<span><b>${esc(signals.length)}</b> señales clave</span></div>${signals.length ? `<ul class="compact-trend-widget__signals">${signals.map((signal) => `<li>${esc(signal)}</li>`).join("")}</ul>` : ""}</div><footer class="compact-trend-widget__actions"><button type="button" class="compact-trend-widget__primary" data-compact-trend-current><i data-lucide="file-plus-2" aria-hidden="true"></i> Crear artículo</button><button type="button" class="compact-trend-widget__secondary" data-compact-trend-new><i data-lucide="plus" aria-hidden="true"></i> Nueva sesión</button></footer>`;
+    widget.innerHTML = `<header class="compact-trend-widget__header"><div><span class="compact-trend-widget__eyebrow"><i data-lucide="radar" aria-hidden="true"></i> Radar de tendencias</span><span class="compact-trend-widget__status"><i aria-hidden="true"></i>${esc(momentumLabels[leader.momentum] || "Señal activa")}</span></div></header><div class="compact-trend-widget__body"><span class="compact-trend-widget__rank">Tema #1 · ${esc(reportMeta)}</span><h3 id="compact-trend-widget-title">${esc(leader.topic || leader.title || "Tendencia principal")}</h3><p>${esc(leader.summary || "Conversación educativa con oportunidad para convertirse en contenido.")}</p><div class="compact-trend-widget__metrics">${trendScore != null ? `<span><b>${esc(trendScore)}</b> TrendScore</span>` : ""}${share != null ? `<span><b>${esc(share)}%</b> share</span>` : ""}<span><b>${esc(signals.length)}</b> señales clave</span></div>${signals.length ? `<ul class="compact-trend-widget__signals">${signals.map((signal) => `<li>${esc(signal)}</li>`).join("")}</ul>` : ""}</div><footer class="compact-trend-widget__actions"><button type="button" class="compact-trend-widget__primary" data-compact-trend-current><i data-lucide="file-plus-2" aria-hidden="true"></i> Crear artículo</button><button type="button" class="compact-trend-widget__secondary" data-compact-trend-new><i data-lucide="plus" aria-hidden="true"></i> Nueva sesión</button></footer>`;
   }
-
-  widget.querySelector("[data-compact-trend-open]")?.addEventListener("click", () => {
-    void openTrends(options).catch(recordEditorialAccessError);
-  });
   widget.querySelector("[data-compact-trend-current]")?.addEventListener("click", async (event) => {
     if (!leader || event.currentTarget.disabled) return;
     const button = event.currentTarget;
@@ -604,8 +615,52 @@ export async function openTrends(options = {}) {
   const emptyHtml = `<div class="radar-empty"><span aria-hidden="true">◎</span><h3>El radar está listo</h3><p>Inicia una exploración para descubrir y comparar conversaciones educativas emergentes.</p></div>`;
   const leader = opportunities[0];
   const reportHtml = leader ? `<section class="radar-winner"><div class="radar-winner-top"><span class="radar-winner-badge"><i aria-hidden="true">↗</i> Trending #1</span><span class="radar-winner-confidence"><i aria-hidden="true"></i> Mayor impulso detectado</span></div><div class="radar-winner-content"><div><span class="radar-winner-eyebrow">Tema con mayor oportunidad editorial</span><h2>${esc(leader.topic || "Tendencia principal")}</h2><p>${esc(leader.summary || "")}</p></div><div class="radar-winner-score"><strong>${esc(Number(leader.trendingPercent || 0).toFixed(1))}%</strong><span>Trending share</span><small>TrendScore ${esc(leader.trendScore || 0)}/100</small></div></div><div class="radar-winner-footer"><span>Convierte esta conversación en contenido mientras conserva impulso.</span><div class="radar-winner-actions"><button type="button" data-trend-current-session="0">Crear artículo aquí</button><button type="button" data-trend-new-session="0">Crear en nueva sesión <i aria-hidden="true">→</i></button></div></div></section>` : `<section class="radar-winner radar-winner--empty"><div class="radar-winner-top"><span class="radar-winner-badge"><i aria-hidden="true">↗</i> Trending #1</span></div><div><h2>Aún no hay un tema ganador</h2><p>Ejecuta el radar para detectar conversaciones educativas emergentes.</p></div><div class="radar-winner-footer"><span>El resultado principal aparecerá aquí.</span></div></section>`;
-  const contentHtml = `<div class="trend-workspace trend-workspace--modern trend-workspace--studio">${permissionBanner()}<section class="radar-controls"><div class="radar-control-group"><label>Ventana de tendencia</label><div id="trend-cadence" class="trend-segmented">${cadenceButtons}</div></div><label class="radar-region"><span>Mercado / región</span><select id="trend-region">${trendRegionOptions(settings.region)}</select></label><button id="trend-refresh" type="button" class="radar-run" ${state.permissionError ? "disabled" : ""}><span aria-hidden="true">↻</span><span>Actualizar radar</span></button></section>${legacy ? `<div class="radar-legacy"><span aria-hidden="true">!</span><div><b>Este reporte pertenece al radar anterior</b><p>Ejecuta una búsqueda para reemplazarlo por el ranking actualizado.</p></div></div>` : ""}<section class="radar-overview">${reportHtml}<div class="radar-stat-grid"><article><span>Topics detectados</span><strong>${opportunities.length}</strong><small>conversaciones distintas</small></article><article><span>Señales activas</span><strong>${signalCount}</strong><small>detonantes observados</small></article><article><span>Alta velocidad</span><strong>${breakoutCount}</strong><small>despegando o creciendo</small></article></div></section><section class="radar-ranking"><header><div><span class="radar-section-kicker"><i aria-hidden="true"></i> Trending topics</span><h3>Oportunidades para tu próximo artículo</h3><p>Priorizadas por impulso, frescura y fuerza de conversación.</p></div><div class="radar-period-chip">${esc(String(latest?.region || settings.region || "MX"))}<span>·</span>${esc(String(latest?.periodKey || cadence))}</div></header><div class="radar-ranking-list">${opportunities.length ? opportunities.map((trend, index) => trendOpportunityCard(trend, index)).join("") : emptyHtml}</div></section></div>`;
+  const contentHtml = `<div class="trend-workspace trend-workspace--modern trend-workspace--studio">
+    ${permissionBanner()}
+    <nav class="radar-tabs" role="tablist" aria-label="Secciones del Radar">
+      <button id="radar-tab-overview" type="button" role="tab" aria-selected="true" aria-controls="radar-panel-overview" data-radar-tab="overview" class="is-active"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Resumen</span></button>
+      <button id="radar-tab-opportunities" type="button" role="tab" aria-selected="false" aria-controls="radar-panel-opportunities" data-radar-tab="opportunities" tabindex="-1"><i data-lucide="list-filter" aria-hidden="true"></i><span>Oportunidades</span><small>${opportunities.length}</small></button>
+      <button id="radar-tab-analysis" type="button" role="tab" aria-selected="false" aria-controls="radar-panel-analysis" data-radar-tab="analysis" tabindex="-1"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>Análisis de sesión</span></button>
+    </nav>
+    <section id="radar-panel-overview" class="radar-tab-panel is-active" role="tabpanel" aria-labelledby="radar-tab-overview" data-radar-panel="overview">
+      <section class="radar-controls"><div class="radar-control-group"><label>Ventana de tendencia</label><div id="trend-cadence" class="trend-segmented">${cadenceButtons}</div></div><label class="radar-region"><span>Mercado / región</span><select id="trend-region">${trendRegionOptions(settings.region)}</select></label><button id="trend-refresh" type="button" class="radar-run" ${state.permissionError ? "disabled" : ""}><span aria-hidden="true">↻</span><span>Actualizar radar</span></button></section>
+      ${legacy ? `<div class="radar-legacy"><span aria-hidden="true">!</span><div><b>Este reporte pertenece al radar anterior</b><p>Ejecuta una búsqueda para reemplazarlo por el ranking actualizado.</p></div></div>` : ""}
+      <section class="radar-overview">${reportHtml}<div class="radar-stat-grid"><article><span>Topics detectados</span><strong>${opportunities.length}</strong><small>conversaciones distintas</small></article><article><span>Señales activas</span><strong>${signalCount}</strong><small>detonantes observados</small></article><article><span>Alta velocidad</span><strong>${breakoutCount}</strong><small>despegando o creciendo</small></article></div></section>
+    </section>
+    <section id="radar-panel-opportunities" class="radar-tab-panel" role="tabpanel" aria-labelledby="radar-tab-opportunities" data-radar-panel="opportunities" hidden>
+      <section class="radar-ranking"><header><div><span class="radar-section-kicker"><i aria-hidden="true"></i> Trending topics</span><h3>Oportunidades para tu próximo artículo</h3><p>Priorizadas por impulso, frescura y fuerza de conversación.</p></div><div class="radar-period-chip">${esc(String(latest?.region || settings.region || "MX"))}<span>·</span>${esc(String(latest?.periodKey || cadence))}</div></header><div class="radar-ranking-list">${opportunities.length ? opportunities.map((trend, index) => trendOpportunityCard(trend, index)).join("") : emptyHtml}</div></section>
+    </section>
+    <section id="radar-panel-analysis" class="radar-tab-panel" role="tabpanel" aria-labelledby="radar-tab-analysis" data-radar-panel="analysis" hidden>${sessionTrendInsightHtml(options)}</section>
+  </div>`;
   const modal = showModal({ title: "Radar de tendencias", widthClass: "max-w-7xl", contentHtml });
+  const activateRadarTab = (tabId, { focus = false } = {}) => {
+    modal.element.querySelectorAll("[data-radar-tab]").forEach((button) => {
+      const active = button.dataset.radarTab === tabId;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && focus) {
+        button.focus();
+        button.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+    modal.element.querySelectorAll("[data-radar-panel]").forEach((panel) => {
+      const active = panel.dataset.radarPanel === tabId;
+      panel.hidden = !active;
+      panel.classList.toggle("is-active", active);
+    });
+  };
+  const radarTabs = [...modal.element.querySelectorAll("[data-radar-tab]")];
+  radarTabs.forEach((button, index) => {
+    button.addEventListener("click", () => activateRadarTab(button.dataset.radarTab, { focus: true }));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? radarTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + radarTabs.length) % radarTabs.length;
+      activateRadarTab(radarTabs[nextIndex].dataset.radarTab, { focus: true });
+    });
+  });
+  window.lucide?.createIcons?.();
   let selectedCadence = cadence;
   modal.element.querySelectorAll("[data-trend-cadence]").forEach((button) => button.addEventListener("click", () => {
     selectedCadence = button.dataset.trendCadence;

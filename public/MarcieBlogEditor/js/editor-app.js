@@ -22,7 +22,7 @@ import { initPipelineStepper, runTrendSearchForSession } from "./components/pipe
 import { initCommandPalette, openCommandPalette } from "./components/command-palette.js?v=20260908r9";
 import { makeArticleEditable } from "./components/inline-editor.js?v=20260908r9";
 import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260922r3";
-import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260922r3";
+import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260922r5";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
 import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r3";
 import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r3";
@@ -3397,52 +3397,6 @@ function renderActiveSession() {
 
   // Actualizar íconos de estado del pipeline
   updatePipelineStepIcons(session);
-
-  // Actualizar Insight de Tendencia en el Panel Derecho
-  const trendContainer = document.getElementById("trend-insight-container");
-  if (trendContainer) {
-    if (session.trends && session.trends.length > 0) {
-      const trend = session.trends[0];
-      const summaryEl = document.getElementById("trend-insight-summary");
-      const scoreEl   = document.getElementById("trend-insight-score");
-      const signalsEl = document.getElementById("trend-insight-signals");
-      const barChart  = document.getElementById("trend-bar-chart");
-      const barLabels = document.getElementById("trend-bar-labels");
-      const metricsEl = document.getElementById("trend-metrics");
-
-      if (summaryEl) summaryEl.textContent = trend.summary || session.selectedBrief || "Análisis generado para la propuesta.";
-      if (scoreEl) scoreEl.textContent = trend.trendScore != null ? `${trend.trendScore}/100` : "Señal verificada";
-
-      if (barChart && barLabels) {
-        barChart.innerHTML = `<div class="self-center text-[10px] leading-relaxed text-slate-500">Sin serie cuantitativa: Marcie no dibuja porcentajes que las fuentes no aportan.</div>`;
-        barLabels.innerHTML = "";
-      }
-
-      // Métricas de tendencia
-      if (metricsEl) {
-        const metrics = [
-          { label: "TrendScore", value: trend.trendScore ? `${trend.trendScore}/100` : "–", color: "text-purple-700" },
-          { label: "Fuentes", value: String((trend.sources || []).length), color: "text-teal-700" },
-          { label: "Ventana", value: trend.period || "Declarada", color: "text-blue-700" },
-        ];
-        metricsEl.innerHTML = metrics.map(m => `
-          <div class="bg-slate-50 rounded-lg p-2 text-center border border-slate-100">
-            <div class="text-[9px] text-slate-400 uppercase font-bold mb-0.5">${m.label}</div>
-            <div class="${m.color} font-bold text-xs">${m.value}</div>
-          </div>`).join("");
-      }
-
-      if (signalsEl && Array.isArray(trend.signals) && trend.signals.length > 0) {
-        signalsEl.innerHTML = trend.signals.map(s => `<li>${escapeHtml(s)}</li>`).join("");
-      } else if (signalsEl) {
-        signalsEl.innerHTML = `<li>No se identificaron señales respaldadas para esta consulta.</li>`;
-      }
-
-      trendContainer.classList.remove("hidden");
-    } else {
-      trendContainer.classList.add("hidden");
-    }
-  }
 
   // Hacer editable el artículo en tiempo real
   makeArticleEditable({

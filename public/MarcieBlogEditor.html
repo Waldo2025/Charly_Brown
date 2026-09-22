@@ -127,7 +127,7 @@
   <link rel="stylesheet" href="/sidebar.css" />
 
   <!-- Estilos complementarios para resizers, shadcn y adaptación de layout -->
-  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260922r1" />
+  <link rel="stylesheet" href="/MarcieBlogEditor/css/MarcieBlogEditor.css?v=20260922r5" />
 
   <style>
     /* Superficies coherentes para los tres temas de la interfaz.
@@ -815,37 +815,6 @@
 
         <hr class="border-border">
 
-        <!-- Insight de tendencia (Relleno con datos reales en JS) -->
-        <div id="trend-insight-container" class="hidden bg-white border border-border rounded-xl p-4 shadow-sm relative overflow-hidden mt-6">
-          <div class="flex justify-between items-center mb-2">
-            <h3 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-              <i data-lucide="trending-up" class="w-4 h-4 text-purple-600"></i> Análisis de Tendencia
-            </h3>
-            <span id="trend-insight-score" class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-600 border border-purple-100"></span>
-          </div>
-          <p id="trend-insight-summary" class="text-xs text-slate-600 leading-relaxed z-10 relative mb-3 font-medium"></p>
-
-          <!-- Gráfica de barras mini -->
-          <div class="mb-3">
-            <div class="flex items-end justify-between gap-1 h-16 px-1" id="trend-bar-chart">
-              <!-- Barras generadas dinámicamente por JS -->
-            </div>
-            <div class="flex justify-between text-[9px] text-slate-400 mt-1 px-1" id="trend-bar-labels">
-              <!-- Etiquetas generadas dinámicamente por JS -->
-            </div>
-          </div>
-
-          <!-- Métricas de tendencia -->
-          <div class="grid grid-cols-3 gap-2 mb-3" id="trend-metrics">
-            <!-- Métricas generadas dinámicamente por JS -->
-          </div>
-
-          <div class="pt-3 border-t border-slate-100">
-            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Señales principales</span>
-            <ul id="trend-insight-signals" class="flex flex-col gap-1.5 text-[11px] text-slate-500 font-medium list-disc pl-3"></ul>
-          </div>
-        </div>
-
         <!-- Resumen compacto del Radar de tendencias -->
         <section
           id="compact-trend-widget"
@@ -859,9 +828,6 @@
               <p>El tema con mayor oportunidad editorial aparecerá aquí.</p>
             </div>
           </div>
-          <button type="button" class="compact-trend-widget__open" data-compact-trend-open>
-            Abrir radar <i data-lucide="arrow-up-right" aria-hidden="true"></i>
-          </button>
         </section>
 
       </div>
@@ -879,6 +845,6 @@
   <script src="/js/html-docx.js"></script>
 
   <!-- Script principal de la aplicación Marcie Blog Editor -->
-  <script type="module" src="/MarcieBlogEditor/js/editor-app.js?v=20260922r4"></script>
+  <script type="module" src="/MarcieBlogEditor/js/editor-app.js?v=20260922r5"></script>
 </body>
 </html>

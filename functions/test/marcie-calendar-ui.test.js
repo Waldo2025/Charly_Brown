@@ -80,11 +80,26 @@ test("el panel lateral resume el radar y elimina la búsqueda redundante en fuen
   assert.doesNotMatch(editorApp, /data-source-action/);
   assert.match(dashboard, /function renderCompactTrendWidget\(options = \{\}\)/);
   assert.match(dashboard, /latest\?\.opportunities\?\.\[0\]/);
-  assert.match(dashboard, /data-compact-trend-open/);
+  assert.doesNotMatch(dashboard, /data-compact-trend-open/);
   assert.match(dashboard, /data-compact-trend-current/);
   assert.match(dashboard, /data-compact-trend-new/);
   assert.match(dashboard, /renderCompactTrendWidget\(options\)/);
   assert.match(styles, /\.compact-trend-widget \{/);
+});
+
+test("el análisis de tendencia vive en el modal y el radar está organizado por pestañas", () => {
+  assert.doesNotMatch(editorHtml, /id="trend-insight-container"/);
+  assert.match(dashboard, /id="trend-insight-container"/);
+  assert.match(dashboard, /class="radar-tabs" role="tablist"/);
+  assert.match(dashboard, /data-radar-tab="overview"/);
+  assert.match(dashboard, /data-radar-tab="opportunities"/);
+  assert.match(dashboard, /data-radar-tab="analysis"/);
+  assert.match(dashboard, /id="radar-panel-analysis"/);
+  assert.match(dashboard, /activateRadarTab/);
+  assert.match(dashboard, /scrollIntoView\(\{ block: "nearest", inline: "nearest" \}\)/);
+  assert.match(styles, /\.trend-workspace--studio \.radar-tabs \{/);
+  assert.match(styles, /\.trend-workspace--studio \.radar-tab-panel\[hidden\]/);
+  assert.match(styles, /\.trend-workspace--studio \.radar-session-insight \{/);
 });
 
 test("al iniciar el sitio muestra una vez el ganador guardado sin buscar automáticamente", () => {
