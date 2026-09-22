@@ -218,6 +218,21 @@ test("video attribution is preserved but does not replace documentary corroborat
   assert.equal(article.verification.videoSources[0].verificationStatus, "attributed_only");
 });
 
+test("video blocks require attribution, timestamp, and short direct quotations", async () => {
+  const client = { models: { generateContent: async () => modelJson({ claims: [{ id: "c-video", text: "Una explicación del video.", evidenceKind: "video_attribution", risk: "low", status: "supported", sourceIds: ["youtube-dQw4w9WgXcQ"], locator: "" }], contradictions: [] }) } };
+  const video = { id: "youtube-dQw4w9WgXcQ", sourceType: "youtube_video", title: "Estrategias", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", supportSummary: "Una explicación." };
+  const longQuote = Array.from({ length: 26 }, (_, index) => `palabra${index + 1}`).join(" ");
+  const article = await verifyArticleEvidenceServer({
+    article: { title: "Estrategias", blocks: [{ id: "q1", type: "quote", text: longQuote, sourceIds: [video.id] }], sources: [video], researchSources: [video] },
+    topic: "Estrategias",
+    dependencies: { client }
+  });
+  const blockers = article.verification.blockers.join(" ");
+  assert.match(blockers, /marca de tiempo/i);
+  assert.match(blockers, /supera 25 palabras/i);
+  assert.match(blockers, /atribución explícita/i);
+});
+
 test("legacy trend snapshots are replaced by signal-based topics without source verification", async () => {
   const store = trendDb({ schemaVersion: 1, verificationStatus: "verified", opportunities: [{ topic: "Vieja" }] });
   let calls = 0;

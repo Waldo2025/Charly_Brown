@@ -46,6 +46,21 @@ test("avanza por los recursos de cada público sin quedar detenido", async () =>
   assert.deepEqual(run.configuration.resourcesByAudience.parents, ["lists", "seo"]);
 });
 
+test("reconoce una URL de YouTube escrita al iniciar y analiza el video", async () => {
+  const run = initialRun({ uid: "user-1" });
+  const response = await advanceRun(run, { text: "Usa como base https://youtu.be/dQw4w9WgXcQ" }, {
+    db: {},
+    analyzeYoutubeVideos: async ({ urls }) => ({
+      videos: [{ videoId: "dQw4w9WgXcQ", url: urls[0], title: "Video base" }],
+      proposedTopics: ["Aprendizaje activo"],
+      warnings: []
+    })
+  });
+  assert.equal(response.phase, "video_topic");
+  assert.equal(run.configuration.creationSource, "youtube");
+  assert.deepEqual(run.configuration.sourceInputs.youtube, [{ videoId: "dQw4w9WgXcQ", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }]);
+});
+
 test("publica las herramientas MCP editoriales de Marcie", async () => {
   const server = createMarcieEditorialMcpServer({ db: {}, uid: "user-1" });
   const client = new Client({ name: "marcie-agent-test", version: "1" });
@@ -64,12 +79,14 @@ test("publica las herramientas MCP editoriales de Marcie", async () => {
   await server.close();
 });
 
-test("inicia la conversación eligiendo tema o YouTube y usa el nombre del usuario", () => {
+test("inicia con una pregunta abierta y permite indicar una URL sin opción dedicada", () => {
   const run = initialRun({ uid: "user-1", displayName: "Waldo" });
   const response = phasePrompt(run);
   assert.equal(response.phase, "creation_source");
   assert.match(response.speechText, /Hola, Waldo/);
-  assert.deepEqual(response.uiPrompt.options.map((option) => option.id), ["topic", "youtube"]);
+  assert.equal(response.uiPrompt.type, "text");
+  assert.deepEqual(response.uiPrompt.options, []);
+  assert.match(response.message, /URL de YouTube/);
   assert.deepEqual(response.missingFields, ["creationSource", "topic", "selectedAudiences", "tone", "resources"]);
 });
 
@@ -215,4 +232,5 @@ test("la interfaz ofrece YouTube en agente y configuración manual", () => {
   assert.match(modalSource, /new-session-youtube-toggle/);
   assert.match(modalSource, /new-session-youtube-analyze/);
   assert.match(modalSource, /Analiza los videos antes de crear la sesión/);
+  assert.doesNotMatch(modalSource, /data-session-choice="youtube"/);
 });

@@ -6,7 +6,7 @@ import {
   researchArticleEvidence,
   sanitizeTrustedSources,
   verifyArticleEvidence
-} from "./marcie-gemini-service.js?v=20260922r1";
+} from "./marcie-gemini-service.js?v=20260922r2";
 
 export const AIDA_SERVICE_VERSION = "2.0";
 export const AIDA_LEGACY_BRAND_LINE = "Aprender no es esforzarse más. Es aprender como el cerebro estaba hecho para aprender.";
@@ -223,7 +223,7 @@ Aplica estrictamente la guía editorial Aida:
 8. Cierre memorable, específico para este artículo y sin CTA comercial.${brandLine ? " Termina exactamente con la frase de marca configurada." : " No repitas una firma, eslogan o frase fija usada en otros artículos."}
 
 Desarrolla el tema completo usando únicamente datos del dossier. Los hechos científicos y la historia enriquecen el argumento: no sustituyen el tema principal. Integra 2 a 4 hitos como antes → avance intermedio → conocimiento vigente solo si ayudan a explicar el hecho o tema y están respaldados. No inventes testimonios, fechas, científicos, estudios ni descubrimientos.
-Las fuentes youtube_video solo respaldan lo que atribuyas explícitamente al autor o al video; no las uses como verificación de hechos externos. Conserva sourceIds y locator para cualquier hallazgo o cita de video. Una cita de video debe coincidir con un fact marcado isDirectQuote y conservar su marca de tiempo.
+Las fuentes youtube_video son solo el punto de partida: crea una estructura y redacción completamente nuevas para esta audiencia, sin copiar su secuencia, frases ni hacer paráfrasis cercanas. Amplía, contrasta y fortalece sus ideas con fuentes documentales verificadas. Atribuye explícitamente al autor, persona o canal toda idea u opinión que proceda del video y no la uses como verificación de hechos externos. Conserva sourceIds y locator para cualquier hallazgo o cita de video. Una cita de video solo puede usarse si es necesaria, tiene máximo 25 palabras, coincide con un fact marcado isDirectQuote y conserva su marca de tiempo.
 Integra entre 2 y 3 referencias atribuidas verificadas del campo attributedReferences cuando existan. Combina citas textuales breves y paráfrasis naturales del tipo "Según X". Una cita directa debe reproducir exactamente el texto verificado y cada bloque factual debe declarar sourceIds con IDs del dossier. Si no hay una frase directa verificada, usa una paráfrasis; nunca inventes una cita.
 Respeta la ventana de actualidad del dossier: las fuentes current solo pueden describirse como noticias, señales o datos actuales si están dentro de dateWindow. Las fuentes historical sirven únicamente como antecedentes explícitos y deben presentarse con su fecha real; nunca las redactes como si fueran del periodo actual.
 Si el brief contiene un hallazgo factual sin respaldo, elimínalo o reescríbelo sin convertirlo en otro dato factual. No repitas ni parafrasees una afirmación marcada como no respaldada. La fase de explicación no obliga a incluir neurociencia cuando el dossier no contiene evidencia neurocientífica pertinente.

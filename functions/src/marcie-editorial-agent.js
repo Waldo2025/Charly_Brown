@@ -9,7 +9,7 @@ const {
   verifyArticleEvidenceServer
 } = require("./marcie-editorial-research.js");
 const { DEFAULT_TEXT_MODEL } = require("./vertex.js");
-const { analyzeYoutubeVideos } = require("./marcie-youtube-agent.js");
+const { analyzeYoutubeVideos, normalizeYoutubeUrls } = require("./marcie-youtube-agent.js");
 
 const RUNS_COLLECTION = "MarcieEditorialAgentRuns";
 const SESSIONS_COLLECTION = "MarcieBlogEditor";
@@ -230,10 +230,10 @@ function missingFields(configuration = {}) {
 function phasePrompt(run, configurationPatch = {}) {
   const configuration = run.configuration;
   if (run.phase === "creation_source") {
-    return promptResponse(run, "¿Cómo quieres comenzar el artículo?", {
-      type: "single_choice",
-      options: [{ id: "topic", label: "Escribir sobre un tema" }, { id: "youtube", label: "Crear desde videos de YouTube" }]
-    }, { configurationPatch, speechText: `Hola${run.displayName ? `, ${run.displayName}` : ""}. Vamos a preparar tus artículos. ¿Quieres escribir sobre un tema o crear el contenido desde videos de YouTube?` });
+    return promptResponse(run, "Cuéntame el tema de los artículos. También puedes pegar una URL de YouTube y pedirme que la use como base.", {
+      type: "text",
+      options: []
+    }, { configurationPatch, speechText: `Hola${run.displayName ? `, ${run.displayName}` : ""}. Vamos a preparar tus artículos. Dime el tema o pega una dirección de YouTube y la usaré como punto de partida.` });
   }
   if (run.phase === "topic") {
     return promptResponse(run, "¿Sobre qué tema quieres crear los artículos?", {
@@ -294,6 +294,12 @@ function selectedValues(input = {}, options = []) {
 
 function selectedValue(input = {}, options = []) {
   return selectedValues(input, options)[0] || clean(input.value || input.text, 600);
+}
+
+function youtubeUrlsFromInput(input = {}) {
+  if (Array.isArray(input.urls)) return normalizeYoutubeUrls(input.urls).valid.map((item) => item.url);
+  const matches = String(input.text || input.value || "").match(/https:\/\/[^\s,;]+/gi) || [];
+  return normalizeYoutubeUrls(matches.map((value) => value.replace(/[)\].!?]+$/, ""))).valid.map((item) => item.url);
 }
 
 function specificationList(configuration = {}) {
@@ -375,11 +381,26 @@ async function advanceRun(run, input, context) {
     return response;
   }
   if (run.phase === "creation_source") {
-    const source = selectedValue(input, [{ id: "topic", label: "Escribir sobre un tema" }, { id: "youtube", label: "Crear desde videos de YouTube" }]);
-    if (!["topic", "youtube"].includes(source)) return phasePrompt(run);
-    configuration.creationSource = source;
-    patch.creationSource = source;
-    run.phase = source === "youtube" ? "youtube_urls" : "topic";
+    const detectedUrls = youtubeUrlsFromInput(input);
+    const rawValue = clean(input.text || input.value, 600);
+    const asksForVideo = rawValue === "youtube" || detectedUrls.length || /\b(?:youtube|video|videos)\b/i.test(rawValue);
+    const resolvedSource = asksForVideo ? "youtube" : (rawValue ? "topic" : "");
+    if (!["topic", "youtube"].includes(resolvedSource)) return phasePrompt(run);
+    configuration.creationSource = resolvedSource;
+    patch.creationSource = resolvedSource;
+    run.phase = resolvedSource === "youtube" ? "youtube_urls" : (rawValue === "topic" ? "topic" : "audiences");
+    if (resolvedSource === "topic" && rawValue !== "topic") {
+      configuration.topic = rawValue;
+      patch.topic = rawValue;
+    }
+    if (detectedUrls.length) {
+      const analysis = await context.analyzeYoutubeVideos({ urls: detectedUrls, objective: configuration.topic, language: "es-MX" });
+      configuration.sourceInputs = { youtube: analysis.videos.map((video) => ({ videoId: video.videoId, url: video.url })) };
+      configuration.videoResearch = analysis;
+      patch.sourceInputs = configuration.sourceInputs;
+      patch.videoResearch = analysis;
+      run.phase = "video_topic";
+    }
   } else if (run.phase === "youtube_urls") {
     const urls = Array.isArray(input.urls) ? input.urls : String(input.text || input.value || "").split(/[\n,;]+/);
     const analysis = await context.analyzeYoutubeVideos({ urls, objective: configuration.topic, language: "es-MX" });
@@ -640,7 +661,7 @@ function createToolHandlers(context) {
       const articles = {};
       for (const audience of audiences) {
         const evidence = evidenceByAudience[audience] || {};
-        const prompt = `Redacta un artículo educativo en español para ${audience} sobre ${topic}. Usa exclusivamente la evidencia proporcionada y conserva sourceIds y locators en cada bloque. Lo dicho en un video debe atribuirse al autor; no lo presentes como hecho externo sin una fuente documental de contraste. Especificaciones: ${specifications.join("; ")}. EVIDENCIA DOCUMENTAL: ${JSON.stringify(evidence).slice(0, 50000)}. EVIDENCIA DE VIDEO: ${JSON.stringify(videoEvidence || {}).slice(0, 30000)}. Devuelve SOLO JSON de artículo con title, subtitle, audience, blocks, sources y seo.`;
+        const prompt = `Redacta un artículo educativo original en español para ${audience} sobre ${topic}. El video aporta la idea inicial, no una plantilla ni texto para copiar: crea una estructura, argumentación y redacción nuevas, adaptadas específicamente a este público. No reproduzcas la secuencia, frases ni paráfrasis cercanas del video. Amplía, contrasta y fortalece la idea con las fuentes documentales verificadas. Usa exclusivamente la evidencia proporcionada para afirmaciones factuales y conserva sourceIds y locators en cada bloque. Toda idea, opinión o explicación procedente del video debe atribuirse explícitamente a su autor, persona o canal; no la presentes como un hecho externo sin una fuente documental de contraste. Una cita directa de video solo puede usarse si es necesaria, tiene máximo 25 palabras, coincide con shortQuotes y conserva su marca de tiempo. Especificaciones: ${specifications.join("; ")}. EVIDENCIA DOCUMENTAL: ${JSON.stringify(evidence).slice(0, 50000)}. EVIDENCIA DE VIDEO: ${JSON.stringify(videoEvidence || {}).slice(0, 30000)}. Devuelve SOLO JSON de artículo con title, subtitle, audience, blocks, sources y seo.`;
         const article = parseJson(await context.generateText({ model: DEFAULT_TEXT_MODEL, prompt, json: true, thinkingLevel: "HIGH" }), {});
         const sourcePool = Array.isArray(evidence.sources) ? evidence.sources : [];
         const usedIds = new Set((article.blocks || []).flatMap((block) => Array.isArray(block?.sourceIds) ? block.sourceIds.map(String) : []));

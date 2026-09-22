@@ -589,7 +589,7 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   const usablePages = verified.verifiedSources.map((source) => ({ source, page: pagesById.get(source.id) })).filter((item) => item.page);
   let result = { claims: [], contradictions: [] };
   if (usablePages.length || videoSources.length) {
-    const prompt = `Extrae las afirmaciones del artículo y comprueba su respaldo. Distingue video_attribution (lo que el artículo atribuye explícitamente al autor o al video) de external_fact (hechos independientes). Una fuente de video puede respaldar solo video_attribution; nunca basta para verificar external_fact. Opiniones y preguntas no son afirmaciones. No supongas respaldo. Marca contradicciones.\nARTÍCULO:\n${text}\nDOCUMENTOS:\n${usablePages.map(({ source, page }) => `ID ${source.id} (${source.qualityTier}) ${source.title}\n${page.text.slice(0, 4200)}`).join("\n\n") || "Sin documentos recuperados"}\nVIDEOS (solo atribución):\n${videoSources.map((source) => `ID ${source.id} ${source.title} ${source.locator || ""}\n${source.supportSummary || "Sin resumen"}`).join("\n\n") || "Sin videos"}\nSOLO JSON: {"claims":[{"id":"claim-1","blockId":"","text":"afirmación exacta","evidenceKind":"video_attribution|external_fact","risk":"low|medium|high","status":"supported|partially_supported|unsupported|contradicted","sourceIds":["source-1"],"supportSummary":"","locator":""}],"contradictions":[""]}`;
+    const prompt = `Extrae las afirmaciones del artículo y comprueba su respaldo. Distingue video_attribution (lo que el artículo atribuye explícitamente al autor, persona o canal) de external_fact (hechos independientes). Una fuente de video puede respaldar solo video_attribution; nunca basta para verificar external_fact. Marca como unsupported cualquier idea del video presentada sin atribución clara. Detecta citas o paráfrasis demasiado extensas o cercanas al video: el artículo debe tener estructura y redacción originales y ampliar la idea con documentos verificados. Opiniones y preguntas no son afirmaciones. No supongas respaldo. Marca contradicciones.\nARTÍCULO:\n${text}\nDOCUMENTOS:\n${usablePages.map(({ source, page }) => `ID ${source.id} (${source.qualityTier}) ${source.title}\n${page.text.slice(0, 4200)}`).join("\n\n") || "Sin documentos recuperados"}\nVIDEOS (solo atribución):\n${videoSources.map((source) => `ID ${source.id} ${source.title} ${source.locator || ""}\n${source.supportSummary || "Sin resumen"}`).join("\n\n") || "Sin videos"}\nSOLO JSON: {"claims":[{"id":"claim-1","blockId":"","text":"afirmación exacta","evidenceKind":"video_attribution|external_fact","risk":"low|medium|high","status":"supported|partially_supported|unsupported|contradicted","sourceIds":["source-1"],"supportSummary":"","locator":""}],"contradictions":[""]}`;
     result = (await generateJson({ client, prompt })).parsed;
   }
   const preservedSources = [...verified.verifiedSources, ...videoSources];
@@ -613,6 +613,20 @@ async function verifyArticleEvidenceServer({ article = {}, topic = "", additiona
   const articleWithPreservedVideos = { ...article, sources: preservedSources, researchSources: preservedSources };
   const missingCitations = bibliography.integrity(articleWithPreservedVideos).missing;
   if (missingCitations.length) blockers.push("Hay citas sin documento bibliográfico asociado: " + missingCitations.join(", "));
+  const videoSourceIds = new Set(videoSources.map((source) => String(source.id)));
+  const attributionPattern = /\b(?:seg[uú]n|explica|se[nñ]ala|afirma|describe|propone|muestra|sostiene|comenta|indica|en el video)\b/i;
+  for (const block of Array.isArray(article.blocks) ? article.blocks : []) {
+    const usesVideo = (Array.isArray(block?.sourceIds) ? block.sourceIds : []).some((id) => videoSourceIds.has(String(id)));
+    if (!usesVideo) continue;
+    const blockText = String(block.text || "").trim();
+    if (!String(block.locator || "").trim()) blockers.push(`El bloque ${block.id || "de video"} necesita una marca de tiempo.`);
+    if (block.type === "quote") {
+      if (blockText.split(/\s+/).filter(Boolean).length > 25) blockers.push(`La cita de video ${block.id || ""} supera 25 palabras.`.trim());
+      if (!String(block.attribution || "").trim()) blockers.push(`La cita de video ${block.id || ""} necesita atribución explícita.`.trim());
+    } else if (!String(block.attribution || "").trim() && !attributionPattern.test(blockText)) {
+      blockers.push(`El bloque ${block.id || "de video"} presenta una idea del video sin atribución explícita.`);
+    }
+  }
   if (verified.rejectedSources.length) blockers.push(`${verified.rejectedSources.length} fuente(s) fueron descartadas al comprobar su contenido.`);
   const requiredSources = article.researchDossier?.targetSourceCount || (article.editorialMode === "aida" ? researchPolicy.target({ editorialMode: "aida" }) : 0);
   if (!verified.verifiedSources.length) blockers.push("El artículo no conserva ninguna fuente verificable.");

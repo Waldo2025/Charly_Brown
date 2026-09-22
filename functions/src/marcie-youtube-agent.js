@@ -130,7 +130,7 @@ function normalizeVideoAnalysis(parsed = {}, source = {}) {
 
 function videoPrompt({ objective = "", language = "es-MX" } = {}) {
   return `Analiza este video público de YouTube como fuente para un artículo educativo en ${language}. Objetivo editorial: ${clean(objective, 1000) || "identificar el tema, las ideas y la evidencia utilizable"}.
-No entregues una transcripción completa. No inventes título, canal, fecha, citas ni marcas de tiempo. Distingue lo que el autor dice o muestra (video_attribution) de afirmaciones factuales que necesitan contraste externo (external_fact). Las citas deben tener máximo 25 palabras y una marca de tiempo comprobable.
+El video es únicamente el punto de partida editorial: extrae ideas y hallazgos, pero no reproduzcas su secuencia, estructura ni redacción. No entregues una transcripción completa ni paráfrasis extensas o demasiado cercanas al original. No inventes título, canal, fecha, citas ni marcas de tiempo. Distingue lo que el autor dice o muestra (video_attribution) de afirmaciones factuales que necesitan contraste externo (external_fact). Las citas deben tener máximo 25 palabras, una marca de tiempo comprobable y usarse solo cuando sean necesarias para atribuir una idea.
 Devuelve SOLO JSON: {"title":"","channel":"","publishedAt":"YYYY-MM-DD o vacío","summary":"","topics":[""],"concepts":[""],"proposedTopics":[""],"evidenceItems":[{"id":"","text":"","timestamp":"MM:SS","evidenceKind":"video_attribution|external_fact","needsCorroboration":true}],"shortQuotes":[{"text":"","timestamp":"MM:SS"}],"warnings":[""]}.`;
 }
 

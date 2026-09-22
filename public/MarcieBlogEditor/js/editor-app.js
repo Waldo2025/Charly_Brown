@@ -25,8 +25,8 @@ import { initTopbarActions, openAiAssistantModal } from "./components/topbar-act
 import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260908r9";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
 import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r1";
-import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r1";
-import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260922r1";
+import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r2";
+import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260922r2";
 import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260908r9";
 import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextModels, listGeminiModels, setConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
 import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260908r9";

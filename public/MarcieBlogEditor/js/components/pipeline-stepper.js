@@ -7,14 +7,14 @@ import { saveMarcieSession } from "../services/marcie-session-store.js?v=2026092
 import { showModal, closeActiveModal, showToast } from "./modals.js";
 import {
   sanitizeTrustedSources
-} from "../services/marcie-gemini-service.js?v=20260922r1";
+} from "../services/marcie-gemini-service.js?v=20260922r2";
 import {
   draftArticleForMode,
   generateProposalsForMode,
   researchTopicForMode,
   reviewArticleForMode,
   sessionUsesAida
-} from "../services/marcie-mode-service.js?v=20260922r1";
+} from "../services/marcie-mode-service.js?v=20260922r2";
 import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 
 function normalizeSourceText(value = "") {
