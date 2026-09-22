@@ -4,11 +4,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const {
+  ANALYSIS_TIMEOUT_MS,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
   normalizeYoutubeUrl,
   normalizeYoutubeUrls
 } = require("../src/marcie-youtube-agent.js");
+
+test("el análisis de video usa el presupuesto extendido de la función", () => {
+  assert.equal(ANALYSIS_TIMEOUT_MS, 420_000);
+});
 
 const IDS = ["dQw4w9WgXcQ", "9bZkp7q19f0", "M7lc1UVf-VE", "aqz-KE-bpKQ", "jNQXAC9IVRw", "kJQP7kiw5Fk"];
 
@@ -93,6 +98,15 @@ test("bloquea la confirmación cuando fallan todos los videos", async () => {
   await assert.rejects(
     analyzeYoutubeVideos({ urls: [`https://youtu.be/${IDS[0]}`] }, { analyzeVideo: async () => { throw new Error("inaccesible"); } }),
     (error) => error.code === "youtube_analysis_empty" && error.status === 422
+  );
+});
+
+test("distingue un análisis agotado de un video inválido", async () => {
+  await assert.rejects(
+    analyzeYoutubeVideos({ urls: [`https://youtu.be/${IDS[0]}`] }, {
+      analyzeVideo: async () => { throw Object.assign(new Error("youtube_analysis_timeout"), { code: "youtube_analysis_timeout" }); }
+    }),
+    (error) => error.code === "youtube_analysis_timeout" && error.status === 504 && /tardó más de lo esperado/i.test(error.message)
   );
 });
 

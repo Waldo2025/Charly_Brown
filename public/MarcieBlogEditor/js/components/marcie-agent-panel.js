@@ -1,5 +1,5 @@
 import { getAgentHistory, sendAgentTurn, startAgentConversation, startAgentRun, updateAgentRun } from "../services/marcie-agent-api.js?v=20260922r3";
-import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r5";
+import { createMarcieAgentVoice } from "../services/marcie-agent-voice.js?v=20260922r6";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
@@ -85,6 +85,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let panelActivity = "";
   let loadedSessionId = "";
   let historyRequestId = 0;
+  let voiceSurface = null;
   const panelMessages = [];
   const guideMessages = [];
 
@@ -144,6 +145,18 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     return "Listo para ayudarte";
   }
 
+  function updateMicControl(surface, value) {
+    if (!surface?.mic) return;
+    const holdMode = surface.root.dataset.micMode === "hold";
+    const label = value === "listening"
+      ? (holdMode ? "Suelta para enviar" : "Escuchando; enviaré al pausar")
+      : (surface === guide ? "Pulsar para hablar" : "Dictar mensaje");
+    surface.mic.setAttribute("aria-label", label);
+    surface.mic.title = label;
+    const visibleLabel = surface.mic.querySelector("span");
+    if (visibleLabel) visibleLabel.textContent = label;
+  }
+
   function setStatus(value) {
     panel.status.textContent = statusLabel(value);
     panel.root.dataset.agentState = value;
@@ -151,13 +164,22 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       guide.status.textContent = statusLabel(value);
       guide.root.dataset.agentState = value;
     }
+    updateMicControl(voiceSurface || activeSurface(), value);
   }
 
   const voice = createMarcieAgentVoice({
     onTranscript(value) {
-      const surface = activeSurface();
+      const surface = voiceSurface || activeSurface();
       surface.input.value = value;
       if (guide) guide.transcript.textContent = value || "Tu respuesta aparecerá aquí antes de enviarse.";
+    },
+    onComplete(value) {
+      const surface = voiceSurface;
+      voiceSurface = null;
+      if (!surface?.root?.isConnected || !String(value || "").trim()) return;
+      surface.input.value = String(value).trim();
+      if (surface.transcript) surface.transcript.textContent = surface.input.value;
+      surface.form.requestSubmit();
     },
     onStateChange: setStatus,
     onError(error) {
@@ -167,6 +189,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       }
       onNotify?.(error.message, "warning");
       setStatus("idle");
+      voiceSurface = null;
     }
   });
 
@@ -295,10 +318,51 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       if (surface.transcript) surface.transcript.textContent = "Tu respuesta aparecerá aquí antes de enviarse.";
       submit({ text });
     });
-    surface.mic?.addEventListener("click", () => {
-      if (voice.listening) voice.stop();
-      else voice.listen();
-    });
+    if (surface.mic) {
+      let pointerStartedAt = 0;
+      let pointerActive = false;
+      let startedWhileActive = false;
+      let suppressClick = false;
+      const beginListening = (mode) => {
+        voiceSurface = surface;
+        surface.root.dataset.micMode = mode;
+        return voice.listen({ autoSubmit: mode === "auto", silenceMs: 1800 });
+      };
+      surface.mic.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        event.preventDefault();
+        pointerStartedAt = performance.now();
+        pointerActive = true;
+        startedWhileActive = voice.active;
+        if (!startedWhileActive) beginListening("hold");
+        try { surface.mic.setPointerCapture(event.pointerId); } catch (_) {}
+      });
+      surface.mic.addEventListener("pointerup", (event) => {
+        if (!pointerActive) return;
+        event.preventDefault();
+        pointerActive = false;
+        const heldLongEnough = performance.now() - pointerStartedAt >= 380;
+        if (startedWhileActive || heldLongEnough) {
+          voice.stop({ submit: true });
+        } else {
+          surface.root.dataset.micMode = "auto";
+          voice.enableAutoSubmit({ silenceMs: 1800 });
+          updateMicControl(surface, "listening");
+        }
+        suppressClick = true;
+        window.setTimeout(() => { suppressClick = false; }, 0);
+      });
+      surface.mic.addEventListener("pointercancel", () => {
+        pointerActive = false;
+        voiceSurface = null;
+        voice.stop();
+      });
+      surface.mic.addEventListener("click", () => {
+        if (suppressClick) return;
+        if (voice.active) voice.stop({ submit: true });
+        else beginListening("auto");
+      });
+    }
     surface.audio?.addEventListener("click", () => {
       panelAudioEnabled = !panelAudioEnabled;
       if (!panelAudioEnabled) voice.cancelSpeech();

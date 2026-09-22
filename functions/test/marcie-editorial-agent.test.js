@@ -52,6 +52,12 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.match(panelSource, /function renderOptions\(response, target = guide \? "guide" : "panel"\)/);
   assert.doesNotMatch(panelSource, /const messages = \[\]/);
   assert.match(panelSource, /Pulsar para hablar/);
+  assert.match(panelSource, /pointerdown/);
+  assert.match(panelSource, /pointerup/);
+  assert.match(panelSource, /Suelta para enviar/);
+  assert.match(panelSource, /Escuchando; enviaré al pausar/);
+  assert.match(panelSource, /voice\.enableAutoSubmit\(\{ silenceMs: 1800 \}\)/);
+  assert.match(panelSource, /voice\.stop\(\{ submit: true \}\)/);
   assert.match(panelSource, /Escribe una instrucción para Marcie/);
   assert.match(panelSource, /data-agent-mic title="Dictar mensaje"/);
   assert.match(panelSource, /data-agent-audio title="Activar respuestas por voz"/);
@@ -65,6 +71,9 @@ test("la creación usa la guía de voz y mantiene el chat MCP visible en el pane
   assert.doesNotMatch(panelSource, /Gemini está revisando/);
   assert.doesNotMatch(panelSource, /Conectando con Gemini/);
   assert.match(voiceSource, /speakWithGeminiLive/);
+  assert.match(voiceSource, /recognition\.continuous = true/);
+  assert.match(voiceSource, /scheduleAutoSubmit\(\)/);
+  assert.match(voiceSource, /onComplete\?\.\(completedTranscript\)/);
   assert.match(voiceSource, /voiceName: "Aoede"/);
   assert.doesNotMatch(voiceSource, /speechSynthesis|SpeechSynthesisUtterance|speakWithBrowser/);
   assert.match(voiceSource, /cancelOutput\(\);/);

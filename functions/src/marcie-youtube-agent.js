@@ -4,7 +4,7 @@ const { buildVertexGenerateRequest, DEFAULT_TEXT_MODEL } = require("./vertex.js"
 const ANALYSIS_VERSION = 1;
 const MAX_YOUTUBE_VIDEOS = 5;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
-const ANALYSIS_TIMEOUT_MS = 105_000;
+const ANALYSIS_TIMEOUT_MS = 420_000;
 
 function clean(value, max = 1200) {
   return String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, max);
@@ -178,7 +178,16 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
   });
   await Promise.all(workers);
   videos.sort((a, b) => normalized.valid.findIndex((item) => item.videoId === a.videoId) - normalized.valid.findIndex((item) => item.videoId === b.videoId));
-  if (!videos.length) throw Object.assign(new Error("No pude analizar ninguno de los videos. Verifica que sean públicos e inténtalo de nuevo."), { status: 422, code: "youtube_analysis_empty", rejectedVideos });
+  if (!videos.length) {
+    const timedOut = rejectedVideos.length > 0 && rejectedVideos.every((item) => item.reason === "youtube_analysis_timeout");
+    throw Object.assign(new Error(timedOut
+      ? "El análisis del video tardó más de lo esperado. Inténtalo nuevamente; la URL sigue siendo válida."
+      : "No pude analizar ninguno de los videos. Verifica que sean públicos e inténtalo de nuevo."), {
+      status: timedOut ? 504 : 422,
+      code: timedOut ? "youtube_analysis_timeout" : "youtube_analysis_empty",
+      rejectedVideos
+    });
+  }
   const proposedTopics = [];
   for (const value of videos.flatMap((video) => video.proposedTopics)) {
     if (!proposedTopics.some((item) => item.toLowerCase() === value.toLowerCase())) proposedTopics.push(value);
@@ -201,6 +210,7 @@ async function analyzeYoutubeVideos({ urls = [], objective = "", language = "es-
 
 module.exports = {
   ANALYSIS_VERSION,
+  ANALYSIS_TIMEOUT_MS,
   MAX_YOUTUBE_VIDEOS,
   analyzeSingleYoutubeVideo,
   analyzeYoutubeVideos,
