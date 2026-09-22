@@ -85,7 +85,8 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   let panelActivity = "";
   let loadedSessionId = "";
   let historyRequestId = 0;
-  const messages = [];
+  const panelMessages = [];
+  const guideMessages = [];
 
   host.innerHTML = `
     <section class="marcie-agent" aria-label="Agente editorial MCP">
@@ -170,8 +171,8 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   });
 
   function renderPanelMessages() {
-    const conversation = messages.length
-      ? messages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}">${escapeHtml(message.text)}</div>`).join("")
+    const conversation = panelMessages.length
+      ? panelMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}">${escapeHtml(message.text)}</div>`).join("")
       : `<div class="marcie-agent__empty"><i data-lucide="wand-sparkles"></i><p>Puedo revisar, verificar y mejorar los artículos creados.</p></div>`;
     const activity = panelActivity
       ? `<div class="marcie-agent-activity" role="status" aria-live="polite"><span class="marcie-agent-activity__dots" aria-hidden="true"><span></span><span></span><span></span></span><span>${escapeHtml(panelActivity)}</span></div>`
@@ -179,6 +180,19 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     panel.messageList.innerHTML = conversation + activity;
     panel.messageList.scrollTop = panel.messageList.scrollHeight;
     window.lucide?.createIcons?.();
+  }
+
+  function renderGuideMessages() {
+    if (!guide?.messageList) return;
+    const visibleMessages = guideMessages.at(-1)?.role === "assistant" ? guideMessages.slice(0, -1) : guideMessages;
+    guide.messageList.innerHTML = visibleMessages.map((message) => `<div class="marcie-agent-message marcie-agent-message--${message.role}">${escapeHtml(message.text)}</div>`).join("");
+    guide.messageList.hidden = visibleMessages.length === 0;
+    guide.messageList.scrollTop = guide.messageList.scrollHeight;
+  }
+
+  function renderActiveMessages() {
+    if (guide) renderGuideMessages();
+    else renderPanelMessages();
   }
 
   function renderGuideQuestion(response) {
@@ -213,8 +227,9 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     });
   }
 
-  function renderOptions(response) {
-    const surface = activeSurface();
+  function renderOptions(response, target = guide ? "guide" : "panel") {
+    const surface = target === "guide" ? guide : panel;
+    if (!surface) return;
     const prompt = response.uiPrompt || {};
     const options = Array.isArray(prompt.options) ? prompt.options : [];
     surface.optionsHost.innerHTML = `${response.phase === "summary" ? configurationHtml(response.configuration) : ""}${response.phase === "video_topic" ? videoResearchHtml(response.videoResearch || response.configuration?.videoResearch) : ""}${prompt.type === "change_preview" ? changePreviewHtml(response.changePreview) : ""}`;
@@ -225,7 +240,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     }
     if (!options.length) return;
     const wrapper = document.createElement("div");
-    wrapper.className = `marcie-agent-option-list${guide ? " marcie-voice-guide__option-list" : ""}`;
+    wrapper.className = `marcie-agent-option-list${target === "guide" ? " marcie-voice-guide__option-list" : ""}`;
     wrapper.innerHTML = options.map(optionButton).join("");
     surface.optionsHost.appendChild(wrapper);
     bindOptionEvents(surface, prompt, wrapper);
@@ -312,6 +327,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
           <p class="marcie-voice-guide__phase" data-guide-phase>Preparando la conversación</p>
           <p class="marcie-voice-guide__question" data-guide-question aria-live="polite">Conectando con Marcie…</p>
           <div class="marcie-voice-guide__status"><span class="marcie-voice-guide__status-dot"></span><span data-agent-status>Procesando</span></div>
+          <div class="marcie-voice-guide__messages" data-guide-messages aria-label="Conversación de configuración" aria-live="polite" hidden></div>
           <div class="marcie-voice-guide__options" data-agent-options></div>
           <div class="marcie-voice-guide__transcript" aria-live="polite"><span>Lo que entendí</span><p data-guide-transcript>Tu respuesta aparecerá aquí antes de enviarse.</p></div>
         </div>
@@ -328,6 +344,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       root,
       question: root.querySelector("[data-guide-question]"),
       phase: root.querySelector("[data-guide-phase]"),
+      messageList: root.querySelector("[data-guide-messages]"),
       transcript: root.querySelector("[data-guide-transcript]"),
       optionsHost: root.querySelector("[data-agent-options]"),
       form: root.querySelector("[data-agent-form]"),
@@ -338,6 +355,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     };
     root.querySelector(".marcie-voice-guide__close").addEventListener("click", () => closeGuide());
     bindComposer(guide);
+    renderGuideMessages();
     window.lucide?.createIcons?.();
     guide.mic.focus();
   }
@@ -345,13 +363,15 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
   async function submit(inputPayload) {
     if (busy) return;
     const surface = activeSurface();
+    const target = guide ? "guide" : "panel";
+    const activeMessages = target === "guide" ? guideMessages : panelMessages;
     const userText = inputPayload.text || inputPayload.value || "";
-    if (userText) messages.push({ role: "user", text: userText });
+    if (userText) activeMessages.push({ role: "user", text: userText });
     if (!guide) panelActivity = activityLabel(inputPayload);
     busy = true;
     setStatus("processing");
     setSurfaceBusy(surface, true);
-    renderPanelMessages();
+    renderActiveMessages();
     try {
       const activeSession = guide ? null : getActiveSession?.();
       if (!guide && !activeSession?.id) throw new Error("Selecciona una sesión con un artículo para trabajar con Marcie.");
@@ -363,13 +383,14 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
         sessionId: activeSession?.id || ""
       });
       panelActivity = "";
-      showResponse(response);
+      showResponse(response, { target });
     } catch (error) {
       panelActivity = "";
-      messages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
+      activeMessages.push({ role: "assistant", text: `No pude continuar: ${error.message}` });
       if (guide) guide.question.textContent = `No pude continuar: ${error.message}`;
-      if (responseState) renderOptions(responseState);
-      renderPanelMessages();
+      if (responseState) renderOptions(responseState, target);
+      if (target === "guide") renderGuideMessages();
+      else renderPanelMessages();
       onNotify?.(error.message, "error");
     } finally {
       busy = false;
@@ -378,19 +399,23 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       setStatus("idle");
       if (panelActivity) {
         panelActivity = "";
-        renderPanelMessages();
+        renderActiveMessages();
       }
     }
   }
 
-  function showResponse(response, { speak = true } = {}) {
+  function showResponse(response, { speak = true, target = guide ? "guide" : "panel" } = {}) {
     responseState = response;
     runId = response.runId || runId;
-    messages.push({ role: "assistant", text: response.message });
-    renderPanelMessages();
-    renderGuideQuestion(response);
-    renderOptions(response);
-    if (speak && (guide || panelAudioEnabled)) voice.speak(response.speechText || response.message);
+    (target === "guide" ? guideMessages : panelMessages).push({ role: "assistant", text: response.message });
+    if (target === "guide") {
+      renderGuideQuestion(response);
+      renderGuideMessages();
+    } else {
+      renderPanelMessages();
+    }
+    renderOptions(response, target);
+    if (speak && ((target === "guide" && guide) || (target === "panel" && panelAudioEnabled))) voice.speak(response.speechText || response.message);
   }
 
   async function executeRun() {
@@ -404,11 +429,11 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     }
     try {
       const result = await startAgentRun(runId);
-      messages.push({ role: "assistant", text: "Perfecto. Investigaré las fuentes y prepararé los artículos." });
+      (guide ? guideMessages : panelMessages).push({ role: "assistant", text: "Perfecto. Investigaré las fuentes y prepararé los artículos." });
       const sessionId = await onCreateSession?.(result.sessionRequest, runId);
       await updateAgentRun(runId, "completed", { sessionId });
       responseState = { ...(responseState || {}), runStatus: "completed", phase: "completed" };
-      messages.push({ role: "assistant", text: "Los artículos están listos. Puedo ayudarte a revisarlos, verificarlos o preparar cambios." });
+      (guide ? guideMessages : panelMessages).push({ role: "assistant", text: "Los artículos están listos. Puedo ayudarte a revisarlos, verificarlos o preparar cambios." });
       panel.body.hidden = false;
       panel.header.setAttribute("aria-expanded", "true");
       document.getElementById("right-panel")?.classList.remove("hidden");
@@ -417,7 +442,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       renderPanelMessages();
     } catch (error) {
       await updateAgentRun(runId, "failed", { error: error.message }).catch(() => {});
-      messages.push({ role: "assistant", text: `La creación se detuvo: ${error.message}` });
+      (guide ? guideMessages : panelMessages).push({ role: "assistant", text: `La creación se detuvo: ${error.message}` });
       if (guide) guide.question.textContent = `La creación se detuvo: ${error.message}`;
       renderPanelMessages();
       onNotify?.(error.message, "error");
@@ -432,8 +457,7 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
     runId = "";
     loadedSessionId = "";
     responseState = null;
-    messages.length = 0;
-    renderPanelMessages();
+    guideMessages.length = 0;
     openVoiceGuide();
     setStatus("processing");
     try {
@@ -459,9 +483,9 @@ export function initMarcieAgentPanel({ getActiveSession, onCreateSession, onNewS
       if (requestId !== historyRequestId || loadedSessionId !== sessionId) return;
       runId = history.runId || "";
       responseState = null;
-      messages.length = 0;
+      panelMessages.length = 0;
       (history.messages || []).forEach((message) => {
-        if ((message.role === "user" || message.role === "assistant") && message.text) messages.push({ role: message.role, text: message.text });
+        if ((message.role === "user" || message.role === "assistant") && message.text) panelMessages.push({ role: message.role, text: message.text });
       });
       if (history.pendingChange) {
         responseState = {
