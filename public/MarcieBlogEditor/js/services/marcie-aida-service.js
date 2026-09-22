@@ -6,7 +6,7 @@ import {
   researchArticleEvidence,
   sanitizeTrustedSources,
   verifyArticleEvidence
-} from "./marcie-gemini-service.js?v=20260922r2";
+} from "./marcie-gemini-service.js?v=20260922r3";
 
 export const AIDA_SERVICE_VERSION = "2.0";
 export const AIDA_LEGACY_BRAND_LINE = "Aprender no es esforzarse más. Es aprender como el cerebro estaba hecho para aprender.";

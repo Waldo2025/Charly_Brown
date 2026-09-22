@@ -107,5 +107,5 @@ export function parseMarcieJson(value = "") {
     }
   } catch (_) {}
 
-  throw firstError || new SyntaxError("Gemini devolvió una respuesta JSON vacía.");
+  throw firstError || new SyntaxError("Marcie devolvió una respuesta JSON vacía.");
 }

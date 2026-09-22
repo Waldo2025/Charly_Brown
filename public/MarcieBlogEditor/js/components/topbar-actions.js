@@ -8,7 +8,7 @@ import { openCommandPalette } from "./command-palette.js";
 import { logOutUser } from "../services/marcie-auth-guard.js";
 import { generateWithGemini, getConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
 import { saveMarcieSession } from "../services/marcie-session-store.js?v=20260922r1";
-import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260922r2";
+import { draftArticleForMode, refineTopicForMode, reviewArticleForMode, sessionUsesAida } from "../services/marcie-mode-service.js?v=20260922r3";
 import { getActiveMarciePrompt } from "../services/marcie-prompt-settings.js";
 
 const escapeHtml = (unsafe) => {
@@ -231,7 +231,7 @@ export function initTopbarActions({ getSessions, onSelectSession, onRefresh, get
     });
   }
 
-  // 2. Botón Asistente IA (Modal de Acciones Rápidas y Prompt Directo a Gemini)
+  // 2. Botón Asistente IA (acciones rápidas y prompt directo a Marcie).
   if (btnIa) {
     btnIa.addEventListener("click", () => {
       openAiAssistantModal({ getActiveSession, onRefresh });
@@ -263,7 +263,7 @@ function openNotificationsCenterModal({ getActiveSession, getSessions }) {
 
   const currentLogs = (session?.log && session.log.length > 0) ? session.log : [
     { message: "Sesión inicializada y sincronizada con Firestore", at: new Date().toISOString() },
-    { message: "Conexión activa con Vertex AI / Gemini 2.5 Flash", at: new Date(Date.now() - 60000).toISOString() }
+    { message: "Conexión activa con Marcie", at: new Date(Date.now() - 60000).toISOString() }
   ];
 
   showModal({
@@ -281,7 +281,7 @@ function openNotificationsCenterModal({ getActiveSession, getSessions }) {
           <div class="p-2.5 bg-purple-50 border border-purple-100 rounded-lg flex flex-col gap-0.5">
             <span class="text-[10px] uppercase font-bold text-purple-800 tracking-wider">Motor IA</span>
             <span class="font-semibold text-purple-900 flex items-center gap-1">
-              <span class="w-2 h-2 rounded-full bg-purple-500"></span> Gemini 2.5
+              <span class="w-2 h-2 rounded-full bg-purple-500"></span> Marcie
             </span>
           </div>
           <div class="p-2.5 bg-blue-50 border border-blue-100 rounded-lg flex flex-col gap-0.5">
@@ -499,7 +499,7 @@ export function openAiAssistantModal({ getActiveSession, onRefresh, preselectedT
         <div class="min-w-0 space-y-3.5">
         <div class="space-y-1.5">
           <label for="ai-topic-input" class="block text-sm font-semibold text-slate-800">Tema del artículo</label>
-          <p class="text-[11px] text-slate-500">Escribe tu idea con tus propias palabras y Gemini la convertirá en un título preciso para el blog.</p>
+          <p class="text-[11px] text-slate-500">Escribe tu idea con tus propias palabras y Marcie la convertirá en un título preciso para el blog.</p>
           <div class="flex flex-col gap-2 sm:flex-row">
             <input id="ai-topic-input" value="${escapeHtml(initialTopic)}" class="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 shadow-xs outline-none transition-all focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20" placeholder="Ej. Cómo recuperar la curiosidad de los estudiantes en el aula" />
             <button id="btn-refine-ai-topic" class="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-purple-200 bg-purple-50 px-3 text-xs font-semibold text-purple-700 transition hover:border-purple-300 hover:bg-purple-100">

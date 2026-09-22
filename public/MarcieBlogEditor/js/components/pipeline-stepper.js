@@ -7,14 +7,14 @@ import { saveMarcieSession } from "../services/marcie-session-store.js?v=2026092
 import { showModal, closeActiveModal, showToast } from "./modals.js";
 import {
   sanitizeTrustedSources
-} from "../services/marcie-gemini-service.js?v=20260922r2";
+} from "../services/marcie-gemini-service.js?v=20260922r3";
 import {
   draftArticleForMode,
   generateProposalsForMode,
   researchTopicForMode,
   reviewArticleForMode,
   sessionUsesAida
-} from "../services/marcie-mode-service.js?v=20260922r2";
+} from "../services/marcie-mode-service.js?v=20260922r3";
 import { articleVerificationBlockers } from "../contracts/editorial-contracts.js?v=20260908r9";
 
 function normalizeSourceText(value = "") {
@@ -284,7 +284,7 @@ export async function runTrendSearchForSession({
   return result;
 }
 
-// 1. Buscar tendencias con Gemini
+// 1. Buscar tendencias con Marcie
 function handleSearchTrendsStep({ getSession, onUpdateSession }) {
   const session = getSession();
   if (!session) return;
@@ -295,7 +295,7 @@ function handleSearchTrendsStep({ getSession, onUpdateSession }) {
     widthClass: "max-w-2xl",
     contentHtml: `
       <div class="flex flex-col gap-4">
-        <p class="text-xs text-slate-500 leading-relaxed">${aidaMode ? "Investiga el tema completo en 8–12 páginas concretas y cuatro instituciones. Añade hechos científicos y evolución histórica solo cuando sean pertinentes y tengan respaldo." : "Ingresa un tema educativo para buscar señales, estadísticas y fuentes recientes con Gemini."}</p>
+        <p class="text-xs text-slate-500 leading-relaxed">${aidaMode ? "Investiga el tema completo en 8–12 páginas concretas y cuatro instituciones. Añade hechos científicos y evolución histórica solo cuando sean pertinentes y tengan respaldo." : "Ingresa un tema educativo para que Marcie busque señales, estadísticas y fuentes recientes."}</p>
 
         <div class="bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col gap-4">
           <div>
@@ -332,7 +332,7 @@ function handleSearchTrendsStep({ getSession, onUpdateSession }) {
       <button id="btn-cancel-search" class="btn btn-outline h-9 px-4 text-xs" onclick="document.getElementById('marcie-modal-backdrop')?.remove()">Cancelar</button>
       <button id="btn-run-trend-search" class="btn btn-primary h-9 px-4 text-xs flex items-center gap-1.5">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-        ${aidaMode ? "Investigar con Aida" : "Buscar con Gemini"}
+        ${aidaMode ? "Investigar con Aida" : "Buscar con Marcie"}
       </button>
     `
   });
@@ -352,7 +352,7 @@ function handleSearchTrendsStep({ getSession, onUpdateSession }) {
     runBtn.disabled = true;
     runBtn.innerHTML = `
       <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-      ${aidaMode ? "Comprobando fuentes del tema..." : "Analizando con Gemini..."}
+      ${aidaMode ? "Comprobando fuentes del tema..." : "Marcie está analizando..."}
     `;
 
     try {
@@ -363,13 +363,13 @@ function handleSearchTrendsStep({ getSession, onUpdateSession }) {
         period: periodSelect?.value || "6m"
       });
       closeActiveModal();
-      showToast(aidaMode ? "✨ Investigación Aida completada." : "✨ Señales y fuentes descubiertas exitosamente con Gemini.", "success");
+      showToast(aidaMode ? "✨ Investigación Aida completada." : "✨ Marcie encontró señales y fuentes correctamente.", "success");
       if (onUpdateSession) onUpdateSession();
     } catch (error) {
       console.error("[MarciePipeline] Error en búsqueda de tendencias:", error);
-      alert(`Error al conectar con Gemini: ${error.message}`);
+      alert(`Error al conectar con Marcie: ${error.message}`);
       runBtn.disabled = false;
-      runBtn.textContent = aidaMode ? "Investigar con Aida" : "Buscar con Gemini";
+      runBtn.textContent = aidaMode ? "Investigar con Aida" : "Buscar con Marcie";
     }
   });
 }
@@ -430,7 +430,7 @@ function handleAnalyzeStep({ getSession, onUpdateSession }) {
   });
 }
 
-// 3. Crear 4 propuestas editoriales por audiencia con Gemini
+// 3. Crear 4 propuestas editoriales por audiencia con Marcie
 function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationState }) {
   const session = getSession();
   if (!session) return;
@@ -472,7 +472,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
           </div>
           <div class="pt-3 mt-auto border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
             ${hasArticle ? `
-              <button type="button" data-regen-audience="${p.audience}" class="text-xs text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2.5 py-1.5 rounded border border-purple-200 flex items-center gap-1.5 font-medium transition-all cursor-pointer" title="Regenerar sólo este artículo con Gemini">
+              <button type="button" data-regen-audience="${p.audience}" class="text-xs text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2.5 py-1.5 rounded border border-purple-200 flex items-center gap-1.5 font-medium transition-all cursor-pointer" title="Regenerar sólo este artículo con Marcie">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                 Re-hacer
               </button>
@@ -536,7 +536,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
 
         <div id="proposals-loading" class="hidden py-6 text-center text-xs text-slate-500">
           <svg class="animate-spin mx-auto h-6 w-6 text-teal-600 mb-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-          Diseñando propuestas personalizadas con Gemini...
+          Marcie está diseñando propuestas personalizadas...
         </div>
 
         <div id="proposals-cards" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -668,7 +668,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
         const existingArticle = session.articlesByAudience[aud];
         const hasExisting = existingArticle && Array.isArray(existingArticle.blocks) && existingArticle.blocks.length > 0;
 
-        // Si ya existe el artículo redactado para esta audiencia, ABRIRLO DE INMEDIATO sin llamar a Gemini
+        // Si ya existe el artículo redactado para esta audiencia, abrirlo sin volver a llamar a Marcie.
         if (hasExisting) {
           session.article = existingArticle;
           if (existingArticle.title) session.title = existingArticle.title;
@@ -678,7 +678,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
           showToast(`✨ Artículo abierto para: ${audLabel}`, "success");
           if (onUpdateSession) onUpdateSession();
         } else {
-          // Si no existe, redactarlo por primera vez con Gemini
+          // Si no existe, redactarlo por primera vez con Marcie.
           await generateAndOpenArticleForAudience(aud, selectedTitle, selectedBrief, false);
         }
       });
@@ -808,7 +808,7 @@ function handleProposalsStep({ getSession, onUpdateSession, onArticleGenerationS
       const requiredCount = session.selectedAudiences?.length || 4;
       const proposals = Array.isArray(resp?.proposals) ? resp.proposals.slice(0, requiredCount) : [];
       if (proposals.length < requiredCount) {
-        throw new Error("Gemini no devolvió un enfoque para cada público seleccionado.");
+        throw new Error("Marcie no devolvió un enfoque para cada público seleccionado.");
       }
       session.proposals = proposals;
       session.researchByAudience = resp.researchByAudience || session.researchByAudience || {};
@@ -989,7 +989,7 @@ Regenera el texto editorial manteniendo estructura, enfoque, tono y fuentes, pri
       });
 
       if (!correctedArticle) {
-        throw new Error("No se recibió un artículo corregido desde Gemini.");
+        throw new Error("No se recibió un artículo corregido desde Marcie.");
       }
 
       session.article = correctedArticle;
@@ -1146,7 +1146,7 @@ Regenera el texto editorial manteniendo estructura, enfoque, tono y fuentes, pri
     bindApproveButton();
   }
 
-  // Solo llamar a Gemini si no hay auditoría guardada
+  // Solo llamar a Marcie si no hay auditoría guardada.
   if (!hasExistingAudit) {
     runAudit();
     return;

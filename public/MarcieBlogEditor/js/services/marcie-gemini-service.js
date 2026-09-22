@@ -10,7 +10,7 @@ import { buildApiUrlPreferRemote, buildMarcieApiUrl } from "/js/api-client.js";
 import { getDownloadURL, ref, uploadBytes } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getCurrentUser, storage } from "./marcie-firebase.js";
 import { getActiveMarciePrompt } from "./marcie-prompt-settings.js?v=20260908r9";
-import { parseMarcieJson } from "./marcie-json.js";
+import { parseMarcieJson } from "./marcie-json.js?v=20260922r3";
 import "../contracts/marcie-research-policy.js?v=20260922r1";
 import "../contracts/marcie-bibliography.js?v=20260922r1";
 
@@ -289,7 +289,7 @@ function extractGeneratedImage(data = {}) {
     const dataBase64 = String(inline?.data || "").trim();
     if (dataBase64 && /^image\//i.test(mimeType)) return { dataBase64, mimeType };
   }
-  throw new Error("Gemini no devolvió una imagen para el artículo.");
+  throw new Error("Marcie no devolvió una imagen para el artículo.");
 }
 
 async function optimizeImageForWeb({ dataBase64 = "", mimeType = "image/png" } = {}) {
@@ -486,7 +486,7 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
 }
 `.trim();
 
-  console.log(`[MarcieGemini] Buscando tendencias y fuentes diversas con ${model} para: "${cleanTopic}"...`);
+  console.log(`[MarcieAI] Buscando tendencias y fuentes diversas con ${model} para: "${cleanTopic}"...`);
   const { parsed, groundingSources } = await generateGroundedJson({ prompt, model });
   parsed.sources = sanitizeTrustedSources([...(parsed.sources || []), ...groundingSources]);
   parsed.growth = null;
@@ -568,7 +568,7 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
 }
 `.trim();
 
-  console.log(`[MarcieGemini] Generando 4 propuestas PNL con ${model} para: "${cleanTopic}"...`);
+  console.log(`[MarcieAI] Generando 4 propuestas PNL con ${model} para: "${cleanTopic}"...`);
   const raw = await generateWithGemini({
     model,
     prompt,
@@ -799,7 +799,7 @@ export async function draftArticleWithGemini({ title = "", topic = "", audience 
     try {
       dossier = await researchArticleEvidence({ topic: cleanTopic, audience, mode: editorialMode, minimumSources: editorialMode === "aida" ? 8 : 6 });
     } catch (error) {
-      console.warn("[MarcieGemini] La investigación con grounding no pudo completarse:", error);
+      console.warn("[MarcieAI] La investigación con grounding no pudo completarse:", error);
       dossier = { facts: [], sources: [], historicalMilestones: [] };
     }
   }
@@ -827,7 +827,7 @@ Dossier completo de contexto y evidencia (la bibliografía se construye desde es
 ${dossierText}
 `.trim();
 
-  console.log(`[MarcieGemini] Redactando artículo maestro para ${audience} con PNL, fuentes diversas y ${model}...`);
+  console.log(`[MarcieAI] Redactando artículo maestro para ${audience} con PNL, fuentes diversas y ${model}...`);
   const raw = await generateWithGemini({
     model,
     prompt,
@@ -916,7 +916,7 @@ Responde ÚNICAMENTE un JSON válido con esta estructura:
 }
 `.trim();
 
-  console.log(`[MarcieGemini] Auditando artículo con ${model}...`);
+  console.log(`[MarcieAI] Auditando artículo con ${model}...`);
   const raw = await generateWithGemini({
     model,
     prompt,
@@ -937,7 +937,7 @@ function parseJsonSafe(text = "") {
   try {
     return parseMarcieJson(text);
   } catch (err) {
-    console.error("[MarcieGeminiService] Error parseando JSON de Gemini:", err, "\nRespuesta cruda:", text);
-    throw new Error("La respuesta de Gemini no tuvo el formato JSON esperado.");
+    console.error("[MarcieAIService] Error parseando JSON de Marcie:", err, "\nRespuesta cruda:", text);
+    throw new Error("La respuesta de Marcie no tuvo el formato JSON esperado.");
   }
 }

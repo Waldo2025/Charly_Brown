@@ -81,7 +81,7 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
 
   function statusLabel(value) {
     if (value === "listening") return "Escuchando";
-    if (value === "speaking") return "Hablando con Gemini Live";
+    if (value === "speaking") return "Hablando con Marcie";
     if (value === "processing") return "Procesando";
     return "Listo para ayudarte";
   }
@@ -183,7 +183,6 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
       rows.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Analizando"; });
       if (guide) {
         guide.phase.textContent = "Analizando videos";
-        guide.question.textContent = `Gemini está revisando ${urls.length} ${urls.length === 1 ? "video" : "videos"}. Esto puede tardar un momento.`;
       }
       submit({ urls });
     });
@@ -238,7 +237,7 @@ export function initMarcieAgentPanel({ onCreateSession, onNewSessionRequest, onN
         <div class="marcie-voice-guide__content">
           <div class="marcie-voice-guide__presence" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
           <p class="marcie-voice-guide__phase" data-guide-phase>Preparando la conversación</p>
-          <p class="marcie-voice-guide__question" data-guide-question aria-live="polite">Conectando con Gemini Live…</p>
+          <p class="marcie-voice-guide__question" data-guide-question aria-live="polite">Conectando con Marcie…</p>
           <div class="marcie-voice-guide__status"><span class="marcie-voice-guide__status-dot"></span><span data-agent-status>Procesando</span></div>
           <div class="marcie-voice-guide__options" data-agent-options></div>
           <div class="marcie-voice-guide__transcript" aria-live="polite"><span>Lo que entendí</span><p data-guide-transcript>Tu respuesta aparecerá aquí antes de enviarse.</p></div>

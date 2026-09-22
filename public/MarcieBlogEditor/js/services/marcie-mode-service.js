@@ -20,7 +20,7 @@ import {
   generateProposalsWithGemini,
   refineBlogTopicWithGemini,
   reviewArticleWithGemini
-} from "./marcie-gemini-service.js?v=20260922r2";
+} from "./marcie-gemini-service.js?v=20260922r3";
 import {
   AIDA_LEGACY_BRAND_LINE,
   draftAidaArticleWithGemini,
@@ -28,7 +28,7 @@ import {
   refineAidaTopicWithGemini,
   researchAidaTopicWithGemini,
   reviewAidaArticleWithGemini
-} from "./marcie-aida-service.js?v=20260922r2";
+} from "./marcie-aida-service.js?v=20260922r3";
 
 export function normalizeLegacyAidaClosing(session = {}, article = session.article || {}) {
   const configuredBrandLine = String(session.editorialProfileSnapshot?.brandLine || "").trim();

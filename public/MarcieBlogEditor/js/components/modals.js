@@ -926,7 +926,7 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
       if (!urls.length) return setYoutubeStatus("Agrega al menos una URL pública de YouTube.", "error");
       youtubeAnalyze.disabled = true;
       youtubeRows?.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Analizando"; });
-      setYoutubeStatus(`Analizando ${urls.length} ${urls.length === 1 ? "video" : "videos"} con Gemini…`, "processing");
+      setYoutubeStatus(`Marcie está analizando ${urls.length} ${urls.length === 1 ? "video" : "videos"}…`, "processing");
       try {
         manualVideoResearch = await analyzeYoutubeVideos(urls, String(input?.value || centralTopic || "").trim());
         youtubeRows?.querySelectorAll("[data-video-progress]").forEach((status) => { status.textContent = "Revisado"; });
@@ -2159,7 +2159,7 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
       }
       refineButton.disabled = true;
       refineButton.innerHTML = `<svg class="h-3.5 w-3.5 animate-spin text-cyan-700" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> <span>Generando propuestas...</span>`;
-      if (refineStatus) refineStatus.textContent = "Gemini está creando 3 propuestas Hook y 3 Antihook para cada público seleccionado.";
+      if (refineStatus) refineStatus.textContent = "Marcie está creando 3 propuestas Hook y 3 Antihook para cada público seleccionado.";
       try {
         const selectedEditorialMode = editorialModeInputs.find((input) => input.checked)?.value || "marcie";
         const refinementProfile = selectedEditorialMode === "custom"
@@ -2176,7 +2176,7 @@ export function showNewSessionModal({ initialConfiguration = null, defaultValue 
           const result = await onRefineTopic(audienceTopic, [...specifications], selectedEditorialMode, refinementProfile, audience, readPreferredVocabulary());
           const raw = result && typeof result === "object"
             ? { topic: audienceTopic, hooks: result.hookTitles, contrahooks: result.contrahookTitles }
-            : { topic: audienceTopic, hooks: typeof result === "string" ? [{ title: result, rationale: "Propuesta perfeccionada con Gemini" }] : [], contrahooks: [] };
+            : { topic: audienceTopic, hooks: typeof result === "string" ? [{ title: result, rationale: "Propuesta perfeccionada con Marcie" }] : [], contrahooks: [] };
           const normalized = normalizeAudienceTitleProposals(raw);
           const audienceLabel = audienceMeta.label.toLowerCase();
           const fallbackHooks = [

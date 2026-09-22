@@ -18,21 +18,21 @@ import {
 } from "./services/marcie-auth-guard.js";
 import { initPanelResizers } from "./components/panel-resizer.js";
 import { openSessionContextMenu } from "./components/session-menu.js?v=20260908r9";
-import { initPipelineStepper, runTrendSearchForSession } from "./components/pipeline-stepper.js?v=20260908r9";
+import { initPipelineStepper, runTrendSearchForSession } from "./components/pipeline-stepper.js?v=20260922r3";
 import { initCommandPalette, openCommandPalette } from "./components/command-palette.js?v=20260908r9";
 import { makeArticleEditable } from "./components/inline-editor.js?v=20260908r9";
-import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260908r9";
-import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260908r9";
+import { initTopbarActions, openAiAssistantModal } from "./components/topbar-actions.js?v=20260922r3";
+import { initEditorialDashboard } from "./components/editorial-dashboard.js?v=20260922r3";
 import { listEditorialProfilesOnce, saveEditorialProfile } from "./services/marcie-editorial-store.js";
-import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r1";
-import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r2";
-import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260922r2";
+import { showModal, showNewSessionModal, showSessionCreationChoiceModal, showToast, closeActiveModal } from "./components/modals.js?v=20260922r3";
+import { articleContentHash, generateArticleImageWithGemini, sanitizeTrustedSources, verifyArticleEvidence, humanizeArticleContent } from "./services/marcie-gemini-service.js?v=20260922r3";
+import { draftArticleForMode, generateProposalsForMode, normalizeLegacyAidaClosing, refineTopicForMode, reviewArticleForMode, sessionUsesAida, restoreSessionResearchFromCache, saveSessionResearchToCache } from "./services/marcie-mode-service.js?v=20260922r3";
 import { articleVerificationBlockers, isAidaArticleCompatible, isArticleFullyVerified } from "./contracts/editorial-contracts.js?v=20260908r9";
 import { DEFAULT_GEMINI_MODEL, getConfiguredGeminiModel, getStaticGeminiTextModels, listGeminiModels, setConfiguredGeminiModel } from "/charly-brown/gemini-client.js";
 import { DEFAULT_PROMPT_PROFILE_ID, FREE_PROMPT_PROFILE_ID, MARCIE_PROMPT_DEFINITIONS, getActiveMarciePromptProfileId, getDefaultMarciePrompts, getFreeMarciePrompts, listMarciePromptProfiles, saveMarciePromptProfile, setActiveMarciePromptProfile } from "./services/marcie-prompt-settings.js?v=20260908r9";
 import { cancelScheduledPublication, createWordPressDraft, getWordPressStatus, publishWordPressArticle, testWordPressConnection } from "./services/marcie-wordpress-service.js";
 import { buildStageVisualHtml, startStageOrbitalAnimation, stopStageOrbitalAnimation, transitionToStageVisuals } from "./components/automation-visuals.js";
-import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260922r1";
+import { initMarcieAgentPanel } from "./components/marcie-agent-panel.js?v=20260922r3";
 
 const MARCIE_UI_THEME_STORAGE_KEY = "marcie_ui_theme_v1";
 const MARCIE_UI_THEMES = [
@@ -122,7 +122,7 @@ async function runSessionReview(session, article = session?.article, audience = 
 
 function compactGeminiModelLabel(model = "") {
   return String(model || "")
-    .replace(/^gemini-/i, "")
+    .replace(/^gemini[\s-]*/i, "")
     .replace(/-preview.*$/i, " preview")
     .replace(/-/g, " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
@@ -132,7 +132,7 @@ function updateGeminiModelBadge(model = getConfiguredGeminiModel()) {
   const badge = document.getElementById("header-gemini-model-badge");
   if (badge) {
     badge.textContent = compactGeminiModelLabel(model);
-    badge.title = model;
+    badge.title = `Marcie ${badge.textContent}`;
   }
 }
 
@@ -143,7 +143,7 @@ async function openGeminiModelSettings() {
   let selectedPromptId = MARCIE_PROMPT_DEFINITIONS[0].id;
   let draftPrompts = { ...(profiles.find((profile) => profile.id === selectedProfileId)?.prompts || getDefaultMarciePrompts()) };
   showModal({
-    title: "Configuración de Gemini",
+    title: "Configuración de Marcie",
     widthClass: "max-w-4xl",
     contentHtml: `
       <div class="gemini-settings-shell">
@@ -159,7 +159,7 @@ async function openGeminiModelSettings() {
             <select id="gemini-model-select" disabled class="input-field h-11"><option>Cargando modelos disponibles por la API...</option></select>
           </label>
           <div id="gemini-model-status" class="mt-3 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500" aria-live="polite"><i data-lucide="loader-circle" class="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin"></i>Consultando los modelos con capacidad de generación de contenido.</div>
-          <p class="mt-3 text-[10px] leading-relaxed text-slate-400">La preferencia se guarda en este navegador. El modelo económico predeterminado es <strong>${DEFAULT_GEMINI_MODEL}</strong>.</p>
+          <p class="mt-3 text-[10px] leading-relaxed text-slate-400">La preferencia se guarda en este navegador. El modelo económico predeterminado es <strong>Marcie ${compactGeminiModelLabel(DEFAULT_GEMINI_MODEL)}</strong>.</p>
         </section>
 
         <section data-gemini-settings-panel="prompts" class="gemini-settings-panel hidden">
@@ -255,7 +255,7 @@ async function openGeminiModelSettings() {
     }
     updateGeminiModelBadge(selectedModel);
     closeActiveModal();
-    showToast(`Gemini y prompts configurados con ${compactGeminiModelLabel(selectedModel)}.`, "success");
+    showToast(`Marcie y sus prompts quedaron configurados con ${compactGeminiModelLabel(selectedModel)}.`, "success");
   });
 
   try {
@@ -273,7 +273,7 @@ async function openGeminiModelSettings() {
       option.value = model.id;
       const limits = model.inputTokenLimit ? ` · ${model.inputTokenLimit.toLocaleString("es-MX")} tokens` : "";
       const economical = model.id === DEFAULT_GEMINI_MODEL ? " · Predeterminado económico" : "";
-      option.textContent = `${model.label}${limits}${economical}`;
+      option.textContent = `Marcie ${compactGeminiModelLabel(model.label || model.id)}${limits}${economical}`;
       return option;
     }));
     select.value = models.some((model) => model.id === currentModel) ? currentModel : DEFAULT_GEMINI_MODEL;
@@ -2013,7 +2013,7 @@ function openEditorialPhaseModal(phaseId) {
         });
         renderSessionList();
         renderActiveSession();
-        showToast(aidaMode ? "Investigación Aida creada y comprobada." : "Señales y fuentes descubiertas con Gemini.", "success");
+        showToast(aidaMode ? "Investigación Aida creada y comprobada." : "Marcie encontró señales y fuentes.", "success");
         activateTab("context");
       } catch (error) {
         console.error("[MarcieBlogEditor] Error en búsqueda de tendencias:", error);
@@ -2043,7 +2043,7 @@ function openEditorialPhaseModal(phaseId) {
         analysisButton.disabled = true;
         analysisButton.innerHTML = `
           <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-          ${aidaMode ? "Investigando y analizando con Aida..." : "Analizando con Gemini..."}
+          ${aidaMode ? "Investigando y analizando con Aida..." : "Marcie está analizando..."}
         `;
 
         try {
@@ -2056,12 +2056,12 @@ function openEditorialPhaseModal(phaseId) {
           renderSessionList();
           renderActiveSession();
           renderTrendAnalysis();
-          showToast(aidaMode ? "Investigación Aida actualizada." : "Análisis editorial actualizado con Gemini.", "success");
+          showToast(aidaMode ? "Investigación Aida actualizada." : "Análisis editorial actualizado por Marcie.", "success");
         } catch (error) {
           console.error("[MarcieBlogEditor] Error al analizar tendencias:", error);
           showToast(`No fue posible completar el análisis: ${error.message}`, "error");
           analysisButton.disabled = false;
-          analysisButton.textContent = aidaMode ? "Investigar y analizar con Aida" : "Realizar análisis con Gemini";
+          analysisButton.textContent = aidaMode ? "Investigar y analizar con Aida" : "Analizar con Marcie";
         }
       });
     };
@@ -2076,7 +2076,7 @@ function openEditorialPhaseModal(phaseId) {
             <button type="button" data-go-to-trend-search class="btn btn-outline h-9 px-4 text-xs">Configurar búsqueda</button>
             <button type="button" data-run-trend-analysis class="btn btn-primary h-9 px-4 text-xs flex items-center gap-1.5">
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V9m5 10V5m5 14v-7m5 7V3"></path></svg>
-              ${aidaMode ? "Investigar y analizar con Aida" : "Realizar análisis con Gemini"}
+              ${aidaMode ? "Investigar y analizar con Aida" : "Analizar con Marcie"}
             </button>
           </div>
         </div>`;
@@ -2174,7 +2174,7 @@ function openEditorialPhaseModal(phaseId) {
         <div class="flex flex-col gap-3 rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50/75 to-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h4 class="text-sm font-semibold text-purple-900">${aidaMode ? "Crear enfoques científicos Aida" : "Crear enfoques editoriales"}</h4>
-            <p class="mt-1 text-xs leading-relaxed text-slate-600">${aidaMode ? "Cada público recibirá una escena, una idea central fiel al tema, una analogía dominante y fuentes concretas; ciencia e historia se usarán como respaldo pertinente." : "Gemini generará propuestas diferenciadas para docentes, estudiantes, familias y coordinadores académicos."}</p>
+            <p class="mt-1 text-xs leading-relaxed text-slate-600">${aidaMode ? "Cada público recibirá una escena, una idea central fiel al tema, una analogía dominante y fuentes concretas; ciencia e historia se usarán como respaldo pertinente." : "Marcie generará propuestas diferenciadas para docentes, estudiantes, familias y coordinadores académicos."}</p>
           </div>
           <button type="button" data-generate-proposals class="btn btn-primary h-9 shrink-0 px-4 text-xs flex items-center gap-1.5">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v18m9-9H3"></path></svg>
@@ -2235,7 +2235,7 @@ function openEditorialPhaseModal(phaseId) {
         });
         const requiredCount = activeSession.selectedAudiences?.length || 4;
         const nextProposals = Array.isArray(response?.proposals) ? response.proposals.slice(0, requiredCount) : [];
-        if (nextProposals.length < requiredCount) throw new Error("Gemini no devolvió un enfoque para cada público seleccionado.");
+        if (nextProposals.length < requiredCount) throw new Error("Marcie no devolvió un enfoque para cada público seleccionado.");
         activeSession.proposals = nextProposals;
         activeSession.researchByAudience = response.researchByAudience || activeSession.researchByAudience || {};
         await saveMarcieSession(activeSession);
@@ -2411,7 +2411,7 @@ function openEditorialPhaseModal(phaseId) {
         <div class="flex items-start gap-3">
           <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white">${EDITORIAL_PHASE_TABS[2][1].icon}</div>
           <div class="min-w-0 flex-1">
-            <h4 class="text-sm font-semibold text-blue-900">${aidaMode ? "Redactar artículo con el motor Aida" : "Redactar artículo con Gemini"}</h4>
+            <h4 class="text-sm font-semibold text-blue-900">${aidaMode ? "Redactar artículo con el motor Aida" : "Redactar artículo con Marcie"}</h4>
             <p class="mt-1 text-xs text-slate-600">${aidaMode ? "Desarrolla las ocho fases desde el dossier científico verificado, con una idea central y una analogía dominante." : "Selecciona la audiencia y genera el artículo completo desde la propuesta elegida."}</p>
           </div>
         </div>
@@ -3482,7 +3482,7 @@ function renderArticleFeaturedImage(session, article = {}) {
         </div>
         <div>
           <p class="marcie-cover-state__title">Creando la portada de este artículo</p>
-          <p class="marcie-cover-state__copy">Gemini está preparando una imagen específica para ${escapeHtml(getEditorialAudienceLabel(session.audience || article.audience || "educators"))}.</p>
+          <p class="marcie-cover-state__copy">Marcie está preparando una imagen específica para ${escapeHtml(getEditorialAudienceLabel(session.audience || article.audience || "educators"))}.</p>
         </div>
       </div>
     `;
@@ -4892,7 +4892,7 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
       }
     });
     const proposals = Array.isArray(proposalResponse?.proposals) ? proposalResponse.proposals : [];
-    if (proposals.length < audiences.length) throw new Error("Gemini no devolvió una propuesta para cada público seleccionado.");
+    if (proposals.length < audiences.length) throw new Error("Marcie no devolvió una propuesta para cada público seleccionado.");
     session.proposals = proposals;
     session.status = "proposal_ready";
     saveSessionResearchToCache(session);
@@ -4966,7 +4966,7 @@ async function runAutomatedSessionWorkflow(session, specifications = []) {
       const audience = audiences[index];
       const stageStartPct = Math.round((index / totalCoverSteps) * 100);
       if (index > 0) {
-        await saveAutomationStage(session, "covers", 52 + index * 5, `Esperando antes de la portada ${index + 1}/${audiences.length} para proteger la cuota de Gemini...`, stageStartPct);
+        await saveAutomationStage(session, "covers", 52 + index * 5, `Esperando antes de la portada ${index + 1}/${audiences.length} para proteger la cuota de Marcie...`, stageStartPct);
         await waitForAutomatedCover(AUTOMATED_COVER_GAP_MS);
       }
       await saveAutomationStage(session, "covers", 54 + index * 5, `Creando portada ${index + 1}/${audiences.length}: ${audience.label}...`, stageStartPct);
